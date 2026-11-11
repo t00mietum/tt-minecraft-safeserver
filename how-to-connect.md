@@ -89,6 +89,8 @@ Both editions play on the same server, in the same world.
 
 - The first time, you may be asked to sign in to your Microsoft account. The server checks that sign-in, so a guest account won't work.
 
+- The first time you join, the game may ask whether to trust the server. Pick yes when the address is the one you were given.
+
 ### Bedrock at home
 
 - Open the Friends tab. The server should show up under LAN Games by itself. Pick it to join.
@@ -128,4 +130,4 @@ tt-minecraftd cmd whitelist add Steve
 tt-minecraftd cmd fwhitelist add "Some Gamertag"
 ~~~
 
-- For players from outside the home, the server needs `allowFrom` set to `any`, and either a router port forward or a tunnel. Forward TCP 25565 for Java and UDP 19132 for Bedrock. [design.md](project/design.md#exposure) has the details.
+- For players from outside the home, the server needs `allowFrom` set to `any`, and either a router port forward or a tunnel. Forward TCP 25565 for Java, and both TCP and UDP 19132 for Bedrock. [design.md](project/design.md#exposure) has the details.

@@ -129,14 +129,16 @@ tt-minecraftd setup   [--yes] [--dry-run] [--adopt PATH] [--accept-eula] [setup 
 tt-minecraftd update  [--yes] [--dry-run] [--self] [--paper] [--plugins] [--image] [--mc-version V]
 tt-minecraftd repair  [--yes] [--dry-run] [--check] [--approve-plugins]
 tt-minecraftd --help | --about | --version
-Common:  --config PATH
+Common:  --config PATH, --set KEY=VALUE
 ~~~
 
 - The commands match `tt-monerod-safeserver`. `console` and `cmd` are new, since a Minecraft server gets managed from its console.
 
 - Exit codes are 0 for success, 1 for an error, and 2 for bad usage.
 
-- `--dry-run` prints every command it would run, with the sudo ones marked, and doesn't run any of them.
+- `--set KEY=VALUE` overrides one config key for this run, such as `--set heapMax=6G`. It can be given more than once. See [Configuration model](#configuration-model).
+
+- `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `docker ps`, still run, so the plan matches what a real run would do.
 
 - When the boot unit is enabled, `start` and `stop` run `systemctl start` and `systemctl stop` on it instead. That way systemd and the tool don't disagree about what's running.
 
@@ -187,17 +189,26 @@ Common:  --config PATH
 	- Who owns the trees, and whether the boot unit is enabled.
 	- The last lines of the log, cut to the terminal width.
 
+- When the server isn't running, `status` names any other Paper server that is, such as one the old scripts started.
+
+- A part that can't be read, such as a file the operator's group can't see, says why, and the rest still shows.
+
+- The log is `logs/latest.log` in both modes, since the container sees the same tree. Files in the tree that aren't plain files, such as a pipe the server left there, aren't read.
+
 - `watch` redraws `status` every few seconds until Ctrl-C.
 
 ### console and cmd
 
-- `console` attaches to the server console. It prints the detach keys first, since Ctrl-C there would stop the server.
-	- Docker mode uses `docker attach` with `--sig-proxy=false` and its own detach keys.
-	- Native mode attaches to the service account's tmux session.
+- `console` attaches to the server console. Ctrl-C there would stop the server, so in both modes it detaches instead, and the server keeps running. It says so first.
+	- Docker mode uses `docker attach` with `--sig-proxy=false` and `ctrl-c` as the detach keys.
+	- Native mode attaches to the service account's tmux session, with Ctrl-C bound to `detach-client`. The binding lasts until the server stops.
+	- When the server stops while attached, such as after `stop` typed there, the trees go back to the operator, as with `stop`.
 
 - `cmd` sends one console command and prints the log lines that follow it, such as `tt-minecraftd cmd whitelist add Steve`.
 	- Docker mode writes to the container's input with the Docker API.
 	- Native mode uses `tmux send-keys`.
+	- The lines come from `logs/latest.log`, in both modes. It waits up to 3 seconds for the first one, then until half a second goes by with nothing new, and 10 seconds at most.
+	- `cmd stop` and `cmd restart` are refused, since `stop` also hands the trees back, and Paper's `restart` only stops without a restart script.
 
 - RCON is never used. See [Safe server settings](#safe-server-settings).
 
@@ -254,14 +265,17 @@ Common:  --config PATH
 - Checks, in order:
 	1. The config parses, and only root can write it.
 	2. The service account and group exist, the account can't log in, and it isn't in any other group.
+		- A `runUser` that's root, or a person's account at uid 1000 or above, is reported and left alone, since the fix would lock a person out.
 	3. The operator is in the group.
 	4. The server tree exists, and so does `paper.jar`.
 	5. Ownership and modes match whether the server runs.
+		- Modes are only checked while it runs, since `stop` hands back ownership and leaves the modes.
 	6. The safe settings are in place.
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.
 	9. With `firewall` on, the rules file matches the config, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
+		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
 	11. In Docker mode, the image is there, and an old stopped container gets removed.
 	12. With a dataset configured, it exists and is mounted.
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
@@ -419,10 +433,23 @@ cicd/                        build, test, and release scripts
 ### Configuration model
 
 - One file, `/etc/tt-minecraftd/config.shcl`, owned by root and readable by all. `--config` points elsewhere.
+	- When the default file is missing, as before `setup`, the defaults are used with a warning. A missing `--config` file is an error.
 
 - The approved plugin list is `/etc/tt-minecraftd/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
+	- It sits beside the config, so a second config given with `--config` gets its own list.
+
+- Settings come from the defaults in the table below, then the file, then the command line. `--native` sets `runMode`, and `--set` sets any key.
+	- A key whose default comes from another one, such as `runGroup`, follows that key wherever it was set.
+	- An option is checked the same way as the file. A bad one is an error rather than a warning, since it was typed just now.
 
 - An unknown key or a bad value gets a warning each run, and the default is used.
+	- So does a key that's set twice with different values. Neither value is used.
+	- A list with one bad item is a bad value, so none of it is used.
+	- A `heapMin` over `heapMax` gets a warning, and `heapMax` is used for both. A `memCap` that isn't over `heapMax` gets a warning, and its default.
+
+- Key names and the words such as `docker` and `lan` don't care about case.
+
+- Sizes take Java's form, such as `4G`, or shcl's, such as `4 GiB`. Either way a G is 1024 M, the same as Java. Timeouts take seconds, or a time such as `5m`.
 
 - Settings:
 
@@ -437,7 +464,7 @@ cicd/                        build, test, and release scripts
 | `zfsDataset`        | none                              | No snapshots when unset
 | `dockerImage`       | Temurin 25 JRE, by digest         | `update --image` changes it
 | `javaBin`           | `java` on PATH                    | Native mode only
-| `heapMin`           | `1G`
+| `heapMin`           | `1G`                              | Or `heapMax`, when that's less
 | `heapMax`           | `4G`
 | `memCap`            | `heapMax` plus a quarter, plus 1G | Swap is capped the same, so it stays at 0
 | `nice`              | `0`
@@ -446,7 +473,7 @@ cicd/                        build, test, and release scripts
 | `bindIP`            | all addresses                     | `server-ip`, and Geyser's address
 | `gamePort`          | `25565`                           | TCP, for Java players
 | `bedrock`           | `true`                            | Geyser and Floodgate
-| `bedrockPort`       | `19132`                           | UDP, for Bedrock players
+| `bedrockPort`       | `19132`                           | TCP and UDP, for Bedrock players. Can't be `gamePort`
 | `allowFrom`         | `[lan]`                           | Who may connect to the game ports. `lan`, `any`, or addresses and ranges
 | `joinRateLimit`     | `20`                              | New connections per minute from one address
 | `egress`            | `web`                             | What the server may connect out to. `web` or `open`
@@ -501,7 +528,7 @@ cicd/                        build, test, and release scripts
 
 - In Docker mode the container takes most of that away:
 	- It sees the server trees, and the image's files as read-only. The rest of the host's files aren't mounted.
-	- `paper.jar` and every plugin jar are mounted read-only on top of the tree, so the server can't change them while it runs.
+	- `paper.jar` and every plugin and Geyser extension jar are mounted read-only on top of the tree, so the server can't change them while it runs.
 	- It has its own process list, so it can't see or signal host processes.
 	- `--cap-drop ALL` and `no-new-privileges` mean a setuid program in the image can't give it root.
 	- The pid limit and the memory cap stop a runaway server from using up the host. When memory runs out anyway, `--oom-score-adj 1000` has the kernel kill the server before the desktop or other services.
@@ -520,7 +547,7 @@ cicd/                        build, test, and release scripts
 - Docker mode runs the container under the service account's uid and gid, with:
 	- `--read-only`, and a tmpfs on `/tmp`. The tmpfs allows exec, since Netty and other libraries extract native code there and load it.
 	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work.
-	- `paper.jar` and each plugin jar mounted read-only over their own paths.
+	- `paper.jar` and each plugin and Geyser extension jar mounted read-only over their own paths.
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
 	- `-i -t`, so the console works with `docker attach`.
@@ -529,8 +556,11 @@ cicd/                        build, test, and release scripts
 - Native mode runs Java in a tmux session, under a transient systemd unit that `systemd-run` starts. The unit runs as the service account, with:
 	- `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, and `NoNewPrivileges=yes`.
 	- Write access only to the trees in `ownerTrees`.
-	- An empty capability set, `MemoryMax`, and `TasksMax`.
+	- An empty capability set, `MemoryMax`, and `TasksMax`. Swap is 0, the same as Docker mode, and so are `umask 0007` and `OOMScoreAdjust=1000`.
+	- `paper.jar` and each plugin and Geyser extension jar read-only. They go to root too, but the server can write their folder, so without that it could swap one out.
 	- The tmux server on a socket under `/run/tt-minecraftd/`. It never uses the operator's tmux server.
+	- The unit is `tt-minecraftd-server.service`, since `tt-minecraftd.service` is the boot unit's name.
+	- `stop` waits up to `stopTimeout` for the unit to end. After that, `systemctl stop` sends SIGTERM, and systemd sends SIGKILL 30 seconds later.
 
 ### Tree ownership
 
@@ -540,9 +570,11 @@ cicd/                        build, test, and release scripts
 
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
 
-- In native mode, `paper.jar` and the plugin jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in Docker mode.
+- In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in Docker mode.
 
-- A tree that's `/` or less than 3 levels deep is refused.
+- A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
+
+- With `ownerAfterStop` empty, as when the boot unit stops the server, the trees stay with `runUser`. The operator's next `stop` hands them back.
 
 ### Safe server settings
 
@@ -560,10 +592,22 @@ cicd/                        build, test, and release scripts
 | `server.properties` | `hide-online-players`             | from `hideOnlinePlayers`
 | `spigot.yml`        | `settings.bungeecord`             | `false`
 | `paper-global.yml`  | `proxies.velocity.enabled`        | `false`
+| `paper-global.yml`  | `proxies.proxy-protocol`          | `false`
 | Geyser `config.yml` | `bedrock.address`, `bedrock.port` | from `bindIP` and `bedrockPort`
 | Geyser `config.yml` | `auth-type`                       | `floodgate`
+| Geyser `config.yml` | `bedrock.transport`               | `nethernet`
+| Geyser `config.yml` | `bedrock.webrtc-port`             | `0`, the same port as `bedrock.port`
+| Geyser `config.yml` | `bedrock.clone-remote-port`       | `false`
 
 - With online mode off, anyone can join under any name, including an op's. With a proxy setting on, anyone who connects to the backend directly can claim to be anyone. Those 2 are the most common ways servers get taken over.
+
+- With `proxy-protocol` on, anyone who connects directly can claim any address, and get around IP bans and the rate limit. See [Needs more thought](#needs-more-thought) for tunnels.
+
+- A missing `server.properties` counts as wrong, since Minecraft's own defaults have the whitelist off, and `repair` writes one. A YAML file or key that's missing is fine, since each of those defaults to off.
+
+- Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is fine, since Geyser writes it at its first start, listening on all addresses and logging Bedrock players in with online mode, and the next start checks it. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. The last 3 keys are the exception: Geyser's defaults for them are already right, so a missing one is fine. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
+
+- The server account can write the tree. So a settings file that's a link, or isn't a plain file, is refused, and `repair` puts a new file in place of the old one rather than writing into it.
 
 - An empty whitelist with `white-list` on locks everyone out. `setup` and `repair` warn about that, and print the `cmd` lines that add players.
 
@@ -574,10 +618,28 @@ cicd/                        build, test, and release scripts
 ### Plugin pinning
 
 - `/etc/tt-minecraftd/plugins.shcl` lists each approved jar by file name, SHA-256, and an optional source for `update --plugins`.
+	- The name is the jar's path under `serverDir`, so a jar in `plugins/` and an extension with the same name stay apart:
+
+		~~~text
+		jar: plugins/Geyser-Spigot.jar
+			sha256: 64 hex digits
+			source: https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot
+		jar: paper-26.3-244.jar
+			sha256: 64 hex digits
+		~~~
+
+	- An entry with no hash, a bad hash, or a path outside `serverDir` gets a warning and is left out, so its jar counts as not approved. A source that isn't `https` is ignored, and the hash still counts.
 
 - `start` hashes every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and `paper.jar`. Extensions run with the same access as plugins. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
+	- `paper.jar` is checked as the build it links to, named by that build's path under `serverDir`, such as `paper-26.3-244.jar`. A `paper.jar` that links outside `serverDir` can't be approved, so it stops the start.
+	- With no approved list yet, every jar counts as new.
+	- `status` and `repair` run the same check.
 
-- `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
+- `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`, or a Geyser extension's `extension.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
+	- A Paper build that's refused stays where it is, still not approved, since moving it would only break `paper.jar`.
+	- When the answers run out, such as at the end of piped input, the jars not asked about yet stay where they are, not approved, and `repair` exits 1.
+	- It doesn't go with `--check`, since approving writes the list.
+	- The new hashes go into the list in place. Its comments, sources, and other entries stay as they were.
 
 - Plugins should come from known sources, such as Hangar, Modrinth, GeyserMC, or the author's own site. The tool can't judge a jar, but it does make sure a jar doesn't change without a person looking at it.
 
@@ -588,6 +650,14 @@ cicd/                        build, test, and release scripts
 - Geyser checks the Xbox login, and Floodgate passes it on to the server, signed with a key in `plugins/floodgate/key.pem`. The key is a secret, so `repair` makes sure only the account and group can read it.
 
 - Bedrock players get a prefix on their names, a `.` by default. They're added to the whitelist with Floodgate's `fwhitelist add <gamertag>` command, or `whitelist add .<gamertag>`.
+
+- Geyser talks to Bedrock clients over NetherNet, the connection method Bedrock moved to in 2026. Geyser dropped its RakNet-only mode in 2.12.1, since Bedrock clients drop RakNet from 26.60.
+	- Players first reach Geyser's built-in signaling over TCP, on `bedrockPort`. The game itself then runs over UDP, on the same port.
+	- So `bedrockPort` needs TCP and UDP, in the firewall and in a router forward. The pinned Geyser settings above keep both on that one port. `transport` set to `both` would add a second UDP port, and `webrtc-port` or `clone-remote-port` would move one.
+	- `bedrockPort` can't be `gamePort`, since Paper already holds that TCP port. Geyser would then fall back to an outside signaling service. When the config has them the same, the tool warns and moves `bedrockPort` to 19132, or 19133 when `gamePort` is 19132.
+	- Geyser's signaling `mode` isn't pinned. Its default, `builtin`, needs nothing outside. `nxs` registers the server with an outside service, Warden by default, over HTTPS.
+	- Built-in signaling is plain HTTP unless Geyser is given a certificate. The game asks players to trust the server the first time they join.
+	- To find the home's public address for players over the internet, Geyser asks public STUN servers: `stun.cloudflare.com` on UDP 3478 and `stun.l.google.com` on UDP 19302. See [Firewall](#firewall).
 
 - On the LAN, Bedrock clients find the server by itself, under Friends, LAN Games. That includes consoles. Geyser has to listen on all addresses for that, since a socket that's bound to one address doesn't get broadcasts.
 
@@ -601,7 +671,7 @@ cicd/                        build, test, and release scripts
 	- Addresses and ranges can be mixed with `lan`.
 
 - A server that players join over the internet needs `allowFrom` set to `any`, plus one of these:
-	- A router port forward for `gamePort` over TCP and `bedrockPort` over UDP, to the server's LAN address. A DNS name for the home address makes it easier for players.
+	- A router port forward for `gamePort` over TCP and `bedrockPort` over both TCP and UDP, to the server's LAN address. A DNS name for the home address makes it easier for players.
 	- A tunnel such as playit.gg. Players connect to the tunnel's address, and the home address stays hidden. The tunnel's agent connects to the server on localhost.
 
 - Public servers get found by scanners within hours, so the whitelist and online mode matter most there. `hideOnlinePlayers` and a port other than 25565 cut down on the noise from scanners, but neither stops anyone.
@@ -616,6 +686,8 @@ cicd/                        build, test, and release scripts
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
 	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
 
+- The game ports are `gamePort` over TCP, and `bedrockPort` over TCP and UDP when `bedrock` is on.
+
 - Inbound, new connections to the game ports:
 	- Ones from loopback are always allowed. A tunnel agent connects that way.
 	- Ones from an address that's not in `allowFrom` get dropped.
@@ -627,6 +699,8 @@ cicd/                        build, test, and release scripts
 	- Ones to loopback get dropped. That way the server can't connect to local services such as databases.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
+		- With `bedrock` on, UDP to ports 3478 and 19302 is allowed too, for Geyser's STUN lookup. Without it, players over the internet get only the server's LAN address, and can't connect.
+		- NetherNet's connection checks from the server to a player's own addresses count as new connections, and get dropped unless they're replies. The player's checks to the server still set up the connection.
 	- With `egress` set to `open`, ones to the internet are allowed on any port.
 	- Everything that gets dropped gets counted too, and logged at a limited rate. `status` shows the counts.
 	- Replies to connections that came in still go out.
@@ -714,6 +788,10 @@ cicd/                        build, test, and release scripts
 - Consoles can't join over the internet yet, since Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
 
 - Behind a tunnel, every player shows up as coming from localhost, unless the tunnel supports the PROXY protocol. IP bans and the per-address rate limit then don't work.
+	- `proxy-protocol` is forced off for now. Turning it on safely needs the firewall to let only the tunnel's agent reach `gamePort`.
+	- For Bedrock, a tunnel has to carry `bedrockPort` over TCP and UDP. Geyser's `bedrock.signaling.advertise-addresses` then has to name the tunnel's address, since STUN finds the home's address, which players can't reach.
+
+- That Bedrock players connect over NetherNet with the firewall on and `egress` set to `web`, from the LAN and over the internet, still needs checking with a real client. That includes the server's own connection checks getting dropped, and whether `joinRateLimit` leaves room for the server list's pings, since each one is a new TCP connection to signaling.
 
 - Hot backups while the server runs, with `save-off` and `save-all flush` through `cmd`, then a snapshot, then `save-on`. That would help a server that runs for weeks without a stop.
 
