@@ -22,6 +22,7 @@ type geyserSetting struct {
 	path       []string
 	want       string
 	ignoreCase bool
+	missingOK  bool // Geyser's own default is the wanted value
 }
 
 func (s geyserSetting) ok(have string) bool {
@@ -40,6 +41,11 @@ func geyserSettings(c *config.Config, lines []string) []geyserSetting {
 		{path: []string{"bedrock", "address"}, want: addr},
 		{path: []string{"bedrock", "port"}, want: strconv.Itoa(c.BedrockPort)},
 		{path: geyserAuthPath(lines), want: "floodgate", ignoreCase: true},
+		// Keep NetherNet on bedrockPort alone, TCP and UDP, as the firewall
+		// and the forward advice expect. See design.md, Bedrock players.
+		{path: []string{"bedrock", "transport"}, want: "nethernet", ignoreCase: true, missingOK: true},
+		{path: []string{"bedrock", "webrtc-port"}, want: "0", missingOK: true},
+		{path: []string{"bedrock", "clone-remote-port"}, want: "false", ignoreCase: true, missingOK: true},
 	}
 }
 
@@ -91,6 +97,9 @@ func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
 			value = strconv.Quote(value) // an IPv6 address isn't a plain YAML scalar
 		}
 		i, found := yamlFind(lines, s.path)
+		if !found && s.missingOK {
+			continue
+		}
 		if !found {
 			problems = append(problems, Problem{File: name, Key: key, Want: s.want, Missing: true})
 			lines = yamlInsert(lines, s.path, value)

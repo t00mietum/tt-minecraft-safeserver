@@ -179,3 +179,28 @@ func TestBadLinesDontSinkLoad(t *testing.T) {
 		t.Error("a missing file loaded")
 	}
 }
+
+// Geyser's signaling can't share gamePort's TCP port, so bedrockPort moves off it.
+func TestBedrockPortClash(t *testing.T) {
+	defer testid.Line(t, "df5yz")
+	asOperator(t, "alice", "")
+	for _, c := range []struct {
+		text string
+		port int
+		warn string
+	}{
+		{"bedrockPort: 25565\n", 19132, "bedrockPort 25565 is gamePort too; using 19132"},
+		{"gamePort: 19132\n", 19133, "bedrockPort 19132 is gamePort too; using 19133"},
+		{"gamePort: 19132\nbedrock: false\n", 19132, ""},
+		{"bedrockPort: 19140\n", 19140, ""},
+	} {
+		got, warns := mustLoad(t, writeConfig(t, c.text))
+		var text string
+		if len(warns) > 0 {
+			text = warns[0].String()
+		}
+		if got.BedrockPort != c.port || text != c.warn || len(warns) > 1 {
+			t.Errorf("%q: bedrockPort %d, warnings %v; want %d, %q", c.text, got.BedrockPort, warns, c.port, c.warn)
+		}
+	}
+}

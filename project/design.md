@@ -467,7 +467,7 @@ cicd/                        build, test, and release scripts
 | `bindIP`            | all addresses                     | `server-ip`, and Geyser's address
 | `gamePort`          | `25565`                           | TCP, for Java players
 | `bedrock`           | `true`                            | Geyser and Floodgate
-| `bedrockPort`       | `19132`                           | UDP, for Bedrock players
+| `bedrockPort`       | `19132`                           | TCP and UDP, for Bedrock players. Can't be `gamePort`
 | `allowFrom`         | `[lan]`                           | Who may connect to the game ports. `lan`, `any`, or addresses and ranges
 | `joinRateLimit`     | `20`                              | New connections per minute from one address
 | `egress`            | `web`                             | What the server may connect out to. `web` or `open`
@@ -589,6 +589,9 @@ cicd/                        build, test, and release scripts
 | `paper-global.yml`  | `proxies.proxy-protocol`          | `false`
 | Geyser `config.yml` | `bedrock.address`, `bedrock.port` | from `bindIP` and `bedrockPort`
 | Geyser `config.yml` | `auth-type`                       | `floodgate`
+| Geyser `config.yml` | `bedrock.transport`               | `nethernet`
+| Geyser `config.yml` | `bedrock.webrtc-port`             | `0`, the same port as `bedrock.port`
+| Geyser `config.yml` | `bedrock.clone-remote-port`       | `false`
 
 - With online mode off, anyone can join under any name, including an op's. With a proxy setting on, anyone who connects to the backend directly can claim to be anyone. Those 2 are the most common ways servers get taken over.
 
@@ -596,7 +599,7 @@ cicd/                        build, test, and release scripts
 
 - A missing `server.properties` counts as wrong, since Minecraft's own defaults have the whitelist off, and `repair` writes one. A YAML file or key that's missing is fine, since each of those defaults to off.
 
-- Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is fine, since Geyser writes it at its first start, listening on all addresses and logging Bedrock players in with online mode, and the next start checks it. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
+- Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is fine, since Geyser writes it at its first start, listening on all addresses and logging Bedrock players in with online mode, and the next start checks it. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. The last 3 keys are the exception: Geyser's defaults for them are already right, so a missing one is fine. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
 
 - The server account can write the tree. So a settings file that's a link, or isn't a plain file, is refused, and `repair` puts a new file in place of the old one rather than writing into it.
 
@@ -635,6 +638,14 @@ cicd/                        build, test, and release scripts
 
 - Bedrock players get a prefix on their names, a `.` by default. They're added to the whitelist with Floodgate's `fwhitelist add <gamertag>` command, or `whitelist add .<gamertag>`.
 
+- Geyser talks to Bedrock clients over NetherNet, the connection method Bedrock moved to in 2026. Geyser dropped its RakNet-only mode in 2.12.1, since Bedrock clients drop RakNet from 26.60.
+	- Players first reach Geyser's built-in signaling over TCP, on `bedrockPort`. The game itself then runs over UDP, on the same port.
+	- So `bedrockPort` needs TCP and UDP, in the firewall and in a router forward. The pinned Geyser settings above keep both on that one port. `transport` set to `both` would add a second UDP port, and `webrtc-port` or `clone-remote-port` would move one.
+	- `bedrockPort` can't be `gamePort`, since Paper already holds that TCP port. Geyser would then fall back to an outside signaling service. When the config has them the same, the tool warns and moves `bedrockPort` to 19132, or 19133 when `gamePort` is 19132.
+	- Geyser's signaling `mode` isn't pinned. Its default, `builtin`, needs nothing outside. `nxs` registers the server with an outside service, Warden by default, over HTTPS.
+	- Built-in signaling is plain HTTP unless Geyser is given a certificate. The game asks players to trust the server the first time they join.
+	- To find the home's public address for players over the internet, Geyser asks public STUN servers: `stun.cloudflare.com` on UDP 3478 and `stun.l.google.com` on UDP 19302. See [Firewall](#firewall).
+
 - On the LAN, Bedrock clients find the server by itself, under Friends, LAN Games. That includes consoles. Geyser has to listen on all addresses for that, since a socket that's bound to one address doesn't get broadcasts.
 
 - Over the internet, phones, tablets, and Bedrock on PCs can add the server by address and port. Consoles can't add a server by address. See [Needs more thought](#needs-more-thought).
@@ -647,7 +658,7 @@ cicd/                        build, test, and release scripts
 	- Addresses and ranges can be mixed with `lan`.
 
 - A server that players join over the internet needs `allowFrom` set to `any`, plus one of these:
-	- A router port forward for `gamePort` over TCP and `bedrockPort` over UDP, to the server's LAN address. A DNS name for the home address makes it easier for players.
+	- A router port forward for `gamePort` over TCP and `bedrockPort` over both TCP and UDP, to the server's LAN address. A DNS name for the home address makes it easier for players.
 	- A tunnel such as playit.gg. Players connect to the tunnel's address, and the home address stays hidden. The tunnel's agent connects to the server on localhost.
 
 - Public servers get found by scanners within hours, so the whitelist and online mode matter most there. `hideOnlinePlayers` and a port other than 25565 cut down on the noise from scanners, but neither stops anyone.
@@ -662,6 +673,8 @@ cicd/                        build, test, and release scripts
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
 	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
 
+- The game ports are `gamePort` over TCP, and `bedrockPort` over TCP and UDP when `bedrock` is on.
+
 - Inbound, new connections to the game ports:
 	- Ones from loopback are always allowed. A tunnel agent connects that way.
 	- Ones from an address that's not in `allowFrom` get dropped.
@@ -673,6 +686,8 @@ cicd/                        build, test, and release scripts
 	- Ones to loopback get dropped. That way the server can't connect to local services such as databases.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
+		- With `bedrock` on, UDP to ports 3478 and 19302 is allowed too, for Geyser's STUN lookup. Without it, players over the internet get only the server's LAN address, and can't connect.
+		- NetherNet's connection checks from the server to a player's own addresses count as new connections, and get dropped unless they're replies. The player's checks to the server still set up the connection.
 	- With `egress` set to `open`, ones to the internet are allowed on any port.
 	- Everything that gets dropped gets counted too, and logged at a limited rate. `status` shows the counts.
 	- Replies to connections that came in still go out.
@@ -761,6 +776,9 @@ cicd/                        build, test, and release scripts
 
 - Behind a tunnel, every player shows up as coming from localhost, unless the tunnel supports the PROXY protocol. IP bans and the per-address rate limit then don't work.
 	- `proxy-protocol` is forced off for now. Turning it on safely needs the firewall to let only the tunnel's agent reach `gamePort`.
+	- For Bedrock, a tunnel has to carry `bedrockPort` over TCP and UDP. Geyser's `bedrock.signaling.advertise-addresses` then has to name the tunnel's address, since STUN finds the home's address, which players can't reach.
+
+- That Bedrock players connect over NetherNet with the firewall on and `egress` set to `web`, from the LAN and over the internet, still needs checking with a real client. That includes the server's own connection checks getting dropped, and whether `joinRateLimit` leaves room for the server list's pings, since each one is a new TCP connection to signaling.
 
 - Hot backups while the server runs, with `save-off` and `save-all flush` through `cmd`, then a snapshot, then `save-on`. That would help a server that runs for weeks without a stop.
 

@@ -251,6 +251,8 @@ func (p *Probe) ports(ctx context.Context) []Line {
 	} else {
 		lines = append(lines, portLines(out, "tcp", p.Cfg.GamePort)...)
 		if p.Cfg.Bedrock {
+			// NetherNet: signaling on TCP, game traffic on UDP.
+			lines = append(lines, portLines(out, "tcp", p.Cfg.BedrockPort)...)
 			lines = append(lines, portLines(out, "udp", p.Cfg.BedrockPort)...)
 		}
 		lines[0].Label = "Ports"

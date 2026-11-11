@@ -25,7 +25,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Current Geyser needs TCP on the Bedrock port too
 	- ID: 2026111113015461
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. No real Bedrock client has joined over NetherNet yet.
+	- Needs hand testing: join from a phone on the LAN, and from outside with `bedrockPort` forwarded over TCP and UDP, to a throwaway Paper server with Geyser 2.12.1.
 	- Priority: High
 	- Opened: 20261111-130154
 	- Opened by:
@@ -33,6 +35,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Incorrect behavior [Bug]: design.md, the firewall, `status`, and the router forward advice treat `bedrockPort` as UDP only.
 	- Expected behavior [Bug]: Bedrock players can connect with the Geyser build in use.
 	- Possible cause [Bug]: Geyser 2.12.1 defaults to the NetherNet transport with built-in signaling, which listens on the Bedrock port over TCP as well as UDP. RakNet-only was removed. Its `nxs` signaling mode also calls out to an outside service, which `egress` may need to allow.
+	- Reproduced [Bug]: Confirmed from Geyser's source at build 1299 and its release notes, not on a live server.
+	- Actual cause [Bug]:
+		- Geyser removed RakNet-only on 2026-10-31. `transport` takes `nethernet`, the default, or `both`. Built-in signaling, the default, listens on `bedrock.port` over TCP, and NetherNet's game traffic uses the same port over UDP.
+		- To give players over the internet the public address, Geyser asks STUN servers on UDP 3478 and 19302, which `egress` `web` would block.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: design.md, how-to-connect.md, and `status` give `bedrockPort` as TCP and UDP. `start` checks, and `repair` sets, Geyser's `transport`, `webrtc-port`, and `clone-remote-port`, so NetherNet stays on `bedrockPort`. A `bedrockPort` equal to `gamePort` warns and moves.
+		- Verified: df5yy, df5yz, and the new df5y7 line each fail with the change taken out, and pass with it in.
+	- Decisions:
+		- No plain UDP mode is left in Geyser to pin, so TCP is opened. `nxs` signaling avoids TCP but sends every join through an outside service. One port over both protocols is also what Geyser's own port forwarding guide says.
+		- The 3 pinned keys are fine when missing, since Geyser's defaults for them are right. Signaling `mode` isn't pinned.
+		- The firewall item gets a design change: with `bedrock` on and `egress` `web`, outbound UDP to 3478 and 19302 is allowed for STUN. Filed as a Check in questions.md.
+		- Tunnels, the server's dropped connection checks, and `joinRateLimit` against server list pings went under Needs more thought in design.md.
+		- 20261111: df5y7 `TestStatusDocker` also expects `tcp *:19132 listening, 0 connections`, and the shared `ss` reply gained that listener. Old: only the UDP line.
+		- Swept: every `bedrockPort` and `udp` use in source and docs; `status` is the only code that names a protocol. The firewall isn't built yet.
+	- Actual fix [Bug]: Docs and `status` say TCP and UDP. Geyser's NetherNet port settings are pinned, and `bedrockPort` can't be `gamePort`.
+	- Branch: r1111
+	- Test case: df5yy, df5yz, df5y7
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283

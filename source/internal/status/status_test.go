@@ -30,6 +30,7 @@ tcp   ESTAB  0 0   [::ffff:192.168.1.9]:25565 [::ffff:192.168.1.20]:51000
 tcp   ESTAB  0 0   [::ffff:192.168.1.9]:25565 [::ffff:203.0.113.7]:40000
 tcp   ESTAB  0 0   192.168.1.9:22 192.168.1.20:50000
 tcp   LISTEN 0 50  127.0.0.1:125565 *:*
+tcp   LISTEN 0 4096 *:19132 *:*
 udp   UNCONN 0 0   0.0.0.0:19132 0.0.0.0:*
 `
 
@@ -151,6 +152,7 @@ func TestStatusDocker(t *testing.T) {
 		"Players:    2 of 20 online: Steve",
 		"Memory:     1.0 GiB of 4.0 GiB cap (25%)",
 		"Ports:      tcp *:25565 listening, 2 connections",
+		"            tcp *:19132 listening, 0 connections",
 		"            udp 0.0.0.0:19132 listening",
 		"Firewall:   drop counters not set up yet",
 		"Whitelist:  3 players",

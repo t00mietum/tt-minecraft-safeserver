@@ -413,3 +413,41 @@ func TestGeyserSkipped(t *testing.T) {
 		t.Error("fix wrote through the link")
 	}
 }
+
+// NetherNet stays on bedrockPort alone. A key left out is Geyser's default,
+// which is already right, so it isn't added.
+func TestGeyserNetherNetPort(t *testing.T) {
+	defer testid.Line(t, "df5yy")
+	cfg, dir := newServer(t)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	good := strings.Replace(geyserNow, "auth-type: online", "auth-type: floodgate", 1)
+	for _, text := range []string{good, strings.Replace(good, "  transport: nethernet\n", "", 1), strings.Replace(good, "nethernet", "NetherNet", 1)} {
+		put(t, dir, geyserConfig, text, 0o640)
+		if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+			t.Errorf("%q: %v, %q", text, err, keys(problems))
+		}
+		if _, err := Fix(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, geyserConfig)); string(b) != text {
+			t.Errorf("fix changed a good file:\n%s", b)
+		}
+	}
+
+	bad := strings.Replace(good, "  transport: nethernet\n", "  webrtc-port: 19140\n  transport: both\n  clone-remote-port: True\n", 1)
+	put(t, dir, geyserConfig, bad, 0o640)
+	problems, err := Check(cfg)
+	want := []string{geyserConfig + " bedrock.transport", geyserConfig + " bedrock.webrtc-port", geyserConfig + " bedrock.clone-remote-port"}
+	if err != nil || !reflect.DeepEqual(keys(problems), want) {
+		t.Fatalf("check: %v, %q; want %q", err, keys(problems), want)
+	}
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	wantText := strings.Replace(good, "  transport: nethernet\n", "  webrtc-port: 0\n  transport: nethernet\n  clone-remote-port: false\n", 1)
+	if b, _ := os.ReadFile(filepath.Join(dir, geyserConfig)); string(b) != wantText {
+		t.Errorf("config.yml:\n%s\nwant:\n%s", b, wantText)
+	}
+}
