@@ -568,7 +568,7 @@ cicd/                        build, test, and release scripts
 
 - `/etc/mcssctl/plugins.shcl` lists each approved jar by file name, SHA-256, and an optional source for `update --plugins`.
 
-- `start` hashes every jar in `plugins/`, and `paper.jar`. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
+- `start` hashes every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and `paper.jar`. Extensions run with the same access as plugins. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
 
 - `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
 
@@ -704,7 +704,7 @@ cicd/                        build, test, and release scripts
 
 ## Needs more thought
 
-- Consoles over the internet. Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console.
+- Consoles over the internet. Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but it keeps a spare Xbox account's login on the server, and may need more outbound access than `egress` set to `web` allows.
 
 - Behind a tunnel, every player shows up as coming from localhost, unless the tunnel supports the PROXY protocol. IP bans and the per-address rate limit then don't work.
 

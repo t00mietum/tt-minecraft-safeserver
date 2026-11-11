@@ -215,7 +215,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Opened by: t00mietum
 	- Requirements:
 		- Let Xbox, PlayStation, and Switch players join from outside the home.
-		- Weigh the MCXboxBroadcast Geyser extension against BedrockConnect, per `design.md`.
+		- Weigh the MCXboxBroadcast Geyser extension against BedrockConnect and a LAN relay app, per `design.md`. MCXboxBroadcast is the front runner.
 
 - NixOS module
 	- ID: 2026111111065855
