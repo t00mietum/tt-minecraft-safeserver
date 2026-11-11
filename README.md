@@ -48,14 +48,14 @@
 <table style="border: none; border-collapse: collapse;">
 	<tr style="border: none; border-collapse: collapse;">
 		<td style="border: none; border-collapse: collapse;"><img src="assets/logo.png" alt="Logo" width="320"/></td>
-		<td style="border: none;">tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `mcssctl`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.</td>
+		<td style="border: none;">tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `tt-minecraftd`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.</td>
 	</tr>
 </table>
 
 <p align="center"><img src="assets/logo.png" alt="" width="128"></p>
 -->
 
-tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `mcssctl`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.
+tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `tt-minecraftd`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.
 
 <!-- TOC ignore:true -->
 ## Table of contents

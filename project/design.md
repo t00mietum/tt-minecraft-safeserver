@@ -61,7 +61,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 
 ## Summary
 
-- `mcssctl` runs a Paper Minecraft Java server on Linux as a dedicated, unprivileged account. It starts and stops the server, shows its status, sends it console commands, sets it up from scratch, updates it, and repairs a broken install.
+- `tt-minecraftd` runs a Paper Minecraft Java server on Linux as a dedicated, unprivileged account. It starts and stops the server, shows its status, sends it console commands, sets it up from scratch, updates it, and repairs a broken install.
 
 - The server runs inside a locked-down Docker container by default. Without Docker it runs in a sandboxed systemd unit, under the same account.
 
@@ -84,7 +84,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 	- Commands were built as strings and run through `eval`.
 	- Stopping meant matching `ps` output with a regex, then SIGTERM and SIGKILL after a fixed 8 seconds.
 
-- A list of the common ways open Minecraft servers get attacked was put together first. [Security](#security) maps each one to what `mcssctl` does about it.
+- A list of the common ways open Minecraft servers get attacked was put together first. [Security](#security) maps each one to what `tt-minecraftd` does about it.
 
 ## Goals and non-goals
 
@@ -119,16 +119,16 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 ## Commands
 
 ~~~text
-mcssctl start   [--native] [--debug] [--dry-run] [--foreground]
-mcssctl stop    [--warn N] [--dry-run]
-mcssctl status
-mcssctl watch   [--interval N]
-mcssctl console
-mcssctl cmd     <server command>
-mcssctl setup   [--yes] [--dry-run] [--adopt PATH] [--accept-eula] [setup options]
-mcssctl update  [--yes] [--dry-run] [--self] [--paper] [--plugins] [--image] [--mc-version V]
-mcssctl repair  [--yes] [--dry-run] [--check] [--approve-plugins]
-mcssctl --help | --about | --version
+tt-minecraftd start   [--native] [--debug] [--dry-run] [--foreground]
+tt-minecraftd stop    [--warn N] [--dry-run]
+tt-minecraftd status
+tt-minecraftd watch   [--interval N]
+tt-minecraftd console
+tt-minecraftd cmd     <server command>
+tt-minecraftd setup   [--yes] [--dry-run] [--adopt PATH] [--accept-eula] [setup options]
+tt-minecraftd update  [--yes] [--dry-run] [--self] [--paper] [--plugins] [--image] [--mc-version V]
+tt-minecraftd repair  [--yes] [--dry-run] [--check] [--approve-plugins]
+tt-minecraftd --help | --about | --version
 Common:  --config PATH
 ~~~
 
@@ -195,7 +195,7 @@ Common:  --config PATH
 	- Docker mode uses `docker attach` with `--sig-proxy=false` and its own detach keys.
 	- Native mode attaches to the service account's tmux session.
 
-- `cmd` sends one console command and prints the log lines that follow it, such as `mcssctl cmd whitelist add Steve`.
+- `cmd` sends one console command and prints the log lines that follow it, such as `tt-minecraftd cmd whitelist add Steve`.
 	- Docker mode writes to the container's input with the Docker API.
 	- Native mode uses `tmux send-keys`.
 
@@ -230,7 +230,7 @@ Common:  --config PATH
 
 - Needs root, and asks first unless `--yes` is given. When a part isn't named, it updates all of them.
 
-- `--self` gets the latest `mcssctl` release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename.
+- `--self` gets the latest `tt-minecraft-safeserver` release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename.
 
 - `--paper` asks the PaperMC download API for the newest stable build of the current Minecraft version. It downloads the jar, checks its SHA-256 sum against the API, puts it beside the old ones, and points `paper.jar` at it. The last 2 builds stay on disk.
 	- `--mc-version V` moves to another Minecraft version. It needs a yes even with `--yes`, since worlds can't go back to an older version and plugins may not work on the new one. It takes a ZFS snapshot first.
@@ -273,7 +273,7 @@ Common:  --config PATH
 
 ~~~text
 go.mod
-source/cmd/mcssctl/          main package, argument parsing
+source/cmd/tt-minecraftd/    main package, argument parsing
 source/internal/config/      config load and checks
 source/internal/host/        command runner, sudo, dry run
 source/internal/server/      Java argument list, server list ping, log reading
@@ -352,7 +352,7 @@ cicd/                        build, test, and release scripts
 
 - The operator gets sudo for single commands, rather than running the whole tool as root.
 
-- Start at boot uses a systemd unit that runs `mcssctl start --foreground` as root, rather than a unit that runs Java directly.
+- Start at boot uses a systemd unit that runs `tt-minecraftd start --foreground` as root, rather than a unit that runs Java directly.
 	- The checks, snapshots, and ownership hand-off then work the same way at boot as by hand.
 
 - On NixOS, a NixOS module declares the account, Docker, the config file, the firewall unit, and the boot unit.
@@ -418,9 +418,9 @@ cicd/                        build, test, and release scripts
 
 ### Configuration model
 
-- One file, `/etc/mcssctl/config.shcl`, owned by root and readable by all. `--config` points elsewhere.
+- One file, `/etc/tt-minecraftd/config.shcl`, owned by root and readable by all. `--config` points elsewhere.
 
-- The approved plugin list is `/etc/mcssctl/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
+- The approved plugin list is `/etc/tt-minecraftd/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
 
 - An unknown key or a bad value gets a warning each run, and the default is used.
 
@@ -432,7 +432,7 @@ cicd/                        build, test, and release scripts
 | `runUser`           | `minecraftd`
 | `runGroup`          | same as `runUser`                 | Stays the group before and after a run
 | `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`
-| `serverDir`         | `/srv/mcssctl/server`
+| `serverDir`         | `/srv/tt-minecraftd/server`
 | `ownerTrees`        | `[<serverDir>]`                   | Every tree that changes hands, such as a world on another dataset
 | `zfsDataset`        | none                              | No snapshots when unset
 | `dockerImage`       | Temurin 25 JRE, by digest         | `update --image` changes it
@@ -530,7 +530,7 @@ cicd/                        build, test, and release scripts
 	- `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, and `NoNewPrivileges=yes`.
 	- Write access only to the trees in `ownerTrees`.
 	- An empty capability set, `MemoryMax`, and `TasksMax`.
-	- The tmux server on a socket under `/run/mcssctl/`. It never uses the operator's tmux server.
+	- The tmux server on a socket under `/run/tt-minecraftd/`. It never uses the operator's tmux server.
 
 ### Tree ownership
 
@@ -573,7 +573,7 @@ cicd/                        build, test, and release scripts
 
 ### Plugin pinning
 
-- `/etc/mcssctl/plugins.shcl` lists each approved jar by file name, SHA-256, and an optional source for `update --plugins`.
+- `/etc/tt-minecraftd/plugins.shcl` lists each approved jar by file name, SHA-256, and an optional source for `update --plugins`.
 
 - `start` hashes every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and `paper.jar`. Extensions run with the same access as plugins. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
 
@@ -610,9 +610,9 @@ cicd/                        build, test, and release scripts
 
 ### Firewall
 
-- With `firewall` on, the tool puts its rules in its own nftables table, `inet mcssctl`, so they apply to IPv4 and IPv6.
+- With `firewall` on, the tool puts its rules in its own nftables table, `inet tt_minecraftd`, so they apply to IPv4 and IPv6.
 
-- `setup` and `repair` write the rules to `/etc/mcssctl/firewall.nft`, from the config. `mcssctl-firewall.service` loads that file at boot.
+- `setup` and `repair` write the rules to `/etc/tt-minecraftd/firewall.nft`, from the config. `tt-minecraftd-firewall.service` loads that file at boot.
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
 	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
 
@@ -636,11 +636,11 @@ cicd/                        build, test, and release scripts
 
 ### Boot
 
-- With `startAtBoot` on, `setup` and `repair` install `mcssctl.service` and enable it.
-	- `ExecStart` runs `mcssctl start --foreground`, and `ExecStop` runs `mcssctl stop`.
+- With `startAtBoot` on, `setup` and `repair` install `tt-minecraftd.service` and enable it.
+	- `ExecStart` runs `tt-minecraftd start --foreground`, and `ExecStop` runs `tt-minecraftd stop`.
 	- `TimeoutStopSec` is a little longer than `stopTimeout`, so systemd doesn't kill the server first.
 	- It starts after `network-online.target`, and after `docker.service` in Docker mode.
-	- With `firewall` on, it requires `mcssctl-firewall.service`, so the server never starts at boot without the rules.
+	- With `firewall` on, it requires `tt-minecraftd-firewall.service`, so the server never starts at boot without the rules.
 
 - With `startAtBoot` off, `repair` disables and removes the unit.
 
@@ -649,15 +649,15 @@ cicd/                        build, test, and release scripts
 - The repo has a flake with a NixOS module. It declares:
 	- The service account and group.
 	- Docker, in Docker mode.
-	- `/etc/mcssctl/config.shcl`, written from module options.
+	- `/etc/tt-minecraftd/config.shcl`, written from module options.
 	- The firewall unit and its rules, and the ports in NixOS's own firewall.
 	- The boot unit.
 
-- `mcssctl` detects NixOS by the `/etc/NIXOS` file. There, `setup` and `repair` still handle the server tree, Paper, the plugins, and the safe settings. For the rest they only check, and print the module options to set.
+- `tt-minecraftd` detects NixOS by the `/etc/NIXOS` file. There, `setup` and `repair` still handle the server tree, Paper, the plugins, and the safe settings. For the rest they only check, and print the module options to set.
 
 ### ZFS snapshots
 
-- With `zfsDataset` set, `start` takes `<YYYYmmDD-HHMMSS>_pre_mcssctl-start`, and `stop` takes `<YYYYmmDD-HHMMSS>_post_mcssctl-stop` after the worlds are saved.
+- With `zfsDataset` set, `start` takes `<YYYYmmDD-HHMMSS>_pre_tt-minecraftd-start`, and `stop` takes `<YYYYmmDD-HHMMSS>_post_tt-minecraftd-stop` after the worlds are saved.
 
 - Old ones get pruned on a grandfather-father-son schedule. The ones kept are the first, the newest 3, and the last of each of the last 7 days, 4 weeks, and 6 months.
 	- Only snapshots that match the tool's name pattern are touched.
@@ -676,7 +676,7 @@ cicd/                        build, test, and release scripts
 
 - How the common attacks on Minecraft servers are handled:
 
-| Attack                                   | What `mcssctl` does
+| Attack                                   | What `tt-minecraftd` does
 | :---                                     | :---
 | Scanners find the server and bots join   | Whitelist forced on. Scanner noise cut by `hideOnlinePlayers`
 | Offline mode, joining under an op's name | Online mode forced on. Bedrock logins checked through Floodgate

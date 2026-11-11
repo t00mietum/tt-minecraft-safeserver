@@ -119,13 +119,13 @@ Both editions play on the same server, in the same world.
 - Add a Java player:
 
 ~~~bash
-mcssctl cmd whitelist add Steve
+tt-minecraftd cmd whitelist add Steve
 ~~~
 
 - Add a Bedrock player, by gamertag:
 
 ~~~bash
-mcssctl cmd fwhitelist add "Some Gamertag"
+tt-minecraftd cmd fwhitelist add "Some Gamertag"
 ~~~
 
 - For players from outside the home, the server needs `allowFrom` set to `any`, and either a router port forward or a tunnel. Forward TCP 25565 for Java and UDP 19132 for Bedrock. [design.md](project/design.md#exposure) has the details.

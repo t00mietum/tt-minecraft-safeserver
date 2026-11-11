@@ -37,7 +37,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The old scripts never set it, and nothing checks it.
 	- Note:
 		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
-		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `mcssctl` will force it on from then on.
+		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
 	- Progress log:
 		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
 
@@ -106,7 +106,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
-		- Keep the approved jars and their hashes in `/etc/mcssctl/plugins.shcl`.
+		- Keep the approved jars and their hashes in `/etc/tt-minecraftd/plugins.shcl`.
 		- `start` refuses when a jar is new or changed.
 		- `repair --approve-plugins` shows each one and asks.
 		- The server can't write to the jars while it runs.
