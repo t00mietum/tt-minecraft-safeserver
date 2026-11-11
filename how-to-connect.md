@@ -6,7 +6,7 @@
 <!-- TOC ignore:true -->
 # How to connect
 
-How to join a server that runs on minecraft-safe-server, from home or from anywhere else.
+How to join a server that runs on tt-minecraft-safeserver, from home or from anywhere else.
 
 From outside the home, players connect with an internet domain name that the person who runs the server gives them. The examples use `mc.example.com` for that name, and `192.168.1.50` for the server's address at home.
 
@@ -101,7 +101,7 @@ Both editions play on the same server, in the same world.
 
 - At home or away, a console that uses BedrockConnect can join from its server list. Type the server's domain name and port `19132` there.
 
-- Without BedrockConnect, consoles can't join from outside the home yet. Xbox, PlayStation, and Switch don't let you add a server by its address. A later version of minecraft-safe-server may let consoles join through the Friends tab instead.
+- Without BedrockConnect, consoles can't join from outside the home yet. Xbox, PlayStation, and Switch don't let you add a server by its address. A later version of tt-minecraft-safeserver may let consoles join through the Friends tab instead.
 
 ## When it doesn't work
 

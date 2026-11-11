@@ -216,6 +216,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- Move the parts that `tt-monerodctl` needs too into a new Go module and repo, `tt-secure-serverctl`, per `design.md`.
 		- Do it when `tt-monerodctl` starts on code, so 2 tools test the interface.
+		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
+		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerodctl` is also being worked on.
 	- Decisions:
 		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
 		- GPL v2 or later.

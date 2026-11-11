@@ -42,20 +42,20 @@
 -->
 
 <!-- TOC ignore:true -->
-# minecraft-safe-server
+# tt-minecraft-safeserver
 
 <!--
 <table style="border: none; border-collapse: collapse;">
 	<tr style="border: none; border-collapse: collapse;">
 		<td style="border: none; border-collapse: collapse;"><img src="assets/logo.png" alt="Logo" width="320"/></td>
-		<td style="border: none;">minecraft-safe-server runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `mcssctl`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.</td>
+		<td style="border: none;">tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `mcssctl`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.</td>
 	</tr>
 </table>
 
 <p align="center"><img src="assets/logo.png" alt="" width="128"></p>
 -->
 
-minecraft-safe-server runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `mcssctl`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.
+tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `mcssctl`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.
 
 <!-- TOC ignore:true -->
 ## Table of contents
@@ -89,7 +89,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 > Licensed under the [GNU General Public License v2.0 or later](https://spdx.org/licenses/GPL-2.0-or-later.html)<br />
 > SPDX-License-Identifier: `GPL-2.0-or-later` <br />
 > No warranty.<br />
-> minecraft-safe-server™ is a [trademark](trademark.md) of t00mietum.
+> tt-minecraft-safeserver™ is a [trademark](trademark.md) of t00mietum.
 <!--
 > Licensed under the [MIT License](https://mit-license.org/)<br />
 > SPDX-License-Identifier: `MIT`.<br />
