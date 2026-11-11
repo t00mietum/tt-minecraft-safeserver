@@ -235,6 +235,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- GPL v2 or later.
 	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
 
+- Podman, Docker, and native modes
+	- ID: 2026111115090766
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-150907
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Related IDs: 2026111111303242
+	- Requirements:
+		- Add rootful Podman beside Docker and native mode, the same as in `tt-monerod-safeserver`. `runMode` takes `podman`, `docker`, or `native`, and the default is `podman`.
+		- Run both runtimes as root through sudo, with the same flags. The operator doesn't need the `docker` group anymore.
+		- `setup` picks `podman` when it's installed, else `docker`. With neither, it offers Podman and `catatonit` through apt, or native mode. It never installs Docker. `repair` checks for `catatonit`, since Podman's `--init` needs it.
+		- `stop`, `status`, and `repair` look for the tool's label in both runtimes, so a container started before a `runMode` change still gets found.
+		- Rename `dockerImage` to `image`, and give the image's full name with `docker.io/`, since Podman won't pick a registry on its own.
+		- Native mode is for a dedicated VM, or a host with neither runtime. It keeps its systemd sandbox.
+		- Update design.md, `Why Docker` included, and the NixOS module item.
+		- The hand tests for Docker mode, status, and console get run under Podman too.
+		- `stop` and `cmd` write to the container's input through the Docker API socket. Without the `docker` group the operator can't open it, and Podman's socket needs `podman.socket` running. Find a way through sudo, such as `sudo podman attach` fed from a pipe, if Podman allows that.
+	- Decisions:
+		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
+
 - setup
 	- ID: 2026111111065776
 	- Type: Feature
