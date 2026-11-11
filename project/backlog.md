@@ -423,10 +423,11 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
+	- Prereq IDs: 2026111111065711 2026111113015461
 	- Requirements:
 		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
 		- Fix `how-to-connect.md` if they don't.
+	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
