@@ -101,7 +101,7 @@ Both editions play on the same server, in the same world.
 
 - At home or away, a console that uses BedrockConnect can join from its server list. Type the server's domain name and port `19132` there.
 
-- Without BedrockConnect, consoles can't join from outside the home yet. Xbox, PlayStation, and Switch don't let you add a server by its address. A fix is planned.
+- Without BedrockConnect, consoles can't join from outside the home yet. Xbox, PlayStation, and Switch don't let you add a server by its address. A later version of minecraft-safe-server may let consoles join through the Friends tab instead.
 
 ## When it doesn't work
 
