@@ -48,14 +48,30 @@ var (
 	psLine       = regexp.MustCompile(`^\s*(\S+)\s+(\d+)\s+(.*)$`)
 )
 
-// RunningPaper picks the Paper servers out of `ps -eo user=,pid=,args=`.
-func RunningPaper(ps []byte) []string {
-	var found []string
+// Proc is one Paper server process. User is as ps gave it, a name or a uid.
+type Proc struct {
+	User string
+	PID  string
+}
+
+// PaperProcs picks the Paper servers out of `ps -eo user=,pid=,args=`, or
+// uid= in place of user=.
+func PaperProcs(ps []byte) []Proc {
+	var found []Proc
 	for _, line := range strings.Split(string(ps), "\n") {
 		fields := psLine.FindStringSubmatch(strings.TrimRight(line, "\r"))
 		if fields != nil && paperProcess.MatchString(fields[3]) {
-			found = append(found, fmt.Sprintf("pid %s, as %s", fields[2], fields[1]))
+			found = append(found, Proc{User: fields[1], PID: fields[2]})
 		}
+	}
+	return found
+}
+
+// RunningPaper picks the Paper servers out of `ps -eo user=,pid=,args=`.
+func RunningPaper(ps []byte) []string {
+	var found []string
+	for _, p := range PaperProcs(ps) {
+		found = append(found, fmt.Sprintf("pid %s, as %s", p.PID, p.User))
 	}
 	return found
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
+	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 )
@@ -130,7 +131,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		return watch(ctx, probe, stdout, time.Duration(inv.opts.interval)*time.Second)
 	}
 	if name == "repair" {
-		return repair(inv, os.Stdin, stdout, os.Geteuid() == 0)
+		return repair(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
 	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
@@ -165,9 +166,17 @@ func (inv invocation) pluginsFile() string {
 	return filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl")
 }
 
+// repairSteps gives the checks around the safe settings and plugins. It's a
+// var so tests don't look at the host's real accounts and docker.
+var repairSteps = func(inv invocation) (h *repairpkg.Host, before, after []repairpkg.Check) {
+	runner := host.NewExec(false)
+	runner.QuietErr = true
+	return repairpkg.NewHost(runner, &inv.cfg, inv.configPath), repairpkg.Before, repairpkg.After
+}
+
 // repair runs design.md's repair checks that are built so far. Each one prints
 // OK, FIXED, or FAILED. --approve-plugins asks on in.
-func repair(inv invocation, in io.Reader, w io.Writer, root bool) error {
+func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
 	if !inv.opts.check && !root {
 		return errors.New("repair needs root to fix things; run it with sudo, or add --check to only report")
 	}
@@ -176,6 +185,8 @@ func repair(inv invocation, in io.Reader, w io.Writer, root bool) error {
 		fmt.Fprintf(w, "%-7s %s\n", state, text)
 		failed = failed || state == "FAILED"
 	}
+	h, before, after := repairSteps(inv)
+	repairpkg.Run(ctx, h, before, inv.opts.check, report)
 	check := settings.Fix
 	if inv.opts.check {
 		check = settings.Check
@@ -198,6 +209,7 @@ func repair(inv invocation, in io.Reader, w io.Writer, root bool) error {
 		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
 	repairPlugins(inv, in, w, report)
+	repairpkg.Run(ctx, h, after, inv.opts.check, report)
 	if failed {
 		return errors.New("not everything is in place")
 	}

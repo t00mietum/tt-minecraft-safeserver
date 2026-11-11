@@ -33,6 +33,15 @@ type Kit struct {
 	Sleep       func(time.Duration)
 }
 
+// Running says whether the server runs in the configured mode.
+func Running(ctx context.Context, r host.Runner, c *config.Config) (bool, error) {
+	if c.RunMode == "native" {
+		return (&Native{Kit: Kit{Run: r, Cfg: c}}).running(ctx)
+	}
+	state, err := ContainerState(ctx, r)
+	return state == "running", err
+}
+
 // engine is the part of a mode that the shared start and stop steps ask about.
 type engine interface {
 	running(ctx context.Context) (bool, error)

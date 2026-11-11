@@ -189,7 +189,7 @@ func (d *Docker) runArgs(mode StartMode) ([]string, error) {
 			return nil, err
 		}
 	}
-	jars, err := lockedJars(c.ServerDir)
+	jars, err := LockedJars(c.ServerDir)
 	if err != nil {
 		return nil, err
 	}
@@ -215,9 +215,9 @@ func appendMount(args []string, path string, readOnly bool) ([]string, error) {
 	return append(args, "--mount", m), nil
 }
 
-// lockedJars gives paper.jar and the jars plugins.Jars checks, after links, so
+// LockedJars gives paper.jar and the jars plugins.Jars checks, after links, so
 // each can be mounted read-only over itself.
-func lockedJars(serverDir string) ([]string, error) {
+func LockedJars(serverDir string) ([]string, error) {
 	paper, err := filepath.EvalSymlinks(filepath.Join(serverDir, "paper.jar"))
 	if err != nil {
 		return nil, fmt.Errorf("no paper.jar in %s: %w", serverDir, err)

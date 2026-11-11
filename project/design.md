@@ -265,14 +265,17 @@ Common:  --config PATH, --set KEY=VALUE
 - Checks, in order:
 	1. The config parses, and only root can write it.
 	2. The service account and group exist, the account can't log in, and it isn't in any other group.
+		- A `runUser` that's root, or a person's account at uid 1000 or above, is reported and left alone, since the fix would lock a person out.
 	3. The operator is in the group.
 	4. The server tree exists, and so does `paper.jar`.
 	5. Ownership and modes match whether the server runs.
+		- Modes are only checked while it runs, since `stop` hands back ownership and leaves the modes.
 	6. The safe settings are in place.
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.
 	9. With `firewall` on, the rules file matches the config, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
+		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
 	11. In Docker mode, the image is there, and an old stopped container gets removed.
 	12. With a dataset configured, it exists and is mounted.
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -24,6 +25,16 @@ func noDefaultConfig(t *testing.T) {
 	old := defaultConfig
 	defaultConfig = filepath.Join(t.TempDir(), "config.shcl")
 	t.Cleanup(func() { defaultConfig = old })
+}
+
+// noHostChecks leaves repair with only the safe settings and plugin steps.
+func noHostChecks(t *testing.T) {
+	t.Helper()
+	old := repairSteps
+	repairSteps = func(inv invocation) (*repairpkg.Host, []repairpkg.Check, []repairpkg.Check) {
+		return &repairpkg.Host{Cfg: &inv.cfg}, nil, nil
+	}
+	t.Cleanup(func() { repairSteps = old })
 }
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
@@ -170,6 +181,7 @@ func TestWatch(t *testing.T) {
 func TestRepair(t *testing.T) {
 	defer testid.Line(t, "df5ys")
 	noDefaultConfig(t)
+	noHostChecks(t)
 	dir := t.TempDir()
 	set := "--set=serverDir=" + dir
 	code, _, msg := runArgs("repair", set)
@@ -189,7 +201,7 @@ func TestRepair(t *testing.T) {
 		t.Fatal("prepare stopped")
 	}
 	var b bytes.Buffer
-	if err := repair(inv, strings.NewReader(""), &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
+	if err := repair(context.Background(), inv, strings.NewReader(""), &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
 		t.Errorf("as root: %v, %q", err, b.String())
 	}
 	code, out, _ = runArgs("repair", "--check", set)
@@ -203,6 +215,7 @@ func TestRepair(t *testing.T) {
 func TestRepairApprovePlugins(t *testing.T) {
 	defer testid.Line(t, "df5z5")
 	noDefaultConfig(t)
+	noHostChecks(t)
 	dir := t.TempDir()
 	for name, text := range map[string]string{"plugins/a.jar": "a", "plugins/b.jar": "b", "plugins/c.jar": "c", "paper.jar": "p"} {
 		if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
@@ -225,7 +238,7 @@ func TestRepairApprovePlugins(t *testing.T) {
 			t.Fatal("prepare stopped")
 		}
 		var b bytes.Buffer
-		err := repair(inv, strings.NewReader(answers), &b, true)
+		err := repair(context.Background(), inv, strings.NewReader(answers), &b, true)
 		return b.String(), err
 	}
 	out, err := repairWith("y\nmaybe\nn\ny\n")
@@ -272,5 +285,26 @@ func TestConsoleCmdArgs(t *testing.T) {
 	}
 	if code, out, _ := runArgs("--help"); code != exitOK || !strings.Contains(out, "console") || !strings.Contains(out, "cmd ") {
 		t.Errorf("--help: exit %d, output %q", code, out)
+	}
+}
+
+// repair runs the host checks before the safe settings and after the plugins,
+// and a failed one makes the exit 1.
+func TestRepairOrder(t *testing.T) {
+	defer testid.Line(t, "df5zn")
+	noDefaultConfig(t)
+	old := repairSteps
+	t.Cleanup(func() { repairSteps = old })
+	repairSteps = func(inv invocation) (*repairpkg.Host, []repairpkg.Check, []repairpkg.Check) {
+		early := repairpkg.Check{Name: "early", Look: func(context.Context, *repairpkg.Host) ([]repairpkg.Finding, error) { return nil, nil }}
+		late := repairpkg.Check{Name: "late", Look: func(context.Context, *repairpkg.Host) ([]repairpkg.Finding, error) {
+			return []repairpkg.Finding{{Problem: "late is wrong"}}, nil
+		}}
+		return &repairpkg.Host{Cfg: &inv.cfg}, []repairpkg.Check{early}, []repairpkg.Check{late}
+	}
+	code, out, _ := runArgs("repair", "--check", "--set=serverDir="+t.TempDir())
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if code != exitError || lines[0] != "OK      early" || !strings.HasPrefix(lines[1], "FAILED  server.properties: online-mode") || lines[len(lines)-1] != "FAILED  late is wrong" {
+		t.Errorf("exit %d, stdout:\n%s", code, out)
 	}
 }

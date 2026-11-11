@@ -58,7 +58,7 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 		return err
 	}
 	// The firewall and snapshot steps come with their own items.
-	jars, err := lockedJars(n.Cfg.ServerDir)
+	jars, err := LockedJars(n.Cfg.ServerDir)
 	if err != nil {
 		return err
 	}

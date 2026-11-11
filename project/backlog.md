@@ -22,6 +22,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Native start misses the new latest.log when its inode is reused
+	- ID: 2026111113354106
+	- Type: Bug
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-133541
+	- Opened by:
+	- Incorrect behavior [Bug]: TestNativeStart (df5y1) fails with TMPDIR on an ext4 folder: start waits out startTimeout though the new latest.log has the Done line.
+	- Expected behavior [Bug]: start sees the new log on any file system.
+	- Reproduced [Bug]: 2026-11-11, on HEAD 2076b3a, with TMPDIR on ext4. Passes on ZFS.
+	- Possible cause [Bug]: Native.log tells the old log from the new one with os.SameFile. ext4 hands a removed file's inode to the next new file, so the new log looks like the old one. Log4j's rollover deletes latest.log, so a real server could hit it too.
+	- Estimated effort: Low
+
 - Current Geyser needs TCP on the Bedrock port too
 	- ID: 2026111113015461
 	- Type: Bug
@@ -400,7 +413,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair
 	- ID: 2026111111065763
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -408,6 +421,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- Run the checks listed in `design.md`, each with an optional fix.
 		- `--check` only reports.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: `repair` runs design.md's checks 1 to 8, 10, 11, 12, and 14 in order, around the safe settings and plugin steps. Each one prints OK, FIXED, or FAILED, and `--check` fixes nothing.
+		- Verified: each new test fails with its check broken, and passes with it in place.
+	- Decisions:
+		- Checks 9 and 13 come with the Firewall and Start at boot items, which list `repair` managing them. There's no rules file or boot unit to check yet.
+		- Checks are a list in `source/internal/repair`, each with a look and an optional fix per finding, per design.md. Every fix is a command through the runner.
+		- A `runUser` that's root or uid 1000 and up is reported and left alone, since stripping its groups and login would lock a person out. design.md updated.
+		- A new account is `useradd --system`, home `/nonexistent`, shell `/usr/sbin/nologin`. "Can't log in" is checked by its shell. The password field needs `/etc/shadow`, which `--check` can't read.
+		- Tree modes are checked only while the server runs, since `stop` only hands back ownership. Native mode's root-owned jars are left out while it runs. design.md updated.
+		- The config check reports a missing config, since `setup` writes it. The server folder, `paper.jar`, Geyser, and Floodgate are reported, not fixed, since `setup` and `update` fetch them.
+		- The Floodgate key is fixed with `chmod o-rwx`. Its group is the tree ownership check's. design.md names no Floodgate config keys, so none are pinned.
+		- In Docker mode a missing image is pulled, and an old stopped container is removed, per design.md.
+		- ufw and firewalld rules are read only as root. Under `--check` without root, an active one is reported as unread. firewalld's default zone ports are read, so a port opened through a service shows as missing. design.md updated.
+		- Other Paper servers are told apart by uid, since both modes run the server under `runUser`'s uid on the host.
+		- `launch.LockedJars` is exported, and `launch.Running` and `server.PaperProcs` added, so `repair` shares them with `start` and `status`.
+		- Swept: `refuseOthers` and `status` still go through `RunningPaper`, which now uses `PaperProcs`; both modes' jar locks use `LockedJars`.
+	- Branch: r1111
+	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
+	- Closed: 20261111-133545
 
 - setup
 	- ID: 2026111111065776
