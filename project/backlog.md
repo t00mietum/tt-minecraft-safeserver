@@ -44,14 +44,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Config reader for shcl in Go
 	- ID: 2026111111065684
 	- Type: Task
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-110656
 	- Opened by: t00mietum
 	- Requirements:
 		- Read `config.shcl` and `plugins.shcl` from Go.
+	- Actual effort: Avg
 	- Decisions:
 		- Config is shcl. The tool reads it with the latest published release of shcl's Go module, beta or not.
+		- shcl `v3.0.0-beta1`, the only v3 release. `go.mod` says Go 1.24, so Debian 13's Go builds it.
+		- The reader lays the file over a `Config` the caller fills first, so the defaults item only has to fill it. Empty fields are left for that item to derive, such as `runGroup` from `runUser`.
+		- A bad value, an unknown key, or a key set twice with different values gets a warning with its line, and the value before it stands. A list with one bad item is dropped whole. Only a file that can't be read is an error.
+		- Values are checked here: paths for `chown -R` must be full and not `/`, names can't start with `-`, ports and `nice` stay in range, and `allowFrom` takes `lan`, `any`, addresses, or ranges.
+		- Sizes take Java's `4G` and shcl's `4 GiB`, since shcl alone refuses `4G`.
+		- `startAtBoot` is read here too, so every key in design.md's table is read. A test checks the two match.
+		- In `plugins.shcl`, a jar is named by its path under `serverDir`. A bad entry is left out, so its jar isn't approved. shcl merges entries with the same path, so a jar listed with 2 hashes is left out too.
+		- shcl's hints are dropped from the warnings. They repeat ours, and "did you mean a list" misleads for a key that takes one value.
+		- Swept: every key in the table has a setter and a test line; both files go through the one `LoadFile`.
+	- Branch: r1111
+	- Test case: df5wt, df5wv, df5ww, df5wx, df5wy, df5wz, df5x0, df5x1, df5x2, df5x3, df5x4, df5x5
+	- Closed: 20261111-120826
 
 - Config defaults and overrides
 	- ID: 2026111111065697

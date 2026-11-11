@@ -423,6 +423,12 @@ cicd/                        build, test, and release scripts
 - The approved plugin list is `/etc/tt-minecraftd/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
 
 - An unknown key or a bad value gets a warning each run, and the default is used.
+	- So does a key that's set twice with different values. Neither value is used.
+	- A list with one bad item is a bad value, so none of it is used.
+
+- Key names and the words such as `docker` and `lan` don't care about case.
+
+- Sizes take Java's form, such as `4G`, or shcl's, such as `4 GiB`. Either way a G is 1024 M, the same as Java. Timeouts take seconds, or a time such as `5m`.
 
 - Settings:
 
@@ -574,6 +580,17 @@ cicd/                        build, test, and release scripts
 ### Plugin pinning
 
 - `/etc/tt-minecraftd/plugins.shcl` lists each approved jar by file name, SHA-256, and an optional source for `update --plugins`.
+	- The name is the jar's path under `serverDir`, so a jar in `plugins/` and an extension with the same name stay apart:
+
+		~~~text
+		jar: plugins/Geyser-Spigot.jar
+			sha256: 64 hex digits
+			source: https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot
+		jar: paper-26.3-244.jar
+			sha256: 64 hex digits
+		~~~
+
+	- An entry with no hash, a bad hash, or a path outside `serverDir` gets a warning and is left out, so its jar counts as not approved. A source that isn't `https` is ignored, and the hash still counts.
 
 - `start` hashes every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and `paper.jar`. Extensions run with the same access as plugins. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
 
