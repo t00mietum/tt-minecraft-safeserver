@@ -76,7 +76,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065697
 	- Requirements:
-		- Build `start`, `stop`, `status`, and `watch`, per `design.md`, with the same options as `tt-monerodctl`.
+		- Build `start`, `stop`, `status`, and `watch`, per `design.md`, with the same options as `tt-monerod-safeserver`.
 		- Docker mode is the default, and a sandboxed systemd unit is the fallback.
 		- Add `--dry-run` and `--debug`.
 		- Add `--help`, `--about`, and `--version`.
@@ -205,7 +205,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
 		- Fix `how-to-connect.md` if they don't.
 
-- Move shared code to tt-secure-serverctl
+- Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
 	- Status: Queued
@@ -214,10 +214,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
-		- Move the parts that `tt-monerodctl` needs too into a new Go module and repo, `tt-secure-serverctl`, per `design.md`.
-		- Do it when `tt-monerodctl` starts on code, so 2 tools test the interface.
+		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
+		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
 		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
-		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerodctl` is also being worked on.
+		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
 	- Decisions:
 		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
 		- GPL v2 or later.

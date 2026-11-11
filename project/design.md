@@ -95,7 +95,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 	- Let Java players on PCs, and Bedrock players on phones and consoles, connect from the LAN and from the internet.
 	- Keep root work to the few steps that need it, and do it in the foreground.
 	- Hand the server tree to the service account before a start, and back to the operator after a stop.
-	- Use the same commands as `tt-monerodctl`, so both tools work the same way.
+	- Use the same commands as `tt-monerod-safeserver`, so both tools work the same way.
 	- Run on Debian first, then NixOS.
 	- Start at boot.
 
@@ -132,7 +132,7 @@ mcssctl --help | --about | --version
 Common:  --config PATH
 ~~~
 
-- The commands match `tt-monerodctl`. `console` and `cmd` are new, since a Minecraft server gets managed from its console.
+- The commands match `tt-monerod-safeserver`. `console` and `cmd` are new, since a Minecraft server gets managed from its console.
 
 - Exit codes are 0 for success, 1 for an error, and 2 for bad usage.
 
@@ -300,7 +300,7 @@ cicd/                        build, test, and release scripts
 
 - `repair` is a list of checks. Each one has a test function and an optional fix function. `setup` reuses the fix functions, and `start` runs the test functions for the safe settings and the plugins.
 
-- The parts that `tt-monerodctl` needs too go in their own packages, so that way they're behind one interface. They're the runner, config loading, the account, the ownership hand-off, ZFS, the launchers, the firewall unit, the boot unit, the `repair` checks, self-update, and the CLI. See [Direction decisions](#direction-decisions).
+- The parts that `tt-monerod-safeserver` needs too go in their own packages, so that way they're behind one interface. They're the runner, config loading, the account, the ownership hand-off, ZFS, the launchers, the firewall unit, the boot unit, the `repair` checks, self-update, and the CLI. See [Direction decisions](#direction-decisions).
 
 ### Data flow
 
@@ -323,11 +323,11 @@ cicd/                        build, test, and release scripts
 - Go was chosen over Bash and PowerShell.
 	- `setup`, `update`, and `repair` need HTTPS, JSON, YAML, hashes, and the Docker API. Bash would need curl, jq, and yq, and it gets hard to test past a few hundred lines.
 	- PowerShell isn't installed on most Linux servers.
-	- Go builds one static binary, and its standard library has nearly all of that. `tt-monerodctl` is in Go too, so code can move between them.
+	- Go builds one static binary, and its standard library has nearly all of that. `tt-monerod-safeserver` is in Go too, so code can move between them.
 
 - Docker mode is the default, and a sandboxed systemd unit is the fallback.
 	- A plugin runs with the same access as the server. In a container it can only see the server tree. [Why Docker](#why-docker) has more.
-	- Native mode uses systemd's sandbox options rather than a bare tmux session as in `tt-monerodctl`. They give most of what the container does for little extra code.
+	- Native mode uses systemd's sandbox options rather than a bare tmux session as in `tt-monerod-safeserver`. They give most of what the container does for little extra code.
 
 - The container runs a stock Eclipse Temurin JRE image that's pinned by its digest.
 	- Java needs more from the image than `monerod` does, so mounting the host's Java into a slim image wasn't an option.
@@ -363,14 +363,14 @@ cicd/                        build, test, and release scripts
 
 - The config format is shcl, and the tool reads it with shcl's Go module.
 
-- The firewall rules go in the tool's own nftables table, rather than in ufw, firewalld, or `nftables.conf`. This matches `tt-monerodctl`.
+- The firewall rules go in the tool's own nftables table, rather than in ufw, firewalld, or `nftables.conf`. This matches `tt-monerod-safeserver`.
 
 - Bedrock players log in through Floodgate, with only their Xbox account, rather than Geyser's `online` mode.
 	- In `online` mode, a Bedrock player also needs a Java account, and most console players don't have one.
 	- Java players log in with their own account the same as before.
 	- Floodgate doesn't affect adding a server by its domain name. Java on PCs, and Bedrock on phones, tablets, and PCs, can all do that. Consoles can't, either way.
 
-- Code that `tt-monerodctl` needs too moves into a shared Go module, `tt-secure-serverctl`, once `tt-monerodctl` starts on code.
+- Code that `tt-monerod-safeserver` needs too moves into a shared Go module, `tt-safeserver`, once `tt-monerod-safeserver` starts on code.
 	- Each tool supplies a small Go interface with its own settings, launch details, firewall rules, checks, and commands. The shared module runs the common commands.
 	- Each tool still has its own repo, binary, and releases. Other services like these can use the module later.
 	- A single binary for every service was looked at, and so was a generic engine driven by a service file. The first ties every service's releases together. The second ends up as Docker Compose again, and Tor, plugin pinning, and the console wouldn't fit it.
