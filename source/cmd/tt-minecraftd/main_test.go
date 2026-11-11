@@ -134,7 +134,9 @@ func TestMissingConfig(t *testing.T) {
 	if code != exitError || !strings.Contains(msg, "nope.shcl") {
 		t.Errorf("--config missing: exit %d, stderr %q; want %d", code, msg, exitError)
 	}
-	if code, _, msg := runArgs("start", "--dry-run"); code != exitError || !strings.Contains(msg, "isn't built yet") {
-		t.Errorf("start: exit %d, stderr %q", code, msg)
+	for _, args := range [][]string{{"status"}, {"start", "--native", "--dry-run"}} {
+		if code, _, msg := runArgs(args...); code != exitError || !strings.Contains(msg, "isn't built yet") {
+			t.Errorf("%q: exit %d, stderr %q", args, code, msg)
+		}
 	}
 }

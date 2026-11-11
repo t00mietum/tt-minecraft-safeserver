@@ -39,9 +39,6 @@ func TestExecDryRun(t *testing.T) {
 	if _, err := e.Run(ctx, Cmd{Args: []string{"chmod", "-R", "o-rwx", "/srv/x"}, Sudo: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.SudoUp(ctx); err != nil {
-		t.Fatal(err)
-	}
 	want := "would run: sudo false\nwould run: chmod -R o-rwx /srv/x\n"
 	if out.String() != want {
 		t.Errorf("printed %q, want %q", out.String(), want)

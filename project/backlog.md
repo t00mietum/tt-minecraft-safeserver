@@ -22,6 +22,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- ZFS snapshots on start and stop
+	- ID: 2026111112264283
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-122642
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Related IDs: 2026111111065711
+	- Requirements:
+		- With `zfsDataset` set, `start` takes a snapshot before the hand-off, and `stop` takes one after the worlds are saved, per `design.md`.
+		- Prune old ones on the schedule there, touching only the tool's own.
+
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
@@ -141,7 +154,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: Docker mode start and stop
 	- ID: 2026111112163174
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. The console takes `stop` in a plain terminal; Paper's own console is still to see.
+	- Needs hand testing: start and stop a throwaway Paper server in Docker mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, and the jars can't be written.
 	- Priority: High
 	- Opened: 20261111-121631
 	- Opened by: t00mietum
@@ -152,6 +167,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refuse to start when a Paper server is already running, under any account.
 		- `stop` sends the `stop` console command first, and hands the trees back even after a crash.
 		- Test with the fake runner and `--dry-run` only.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: the same `docker run` flags on a small image give a writable `/tmp`, read-only jars and image, and umask 0007. The console's `stop` reached a real container's terminal.
+	- Decisions:
+		- `stop` writes to the container's input through the Docker API, as `cmd` will, since `docker attach` refuses input that isn't a terminal. A line ends with a carriage return, which a cooked terminal takes, and a raw one such as Paper's should too.
+		- The countdown says the time left at the start, then at 60, 30, 10, and 5 to 1 seconds.
+		- "Already running" comes from `ps`: any `java -jar paper*.jar`, under any account. That covers the old scripts and this tool's own container.
+		- The server runs under `sh -c 'umask 0007 && exec "$@"'` in the image, since Docker has no umask option. The pid limit is 2048, for Paper's thread pools.
+		- `--debug` runs attached and hands the trees back when the server exits. `--foreground` runs detached, so `console` still works, then waits with `docker wait`.
+		- A start that times out leaves the server running, with an error that says so.
+		- The safe settings, plugin, and firewall steps of `start` come with their own items. ZFS snapshots had none, so 2026111112264283 is filed.
+		- Swept: every container command uses `launch.Container`; `start` and `stop` both hand back through `tree.ToOperator`.
+	- Branch: r1111
+	- Test case: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz
 
 - Core commands: native mode start and stop
 	- ID: 2026111112163284

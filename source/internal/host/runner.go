@@ -74,16 +74,6 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 	return out, nil
 }
 
-// SudoUp asks for the sudo password once, up front, so no later step stops
-// to ask. See design.md, Privilege model.
-func (e *Exec) SudoUp(ctx context.Context) error {
-	if e.Root {
-		return nil
-	}
-	_, err := e.Run(ctx, Cmd{Args: []string{"sudo", "-v"}, Tty: true})
-	return err
-}
-
 var plainArg = regexp.MustCompile(`^[A-Za-z0-9_./:=@%+,-]+$`)
 
 // Quote joins argv the way it would be typed into a shell.

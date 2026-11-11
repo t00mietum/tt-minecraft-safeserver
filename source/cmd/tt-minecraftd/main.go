@@ -5,16 +5,22 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/signal"
 	"runtime/debug"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 )
 
 // version is set at release with -ldflags "-X main.version=...".
@@ -82,10 +88,40 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if done {
 		return code
 	}
-	// Each command's own item builds it. Until then it says so, rather than
-	// doing half of a start or stop.
-	fmt.Fprintf(stderr, "tt-minecraftd: %s isn't built yet\n", inv.cmd.name)
-	return exitError
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	if err := dispatch(ctx, inv, stdout); err != nil {
+		fmt.Fprintf(stderr, "tt-minecraftd: %v\n", err)
+		return exitError
+	}
+	return exitOK
+}
+
+func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
+	name := inv.cmd.name
+	if name != "start" && name != "stop" {
+		// Each command's own item builds it. Until then it says so.
+		return fmt.Errorf("%s isn't built yet", name)
+	}
+	if inv.cfg.RunMode != "docker" {
+		return fmt.Errorf("%s: %s mode isn't built yet", name, inv.cfg.RunMode)
+	}
+	runner := host.NewExec(inv.opts.dryRun)
+	runner.Out = stdout
+	d := &launch.Docker{
+		Run:     runner,
+		Console: launch.DockerConsole{Socket: launch.DockerSocket(), Container: launch.Container, DryRun: inv.opts.dryRun, Out: stdout},
+		Cfg:     &inv.cfg,
+		Out:     stdout,
+		Root:    runner.Root,
+		DryRun:  inv.opts.dryRun,
+		Sleep:   time.Sleep,
+		IDs:     launch.HostIDs,
+	}
+	if name == "stop" {
+		return d.Stop(ctx, inv.opts.warn)
+	}
+	return d.Start(ctx, launch.StartMode{Debug: inv.opts.debug, Foreground: inv.opts.foreground})
 }
 
 // commonFlags is called twice, before the command and after it, so a value
