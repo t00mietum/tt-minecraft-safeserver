@@ -80,7 +80,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 - The server used to run from a few Bash scripts. They worked, but had some problems:
 	- The run account was also in `sudo` and `docker`, so a plugin that went bad had root a step away.
 	- The whitelist was off, and the game port was open to the internet.
-	- Plugin jars could change between runs, and nothing would notice.
+	- Plugin jars could change between runs, and the scripts wouldn't notice.
 	- Commands were built as strings and run through `eval`.
 	- Stopping meant matching `ps` output with a regex, then SIGTERM and SIGKILL after a fixed 8 seconds.
 
@@ -96,15 +96,15 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 	- Keep root work to the few steps that need it, and do it in the foreground.
 	- Hand the server tree to the service account before a start, and back to the operator after a stop.
 	- Use the same commands as `tt-monerodctl`, so both tools work the same way.
-	- Supported platforms: Debian first, then NixOS.
+	- Run on Debian first, then NixOS.
 	- Start at boot.
 
 - Non-goals:
-	- Modded servers, such as Forge, NeoForge, and Fabric. Paper only.
-	- Bedrock Dedicated Server. Bedrock players come in through Geyser.
-	- More than one server per config. `--config` can point at a second one.
-	- Proxy networks, such as Velocity or BungeeCord.
-	- Hardening the rest of the host, such as SSH.
+	- Only Paper is supported. Forge, NeoForge, Fabric, and other modded servers aren't.
+	- Bedrock Dedicated Server isn't supported. Bedrock players come in through Geyser instead.
+	- A config runs one server. `--config` can point at a second one.
+	- Proxy networks, such as Velocity or BungeeCord, aren't supported.
+	- The tool doesn't harden the rest of the host, such as SSH, adn leaves that to the host's own setup.
 
 ## Assumptions
 
@@ -300,7 +300,7 @@ cicd/                        build, test, and release scripts
 
 - `repair` is a list of checks. Each one has a test function and an optional fix function. `setup` reuses the fix functions, and `start` runs the test functions for the safe settings and the plugins.
 
-- Code for `tt-monerodctl` gets copied where it fits, such as the runner, the ownership hand-off, ZFS pruning, and the boot unit. The 2 tools don't share a module yet.
+- The parts that `tt-monerodctl` needs too go in their own packages, so that way they're behind one interface. They're the runner, config loading, the account, the ownership hand-off, ZFS, the launchers, the firewall unit, the boot unit, the `repair` checks, self-update, and the CLI. See [Direction decisions](#direction-decisions).
 
 ### Data flow
 
@@ -368,7 +368,14 @@ cicd/                        build, test, and release scripts
 - Bedrock players log in through Floodgate, with only their Xbox account, rather than Geyser's `online` mode.
 	- In `online` mode, a Bedrock player also needs a Java account, and most console players don't have one.
 	- Java players log in with their own account the same as before.
-	- Floodgate has nothing to do with adding a server by its domain name. Java on PCs, and Bedrock on phones, tablets, and PCs, can all do that. Consoles can't, either way.
+	- Floodgate doesn't affect adding a server by its domain name. Java on PCs, and Bedrock on phones, tablets, and PCs, can all do that. Consoles can't, either way.
+
+- Code that `tt-monerodctl` needs too moves into a shared Go module, `tt-secure-serverctl`, once `tt-monerodctl` starts on code.
+	- Each tool supplies a small Go interface with its own settings, launch details, firewall rules, checks, and commands. The shared module runs the common commands.
+	- Each tool still has its own repo, binary, and releases. Other services like these can use the module later.
+	- A single binary for every service was looked at, and so was a generic engine driven by a service file. The first ties every service's releases together. The second ends up as Docker Compose again, and Tor, plugin pinning, and the console wouldn't fit it.
+	- The module waits for the second tool, because 2 tools that use an interface test its design better than 2 documents do.
+	- The module is GPL v2 or later, the same as both tools.
 
 - Tailscale and other VPNs were looked at for remote players, and left out as the main way in.
 	- Consoles can't run them, and phones allow only one VPN at a time.
@@ -413,7 +420,7 @@ cicd/                        build, test, and release scripts
 
 - One file, `/etc/mcssctl/config.shcl`, owned by root and readable by all. `--config` points elsewhere.
 
-- The approved plugin list is `/etc/mcssctl/plugins.shcl`, owned by root. It lives outside the server tree, so the server can't change it.
+- The approved plugin list is `/etc/mcssctl/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
 
 - An unknown key or a bad value gets a warning each run, and the default is used.
 
@@ -493,7 +500,7 @@ cicd/                        build, test, and release scripts
 	- Use as much memory and as many processes as the kernel allows.
 
 - In Docker mode the container takes most of that away:
-	- It sees the image's files, read-only, and the server trees. The rest of the host's files aren't mounted.
+	- It sees the server trees, and the image's files as read-only. The rest of the host's files aren't mounted.
 	- `paper.jar` and every plugin jar are mounted read-only on top of the tree, so the server can't change them while it runs.
 	- It has its own process list, so it can't see or signal host processes.
 	- `--cap-drop ALL` and `no-new-privileges` mean a setuid program in the image can't give it root.
@@ -517,9 +524,9 @@ cicd/                        build, test, and release scripts
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
 	- `-i -t`, so the console works with `docker attach`.
-	- No `--rm`, so `docker logs` still works after a crash. `start` removes the old container, and only one with this tool's label.
+	- There's no `--rm`, so `docker logs` still works after a crash. `start` removes the old container, but only one that has this tool's label.
 
-- Native mode runs Java in a tmux session, under a transient systemd unit started with `systemd-run`. The unit runs as the service account, with:
+- Native mode runs Java in a tmux session, under a transient systemd unit that `systemd-run` starts. The unit runs as the service account, with:
 	- `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, and `NoNewPrivileges=yes`.
 	- Write access only to the trees in `ownerTrees`.
 	- An empty capability set, `MemoryMax`, and `TasksMax`.
@@ -562,7 +569,7 @@ cicd/                        build, test, and release scripts
 
 - `start` also warns when there are more than 2 ops, or when an op isn't on the whitelist.
 
-- `-Dlog4j2.formatMsgNoLookups=true` is always in the Java arguments. Current Paper doesn't need it, but it costs nothing.
+- `-Dlog4j2.formatMsgNoLookups=true` is always in the Java arguments. Current Paper doesn't need it, but it doesn't cost anything.
 
 ### Plugin pinning
 
@@ -572,7 +579,7 @@ cicd/                        build, test, and release scripts
 
 - `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
 
-- Plugins should come from known sources, such as Hangar, Modrinth, GeyserMC, or the author's own site. The tool can't judge a jar, but it does make sure nothing changes without a person looking.
+- Plugins should come from known sources, such as Hangar, Modrinth, GeyserMC, or the author's own site. The tool can't judge a jar, but it does make sure a jar doesn't change without a person looking at it.
 
 ### Bedrock players
 
@@ -582,7 +589,7 @@ cicd/                        build, test, and release scripts
 
 - Bedrock players get a prefix on their names, a `.` by default. They're added to the whitelist with Floodgate's `fwhitelist add <gamertag>` command, or `whitelist add .<gamertag>`.
 
-- On the LAN, Bedrock clients find the server by itself, under Friends, LAN Games. That includes consoles. Geyser has to listen on all addresses for that, since a socket bound to one address doesn't get broadcasts.
+- On the LAN, Bedrock clients find the server by itself, under Friends, LAN Games. That includes consoles. Geyser has to listen on all addresses for that, since a socket that's bound to one address doesn't get broadcasts.
 
 - Over the internet, phones, tablets, and Bedrock on PCs can add the server by address and port. Consoles can't add a server by address. See [Needs more thought](#needs-more-thought).
 
@@ -607,20 +614,20 @@ cicd/                        build, test, and release scripts
 
 - `setup` and `repair` write the rules to `/etc/mcssctl/firewall.nft`, from the config. `mcssctl-firewall.service` loads that file at boot.
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
-	- The file deletes the old table and adds the new one in a single nft transaction, so there's no gap without rules.
+	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
 
 - Inbound, new connections to the game ports:
-	- From loopback, always allowed. A tunnel agent connects that way.
-	- From an address that's not in `allowFrom`, dropped.
-	- From one address, more than `joinRateLimit` a minute, dropped. That slows down bot join floods.
+	- Ones from loopback are always allowed. A tunnel agent connects that way.
+	- Ones from an address that's not in `allowFrom` get dropped.
+	- Past `joinRateLimit` a minute from one address, the rest get dropped. That slows down bot join floods.
 
 - Inbound, new connections from anywhere but loopback get dropped on the RCON, query, and management ports, even though the server should never open them.
 
 - Outbound, new connections from the service account:
-	- To loopback, dropped. That way the server can't connect to local services such as databases.
-	- To the private ranges, dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
-	- With `egress` set to `web`, to the internet on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
-	- With `egress` set to `open`, to the internet on any port.
+	- Ones to loopback get dropped. That way the server can't connect to local services such as databases.
+	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
+	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
+	- With `egress` set to `open`, ones to the internet are allowed on any port.
 	- Everything that gets dropped gets counted too, and logged at a limited rate. `status` shows the counts.
 	- Replies to connections that came in still go out.
 	- It works the same in both modes, since a host-network container's sockets belong to the service account's uid.
@@ -679,7 +686,7 @@ cicd/                        build, test, and release scripts
 | Exposed RCON                             | RCON forced off, and its port dropped. `cmd` used instead
 | Crash exploits                           | `update --paper` updates Paper to the newest build
 | Join floods                              | Per-address rate limit in the firewall, and Paper's own throttle
-| DDoS, and the home address being public  | A tunnel hides the home address. Nothing on the host stops a big flood
+| DDoS, and the home address being public  | A tunnel hides the home address. The host can't stop a big flood
 | Proxy bypass                             | Proxy settings forced off, since proxies aren't supported
 
 - The service account doesn't have sudo, a login shell, a home, or any other groups.
@@ -704,7 +711,7 @@ cicd/                        build, test, and release scripts
 
 ## Needs more thought
 
-- Consoles over the internet. Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
+- Consoles can't join over the internet yet, since Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
 
 - Behind a tunnel, every player shows up as coming from localhost, unless the tunnel supports the PROXY protocol. IP bans and the per-address rate limit then don't work.
 
@@ -715,5 +722,3 @@ cicd/                        build, test, and release scripts
 - `memCap` of a quarter above the heap plus 1G is a guess. Geyser and big view distances use more memory outside the heap.
 
 - Tool releases could be signed, beyond a SHA-256 sum. Paper builds aren't signed either, only hashed.
-
-- Whether to share code with `tt-monerodctl` through a common module and also stop copying it.

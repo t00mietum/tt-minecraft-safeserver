@@ -31,9 +31,9 @@ From outside the home, players connect with an internet domain name that the per
 
 ## Before you start
 
-- The server only lets in players who are on its whitelist. Send the person who runs it your name first:
-	- Java Edition: your Minecraft username.
-	- Bedrock: your Xbox gamertag.
+- The server only lets in players who are on its whitelist, so send the person who runs it your name first.
+	- Java Edition players send their Minecraft username.
+	- Bedrock players send their Xbox gamertag.
 
 - You don't need a VPN or any other app. A VPN on your phone or PC can get in the way at home, so turn it off if you can't connect.
 
@@ -80,10 +80,10 @@ Both editions play on the same server, in the same world.
 
 2. Open the Servers tab, scroll to the bottom, and pick Add Server.
 
-3. Fill in:
-	- Server Name: a name you'll recognize.
-	- Server Address: `mc.example.com`.
-	- Port: `19132`, unless you were given another one.
+3. Fill in the form.
+	- Type a name you'll recognize for Server Name.
+	- Type `mc.example.com` for Server Address.
+	- Leave Port at `19132`, unless you were given another one.
 
 4. Pick Save, then pick the server to join.
 
@@ -97,7 +97,7 @@ Both editions play on the same server, in the same world.
 
 ## Bedrock on a console
 
-- At home, consoles join the same way as other Bedrock devices: open the Friends tab, and pick the server under LAN Games.
+- At home, consoles join the same way as other Bedrock devices. Open the Friends tab, and pick the server under LAN Games.
 
 - At home or away, a console that uses BedrockConnect can join from its server list. Type the server's domain name and port `19132` there.
 

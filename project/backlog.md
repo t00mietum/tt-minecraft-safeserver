@@ -13,7 +13,6 @@
 - [Introduction](#introduction)
 - [Issues](#issues)
 - [Template](#template)
-	- [New format](#new-format)
 
 <!-- /TOC -->
 
@@ -28,7 +27,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Bug
 	- Status: Waiting for answers
 	- Severity: Critical
-	- Opened: 2026-11-11
+	- Opened: 20261111-110656
 	- Opened by: t00mietum
 	- Incorrect behavior [Bug]:
 		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
@@ -47,7 +46,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110656
 	- Opened by: t00mietum
 	- Requirements:
 		- Read `config.shcl` and `plugins.shcl` from Go.
@@ -59,7 +58,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110656
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065684
 	- Requirements:
@@ -73,14 +72,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110657
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065697
 	- Requirements:
-		- `start`, `stop`, `status`, and `watch`, per `design.md`, with the same options as `tt-monerodctl`.
+		- Build `start`, `stop`, `status`, and `watch`, per `design.md`, with the same options as `tt-monerodctl`.
 		- Docker mode is the default, and a sandboxed systemd unit is the fallback.
-		- `--dry-run` and `--debug`.
-		- `--help`, `--about`, and `--version`.
+		- Add `--dry-run` and `--debug`.
+		- Add `--help`, `--about`, and `--version`.
 		- Hand the trees to the service account on start, and back on stop.
 		- `stop` sends the `stop` console command first, with an optional countdown for the players.
 		- Refuse to start when an old copy of the server is running under any account.
@@ -90,12 +89,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110657
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
 		- `start` checks the settings listed in `design.md` and refuses when one is wrong. `repair` fixes them.
-		- Online mode and the whitelist on. RCON, query, and the management server off. Proxy settings off.
+		- Force online mode and the whitelist on. Force RCON, query, the management server, and the proxy settings off.
 		- Warn about an empty whitelist, and about more than 2 ops.
 
 - Plugin pinning
@@ -103,7 +102,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110657
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
@@ -117,20 +116,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110657
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
 		- `console` attaches to the server console, with detach keys that can't stop the server by accident.
 		- `cmd` sends one console command and prints what the server says back.
-		- Works in Docker and native modes. No RCON.
+		- Make both work in Docker and native modes, without RCON.
 
 - repair
 	- ID: 2026111111065763
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110657
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065724, 2026111111065737
 	- Requirements:
@@ -142,7 +141,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110657
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065763
 	- Requirements:
@@ -157,7 +156,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110657
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
@@ -172,7 +171,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-11-11
+	- Opened: 20261111-110658
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
@@ -186,7 +185,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: Avg
-	- Opened: 2026-11-11
+	- Opened: 20261111-110658
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065763
 	- Requirements:
@@ -199,19 +198,34 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Queued
 	- Priority: Avg
-	- Opened: 2026-11-11
+	- Opened: 20261111-110658
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065711
 	- Requirements:
 		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
 		- Fix `how-to-connect.md` if they don't.
 
+- Move shared code to tt-secure-serverctl
+	- ID: 2026111111303242
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-113032
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711
+	- Requirements:
+		- Move the parts that `tt-monerodctl` needs too into a new Go module and repo, `tt-secure-serverctl`, per `design.md`.
+		- Do it when `tt-monerodctl` starts on code, so 2 tools test the interface.
+	- Decisions:
+		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
+		- GPL v2 or later.
+
 - NixOS module
 	- ID: 2026111111065855
 	- Type: Feature
 	- Status: Queued
 	- Priority: Avg
-	- Opened: 2026-11-11
+	- Opened: 20261111-110658
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065776
 	- Requirements:
@@ -223,7 +237,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: Avg
-	- Opened: 2026-11-11
+	- Opened: 20261111-110658
 	- Opened by: t00mietum
 	- Requirements:
 		- A CI/CD pipeline kicked off by a bash script (`cicd/cicd.bash`). It builds, tests, and can commit and push. Packaging and publishing are opt-in.
@@ -233,7 +247,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: Avg
-	- Opened: 2026-11-11
+	- Opened: 20261111-110707
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065868
 	- Requirements:
@@ -248,7 +262,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Queued
 	- Priority: Avg
-	- Opened: 2026-11-11
+	- Opened: 20261111-110707
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065868, 2026111111070761
 	- Requirements:
@@ -259,7 +273,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Queued
 	- Priority: Avg
-	- Opened: 2026-11-11
+	- Opened: 20261111-110707
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065776
 	- Requirements:
@@ -272,7 +286,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Queued
 	- Priority: Low
-	- Opened: 2026-11-11
+	- Opened: 20261111-110708
 	- Opened by: t00mietum
 	- Prereq IDs: 2026111111065868
 	- Requirements:
@@ -287,7 +301,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Deferred
 	- Priority: Low
-	- Opened: 2026-11-11
+	- Opened: 20261111-110658
 	- Opened by: t00mietum
 	- Requirements:
 		- Let any Xbox, PlayStation, or Switch player join from outside the home, without changing settings on the console.
@@ -296,8 +310,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
 
 ## Template
-
-### New format
 
 - Notes:
 
@@ -335,19 +347,19 @@ Template:
 	- Requirements  [Feature]:
 		- Hierarchical bulleted list.
 	- Steps to reproduce [Bug]:
-		- …
+		- ...
 	- Incorrect behavior [Bug]:
 	- Expected behavior [Bug]:
 	- Reproduced [Bug]: [No, or when, where and how]
 	- Possible cause [Bug]:
 	- Actual cause [Bug]:
-		- …
+		- ...
 	- Estimated effort: [High|Avg|Low]
 	- Actual effort: [High|Avg|Low]
 	- Progress log:
-		- …
+		- ...
 	- Decisions:
-		- …
+		- ...
 	- Actual fix [Bug]:
 	- Branch:
 	- Commit:
