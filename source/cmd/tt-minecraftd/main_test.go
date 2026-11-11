@@ -252,3 +252,25 @@ func TestRepairApprovePlugins(t *testing.T) {
 		t.Errorf("after: exit %d, stdout %q", code, out)
 	}
 }
+
+// cmd takes the rest of the line as the console command; console takes none.
+func TestConsoleCmdArgs(t *testing.T) {
+	defer testid.Line(t, "df5z8")
+	noDefaultConfig(t)
+	var out, errOut bytes.Buffer
+	inv, _, done := prepare([]string{"cmd", "--set", "heapMax=2G", "whitelist", "add", "Steve"}, &out, &errOut)
+	if done || inv.opts.line != "whitelist add Steve" || inv.cfg.HeapMax != 2<<30 {
+		t.Errorf("cmd: done %v, line %q, heapMax %d, stderr %q", done, inv.opts.line, inv.cfg.HeapMax, errOut.String())
+	}
+	for _, args := range [][]string{{"cmd"}, {"console", "now"}, {"console", "--dry-run"}} {
+		if code, _, errOut := runArgs(args...); code != exitUsage || errOut == "" {
+			t.Errorf("%q: exit %d, stderr %q", args, code, errOut)
+		}
+	}
+	if code, out, _ := runArgs("cmd", "--help"); code != exitOK || !strings.Contains(out, "tt-minecraftd cmd [options] <server command>") {
+		t.Errorf("cmd --help: exit %d, output %q", code, out)
+	}
+	if code, out, _ := runArgs("--help"); code != exitOK || !strings.Contains(out, "console") || !strings.Contains(out, "cmd ") {
+		t.Errorf("--help: exit %d, output %q", code, out)
+	}
+}

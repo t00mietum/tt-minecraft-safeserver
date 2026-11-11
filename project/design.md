@@ -199,13 +199,16 @@ Common:  --config PATH, --set KEY=VALUE
 
 ### console and cmd
 
-- `console` attaches to the server console. It prints the detach keys first, since Ctrl-C there would stop the server.
-	- Docker mode uses `docker attach` with `--sig-proxy=false` and its own detach keys.
-	- Native mode attaches to the service account's tmux session.
+- `console` attaches to the server console. Ctrl-C there would stop the server, so in both modes it detaches instead, and the server keeps running. It says so first.
+	- Docker mode uses `docker attach` with `--sig-proxy=false` and `ctrl-c` as the detach keys.
+	- Native mode attaches to the service account's tmux session, with Ctrl-C bound to `detach-client`. The binding lasts until the server stops.
+	- When the server stops while attached, such as after `stop` typed there, the trees go back to the operator, as with `stop`.
 
 - `cmd` sends one console command and prints the log lines that follow it, such as `tt-minecraftd cmd whitelist add Steve`.
 	- Docker mode writes to the container's input with the Docker API.
 	- Native mode uses `tmux send-keys`.
+	- The lines come from `logs/latest.log`, in both modes. It waits up to 3 seconds for the first one, then until half a second goes by with nothing new, and 10 seconds at most.
+	- `cmd stop` and `cmd restart` are refused, since `stop` also hands the trees back, and Paper's `restart` only stops without a restart script.
 
 - RCON is never used. See [Safe server settings](#safe-server-settings).
 

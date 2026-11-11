@@ -20,7 +20,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
@@ -318,7 +317,7 @@ func (p *Probe) ops() Line {
 	}
 	names := make([]string, 0, len(list))
 	for _, o := range list {
-		names = append(names, clean(o.Name))
+		names = append(names, server.Clean(o.Name))
 	}
 	return Line{"Ops", strings.Join(names, ", ")}
 }
@@ -393,7 +392,7 @@ func (p *Probe) boot(ctx context.Context) Line {
 // log is the end of latest.log. It's the same file in both modes, since the
 // server tree is mounted in the container.
 func (p *Probe) log() []Line {
-	file := filepath.Join(p.Cfg.ServerDir, "logs", "latest.log")
+	file := server.LogFile(p.Cfg.ServerDir)
 	tail, err := tailFile(file, logLines)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -403,33 +402,14 @@ func (p *Probe) log() []Line {
 	}
 	lines := []Line{{"Log", file}}
 	for _, l := range tail {
-		lines = append(lines, Line{"", clean(l)})
+		lines = append(lines, Line{"", server.Clean(l)})
 	}
 	return lines
 }
 
-// openRegular opens a file in the server tree for reading. The server owns
-// the tree, so it could swap a file for a pipe or a device, to hang status or
-// feed it without end.
-func openRegular(file string) (*os.File, error) {
-	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0) // #nosec G304 -- under the configured serverDir
-	if err != nil {
-		return nil, err
-	}
-	fi, err := f.Stat()
-	if err == nil && !fi.Mode().IsRegular() {
-		err = fmt.Errorf("%s isn't a regular file", file)
-	}
-	if err != nil {
-		_ = f.Close() // only read from, so nothing is lost
-		return nil, err
-	}
-	return f, nil
-}
-
 // tailFile reads only the end of a file, since a log can be large.
 func tailFile(file string, n int) ([]string, error) {
-	f, err := openRegular(file)
+	f, err := server.OpenRegular(file)
 	if err != nil {
 		return nil, err
 	}
@@ -453,17 +433,6 @@ func tailFile(file string, n int) ([]string, error) {
 		lines = lines[1:] // the first one is likely cut
 	}
 	return lines[max(0, len(lines)-n):], nil
-}
-
-// clean drops control characters, so a player's name or chat line can't send
-// escape codes to the operator's terminal.
-func clean(s string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, s)
 }
 
 // Write prints the report, with a blank line at the start, the end, and

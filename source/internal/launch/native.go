@@ -121,16 +121,24 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 // server up, and its trees with it.
 func (n *Native) attach(ctx context.Context) error {
 	n.say("Starting with the console attached. Type stop to stop the server, or press Ctrl-b d to leave it running.")
-	_, err := n.Run.Run(ctx, host.Cmd{Args: []string{"tmux", "-S", TmuxSocket, "attach-session", "-t", Container}, As: n.Cfg.RunUser, Tty: true})
-	if n.DryRun {
+	return n.session(ctx, n, host.Cmd{Args: []string{"tmux", "-S", TmuxSocket, "attach-session", "-t", Container}, As: n.Cfg.RunUser, Tty: true}, nil)
+}
+
+// OpenConsole is console. Ctrl-C is bound to detach first, so it can't stop
+// the server by accident. The binding lasts as long as the tmux server.
+func (n *Native) OpenConsole(ctx context.Context) error {
+	if err := n.mustRun(ctx, n); err != nil {
 		return err
 	}
-	up, upErr := n.running(ctx)
-	if upErr == nil && up {
-		n.say("Detached. The server is still running; stop stops it.")
-		return err
-	}
-	return errors.Join(err, upErr, n.handBack(ctx))
+	n.say(consoleHello)
+	return n.session(ctx, n, host.Cmd{As: n.Cfg.RunUser, Tty: true, Args: []string{
+		"tmux", "-S", TmuxSocket, "bind-key", "-n", "C-c", "detach-client", ";", "attach-session", "-t", Container,
+	}}, nil)
+}
+
+// SendCmd is cmd: one console line, and what the server says back.
+func (n *Native) SendCmd(ctx context.Context, line string) error {
+	return n.command(ctx, n, line)
 }
 
 // lockJars gives paper.jar and the plugin jars to root while the server
@@ -218,7 +226,7 @@ func UnitUp(state string) bool {
 }
 
 func (n *Native) latestLog() string {
-	return filepath.Join(n.Cfg.ServerDir, "logs", "latest.log")
+	return server.LogFile(n.Cfg.ServerDir)
 }
 
 // log is this run's latest.log. Paper moves the last run's aside as it

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -243,4 +244,27 @@ func lockedJars(serverDir string) ([]string, error) {
 // countdown for the players, in seconds.
 func (d *Docker) Stop(ctx context.Context, warn int) error {
 	return d.stop(ctx, d, warn)
+}
+
+// OpenConsole is console. Ctrl-C is the detach key, so it can't reach the
+// server's terminal and stop it by accident.
+func (d *Docker) OpenConsole(ctx context.Context) error {
+	if err := d.mustRun(ctx, d); err != nil {
+		return err
+	}
+	d.say(consoleHello)
+	return d.session(ctx, d, host.Cmd{Tty: true, Args: []string{
+		"docker", "attach", "--sig-proxy=false", "--detach-keys=ctrl-c", Container,
+	}}, attachDetached)
+}
+
+// attachDetached is docker attach's exit after the detach keys, which is 1.
+func attachDetached(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 1
+}
+
+// SendCmd is cmd: one console line, and what the server says back.
+func (d *Docker) SendCmd(ctx context.Context, line string) error {
+	return d.command(ctx, d, line)
 }

@@ -370,7 +370,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - console and cmd
 	- ID: 2026111111065750
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. Paper's own console wasn't tried.
+	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -380,6 +382,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `cmd` sends one console command and prints what the server says back.
 		- Make both work in Docker and native modes, without RCON.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against a stand-in container named like the server's, `console` detaches on Ctrl-C with the container still running, and `cmd` prints the line the stand-in logged. Without the detach keys, Ctrl-C ends the container. In tmux, Ctrl-C with the binding detaches and the session lives; without it the session ends.
+	- Decisions:
+		- Ctrl-C is the detach key in both modes, so it can't reach the server. Docker's `--detach-keys=ctrl-c`, and in tmux `bind-key -n C-c detach-client` at attach. design.md updated.
+		- `docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach.
+		- `cmd` reads `logs/latest.log` in both modes, from where it ended before the send, rather than `docker logs`, which carries the terminal's echo and escape codes. It waits up to 3 s for a first line, then until 0.5 s go by with nothing, 10 s at most. A new day's log is read from its start.
+		- `cmd stop` and `cmd restart` are refused, pointing at `stop`, which hands the trees back too.
+		- A server that stops while `console` is attached gets its trees handed back, as `start --debug` in native mode did. Both now share one step. It no longer hands back when the unit's state can't be read, since the server may still be up.
+		- `cmd` takes no `--dry-run`, since design.md lists none.
+		- `OpenRegular` and `Clean` moved from `status` to `server`, for `cmd` to share.
+		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
+	- Branch: r1111
+	- Test case: df5z6, df5z7, df5z8
 
 - repair
 	- ID: 2026111111065763

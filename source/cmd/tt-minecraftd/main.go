@@ -54,6 +54,8 @@ type options struct {
 	interval   int
 	check      bool
 	approve    bool
+	// line is cmd's console command.
+	line string
 }
 
 type command struct {
@@ -84,6 +86,8 @@ var commands = []command{
 	{"watch", "Redraw status every few seconds, until Ctrl-C", func(fs *flag.FlagSet, o *options) {
 		fs.IntVar(&o.interval, "interval", 2, "Seconds `N` between redraws")
 	}},
+	{"console", "Attach to the server console. Ctrl-C leaves it running", func(*flag.FlagSet, *options) {}},
+	{"cmd", "Send one console command, and print what the server says back", func(*flag.FlagSet, *options) {}},
 }
 
 // invocation is a parsed command line with its config loaded.
@@ -134,6 +138,8 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	var srv interface {
 		Start(ctx context.Context, mode launch.StartMode) error
 		Stop(ctx context.Context, warn int) error
+		OpenConsole(ctx context.Context) error
+		SendCmd(ctx context.Context, line string) error
 	}
 	if inv.cfg.RunMode == "native" {
 		kit.Console = launch.TmuxConsole{Run: runner, User: inv.cfg.RunUser}
@@ -142,8 +148,13 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		kit.Console = launch.DockerConsole{Socket: launch.DockerSocket(), Container: launch.Container, DryRun: inv.opts.dryRun, Out: stdout}
 		srv = &launch.Docker{Kit: kit, IDs: launch.HostIDs}
 	}
-	if name == "stop" {
+	switch name {
+	case "stop":
 		return srv.Stop(ctx, inv.opts.warn)
+	case "console":
+		return srv.OpenConsole(ctx)
+	case "cmd":
+		return srv.SendCmd(ctx, inv.opts.line)
 	}
 	return srv.Start(ctx, launch.StartMode{Debug: inv.opts.debug, Foreground: inv.opts.foreground})
 }
@@ -429,6 +440,10 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		return inv, exitOK, true
 	}
 	switch {
+	case name == "cmd" && cmdFlags.NArg() == 0:
+		return usageErr("cmd: give the console command, such as cmd whitelist add Steve")
+	case name == "cmd":
+		o.line = strings.Join(cmdFlags.Args(), " ")
 	case cmdFlags.NArg() > 0:
 		return usageErr("%s: unexpected %q", name, cmdFlags.Arg(0))
 	case o.debug && o.foreground:
@@ -519,7 +534,11 @@ func writeHelp(w io.Writer) {
 
 func writeCommandHelp(w io.Writer, c *command, fs *flag.FlagSet) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nUsage:\n  tt-minecraftd %s [options]\n\n%s.\n\nOptions:\n", c.name, c.summary)
+	operands := ""
+	if c.name == "cmd" {
+		operands = " <server command>"
+	}
+	fmt.Fprintf(&b, "\nUsage:\n  tt-minecraftd %s [options]%s\n\n%s.\n\nOptions:\n", c.name, operands, c.summary)
 	writeFlags(&b, fs)
 	b.WriteString("\n")
 	fmt.Fprint(w, b.String())
