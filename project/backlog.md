@@ -407,6 +407,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `setup` and `repair` manage it. They never change ufw or firewalld rules.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
+	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
 
 - update
 	- ID: 2026111111065803
@@ -448,6 +449,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
 		- Fix `how-to-connect.md` if they don't.
 	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
+	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
