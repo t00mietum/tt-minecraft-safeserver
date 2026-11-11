@@ -22,31 +22,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- Native start misses the new latest.log when its inode is reused
-	- ID: 2026111113354106
+- Live server has the whitelist off while it's open to the internet
+	- ID: 2026111111065671
 	- Type: Bug
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261111-133541
-	- Opened by:
-	- Related IDs: 2026111112163284, 2026111111065750
-	- Incorrect behavior [Bug]: TestNativeStart (df5y1) fails with TMPDIR on an ext4 folder: start waits out startTimeout though the new latest.log has the Done line.
-	- Expected behavior [Bug]: start sees the new log on any file system.
-	- Reproduced [Bug]: 2026-11-11, on HEAD 2076b3a, with TMPDIR on ext4. Passes on ZFS.
-	- Possible cause [Bug]: Native.log tells the old log from the new one with os.SameFile. ext4 hands a removed file's inode to the next new file, so the new log looks like the old one. Log4j's rollover deletes latest.log, so a real server could hit it too.
-	- Actual cause [Bug]: As above. The old log's inode was free once it was removed, since nothing held it open. `cmd`'s log follower had the same flaw: a new day's log on a reused inode was read from the old offset.
-	- Estimated effort: Low
-	- Actual effort: Low
+	- Status: Waiting for answers
+	- Severity: Critical
+	- Opened: 20261111-110656
+	- Opened by: t00mietum
+	- Incorrect behavior [Bug]:
+		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
+	- Expected behavior [Bug]:
+		- Only whitelisted players can join, Java and Bedrock both.
+	- Possible cause [Bug]:
+		- The old scripts never set it, and nothing checks it.
+	- Note:
+		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
+		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
 	- Progress log:
-		- Verified: on ext4, df5y1 and df5zp fail on the old code and pass with the fix. The gate passes with the default TMPDIR and with TMPDIR on ext4.
-	- Decisions:
-		- Hold the old log open until the server has loaded, so its inode can't go to the new file. Then `os.SameFile` is sound on any file system. A size or time check would still guess.
-		- `cmd`'s follower holds the file it read last, until the command ends.
-		- Swept: `os.SameFile` is used only in `Native.log` and `logFollow.next`, and both are fixed.
-	- Actual fix [Bug]: `Native` keeps `latest.log` open from before the launch until loaded; `logFollow` keeps its last file open.
-	- Branch: r1111
-	- Test case: df5y1, df5zp
-	- Closed: 20261111-133909
+		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
 
 - Current Geyser needs TCP on the Bedrock port too
 	- ID: 2026111113015461
@@ -80,90 +73,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1111
 	- Test case: df5yy, df5yz, df5y7
 
-- ZFS snapshots on start and stop
-	- ID: 2026111112264283
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-122642
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
-	- Related IDs: 2026111111065711
-	- Requirements:
-		- With `zfsDataset` set, `start` takes a snapshot before the hand-off, and `stop` takes one after the worlds are saved, per `design.md`.
-		- Prune old ones on the schedule there, touching only the tool's own.
-
-- Live server has the whitelist off while it's open to the internet
-	- ID: 2026111111065671
-	- Type: Bug
-	- Status: Waiting for answers
-	- Severity: Critical
-	- Opened: 20261111-110656
-	- Opened by: t00mietum
-	- Incorrect behavior [Bug]:
-		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
-	- Expected behavior [Bug]:
-		- Only whitelisted players can join, Java and Bedrock both.
-	- Possible cause [Bug]:
-		- The old scripts never set it, and nothing checks it.
-	- Note:
-		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
-		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
-	- Progress log:
-		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
-
-- Config reader for shcl in Go
-	- ID: 2026111111065684
-	- Type: Task
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-110656
-	- Opened by: t00mietum
-	- Requirements:
-		- Read `config.shcl` and `plugins.shcl` from Go.
-	- Actual effort: Avg
-	- Decisions:
-		- Config is shcl. The tool reads it with the latest published release of shcl's Go module, beta or not.
-		- shcl `v3.0.0-beta1`, the only v3 release. `go.mod` says Go 1.24, so Debian 13's Go builds it.
-		- The reader lays the file over a `Config` the caller fills first, so the defaults item only has to fill it. Empty fields are left for that item to derive, such as `runGroup` from `runUser`.
-		- A bad value, an unknown key, or a key set twice with different values gets a warning with its line, and the value before it stands. A list with one bad item is dropped whole. Only a file that can't be read is an error.
-		- Values are checked here: paths for `chown -R` must be full and not `/`, names can't start with `-`, ports and `nice` stay in range, and `allowFrom` takes `lan`, `any`, addresses, or ranges.
-		- Sizes take Java's `4G` and shcl's `4 GiB`, since shcl alone refuses `4G`.
-		- `startAtBoot` is read here too, so every key in design.md's table is read. A test checks the two match.
-		- In `plugins.shcl`, a jar is named by its path under `serverDir`. A bad entry is left out, so its jar isn't approved. shcl merges entries with the same path, so a jar listed with 2 hashes is left out too.
-		- shcl's hints are dropped from the warnings. They repeat ours, and "did you mean a list" misleads for a key that takes one value.
-		- Swept: every key in the table has a setter and a test line; both files go through the one `LoadFile`.
-	- Branch: r1111
-	- Test case: df5wt, df5wv, df5ww, df5wx, df5wy, df5wz, df5x0, df5x1, df5x2, df5x3, df5x4, df5x5
-	- Closed: 20261111-120826
-
-- Config defaults and overrides
-	- ID: 2026111111065697
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-110656
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065684
-	- Requirements:
-		- Default configuration hard-coded.
-		- Overridden by the config file.
-		- Resistant to errors, so one bad line doesn't sink the whole thing.
-		- Overridden by program options at run-time.
-	- Actual effort: Avg
-	- Decisions:
-		- Settings are built in order: the defaults, the file, the command-line options, then the keys that come from others, such as `runGroup` from `runUser`. Deriving last means an option that changes `runUser` moves `runGroup` too.
-		- Options are checked by the same code as the file. A bad one is an error, not a warning, since it was typed just now.
-		- design.md now has a common `--set KEY=VALUE`, with `--native` as a short form for `runMode`. The flags themselves are parsed in the Core commands item, which builds the CLI.
-		- `heapMin` defaults to 1G, or `heapMax` when that's less. A `heapMin` over `heapMax`, or a `memCap` not over it, gets a warning and a safe value.
-		- `ownerAfterStop` comes from `SUDO_USER`, then `USER`. It's left empty when neither names an account, as from the boot unit, and Core commands decides what `stop` does then.
-		- The default image is `eclipse-temurin:25-jre`, pinned to its multi-arch digest. `jvmArgs` defaults to Paper's recommended flags.
-		- An option value follows file syntax, so `##` starts a comment there too.
-		- Swept: every default in design.md's table that's written as a value is checked against the code by a test. The derived ones have their own cases.
-	- Branch: r1111
-	- Test case: df5x6, df5x7, df5x8, df5x9, df5xa, df5xb
-	- Closed: 20261111-121403
-
 - Core commands
 	- ID: 2026111111065711
 	- Type: Feature
@@ -184,32 +93,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) waits on a hand test, and 2026111112163393 (status and watch) waits on a hand test.
 	- Test case: its children's: 2026111112162268: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn; 2026111112163174: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz; 2026111112163284: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6; 2026111112163393: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
 	- 20261111: children 2026111112163174 2026111112163284 2026111112163393 wait on UAT, and the rest are closed
-
-- Core commands: CLI, command runner, and tree hand-off
-	- ID: 2026111112162268
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-121622
-	- Opened by: t00mietum
-	- Parent ID: 2026111111065711
-	- Requirements:
-		- Parse the commands and the common options, `--set` and `--native` included, and load the config.
-		- Add `--help`, `--about`, `--version`, `--dry-run`, and `--debug`.
-		- One command runner, with sudo and dry run, and a fake for tests.
-		- Hand the trees to the service account and back.
-	- Actual effort: Avg
-	- Decisions:
-		- Common options work before or after the command. `--native` and `--set` reach the config in the order given, so the last one wins.
-		- A missing default config means the defaults, with a warning, so `status` works before `setup`. A missing `--config` file is an error, exit 1. A bad option is exit 2.
-		- `--dry-run` still runs commands that only look, such as `docker ps`, so the plan it prints matches a real run. design.md updated.
-		- With `ownerAfterStop` empty, as from the boot unit, `stop` leaves the trees with `runUser` and warns. The operator's next `stop` hands them back, per design.md's `stop` step 1.
-		- A tree given as a link is followed before `chown -R`, and the depth check runs on both the link and its target.
-		- `--help` lists only the built commands. `start`, `stop`, `status`, and `watch` parse and load the config, then say they aren't built yet, until the next 3 children.
-		- Swept: both flag passes share `commonFlags`; every chown goes through `tree.handOver`.
-	- Branch: r1111
-	- Test case: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn
-	- Closed: 20261111-122043
 
 - Core commands: Docker mode start and stop
 	- ID: 2026111112163174
@@ -304,6 +187,322 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1111
 	- Test case: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
 
+- console and cmd
+	- ID: 2026111111065750
+	- Type: Feature
+	- Status: Waiting on signoff
+		- Waits on the hand test below. Paper's own console wasn't tried.
+	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
+	- Priority: High
+	- Opened: 20261111-110657
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- `console` attaches to the server console, with detach keys that can't stop the server by accident.
+		- `cmd` sends one console command and prints what the server says back.
+		- Make both work in Docker and native modes, without RCON.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against a stand-in container named like the server's, `console` detaches on Ctrl-C with the container still running, and `cmd` prints the line the stand-in logged. Without the detach keys, Ctrl-C ends the container. In tmux, Ctrl-C with the binding detaches and the session lives; without it the session ends.
+	- Decisions:
+		- Ctrl-C is the detach key in both modes, so it can't reach the server. Docker's `--detach-keys=ctrl-c`, and in tmux `bind-key -n C-c detach-client` at attach. design.md updated.
+		- `docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach.
+		- `cmd` reads `logs/latest.log` in both modes, from where it ended before the send, rather than `docker logs`, which carries the terminal's echo and escape codes. It waits up to 3 s for a first line, then until 0.5 s go by with nothing, 10 s at most. A new day's log is read from its start.
+		- `cmd stop` and `cmd restart` are refused, pointing at `stop`, which hands the trees back too.
+		- A server that stops while `console` is attached gets its trees handed back, as `start --debug` in native mode did. Both now share one step. It no longer hands back when the unit's state can't be read, since the server may still be up.
+		- `cmd` takes no `--dry-run`, since design.md lists none.
+		- `OpenRegular` and `Clean` moved from `status` to `server`, for `cmd` to share.
+		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
+	- Branch: r1111
+	- Test case: df5z6, df5z7, df5z8
+
+- Move shared code to tt-safeserver
+	- ID: 2026111111303242
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 20261111-113032
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711
+	- Requirements:
+		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
+		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
+		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
+		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
+	- Decisions:
+		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
+		- GPL v2 or later.
+	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
+
+- setup
+	- ID: 2026111111065776
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-110657
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065763
+	- Requirements:
+		- Install from scratch, per `design.md`.
+		- `--adopt` takes over an existing server folder as it is.
+		- Ask before accepting the Minecraft EULA.
+		- Install and set up Geyser and Floodgate when `bedrock` is on.
+		- On an existing install, run `repair` and then `update`.
+
+- Firewall
+	- ID: 2026111111065789
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-110657
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174 2026111113015461
+	- Requirements:
+		- Keep the tool's rules in its own nftables table, loaded by its own systemd unit, per `design.md`.
+		- Limit the game ports to `allowFrom`, with a rate limit per address.
+		- Drop the server's new outbound connections to loopback and the LAN. Allow DNS, and the web unless `egress` is `open`.
+		- `start` refuses to run when the table isn't loaded.
+		- `setup` and `repair` manage it. They never change ufw or firewalld rules.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
+	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
+
+- update
+	- ID: 2026111111065803
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- Update the tool from GitHub releases.
+		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
+		- Update plugins that have a known source, and approve the new jars.
+		- Refresh the pinned container image.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+
+- ZFS snapshots on start and stop
+	- ID: 2026111112264283
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-122642
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Related IDs: 2026111111065711
+	- Requirements:
+		- With `zfsDataset` set, `start` takes a snapshot before the hand-off, and `stop` takes one after the worlds are saved, per `design.md`.
+		- Prune old ones on the schedule there, touching only the tool's own.
+
+- Start at boot
+	- ID: 2026111111065816
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065763
+	- Requirements:
+		- Add `startAtBoot` to the config, and a systemd unit that runs `start --foreground`, per `design.md`.
+		- `start` and `stop` go through `systemctl` when the unit is enabled.
+		- `setup` and `repair` install or remove the unit to match the config.
+
+- Bedrock LAN discovery
+	- ID: 2026111111065829
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711 2026111113015461
+	- Requirements:
+		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
+		- Fix `how-to-connect.md` if they don't.
+	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
+	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+
+- NixOS module
+	- ID: 2026111111065855
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Add a flake with a NixOS module for the account, Docker, the config file, the firewall unit, and the boot unit.
+		- On NixOS, `setup`, `repair`, and `update` check the system parts and print module settings, rather than change them.
+
+- CI/CD pipeline
+	- ID: 2026111111065868
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Requirements:
+		- A CI/CD pipeline kicked off by a bash script (`cicd/cicd.bash`). It builds, tests, and can commit and push. Packaging and publishing are opt-in.
+
+- Release-install script
+	- ID: 2026111111070761
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868
+	- Requirements:
+		- Runnable via a single `curl` or `wget`, and documented under "how to install".
+		- Downloads, installs, and runs the latest release, with an option to abort.
+	- Target OS: Debian, NixOS
+	- Decisions:
+		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
+
+- First release
+	- ID: 2026111111070774
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868, 2026111111070761
+	- Requirements:
+		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+
+- Move the first server over
+	- ID: 2026111111070787
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Move the existing server to the new account and tool with `setup --adopt`.
+		- Approve the plugins that are there now.
+		- Retire the old start, stop, and manage scripts after it runs clean.
+
+- Dev-environment install script
+	- ID: 2026111111070800
+	- Type: Feature
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-110708
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868
+	- Requirements:
+		- Runnable via a single `curl` or `wget`, and documented under "how to develop".
+		- Clones main, installs dependencies, and states what it will do, with an option to abort.
+	- Target OS: Debian, NixOS
+	- Decisions:
+		- It's Bash only, since both targets are Linux.
+
+- Native start misses the new latest.log when its inode is reused
+	- ID: 2026111113354106
+	- Type: Bug
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-133541
+	- Opened by:
+	- Related IDs: 2026111112163284, 2026111111065750
+	- Incorrect behavior [Bug]: TestNativeStart (df5y1) fails with TMPDIR on an ext4 folder: start waits out startTimeout though the new latest.log has the Done line.
+	- Expected behavior [Bug]: start sees the new log on any file system.
+	- Reproduced [Bug]: 2026-11-11, on HEAD 2076b3a, with TMPDIR on ext4. Passes on ZFS.
+	- Possible cause [Bug]: Native.log tells the old log from the new one with os.SameFile. ext4 hands a removed file's inode to the next new file, so the new log looks like the old one. Log4j's rollover deletes latest.log, so a real server could hit it too.
+	- Actual cause [Bug]: As above. The old log's inode was free once it was removed, since nothing held it open. `cmd`'s log follower had the same flaw: a new day's log on a reused inode was read from the old offset.
+	- Estimated effort: Low
+	- Actual effort: Low
+	- Progress log:
+		- Verified: on ext4, df5y1 and df5zp fail on the old code and pass with the fix. The gate passes with the default TMPDIR and with TMPDIR on ext4.
+	- Decisions:
+		- Hold the old log open until the server has loaded, so its inode can't go to the new file. Then `os.SameFile` is sound on any file system. A size or time check would still guess.
+		- `cmd`'s follower holds the file it read last, until the command ends.
+		- Swept: `os.SameFile` is used only in `Native.log` and `logFollow.next`, and both are fixed.
+	- Actual fix [Bug]: `Native` keeps `latest.log` open from before the launch until loaded; `logFollow` keeps its last file open.
+	- Branch: r1111
+	- Test case: df5y1, df5zp
+	- Closed: 20261111-133909
+
+- Config reader for shcl in Go
+	- ID: 2026111111065684
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-110656
+	- Opened by: t00mietum
+	- Requirements:
+		- Read `config.shcl` and `plugins.shcl` from Go.
+	- Actual effort: Avg
+	- Decisions:
+		- Config is shcl. The tool reads it with the latest published release of shcl's Go module, beta or not.
+		- shcl `v3.0.0-beta1`, the only v3 release. `go.mod` says Go 1.24, so Debian 13's Go builds it.
+		- The reader lays the file over a `Config` the caller fills first, so the defaults item only has to fill it. Empty fields are left for that item to derive, such as `runGroup` from `runUser`.
+		- A bad value, an unknown key, or a key set twice with different values gets a warning with its line, and the value before it stands. A list with one bad item is dropped whole. Only a file that can't be read is an error.
+		- Values are checked here: paths for `chown -R` must be full and not `/`, names can't start with `-`, ports and `nice` stay in range, and `allowFrom` takes `lan`, `any`, addresses, or ranges.
+		- Sizes take Java's `4G` and shcl's `4 GiB`, since shcl alone refuses `4G`.
+		- `startAtBoot` is read here too, so every key in design.md's table is read. A test checks the two match.
+		- In `plugins.shcl`, a jar is named by its path under `serverDir`. A bad entry is left out, so its jar isn't approved. shcl merges entries with the same path, so a jar listed with 2 hashes is left out too.
+		- shcl's hints are dropped from the warnings. They repeat ours, and "did you mean a list" misleads for a key that takes one value.
+		- Swept: every key in the table has a setter and a test line; both files go through the one `LoadFile`.
+	- Branch: r1111
+	- Test case: df5wt, df5wv, df5ww, df5wx, df5wy, df5wz, df5x0, df5x1, df5x2, df5x3, df5x4, df5x5
+	- Closed: 20261111-120826
+
+- Config defaults and overrides
+	- ID: 2026111111065697
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-110656
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065684
+	- Requirements:
+		- Default configuration hard-coded.
+		- Overridden by the config file.
+		- Resistant to errors, so one bad line doesn't sink the whole thing.
+		- Overridden by program options at run-time.
+	- Actual effort: Avg
+	- Decisions:
+		- Settings are built in order: the defaults, the file, the command-line options, then the keys that come from others, such as `runGroup` from `runUser`. Deriving last means an option that changes `runUser` moves `runGroup` too.
+		- Options are checked by the same code as the file. A bad one is an error, not a warning, since it was typed just now.
+		- design.md now has a common `--set KEY=VALUE`, with `--native` as a short form for `runMode`. The flags themselves are parsed in the Core commands item, which builds the CLI.
+		- `heapMin` defaults to 1G, or `heapMax` when that's less. A `heapMin` over `heapMax`, or a `memCap` not over it, gets a warning and a safe value.
+		- `ownerAfterStop` comes from `SUDO_USER`, then `USER`. It's left empty when neither names an account, as from the boot unit, and Core commands decides what `stop` does then.
+		- The default image is `eclipse-temurin:25-jre`, pinned to its multi-arch digest. `jvmArgs` defaults to Paper's recommended flags.
+		- An option value follows file syntax, so `##` starts a comment there too.
+		- Swept: every default in design.md's table that's written as a value is checked against the code by a test. The derived ones have their own cases.
+	- Branch: r1111
+	- Test case: df5x6, df5x7, df5x8, df5x9, df5xa, df5xb
+	- Closed: 20261111-121403
+
+- Core commands: CLI, command runner, and tree hand-off
+	- ID: 2026111112162268
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-121622
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Requirements:
+		- Parse the commands and the common options, `--set` and `--native` included, and load the config.
+		- Add `--help`, `--about`, `--version`, `--dry-run`, and `--debug`.
+		- One command runner, with sudo and dry run, and a fake for tests.
+		- Hand the trees to the service account and back.
+	- Actual effort: Avg
+	- Decisions:
+		- Common options work before or after the command. `--native` and `--set` reach the config in the order given, so the last one wins.
+		- A missing default config means the defaults, with a warning, so `status` works before `setup`. A missing `--config` file is an error, exit 1. A bad option is exit 2.
+		- `--dry-run` still runs commands that only look, such as `docker ps`, so the plan it prints matches a real run. design.md updated.
+		- With `ownerAfterStop` empty, as from the boot unit, `stop` leaves the trees with `runUser` and warns. The operator's next `stop` hands them back, per design.md's `stop` step 1.
+		- A tree given as a link is followed before `chown -R`, and the depth check runs on both the link and its target.
+		- `--help` lists only the built commands. `start`, `stop`, `status`, and `watch` parse and load the config, then say they aren't built yet, until the next 3 children.
+		- Swept: both flag passes share `commonFlags`; every chown goes through `tree.handOver`.
+	- Branch: r1111
+	- Test case: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn
+	- Closed: 20261111-122043
+
 - Safe server settings
 	- ID: 2026111111065724
 	- Type: Feature
@@ -393,36 +592,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df5z0, df5z1, df5z2, df5z3, df5z4, df5z5
 	- Closed: 20261111-131704
 
-- console and cmd
-	- ID: 2026111111065750
-	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. Paper's own console wasn't tried.
-	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
-	- Priority: High
-	- Opened: 20261111-110657
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
-	- Requirements:
-		- `console` attaches to the server console, with detach keys that can't stop the server by accident.
-		- `cmd` sends one console command and prints what the server says back.
-		- Make both work in Docker and native modes, without RCON.
-	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: against a stand-in container named like the server's, `console` detaches on Ctrl-C with the container still running, and `cmd` prints the line the stand-in logged. Without the detach keys, Ctrl-C ends the container. In tmux, Ctrl-C with the binding detaches and the session lives; without it the session ends.
-	- Decisions:
-		- Ctrl-C is the detach key in both modes, so it can't reach the server. Docker's `--detach-keys=ctrl-c`, and in tmux `bind-key -n C-c detach-client` at attach. design.md updated.
-		- `docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach.
-		- `cmd` reads `logs/latest.log` in both modes, from where it ended before the send, rather than `docker logs`, which carries the terminal's echo and escape codes. It waits up to 3 s for a first line, then until 0.5 s go by with nothing, 10 s at most. A new day's log is read from its start.
-		- `cmd stop` and `cmd restart` are refused, pointing at `stop`, which hands the trees back too.
-		- A server that stops while `console` is attached gets its trees handed back, as `start --debug` in native mode did. Both now share one step. It no longer hands back when the unit's state can't be read, since the server may still be up.
-		- `cmd` takes no `--dry-run`, since design.md lists none.
-		- `OpenRegular` and `Clean` moved from `status` to `server`, for `cmd` to share.
-		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
-	- Branch: r1111
-	- Test case: df5z6, df5z7, df5z8
-
 - repair
 	- ID: 2026111111065763
 	- Type: Feature
@@ -454,175 +623,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1111
 	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
 	- Closed: 20261111-133545
-
-- setup
-	- ID: 2026111111065776
-	- Type: Feature
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261111-110657
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065763
-	- Requirements:
-		- Install from scratch, per `design.md`.
-		- `--adopt` takes over an existing server folder as it is.
-		- Ask before accepting the Minecraft EULA.
-		- Install and set up Geyser and Floodgate when `bedrock` is on.
-		- On an existing install, run `repair` and then `update`.
-
-- Firewall
-	- ID: 2026111111065789
-	- Type: Feature
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261111-110657
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174 2026111113015461
-	- Requirements:
-		- Keep the tool's rules in its own nftables table, loaded by its own systemd unit, per `design.md`.
-		- Limit the game ports to `allowFrom`, with a rate limit per address.
-		- Drop the server's new outbound connections to loopback and the LAN. Allow DNS, and the web unless `egress` is `open`.
-		- `start` refuses to run when the table isn't loaded.
-		- `setup` and `repair` manage it. They never change ufw or firewalld rules.
-	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
-	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
-
-- update
-	- ID: 2026111111065803
-	- Type: Feature
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
-	- Requirements:
-		- Update the tool from GitHub releases.
-		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
-		- Update plugins that have a known source, and approve the new jars.
-		- Refresh the pinned container image.
-	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-
-- Start at boot
-	- ID: 2026111111065816
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065763
-	- Requirements:
-		- Add `startAtBoot` to the config, and a systemd unit that runs `start --foreground`, per `design.md`.
-		- `start` and `stop` go through `systemctl` when the unit is enabled.
-		- `setup` and `repair` install or remove the unit to match the config.
-
-- Bedrock LAN discovery
-	- ID: 2026111111065829
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711 2026111113015461
-	- Requirements:
-		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
-		- Fix `how-to-connect.md` if they don't.
-	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
-	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
-
-- Move shared code to tt-safeserver
-	- ID: 2026111111303242
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 20261111-113032
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
-	- Requirements:
-		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
-		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
-		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
-		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
-	- Decisions:
-		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
-		- GPL v2 or later.
-	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
-
-- NixOS module
-	- ID: 2026111111065855
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Add a flake with a NixOS module for the account, Docker, the config file, the firewall unit, and the boot unit.
-		- On NixOS, `setup`, `repair`, and `update` check the system parts and print module settings, rather than change them.
-
-- CI/CD pipeline
-	- ID: 2026111111065868
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Requirements:
-		- A CI/CD pipeline kicked off by a bash script (`cicd/cicd.bash`). It builds, tests, and can commit and push. Packaging and publishing are opt-in.
-
-- Release-install script
-	- ID: 2026111111070761
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868
-	- Requirements:
-		- Runnable via a single `curl` or `wget`, and documented under "how to install".
-		- Downloads, installs, and runs the latest release, with an option to abort.
-	- Target OS: Debian, NixOS
-	- Decisions:
-		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
-
-- First release
-	- ID: 2026111111070774
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868, 2026111111070761
-	- Requirements:
-		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
-
-- Move the first server over
-	- ID: 2026111111070787
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Move the existing server to the new account and tool with `setup --adopt`.
-		- Approve the plugins that are there now.
-		- Retire the old start, stop, and manage scripts after it runs clean.
-
-- Dev-environment install script
-	- ID: 2026111111070800
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261111-110708
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868
-	- Requirements:
-		- Runnable via a single `curl` or `wget`, and documented under "how to develop".
-		- Clones main, installs dependencies, and states what it will do, with an option to abort.
-	- Target OS: Debian, NixOS
-	- Decisions:
-		- It's Bash only, since both targets are Linux.
 
 - Consoles over the internet
 	- ID: 2026111111065842
