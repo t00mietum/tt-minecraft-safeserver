@@ -193,3 +193,28 @@ func TestSendCmd(t *testing.T) {
 		t.Errorf("docker: err %v, output %q", err, g.out.String())
 	}
 }
+
+// A log removed and made again, as at a rollover, is read from its start,
+// even where the new file gets the old one's inode, as on ext4.
+func TestLogFollowNewFile(t *testing.T) {
+	defer testid.Line(t, "df5zp")
+	path := filepath.Join(t.TempDir(), "latest.log")
+	if err := os.WriteFile(path, []byte("old line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := &logFollow{file: path}
+	defer f.close()
+	if err := f.skip(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("new day\nanswer\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := f.next()
+	if want := []string{"new day", "answer"}; err != nil || !reflect.DeepEqual(lines, want) {
+		t.Errorf("got %q, %v, want %q", lines, err, want)
+	}
+}

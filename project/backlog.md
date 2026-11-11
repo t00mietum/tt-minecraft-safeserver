@@ -25,15 +25,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Native start misses the new latest.log when its inode is reused
 	- ID: 2026111113354106
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-133541
 	- Opened by:
+	- Related IDs: 2026111112163284, 2026111111065750
 	- Incorrect behavior [Bug]: TestNativeStart (df5y1) fails with TMPDIR on an ext4 folder: start waits out startTimeout though the new latest.log has the Done line.
 	- Expected behavior [Bug]: start sees the new log on any file system.
 	- Reproduced [Bug]: 2026-11-11, on HEAD 2076b3a, with TMPDIR on ext4. Passes on ZFS.
 	- Possible cause [Bug]: Native.log tells the old log from the new one with os.SameFile. ext4 hands a removed file's inode to the next new file, so the new log looks like the old one. Log4j's rollover deletes latest.log, so a real server could hit it too.
+	- Actual cause [Bug]: As above. The old log's inode was free once it was removed, since nothing held it open. `cmd`'s log follower had the same flaw: a new day's log on a reused inode was read from the old offset.
 	- Estimated effort: Low
+	- Actual effort: Low
+	- Progress log:
+		- Verified: on ext4, df5y1 and df5zp fail on the old code and pass with the fix. The gate passes with the default TMPDIR and with TMPDIR on ext4.
+	- Decisions:
+		- Hold the old log open until the server has loaded, so its inode can't go to the new file. Then `os.SameFile` is sound on any file system. A size or time check would still guess.
+		- `cmd`'s follower holds the file it read last, until the command ends.
+		- Swept: `os.SameFile` is used only in `Native.log` and `logFollow.next`, and both are fixed.
+	- Actual fix [Bug]: `Native` keeps `latest.log` open from before the launch until loaded; `logFollow` keeps its last file open.
+	- Branch: r1111
+	- Test case: df5y1, df5zp
+	- Closed: 20261111-133909
 
 - Current Geyser needs TCP on the Bedrock port too
 	- ID: 2026111113015461

@@ -37,8 +37,10 @@ const foregroundPoll = 5 * time.Second
 type Native struct {
 	Kit
 	// oldLog is latest.log from before the launch, so its Done line isn't
-	// taken for this run's.
-	oldLog os.FileInfo
+	// taken for this run's. It's held open until the server has loaded,
+	// since Paper removes it as it rolls it over, and ext4 hands a removed
+	// file's inode to the next new file once nothing has it open.
+	oldLog *os.File
 }
 
 // Start runs design.md's start steps that are built so far.
@@ -88,12 +90,14 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.lockJars(ctx, jars); err != nil {
 		return err
 	}
-	n.oldLog, _ = os.Stat(n.latestLog()) // none yet is fine
+	n.oldLog, _ = server.OpenRegular(n.latestLog()) // none yet is fine
+	defer n.dropOldLog()
 	if _, err := n.Run.Run(ctx, host.Cmd{Args: args, Sudo: true}); err != nil {
 		return err
 	}
 
 	if mode.Debug {
+		n.dropOldLog()
 		return n.attach(ctx)
 	}
 	if n.DryRun {
@@ -102,6 +106,7 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.waitLoaded(ctx, n); err != nil {
 		return err
 	}
+	n.dropOldLog()
 	if !mode.Foreground {
 		return nil
 	}
@@ -238,10 +243,19 @@ func (n *Native) log(context.Context) ([]byte, error) {
 		return nil, nil
 	case err != nil:
 		return nil, err
-	case n.oldLog != nil && os.SameFile(n.oldLog, fi):
-		return nil, nil
+	case n.oldLog != nil:
+		if old, err := n.oldLog.Stat(); err == nil && os.SameFile(old, fi) {
+			return nil, nil
+		}
 	}
 	return os.ReadFile(n.latestLog())
+}
+
+func (n *Native) dropOldLog() {
+	if n.oldLog != nil {
+		_ = n.oldLog.Close() // only read from
+		n.oldLog = nil
+	}
 }
 
 func (n *Native) tail(ctx context.Context) []byte {

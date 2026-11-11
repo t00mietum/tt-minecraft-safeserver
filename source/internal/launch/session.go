@@ -94,6 +94,7 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 		return err
 	}
 	log := &logFollow{file: server.LogFile(k.Cfg.ServerDir)}
+	defer log.close()
 	if err := log.skip(); err != nil {
 		return err
 	}
@@ -133,7 +134,9 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 // starts each day, is read from its start.
 type logFollow struct {
 	file string
-	last os.FileInfo
+	// last is the file read last time, held open so its inode can't go to
+	// the next new file, as ext4 does once a removed file is closed.
+	last *os.File
 	off  int64
 	// part is a line that isn't finished yet.
 	part []byte
@@ -150,12 +153,12 @@ func (f *logFollow) skip() error {
 	if err != nil {
 		return err
 	}
-	defer fh.Close()
+	f.last = fh
 	fi, err := fh.Stat()
 	if err != nil {
 		return err
 	}
-	f.last, f.off = fi, fi.Size()
+	f.off = fi.Size()
 	if f.off > 0 {
 		end := make([]byte, 1)
 		if _, err := fh.ReadAt(end, f.off-1); err != nil {
@@ -174,15 +177,19 @@ func (f *logFollow) next() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer fh.Close()
+	var last os.FileInfo
+	if f.last != nil {
+		last, _ = f.last.Stat() // nil reads it again from the start
+	}
+	f.close()
+	f.last = fh
 	fi, err := fh.Stat()
 	if err != nil {
 		return nil, err
 	}
-	if f.last == nil || !os.SameFile(f.last, fi) || fi.Size() < f.off {
+	if last == nil || !os.SameFile(last, fi) || fi.Size() < f.off {
 		f.off, f.part, f.cut = 0, nil, false
 	}
-	f.last = fi
 	buf := make([]byte, min(fi.Size()-f.off, answerChunk))
 	n, err := fh.ReadAt(buf, f.off)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -208,4 +215,11 @@ func (f *logFollow) next() ([]string, error) {
 		lines[i] = strings.TrimRight(l, "\r")
 	}
 	return lines, nil
+}
+
+func (f *logFollow) close() {
+	if f.last != nil {
+		_ = f.last.Close() // only read from
+		f.last = nil
+	}
 }
