@@ -261,7 +261,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Safe server settings
 	- ID: 2026111111065724
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -286,7 +286,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The empty whitelist warning names `tt-minecraftd cmd whitelist add`, per design.md, though `cmd` comes with its own item.
 		- Swept: both modes call the check through `Kit`; `status` and the warnings share one player reader.
 	- Branch: r1111
-	- Test case: df5yj, df5yk, df5ym, df5yn, df5yp, df5yq, df5yr, df5ys
+	- Test case: its children's: 2026111112554261: df5yv, df5yw, df5yx
+	- Closed: 20261111-130256
 
 - Safe server settings: Geyser config
 	- ID: 2026111112554261
@@ -377,7 +378,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
+	- Prereq IDs: 2026111112163174 2026111113015461
 	- Requirements:
 		- Keep the tool's rules in its own nftables table, loaded by its own systemd unit, per `design.md`.
 		- Limit the game ports to `allowFrom`, with a rate limit per address.
@@ -385,6 +386,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `start` refuses to run when the table isn't loaded.
 		- `setup` and `repair` manage it. They never change ufw or firewalld rules.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
 
 - update
 	- ID: 2026111111065803
