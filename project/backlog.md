@@ -206,17 +206,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
 		- Fix `how-to-connect.md` if they don't.
 
-- Consoles over the internet
-	- ID: 2026111111065842
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 2026-11-11
-	- Opened by: t00mietum
-	- Requirements:
-		- Let Xbox, PlayStation, and Switch players join from outside the home.
-		- Weigh the MCXboxBroadcast Geyser extension against BedrockConnect and a LAN relay app, per `design.md`. MCXboxBroadcast is the front runner.
-
 - NixOS module
 	- ID: 2026111111065855
 	- Type: Feature
@@ -292,6 +281,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux.
+
+- Consoles over the internet
+	- ID: 2026111111065842
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 2026-11-11
+	- Opened by: t00mietum
+	- Requirements:
+		- Let any Xbox, PlayStation, or Switch player join from outside the home, without changing settings on the console.
+	- Decisions:
+		- MCXboxBroadcast, when this gets picked up. It needs a spare Microsoft account, never the main one.
+		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
 
 ## Template
 

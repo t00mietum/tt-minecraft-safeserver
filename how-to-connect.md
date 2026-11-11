@@ -99,7 +99,9 @@ Both editions play on the same server, in the same world.
 
 - At home, consoles join the same way as other Bedrock devices: open the Friends tab, and pick the server under LAN Games.
 
-- From outside the home, consoles can't join yet. Xbox, PlayStation, and Switch don't let you add a server by its address. A fix is planned.
+- At home or away, a console that uses BedrockConnect can join from its server list. Type the server's domain name and port `19132` there.
+
+- Without BedrockConnect, consoles can't join from outside the home yet. Xbox, PlayStation, and Switch don't let you add a server by its address. A fix is planned.
 
 ## When it doesn't work
 
