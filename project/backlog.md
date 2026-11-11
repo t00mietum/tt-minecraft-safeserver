@@ -109,6 +109,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Hand the trees to the service account on start, and back on stop.
 		- `stop` sends the `stop` console command first, with an optional countdown for the players.
 		- Refuse to start when an old copy of the server is running under any account.
+	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
 
 - Safe server settings
 	- ID: 2026111111065724
