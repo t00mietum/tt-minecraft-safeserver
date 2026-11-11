@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
@@ -23,10 +25,12 @@ type Kit struct {
 	Run     host.Runner
 	Console Console
 	Cfg     *config.Config
-	Out     io.Writer
-	Root    bool
-	DryRun  bool
-	Sleep   func(time.Duration)
+	// PluginsFile is the approved jar list, plugins.shcl.
+	PluginsFile string
+	Out         io.Writer
+	Root        bool
+	DryRun      bool
+	Sleep       func(time.Duration)
 }
 
 // engine is the part of a mode that the shared start and stop steps ask about.
@@ -89,6 +93,35 @@ func (k *Kit) checkSettings() error {
 		k.say("unsafe: %s", p)
 	}
 	return errors.New("the safe settings aren't in place; sudo tt-minecraftd repair sets them")
+}
+
+// checkPlugins refuses a start when a jar is new or changed since it was
+// approved. See design.md, Plugin pinning.
+func (k *Kit) checkPlugins() error {
+	approved, warns, err := plugins.ReadApproved(k.PluginsFile)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// Nothing approved yet, so every jar is new.
+	case err != nil:
+		return fmt.Errorf("can't read the approved plugin list: %w", err)
+	}
+	for _, w := range warns {
+		k.say("warning: %s", w)
+	}
+	c, err := plugins.CheckJars(k.Cfg.ServerDir, approved, &plugins.Sums{})
+	if err != nil {
+		return fmt.Errorf("can't check the plugin jars: %w", err)
+	}
+	if c.OK() {
+		return nil
+	}
+	for _, name := range c.New {
+		k.say("not approved: %s", name)
+	}
+	for _, name := range c.Changed {
+		k.say("changed since it was approved: %s", name)
+	}
+	return errors.New("a jar is new or changed; sudo tt-minecraftd repair --approve-plugins shows each one and asks")
 }
 
 func (k *Kit) waitLoaded(ctx context.Context, e engine) error {

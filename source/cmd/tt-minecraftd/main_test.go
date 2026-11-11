@@ -75,6 +75,7 @@ func TestUsageErrors(t *testing.T) {
 		{"stop", "--warn", "-1"},
 		{"stop", "--warn", "soon"},
 		{"watch", "--interval", "0"},
+		{"repair", "--approve-plugins", "--check"},
 		{"status", "--set", "heapMax"},
 		{"status", "--set", "=6G"},
 		{"status", "--set", "noSuchKey=1"},
@@ -188,11 +189,66 @@ func TestRepair(t *testing.T) {
 		t.Fatal("prepare stopped")
 	}
 	var b bytes.Buffer
-	if err := repair(inv, &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
+	if err := repair(inv, strings.NewReader(""), &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
 		t.Errorf("as root: %v, %q", err, b.String())
 	}
 	code, out, _ = runArgs("repair", "--check", set)
 	if code != exitOK || !strings.HasPrefix(out, "OK      safe settings\n") {
 		t.Errorf("after fix: exit %d, stdout %q", code, out)
+	}
+}
+
+// repair reports jars that aren't approved, and --approve-plugins asks about
+// each one: yes approves it, no moves it out, and no answer leaves it.
+func TestRepairApprovePlugins(t *testing.T) {
+	defer testid.Line(t, "df5z5")
+	noDefaultConfig(t)
+	dir := t.TempDir()
+	for name, text := range map[string]string{"plugins/a.jar": "a", "plugins/b.jar": "b", "plugins/c.jar": "c", "paper.jar": "p"} {
+		if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set := "--set=serverDir=" + dir
+	code, out, _ := runArgs("repair", "--check", set)
+	if code != exitError || !strings.Contains(out, "FAILED  plugins/a.jar isn't approved; repair --approve-plugins") || !strings.Contains(out, "FAILED  paper.jar isn't approved") {
+		t.Errorf("--check: exit %d, stdout %q", code, out)
+	}
+
+	repairWith := func(answers string) (string, error) {
+		t.Helper()
+		inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
+		if done {
+			t.Fatal("prepare stopped")
+		}
+		var b bytes.Buffer
+		err := repair(inv, strings.NewReader(answers), &b, true)
+		return b.String(), err
+	}
+	out, err := repairWith("y\nmaybe\nn\ny\n")
+	for _, want := range []string{
+		"plugins/a.jar (new)\n  sha256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n  size:   1 bytes\n",
+		"  says:   no plugin.yml\nApprove it? [y/n] \n",
+		"Approve it? [y/n] Approve it? [y/n] ",
+		"FIXED   plugins/b.jar refused, and moved to " + filepath.Join(dir, "plugins-refused", "b.jar"),
+		"FIXED   plugins/a.jar approved\nFIXED   plugins/c.jar approved\nFAILED  paper.jar isn't approved; no answer\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("first pass lacks %q:\n%s", want, out)
+		}
+	}
+	if err == nil {
+		t.Error("first pass: no error with paper.jar left")
+	}
+
+	if out, err := repairWith("y\n"); err != nil || !strings.Contains(out, "paper.jar (new)") || strings.Contains(out, "a.jar") {
+		t.Errorf("second pass: %v\n%s", err, out)
+	}
+	code, out, _ = runArgs("repair", "--check", set)
+	if code != exitOK || !strings.Contains(out, "OK      plugins: 3 jars, all approved\n") {
+		t.Errorf("after: exit %d, stdout %q", code, out)
 	}
 }

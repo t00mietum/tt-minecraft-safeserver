@@ -75,7 +75,7 @@ func newRig(t *testing.T) *rig {
 	}
 	write(t, filepath.Join(dir, "logs", "latest.log"), log.String())
 	list := filepath.Join(t.TempDir(), "plugins.shcl")
-	write(t, list, "jar: plugins/Geyser-Spigot.jar\n\tsha256: "+sum("geyser")+"\njar: plugins/floodgate.jar\n\tsha256: "+sum("floodgate")+"\n")
+	write(t, list, "jar: plugins/Geyser-Spigot.jar\n\tsha256: "+sum("geyser")+"\njar: plugins/floodgate.jar\n\tsha256: "+sum("floodgate")+"\njar: paper-26.3-244.jar\n\tsha256: "+sum("")+"\n")
 
 	cfg := config.Defaults()
 	cfg.ServerDir, cfg.OwnerTrees = dir, []string{dir}
@@ -157,7 +157,7 @@ func TestStatusDocker(t *testing.T) {
 		"Firewall:   drop counters not set up yet",
 		"Whitelist:  3 players",
 		"Ops:        Steve, Evil[2J",
-		"Plugins:    2 jars, all approved",
+		"Plugins:    3 jars, all approved",
 		"Boot unit:  enabled",
 		"Log:        "+filepath.Join(g.dir, "logs", "latest.log"),
 		"            [12:00:06 INFO]: line 6",
@@ -213,7 +213,7 @@ func TestStatusStopped(t *testing.T) {
 		"Ports:      tcp *:25565 listening, 2 connections",
 		"Firewall:   off in the config",
 		"Ops:        none",
-		"Plugins:    3 jars, NOT all approved, so start refuses; new: plugins/new.jar; changed: plugins/floodgate.jar",
+		"Plugins:    4 jars, NOT all approved, so start refuses; new: plugins/new.jar; changed: plugins/floodgate.jar",
 		"Boot unit:  not installed",
 	)
 	if g.pinged != "" || strings.Contains(out, "udp") || strings.Contains(out, "Players:") {
@@ -287,7 +287,7 @@ func TestStatusHostileFiles(t *testing.T) {
 	go func() { done <- g.text(t, 0) }()
 	select {
 	case out := <-done:
-		wantLines(t, out, "Plugins:    2 jars, NOT all approved, so start refuses; changed: plugins/Geyser-Spigot.jar, plugins/floodgate.jar")
+		wantLines(t, out, "Plugins:    3 jars, NOT all approved, so start refuses; changed: plugins/Geyser-Spigot.jar, plugins/floodgate.jar")
 		for _, w := range []string{"Whitelist:  can't read it:", "Ops:        can't read them:", "Log:        can't read it:"} {
 			if !strings.Contains(out, w) {
 				t.Errorf("lacks %q:\n%s", w, out)

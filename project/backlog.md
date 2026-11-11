@@ -338,7 +338,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Plugin pinning
 	- ID: 2026111111065737
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -349,6 +349,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `repair --approve-plugins` shows each one and asks.
 		- The server can't write to the jars while it runs.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: `start` refuses a new or changed plugin, extension, or Paper build in both modes, and the start test fails with the check taken out. `repair --approve-plugins` approves, refuses, and leaves unanswered jars as asked.
+	- Decisions:
+		- One list of checked jars, `plugins.Jars`, feeds `start`, `status`, `repair`, and the read-only mounts, so they can't disagree. Geyser extensions are now locked like plugins. design.md updated.
+		- `paper.jar` is checked as the build it links to, by that build's path under `serverDir`. One that links outside can't be approved, so `start` refuses.
+		- No approved list yet means every jar is new.
+		- Answers are `y` or `n`, asked again on anything else. When input runs out, the jars left stay put and unapproved, and `repair` exits 1. A refused Paper build isn't moved, since that only breaks `paper.jar`.
+		- The list is updated in place through shcl, so comments and sources stay. A new list is mode 0644, since `status` reads it without sudo.
+		- `plugins-refused/` takes the owner of `plugins/`. A name already there gets the time added.
+		- The name and version come from `paper-plugin.yml`, `plugin.yml`, or `extension.yml`, read up to 64 KiB, with control characters dropped.
+		- `--approve-plugins` with `--check` is a usage error. No `--yes` for it, since the point is a person looking at each jar.
+		- 20261111: the status tests' approved list gained the Paper build, and their jar counts went from 2 to 3 and from 3 to 4 (df5y7, df5y9, df5yh), since `paper.jar` is now counted.
+		- Swept: every reader of jars goes through `plugins.Jars` (`CheckJars`, `lockedJars`, `repair`); both modes call `Kit.checkPlugins`; status reads the list through the same path as `start`.
+	- Branch: r1111
+	- Test case: df5z0, df5z1, df5z2, df5z3, df5z4, df5z5
+	- Closed: 20261111-131704
 
 - console and cmd
 	- ID: 2026111111065750

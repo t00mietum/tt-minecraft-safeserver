@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"syscall"
 	"time"
@@ -76,38 +78,80 @@ func (s *Sums) Sum(file string) (string, error) {
 	return sum, nil
 }
 
-// CheckJars compares serverDir/plugins/*.jar with approved. Approved entries
-// outside plugins/ are left to their own checks, such as paper.jar's.
+// Folders whose jars start checks, besides paper.jar. Geyser extensions run
+// with the same access as plugins.
+var pinnedDirs = []string{"plugins", "plugins/Geyser-Spigot/extensions"}
+
+// Jar is one jar that start checks: its name on the approved list, and its
+// file.
+type Jar struct {
+	Name string
+	File string
+}
+
+// Jars lists what start checks: the jars in pinnedDirs, and the build
+// paper.jar points to, named by its path under serverDir. A missing paper.jar
+// is left to start's own check.
+func Jars(serverDir string) ([]Jar, error) {
+	var jars []Jar
+	for _, dir := range pinnedDirs {
+		found, err := filepath.Glob(filepath.Join(serverDir, filepath.FromSlash(dir), "*.jar"))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range found {
+			jars = append(jars, Jar{dir + "/" + filepath.Base(f), f})
+		}
+	}
+	paper, err := filepath.EvalSymlinks(filepath.Join(serverDir, "paper.jar"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return jars, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	base, err := filepath.EvalSymlinks(serverDir)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := filepath.Rel(base, paper)
+	if err != nil || !insideServer(filepath.ToSlash(rel)) {
+		return nil, fmt.Errorf("paper.jar points to %s, outside %s, so it can't be approved", paper, serverDir)
+	}
+	return append(jars, Jar{filepath.ToSlash(rel), paper}), nil
+}
+
+// CheckJars compares the jars from Jars with approved. Missing lists only the
+// approved jars in pinnedDirs, since old Paper builds stay on the list.
 func CheckJars(serverDir string, approved []Approved, sums *Sums) (Check, error) {
 	var c Check
-	jars, err := filepath.Glob(filepath.Join(serverDir, "plugins", "*.jar"))
+	jars, err := Jars(serverDir)
 	if err != nil {
 		return c, err
 	}
 	want := make(map[string]string, len(approved))
 	for _, a := range approved {
-		if path.Dir(a.Name) == "plugins" && path.Ext(a.Name) == ".jar" {
-			want[a.Name] = a.SHA256
-		}
+		want[a.Name] = a.SHA256
 	}
 	c.Jars = len(jars)
 	for _, j := range jars {
-		name := "plugins/" + filepath.Base(j)
-		sum, err := sums.Sum(j)
+		sum, err := sums.Sum(j.File)
 		if err != nil && !errors.Is(err, ErrNotRegular) {
 			return c, err
 		}
-		approvedSum, listed := want[name]
-		delete(want, name)
+		approvedSum, listed := want[j.Name]
+		delete(want, j.Name)
 		switch {
 		case !listed:
-			c.New = append(c.New, name)
+			c.New = append(c.New, j.Name)
 		case approvedSum != sum:
-			c.Changed = append(c.Changed, name)
+			c.Changed = append(c.Changed, j.Name)
 		}
 	}
 	for name := range want {
-		c.Missing = append(c.Missing, name)
+		if slices.Contains(pinnedDirs, path.Dir(name)) && path.Ext(name) == ".jar" {
+			c.Missing = append(c.Missing, name)
+		}
 	}
 	sort.Strings(c.Missing)
 	return c, nil

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
@@ -80,7 +81,10 @@ func (d *Docker) Start(ctx context.Context, mode StartMode) error {
 	if err := d.checkSettings(); err != nil {
 		return err
 	}
-	// The plugin, firewall, and snapshot steps come with their own items.
+	if err := d.checkPlugins(); err != nil {
+		return err
+	}
+	// The firewall and snapshot steps come with their own items.
 	args, err := d.runArgs(mode)
 	if err != nil {
 		return err
@@ -210,25 +214,27 @@ func appendMount(args []string, path string, readOnly bool) ([]string, error) {
 	return append(args, "--mount", m), nil
 }
 
-// lockedJars gives paper.jar and the plugin jars, after links, so each can be
-// mounted read-only over itself.
+// lockedJars gives paper.jar and the jars plugins.Jars checks, after links, so
+// each can be mounted read-only over itself.
 func lockedJars(serverDir string) ([]string, error) {
 	paper, err := filepath.EvalSymlinks(filepath.Join(serverDir, "paper.jar"))
 	if err != nil {
 		return nil, fmt.Errorf("no paper.jar in %s: %w", serverDir, err)
 	}
-	plugins, err := filepath.Glob(filepath.Join(serverDir, "plugins", "*.jar"))
+	found, err := plugins.Jars(serverDir)
 	if err != nil {
 		return nil, err
 	}
-	jars := make([]string, 0, 1+len(plugins))
+	jars := make([]string, 0, len(found))
 	jars = append(jars, paper)
-	for _, p := range plugins {
-		real, err := filepath.EvalSymlinks(p)
+	for _, j := range found {
+		real, err := filepath.EvalSymlinks(j.File)
 		if err != nil {
 			return nil, err
 		}
-		jars = append(jars, real)
+		if real != paper {
+			jars = append(jars, real)
+		}
 	}
 	return jars, nil
 }

@@ -70,10 +70,16 @@ func newRig(t *testing.T) *rig {
 	if err := os.WriteFile(filepath.Join(dir, "whitelist.json"), []byte(`[{"uuid": "5e0c6c7f-4d0a-4d1e-9a0e-4b9e3c2f1a01", "name": "Steve"}]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Both jars are empty, and approved.
+	list := filepath.Join(base, "plugins.shcl")
+	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if err := os.WriteFile(list, []byte("jar: paper-26.3-244.jar\n\tsha256: "+empty+"\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+empty+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir}
 	g.r.Reply = g.reply
 	g.d = &Docker{
-		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
+		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
 		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
@@ -333,5 +339,73 @@ func TestStartChecksSettings(t *testing.T) {
 		if !strings.Contains(g.out.String(), "warning: the whitelist is empty") {
 			t.Errorf("native %v, empty whitelist: output %q", native, g.out.String())
 		}
+	}
+}
+
+// A new or changed jar stops a start in either mode, after sudo and before
+// anything changes. Geyser extensions count, and get read-only mounts too.
+func TestStartChecksPlugins(t *testing.T) {
+	defer testid.Line(t, "df5z4")
+	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	ext := filepath.Join("plugins", "Geyser-Spigot", "extensions", "thing.jar")
+	for _, native := range []bool{false, true} {
+		for _, c := range []struct {
+			what, file, text, says string
+		}{
+			{"new", "plugins/floodgate.jar", "", "not approved: plugins/floodgate.jar"},
+			{"changed", "plugins/Geyser-Spigot.jar", "evil", "changed since it was approved: plugins/Geyser-Spigot.jar"},
+			{"paper", "paper-26.3-244.jar", "evil", "changed since it was approved: paper-26.3-244.jar"},
+			{"extension", ext, "", "not approved: " + filepath.ToSlash(ext)},
+		} {
+			g := newNativeRig(t)
+			start := g.d.Start
+			if native {
+				start = g.n.Start
+			}
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(g.dir, c.file)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(g.dir, c.file), []byte(c.text), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := start(context.Background(), StartMode{})
+			if err == nil || !strings.Contains(err.Error(), "repair --approve-plugins") || len(g.changes()) != 1 || !strings.Contains(g.out.String(), c.says) {
+				t.Errorf("native %v, %s: err %v, ran %q, output %q", native, c.what, err, g.changes(), g.out.String())
+			}
+		}
+
+		g := newNativeRig(t)
+		start := g.d.Start
+		if native {
+			start = g.n.Start
+		}
+		g.d.PluginsFile, g.n.PluginsFile = filepath.Join(t.TempDir(), "none.shcl"), filepath.Join(t.TempDir(), "none.shcl")
+		if err := start(context.Background(), StartMode{}); err == nil || !strings.Contains(g.out.String(), "not approved: paper-26.3-244.jar") {
+			t.Errorf("native %v, no list: err %v, output %q", native, err, g.out.String())
+		}
+	}
+
+	g := newRig(t)
+	g.d.DryRun = true
+	if err := os.MkdirAll(filepath.Join(g.dir, filepath.Dir(ext)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.dir, ext), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(g.d.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("jar: " + filepath.ToSlash(ext) + "\n\tsha256: " + empty + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
+	if last := g.r.Lines()[len(g.r.Ran)-1]; !strings.Contains(last, mount) {
+		t.Errorf("no read-only mount for the extension in %q", last)
 	}
 }

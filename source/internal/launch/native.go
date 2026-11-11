@@ -54,7 +54,10 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.checkSettings(); err != nil {
 		return err
 	}
-	// The plugin, firewall, and snapshot steps come with their own items.
+	if err := n.checkPlugins(); err != nil {
+		return err
+	}
+	// The firewall and snapshot steps come with their own items.
 	jars, err := lockedJars(n.Cfg.ServerDir)
 	if err != nil {
 		return err

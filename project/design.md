@@ -522,7 +522,7 @@ cicd/                        build, test, and release scripts
 
 - In Docker mode the container takes most of that away:
 	- It sees the server trees, and the image's files as read-only. The rest of the host's files aren't mounted.
-	- `paper.jar` and every plugin jar are mounted read-only on top of the tree, so the server can't change them while it runs.
+	- `paper.jar` and every plugin and Geyser extension jar are mounted read-only on top of the tree, so the server can't change them while it runs.
 	- It has its own process list, so it can't see or signal host processes.
 	- `--cap-drop ALL` and `no-new-privileges` mean a setuid program in the image can't give it root.
 	- The pid limit and the memory cap stop a runaway server from using up the host. When memory runs out anyway, `--oom-score-adj 1000` has the kernel kill the server before the desktop or other services.
@@ -541,7 +541,7 @@ cicd/                        build, test, and release scripts
 - Docker mode runs the container under the service account's uid and gid, with:
 	- `--read-only`, and a tmpfs on `/tmp`. The tmpfs allows exec, since Netty and other libraries extract native code there and load it.
 	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work.
-	- `paper.jar` and each plugin jar mounted read-only over their own paths.
+	- `paper.jar` and each plugin and Geyser extension jar mounted read-only over their own paths.
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
 	- `-i -t`, so the console works with `docker attach`.
@@ -551,7 +551,7 @@ cicd/                        build, test, and release scripts
 	- `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, and `NoNewPrivileges=yes`.
 	- Write access only to the trees in `ownerTrees`.
 	- An empty capability set, `MemoryMax`, and `TasksMax`. Swap is 0, the same as Docker mode, and so are `umask 0007` and `OOMScoreAdjust=1000`.
-	- `paper.jar` and each plugin jar read-only. They go to root too, but the server can write their folder, so without that it could swap one out.
+	- `paper.jar` and each plugin and Geyser extension jar read-only. They go to root too, but the server can write their folder, so without that it could swap one out.
 	- The tmux server on a socket under `/run/tt-minecraftd/`. It never uses the operator's tmux server.
 	- The unit is `tt-minecraftd-server.service`, since `tt-minecraftd.service` is the boot unit's name.
 	- `stop` waits up to `stopTimeout` for the unit to end. After that, `systemctl stop` sends SIGTERM, and systemd sends SIGKILL 30 seconds later.
@@ -564,7 +564,7 @@ cicd/                        build, test, and release scripts
 
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
 
-- In native mode, `paper.jar` and the plugin jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in Docker mode.
+- In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in Docker mode.
 
 - A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
 
@@ -625,8 +625,15 @@ cicd/                        build, test, and release scripts
 	- An entry with no hash, a bad hash, or a path outside `serverDir` gets a warning and is left out, so its jar counts as not approved. A source that isn't `https` is ignored, and the hash still counts.
 
 - `start` hashes every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and `paper.jar`. Extensions run with the same access as plugins. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
+	- `paper.jar` is checked as the build it links to, named by that build's path under `serverDir`, such as `paper-26.3-244.jar`. A `paper.jar` that links outside `serverDir` can't be approved, so it stops the start.
+	- With no approved list yet, every jar counts as new.
+	- `status` and `repair` run the same check.
 
-- `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
+- `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`, or a Geyser extension's `extension.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
+	- A Paper build that's refused stays where it is, still not approved, since moving it would only break `paper.jar`.
+	- When the answers run out, such as at the end of piped input, the jars not asked about yet stay where they are, not approved, and `repair` exits 1.
+	- It doesn't go with `--check`, since approving writes the list.
+	- The new hashes go into the list in place. Its comments, sources, and other entries stay as they were.
 
 - Plugins should come from known sources, such as Hangar, Modrinth, GeyserMC, or the author's own site. The tool can't judge a jar, but it does make sure a jar doesn't change without a person looking at it.
 
