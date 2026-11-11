@@ -214,11 +214,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
+	- Prereq IDs: 2026111112163174
 	- Requirements:
 		- `start` checks the settings listed in `design.md` and refuses when one is wrong. `repair` fixes them.
 		- Force online mode and the whitelist on. Force RCON, query, the management server, and the proxy settings off.
 		- Warn about an empty whitelist, and about more than 2 ops.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 
 - Plugin pinning
 	- ID: 2026111111065737
@@ -227,12 +228,13 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
+	- Prereq IDs: 2026111112163174
 	- Requirements:
 		- Keep the approved jars and their hashes in `/etc/tt-minecraftd/plugins.shcl`.
 		- `start` refuses when a jar is new or changed.
 		- `repair --approve-plugins` shows each one and asks.
 		- The server can't write to the jars while it runs.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 
 - console and cmd
 	- ID: 2026111111065750
@@ -241,11 +243,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
+	- Prereq IDs: 2026111112163174
 	- Requirements:
 		- `console` attaches to the server console, with detach keys that can't stop the server by accident.
 		- `cmd` sends one console command and prints what the server says back.
 		- Make both work in Docker and native modes, without RCON.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 
 - repair
 	- ID: 2026111111065763
@@ -281,13 +284,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
+	- Prereq IDs: 2026111112163174
 	- Requirements:
 		- Keep the tool's rules in its own nftables table, loaded by its own systemd unit, per `design.md`.
 		- Limit the game ports to `allowFrom`, with a rate limit per address.
 		- Drop the server's new outbound connections to loopback and the LAN. Allow DNS, and the web unless `egress` is `open`.
 		- `start` refuses to run when the table isn't loaded.
 		- `setup` and `repair` manage it. They never change ufw or firewalld rules.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 
 - update
 	- ID: 2026111111065803
@@ -296,12 +300,13 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: High
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
+	- Prereq IDs: 2026111112163174
 	- Requirements:
 		- Update the tool from GitHub releases.
 		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
 		- Update plugins that have a known source, and approve the new jars.
 		- Refresh the pinned container image.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 
 - Start at boot
 	- ID: 2026111111065816
