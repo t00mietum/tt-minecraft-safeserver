@@ -109,7 +109,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands
 	- ID: 2026111111065711
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -124,6 +124,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
 	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) waits on a hand test, and 2026111112163393 (status and watch) waits on a hand test.
+	- Test case: its children's: 2026111112162268: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn; 2026111112163174: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz; 2026111112163284: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6; 2026111112163393: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
+	- 20261111: children 2026111112163174 2026111112163284 2026111112163393 wait on UAT, and the rest are closed
 
 - Core commands: CLI, command runner, and tree hand-off
 	- ID: 2026111112162268
