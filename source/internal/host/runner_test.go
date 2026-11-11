@@ -60,3 +60,29 @@ func TestExecError(t *testing.T) {
 		t.Error("empty command ran")
 	}
 }
+
+// A command run as the service account goes through sudo -u, or runuser
+// when the tool is already root, since root may have no sudo.
+func TestExecAs(t *testing.T) {
+	defer testid.Line(t, "df5y0")
+	var out bytes.Buffer
+	e := &Exec{DryRun: true, Out: &out}
+	ctx := context.Background()
+	c := Cmd{Args: []string{"tmux", "send-keys", "-l", "--", "say hi"}, As: "minecraftd", Sudo: true}
+	if _, err := e.Run(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	e.Root = true
+	if _, err := e.Run(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	want := "would run: sudo -u minecraftd -- tmux send-keys -l -- 'say hi'\nwould run: runuser -u minecraftd -- tmux send-keys -l -- 'say hi'\n"
+	if out.String() != want {
+		t.Errorf("printed %q, want %q", out.String(), want)
+	}
+	f := &Fake{}
+	_, _ = f.Run(ctx, c) // a Fake with no Reply can't fail
+	if got := f.Lines()[0]; got != "sudo -u minecraftd -- tmux send-keys -l -- 'say hi'" {
+		t.Errorf("Lines = %q", got)
+	}
+}

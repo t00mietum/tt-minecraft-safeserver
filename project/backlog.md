@@ -123,7 +123,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` sends the `stop` console command first, with an optional countdown for the players.
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
-	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) and 2026111112163393 (status and watch) are Queued.
+	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) waits on a hand test, and 2026111112163393 (status and watch) is Queued.
 
 - Core commands: CLI, command runner, and tree hand-off
 	- ID: 2026111112162268
@@ -185,7 +185,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: native mode start and stop
 	- ID: 2026111112163284
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. No real unit was started here.
+	- Needs hand testing: start and stop a throwaway Paper server in native mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, the jars can't be written or swapped, and `systemctl show tt-minecraftd-server` lists the sandbox settings.
 	- Priority: High
 	- Opened: 20261111-121632
 	- Opened by: t00mietum
@@ -194,6 +196,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- `start` and `stop` in native mode: `systemd-run` with the sandbox options, and tmux on a socket under `/run/tt-minecraftd/`, per `design.md`.
 		- `paper.jar` and the plugin jars go to root at start.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: tmux `send-keys -l` drops a `;` that ends the text, and `-H 3b` sends it whole. The unit's settings pass `systemd-analyze verify`.
+	- Decisions:
+		- The unit is `tt-minecraftd-server.service`, since `tt-minecraftd.service` is the boot unit. It's `Type=forking`, since `tmux new-session -d` returns once the session is up. `--collect` drops it after a crash, so the next start can reuse the name.
+		- The jars also get `ReadOnlyPaths`, since the server can write their folder and could swap a root-owned jar. `OOMScoreAdjust=1000`, a swap of 0, and the pid limit match Docker mode. design.md updated.
+		- `$` in the server command goes as `$$`, since systemd expands variables there.
+		- "Is it up" is the unit's `ActiveState`. "Done loading" is a `logs/latest.log` that isn't the one from before the launch.
+		- `stop` past `stopTimeout` runs `systemctl stop`, with `TimeoutStopSec` set to the 30 seconds before SIGKILL.
+		- `--debug` attaches to tmux. A detach leaves the server and its trees as they are; an exit hands them back. `--foreground` checks the unit every 5 seconds.
+		- Console lines go through `tmux send-keys` as the service account, with `sudo -u`, or `runuser` when root. `host.Cmd` has an `As` field for it, which `console` and `cmd` can use too.
+		- Docker and native share the start and stop steps through `launch.Kit`. Docker's tests pass unchanged.
+		- 20261111: `TestMissingConfig` (df5xn) no longer expects `start --native --dry-run` to say it isn't built. `status` still does.
+		- Swept: every sudo goes through `host.Cmd`; both modes refuse others, count down, and hand back through `Kit`.
+	- Branch: r1111
+	- Test case: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6
 
 - Core commands: status and watch
 	- ID: 2026111112163393

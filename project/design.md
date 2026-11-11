@@ -543,8 +543,11 @@ cicd/                        build, test, and release scripts
 - Native mode runs Java in a tmux session, under a transient systemd unit that `systemd-run` starts. The unit runs as the service account, with:
 	- `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, and `NoNewPrivileges=yes`.
 	- Write access only to the trees in `ownerTrees`.
-	- An empty capability set, `MemoryMax`, and `TasksMax`.
+	- An empty capability set, `MemoryMax`, and `TasksMax`. Swap is 0, the same as Docker mode, and so are `umask 0007` and `OOMScoreAdjust=1000`.
+	- `paper.jar` and each plugin jar read-only. They go to root too, but the server can write their folder, so without that it could swap one out.
 	- The tmux server on a socket under `/run/tt-minecraftd/`. It never uses the operator's tmux server.
+	- The unit is `tt-minecraftd-server.service`, since `tt-minecraftd.service` is the boot unit's name.
+	- `stop` waits up to `stopTimeout` for the unit to end. After that, `systemctl stop` sends SIGTERM, and systemd sends SIGKILL 30 seconds later.
 
 ### Tree ownership
 

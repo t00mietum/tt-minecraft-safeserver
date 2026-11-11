@@ -103,25 +103,24 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		// Each command's own item builds it. Until then it says so.
 		return fmt.Errorf("%s isn't built yet", name)
 	}
-	if inv.cfg.RunMode != "docker" {
-		return fmt.Errorf("%s: %s mode isn't built yet", name, inv.cfg.RunMode)
-	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
-	d := &launch.Docker{
-		Run:     runner,
-		Console: launch.DockerConsole{Socket: launch.DockerSocket(), Container: launch.Container, DryRun: inv.opts.dryRun, Out: stdout},
-		Cfg:     &inv.cfg,
-		Out:     stdout,
-		Root:    runner.Root,
-		DryRun:  inv.opts.dryRun,
-		Sleep:   time.Sleep,
-		IDs:     launch.HostIDs,
+	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
+	var srv interface {
+		Start(ctx context.Context, mode launch.StartMode) error
+		Stop(ctx context.Context, warn int) error
+	}
+	if inv.cfg.RunMode == "native" {
+		kit.Console = launch.TmuxConsole{Run: runner, User: inv.cfg.RunUser}
+		srv = &launch.Native{Kit: kit}
+	} else {
+		kit.Console = launch.DockerConsole{Socket: launch.DockerSocket(), Container: launch.Container, DryRun: inv.opts.dryRun, Out: stdout}
+		srv = &launch.Docker{Kit: kit, IDs: launch.HostIDs}
 	}
 	if name == "stop" {
-		return d.Stop(ctx, inv.opts.warn)
+		return srv.Stop(ctx, inv.opts.warn)
 	}
-	return d.Start(ctx, launch.StartMode{Debug: inv.opts.debug, Foreground: inv.opts.foreground})
+	return srv.Start(ctx, launch.StartMode{Debug: inv.opts.debug, Foreground: inv.opts.foreground})
 }
 
 // commonFlags is called twice, before the command and after it, so a value

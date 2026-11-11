@@ -66,9 +66,8 @@ func newRig(t *testing.T) *rig {
 	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir}
 	g.r.Reply = g.reply
 	g.d = &Docker{
-		Run: g.r, Console: g.console, Cfg: &cfg, Out: g.out,
-		Sleep: func(d time.Duration) { g.slept += d },
-		IDs:   func(string, string) (string, string, error) { return "990", "991", nil },
+		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
+		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
 }

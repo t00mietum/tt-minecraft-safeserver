@@ -8,14 +8,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
@@ -32,13 +29,7 @@ const killGrace = 30
 
 // Docker runs the server in a container. See design.md, Run modes.
 type Docker struct {
-	Run     host.Runner
-	Console Console
-	Cfg     *config.Config
-	Out     io.Writer
-	Root    bool
-	DryRun  bool
-	Sleep   func(time.Duration)
+	Kit
 	// IDs gives the uid and gid for --user, since the image doesn't know the
 	// host's names.
 	IDs func(userName, groupName string) (uid, gid string, err error)
@@ -63,24 +54,6 @@ func HostIDs(userName, groupName string) (string, string, error) {
 	return u.Uid, g.Gid, nil
 }
 
-func (d *Docker) say(format string, a ...any) {
-	fmt.Fprintf(d.Out, format+"\n", a...)
-}
-
-func (d *Docker) warn(warns []string) {
-	for _, w := range warns {
-		d.say("warning: %s", w)
-	}
-}
-
-func (d *Docker) sudoUp(ctx context.Context) error {
-	if d.Root {
-		return nil
-	}
-	_, err := d.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Tty: true})
-	return err
-}
-
 // state is the container's state, such as running or exited, or "" when
 // there's no container.
 func (d *Docker) state(ctx context.Context) (string, error) {
@@ -92,12 +65,8 @@ func (d *Docker) state(ctx context.Context) (string, error) {
 
 // Start runs design.md's start steps that are built so far.
 func (d *Docker) Start(ctx context.Context, mode StartMode) error {
-	ps, err := d.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"ps", "-eo", "user=,pid=,args="}})
-	if err != nil {
+	if err := d.refuseOthers(ctx); err != nil {
 		return err
-	}
-	if found := server.RunningPaper(ps); len(found) > 0 {
-		return fmt.Errorf("a Paper server is already running (%s); stop it first", strings.Join(found, "; "))
 	}
 	if !mode.Foreground {
 		if err := d.sudoUp(ctx); err != nil {
@@ -139,7 +108,7 @@ func (d *Docker) Start(ctx context.Context, mode StartMode) error {
 	if d.DryRun {
 		return nil
 	}
-	if err := d.waitLoaded(ctx); err != nil {
+	if err := d.waitLoaded(ctx, d); err != nil {
 		return err
 	}
 	if !mode.Foreground {
@@ -151,29 +120,27 @@ func (d *Docker) Start(ctx context.Context, mode StartMode) error {
 	return d.handBack(ctx)
 }
 
-func (d *Docker) waitLoaded(ctx context.Context) error {
-	d.say("Waiting for the server to load, up to %s.", d.Cfg.StartTimeout)
-	for range int(d.Cfg.StartTimeout / time.Second) {
-		log, err := d.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"docker", "logs", Container}})
-		if err != nil {
-			return err
-		}
-		if server.Loaded(log) {
-			d.say("The server is up.")
-			return nil
-		}
-		state, err := d.state(ctx)
-		if err != nil {
-			return err
-		}
-		if state != "running" {
-			tail, _ := d.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"docker", "logs", "--tail", "20", Container}}) // the exit is the error worth showing
-			d.say("%s", strings.TrimRight(string(tail), "\n"))
-			return errors.New("the server exited while loading")
-		}
-		d.Sleep(time.Second)
-	}
-	return fmt.Errorf("the server didn't finish loading in %s; it's still running, so see status or docker logs %s", d.Cfg.StartTimeout, Container)
+func (d *Docker) running(ctx context.Context) (bool, error) {
+	state, err := d.state(ctx)
+	return state == "running", err
+}
+
+func (d *Docker) log(ctx context.Context) ([]byte, error) {
+	return d.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"docker", "logs", Container}})
+}
+
+func (d *Docker) tail(ctx context.Context) []byte {
+	tail, _ := d.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"docker", "logs", "--tail", "20", Container}}) // the exit is the error worth showing
+	return tail
+}
+
+func (d *Docker) logHint() string {
+	return "docker logs " + Container
+}
+
+func (d *Docker) kill(ctx context.Context) error {
+	_, err := d.Run.Run(ctx, host.Cmd{Args: []string{"docker", "stop", "--time", strconv.Itoa(killGrace), Container}})
+	return err
 }
 
 // runArgs builds the docker run command. See design.md, Run modes.
@@ -262,78 +229,5 @@ func lockedJars(serverDir string) ([]string, error) {
 // Stop runs design.md's stop steps that are built so far. warn is the
 // countdown for the players, in seconds.
 func (d *Docker) Stop(ctx context.Context, warn int) error {
-	state, err := d.state(ctx)
-	if err != nil {
-		return err
-	}
-	if err := d.sudoUp(ctx); err != nil {
-		return err
-	}
-	if state != "running" {
-		d.say("The server isn't running.")
-		return d.handBack(ctx)
-	}
-	if err := d.countDown(ctx, warn); err != nil {
-		return err
-	}
-	if err := d.Console.Send(ctx, "stop"); err != nil {
-		return err
-	}
-	if !d.DryRun {
-		if err := d.waitStopped(ctx); err != nil {
-			return err
-		}
-	}
-	return d.handBack(ctx)
-}
-
-// countDown tells the players at the start, then at each mark below it.
-func (d *Docker) countDown(ctx context.Context, warn int) error {
-	if warn <= 0 {
-		return nil
-	}
-	marks := []int{warn}
-	for _, m := range []int{60, 30, 10, 5, 4, 3, 2, 1} {
-		if m < warn {
-			marks = append(marks, m)
-		}
-	}
-	marks = append(marks, 0)
-	for i, m := range marks[:len(marks)-1] {
-		unit := "seconds"
-		if m == 1 {
-			unit = "second"
-		}
-		if err := d.Console.Send(ctx, fmt.Sprintf("say The server stops in %d %s.", m, unit)); err != nil {
-			return err
-		}
-		if !d.DryRun {
-			d.Sleep(time.Duration(m-marks[i+1]) * time.Second)
-		}
-	}
-	return nil
-}
-
-func (d *Docker) waitStopped(ctx context.Context) error {
-	d.say("Waiting for the server to save and stop, up to %s.", d.Cfg.StopTimeout)
-	for range int(d.Cfg.StopTimeout / time.Second) {
-		state, err := d.state(ctx)
-		if err != nil {
-			return err
-		}
-		if state != "running" {
-			d.say("The server stopped.")
-			return nil
-		}
-		d.Sleep(time.Second)
-	}
-	d.say("The server is still up after %s; sending SIGTERM.", d.Cfg.StopTimeout)
-	_, err := d.Run.Run(ctx, host.Cmd{Args: []string{"docker", "stop", "--time", strconv.Itoa(killGrace), Container}})
-	return err
-}
-
-func (d *Docker) handBack(ctx context.Context) error {
-	warns, err := tree.ToOperator(ctx, d.Run, d.Cfg)
-	d.warn(warns)
-	return err
+	return d.stop(ctx, d, warn)
 }

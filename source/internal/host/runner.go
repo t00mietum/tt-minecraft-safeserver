@@ -19,6 +19,9 @@ type Cmd struct {
 	Args []string
 	// Sudo runs it through sudo, unless the tool already runs as root.
 	Sudo bool
+	// As runs it as that account instead, through sudo -u, or runuser when
+	// the tool is root.
+	As string
 	// Look marks a command that only reads state, such as docker ps. It still
 	// runs under dry run, so the plan printed matches what a real run would do.
 	Look bool
@@ -50,7 +53,12 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 		return nil, fmt.Errorf("empty command")
 	}
 	argv := c.Args
-	if c.Sudo && !e.Root {
+	switch {
+	case c.As != "" && e.Root:
+		argv = append([]string{"runuser", "-u", c.As, "--"}, argv...)
+	case c.As != "":
+		argv = append([]string{"sudo", "-u", c.As, "--"}, argv...)
+	case c.Sudo && !e.Root:
 		argv = append([]string{"sudo"}, argv...)
 	}
 	if e.DryRun && !c.Look {
@@ -112,7 +120,10 @@ func (f *Fake) Lines() []string {
 	lines := make([]string, 0, len(f.Ran))
 	for _, c := range f.Ran {
 		s := Quote(c.Args)
-		if c.Sudo {
+		switch {
+		case c.As != "":
+			s = "sudo -u " + c.As + " -- " + s
+		case c.Sudo:
 			s = "sudo " + s
 		}
 		lines = append(lines, s)
