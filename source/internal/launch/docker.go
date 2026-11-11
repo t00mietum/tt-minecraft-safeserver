@@ -77,7 +77,10 @@ func (d *Docker) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 	}
-	// The safe settings, plugin, firewall, and snapshot steps come with their own items.
+	if err := d.checkSettings(); err != nil {
+		return err
+	}
+	// The plugin, firewall, and snapshot steps come with their own items.
 	args, err := d.runArgs(mode)
 	if err != nil {
 		return err

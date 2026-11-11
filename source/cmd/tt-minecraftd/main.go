@@ -24,6 +24,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 )
 
@@ -48,6 +49,7 @@ type options struct {
 	foreground bool
 	warn       int
 	interval   int
+	check      bool
 }
 
 type command struct {
@@ -69,6 +71,9 @@ var commands = []command{
 	{"stop", "Stop the server and hand the trees back", func(fs *flag.FlagSet, o *options) {
 		fs.IntVar(&o.warn, "warn", 0, "Count down `N` seconds for the players first")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the commands that would change something, and run none of them")
+	}},
+	{"repair", "Check the setup, and fix what's wrong", func(fs *flag.FlagSet, o *options) {
+		fs.BoolVar(&o.check, "check", false, "Only report, and change nothing. Doesn't need root")
 	}},
 	{"status", "Show what the server is doing", func(*flag.FlagSet, *options) {}},
 	{"watch", "Redraw status every few seconds, until Ctrl-C", func(fs *flag.FlagSet, o *options) {
@@ -115,6 +120,9 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		}
 		return watch(ctx, probe, stdout, time.Duration(inv.opts.interval)*time.Second)
 	}
+	if name == "repair" {
+		return repair(inv, stdout, os.Geteuid() == 0)
+	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
 	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
@@ -133,6 +141,44 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		return srv.Stop(ctx, inv.opts.warn)
 	}
 	return srv.Start(ctx, launch.StartMode{Debug: inv.opts.debug, Foreground: inv.opts.foreground})
+}
+
+// repair runs design.md's repair checks that are built so far. Each one prints
+// OK, FIXED, or FAILED.
+func repair(inv invocation, w io.Writer, root bool) error {
+	if !inv.opts.check && !root {
+		return errors.New("repair needs root to fix things; run it with sudo, or add --check to only report")
+	}
+	failed := false
+	report := func(state, text string) {
+		fmt.Fprintf(w, "%-7s %s\n", state, text)
+		failed = failed || state == "FAILED"
+	}
+	check := settings.Fix
+	if inv.opts.check {
+		check = settings.Check
+	}
+	problems, err := check(&inv.cfg)
+	switch {
+	case err != nil:
+		report("FAILED", "safe settings: "+err.Error())
+	case len(problems) == 0:
+		report("OK", "safe settings")
+	}
+	for _, p := range problems {
+		if inv.opts.check {
+			report("FAILED", p.String())
+		} else {
+			report("FIXED", p.Fixed())
+		}
+	}
+	for _, warn := range settings.Warnings(inv.cfg.ServerDir) {
+		fmt.Fprintf(w, "warning: %s\n", warn)
+	}
+	if failed {
+		return errors.New("not everything is in place")
+	}
+	return nil
 }
 
 // watch redraws status until Ctrl-C. On a terminal each redraw replaces the

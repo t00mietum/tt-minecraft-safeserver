@@ -8,7 +8,6 @@ package status
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +27,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 )
 
 // BootUnit is the unit that runs start --foreground at boot.
@@ -293,30 +293,8 @@ func portLines(ss []byte, proto string, port int) []Line {
 	return []Line{{"", text}}
 }
 
-// player is one entry in whitelist.json or ops.json.
-type player struct {
-	Name string `json:"name"`
-}
-
-func (p *Probe) players(file string) ([]player, error) {
-	f, err := openRegular(filepath.Join(p.Cfg.ServerDir, file))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxList))
-	if err != nil {
-		return nil, err
-	}
-	var list []player
-	if err := json.Unmarshal(b, &list); err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
-	}
-	return list, nil
-}
-
 func (p *Probe) whitelist() Line {
-	list, err := p.players("whitelist.json")
+	list, err := settings.ReadPlayers(p.Cfg.ServerDir, "whitelist.json")
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return Line{"Whitelist", "no whitelist.json yet"}
@@ -327,7 +305,7 @@ func (p *Probe) whitelist() Line {
 }
 
 func (p *Probe) ops() Line {
-	list, err := p.players("ops.json")
+	list, err := settings.ReadPlayers(p.Cfg.ServerDir, "ops.json")
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return Line{"Ops", "none"}
@@ -427,9 +405,6 @@ func (p *Probe) log() []Line {
 	}
 	return lines
 }
-
-// maxList caps what's read of whitelist.json or ops.json.
-const maxList = 8 << 20
 
 // openRegular opens a file in the server tree for reading. The server owns
 // the tree, so it could swap a file for a pipe or a device, to hang status or

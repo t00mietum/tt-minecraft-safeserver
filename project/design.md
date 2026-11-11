@@ -586,10 +586,17 @@ cicd/                        build, test, and release scripts
 | `server.properties` | `hide-online-players`             | from `hideOnlinePlayers`
 | `spigot.yml`        | `settings.bungeecord`             | `false`
 | `paper-global.yml`  | `proxies.velocity.enabled`        | `false`
+| `paper-global.yml`  | `proxies.proxy-protocol`          | `false`
 | Geyser `config.yml` | `bedrock.address`, `bedrock.port` | from `bindIP` and `bedrockPort`
 | Geyser `config.yml` | `auth-type`                       | `floodgate`
 
 - With online mode off, anyone can join under any name, including an op's. With a proxy setting on, anyone who connects to the backend directly can claim to be anyone. Those 2 are the most common ways servers get taken over.
+
+- With `proxy-protocol` on, anyone who connects directly can claim any address, and get around IP bans and the rate limit. See [Needs more thought](#needs-more-thought) for tunnels.
+
+- A missing `server.properties` counts as wrong, since Minecraft's own defaults have the whitelist off, and `repair` writes one. A YAML file or key that's missing is fine, since each of those defaults to off.
+
+- The server account can write the tree. So a settings file that's a link, or isn't a plain file, is refused, and `repair` puts a new file in place of the old one rather than writing into it.
 
 - An empty whitelist with `white-list` on locks everyone out. `setup` and `repair` warn about that, and print the `cmd` lines that add players.
 
@@ -751,6 +758,7 @@ cicd/                        build, test, and release scripts
 - Consoles can't join over the internet yet, since Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
 
 - Behind a tunnel, every player shows up as coming from localhost, unless the tunnel supports the PROXY protocol. IP bans and the per-address rate limit then don't work.
+	- `proxy-protocol` is forced off for now. Turning it on safely needs the firewall to let only the tunnel's agent reach `gamePort`.
 
 - Hot backups while the server runs, with `save-off` and `save-all flush` through `cmd`, then a snapshot, then `save-on`. That would help a server that runs for weeks without a stop.
 

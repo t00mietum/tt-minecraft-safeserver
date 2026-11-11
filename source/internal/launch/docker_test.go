@@ -16,6 +16,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -63,6 +64,12 @@ func newRig(t *testing.T) *rig {
 	cfg.RunGroup, cfg.OwnerAfterStop = "minecraftd", "alice"
 	cfg.HeapMin, cfg.MemCap = 1<<30, 6<<30
 	cfg.StartTimeout, cfg.StopTimeout = 5*time.Second, 3*time.Second
+	if _, err := settings.Fix(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "whitelist.json"), []byte(`[{"uuid": "5e0c6c7f-4d0a-4d1e-9a0e-4b9e3c2f1a01", "name": "Steve"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir}
 	g.r.Reply = g.reply
 	g.d = &Docker{
@@ -287,3 +294,44 @@ func TestDockerStopEdges(t *testing.T) {
 type failConsole struct{}
 
 func (failConsole) Send(context.Context, string) error { return errors.New("no socket") }
+
+// An unsafe setting stops a start in either mode, after sudo and before
+// anything changes. A likely mistake only warns.
+func TestStartChecksSettings(t *testing.T) {
+	defer testid.Line(t, "df5yj")
+	for _, native := range []bool{false, true} {
+		g := newNativeRig(t)
+		start := g.d.Start
+		if native {
+			start = g.n.Start
+		}
+		props := filepath.Join(g.dir, "server.properties")
+		text, err := os.ReadFile(props)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(props, []byte(strings.Replace(string(text), "white-list=true", "white-list=false", 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err = start(context.Background(), StartMode{})
+		if err == nil || !strings.Contains(err.Error(), "repair") || len(g.changes()) != 1 || !strings.Contains(g.out.String(), "white-list is \"false\"") {
+			t.Errorf("native %v: err %v, ran %q, output %q", native, err, g.changes(), g.out.String())
+		}
+
+		g = newNativeRig(t)
+		start = g.d.Start
+		if native {
+			start = g.n.Start
+		}
+		g.n.DryRun, g.d.DryRun = true, true
+		if err := os.WriteFile(filepath.Join(g.dir, "whitelist.json"), []byte("[]"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := start(context.Background(), StartMode{}); err != nil && strings.Contains(err.Error(), "safe settings") {
+			t.Errorf("native %v, empty whitelist: %v", native, err)
+		}
+		if !strings.Contains(g.out.String(), "warning: the whitelist is empty") {
+			t.Errorf("native %v, empty whitelist: output %q", native, g.out.String())
+		}
+	}
+}

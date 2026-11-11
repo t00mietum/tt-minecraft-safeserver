@@ -14,6 +14,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
 
@@ -71,6 +72,23 @@ func (k *Kit) refuseOthers(ctx context.Context) error {
 		return fmt.Errorf("a Paper server is already running (%s); stop it first", strings.Join(found, "; "))
 	}
 	return nil
+}
+
+// checkSettings refuses a start when a safe setting is off, and warns about
+// what's allowed but likely a mistake.
+func (k *Kit) checkSettings() error {
+	k.warn(settings.Warnings(k.Cfg.ServerDir))
+	problems, err := settings.Check(k.Cfg)
+	if err != nil {
+		return fmt.Errorf("can't check the safe settings: %w", err)
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	for _, p := range problems {
+		k.say("unsafe: %s", p)
+	}
+	return errors.New("the safe settings aren't in place; sudo tt-minecraftd repair sets them")
 }
 
 func (k *Kit) waitLoaded(ctx context.Context, e engine) error {

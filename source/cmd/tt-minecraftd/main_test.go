@@ -163,3 +163,36 @@ func TestWatch(t *testing.T) {
 		t.Errorf("no status in:\n%s", out.String())
 	}
 }
+
+// repair fixes the safe settings as root, and --check only reports, without
+// root. Either one exits 1 while something is wrong.
+func TestRepair(t *testing.T) {
+	defer testid.Line(t, "df5ys")
+	noDefaultConfig(t)
+	dir := t.TempDir()
+	set := "--set=serverDir=" + dir
+	code, _, msg := runArgs("repair", set)
+	if os.Geteuid() != 0 && (code != exitError || !strings.Contains(msg, "needs root")) {
+		t.Errorf("not root: exit %d, stderr %q", code, msg)
+	}
+	code, out, _ := runArgs("repair", "--check", set)
+	if code != exitError || !strings.Contains(out, "FAILED  server.properties: white-list isn't set") || !strings.Contains(out, "warning: the whitelist is empty") {
+		t.Errorf("--check: exit %d, stdout %q", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
+		t.Error("--check wrote server.properties")
+	}
+
+	inv, _, done := prepare([]string{"repair", set}, &bytes.Buffer{}, &bytes.Buffer{})
+	if done {
+		t.Fatal("prepare stopped")
+	}
+	var b bytes.Buffer
+	if err := repair(inv, &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
+		t.Errorf("as root: %v, %q", err, b.String())
+	}
+	code, out, _ = runArgs("repair", "--check", set)
+	if code != exitOK || !strings.HasPrefix(out, "OK      safe settings\n") {
+		t.Errorf("after fix: exit %d, stdout %q", code, out)
+	}
+}

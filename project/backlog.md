@@ -259,6 +259,35 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Force online mode and the whitelist on. Force RCON, query, the management server, and the proxy settings off.
 		- Warn about an empty whitelist, and about more than 2 ops.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Split: the Geyser rows are in child 2026111112554261, which is Queued. The rest is done.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: `start` checks `server.properties`, `spigot.yml`, and `paper-global.yml` in both modes, and refuses with the setting named. `repair` sets them, and `repair --check` only reports. The whitelist and ops warnings show at `start` and `repair`.
+		- Verified: each new test fails with its check broken, and passes with it in place.
+	- Decisions:
+		- `proxies.proxy-protocol` is forced off too, as a proxy setting. design.md updated, with a note under Needs more thought for tunnels.
+		- A missing `server.properties` is unsafe, since Minecraft's defaults have the whitelist off. `repair` writes one. A missing YAML file or key is fine, since each defaults to off.
+		- Booleans compare without case, as Java reads them. A fix changes only the wrong lines, and keeps comments, order, owner, and mode.
+		- Files are opened without following links, and a fix writes a new file and renames it into place, since the server account can write the tree and `repair` runs as root.
+		- `repair` is only the safe settings check so far. The repair item adds the rest. It refuses without root unless `--check` is given.
+		- `status` now reads the whitelist and ops through the same code.
+		- The empty whitelist warning names `tt-minecraftd cmd whitelist add`, per design.md, though `cmd` comes with its own item.
+		- Swept: both modes call the check through `Kit`; `status` and the warnings share one player reader.
+	- Branch: r1111
+	- Test case: df5yj, df5yk, df5ym, df5yn, df5yp, df5yq, df5yr, df5ys
+
+- Safe server settings: Geyser config
+	- ID: 2026111112554261
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-125542
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065724
+	- Requirements:
+		- With `bedrock` on, `start` checks Geyser's `config.yml` and `repair` sets it: `bedrock.address` and `bedrock.port` from `bindIP` and `bedrockPort`, and `auth-type` set to `floodgate`, per `design.md`.
+		- Check the key names against the Geyser build in use, since its config layout has changed between versions. `auth-type` has sat at the top level, under `remote:`, and under `java:`.
+		- Use the YAML and file code in `source/internal/settings`.
 
 - Plugin pinning
 	- ID: 2026111111065737
