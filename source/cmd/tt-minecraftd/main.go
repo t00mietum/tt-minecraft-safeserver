@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -13,14 +14,17 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 )
 
 // version is set at release with -ldflags "-X main.version=...".
@@ -77,6 +81,8 @@ type invocation struct {
 	cmd  *command
 	opts options
 	cfg  config.Config
+	// configPath is the file the config came from, or would have.
+	configPath string
 }
 
 func main() {
@@ -99,9 +105,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	name := inv.cmd.name
-	if name != "start" && name != "stop" {
-		// Each command's own item builds it. Until then it says so.
-		return fmt.Errorf("%s isn't built yet", name)
+	if name == "status" || name == "watch" {
+		runner := host.NewExec(false)
+		runner.QuietErr = true
+		probe := status.NewProbe(runner, &inv.cfg, filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl"))
+		if name == "status" {
+			width, _ := terminal(stdout)
+			return probe.Take(ctx).Write(stdout, width)
+		}
+		return watch(ctx, probe, stdout, time.Duration(inv.opts.interval)*time.Second)
 	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
@@ -121,6 +133,45 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		return srv.Stop(ctx, inv.opts.warn)
 	}
 	return srv.Start(ctx, launch.StartMode{Debug: inv.opts.debug, Foreground: inv.opts.foreground})
+}
+
+// watch redraws status until Ctrl-C. On a terminal each redraw replaces the
+// last one; elsewhere they follow one another.
+func watch(ctx context.Context, probe *status.Probe, w io.Writer, every time.Duration) error {
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		width, tty := terminal(w)
+		var b bytes.Buffer
+		if tty {
+			b.WriteString("\x1b[H\x1b[2J")
+		}
+		fmt.Fprintf(&b, "\nEvery %s, until Ctrl-C. %s\n", every, time.Now().Format("15:04:05"))
+		if err := probe.Take(ctx).Write(&b, width); err != nil {
+			return err
+		}
+		if _, err := w.Write(b.Bytes()); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+// terminal gives the width of w, and whether it's a terminal at all.
+func terminal(w io.Writer) (width int, ok bool) {
+	f, isFile := w.(*os.File)
+	if !isFile {
+		return 0, false
+	}
+	var ws struct{ rows, cols, x, y uint16 }
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws))); errno != 0 { // #nosec G103 -- TIOCGWINSZ fills the struct at that address
+		return 0, false
+	}
+	return int(ws.cols), true
 }
 
 // commonFlags is called twice, before the command and after it, so a value
@@ -207,6 +258,10 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		return usageErr("watch: --interval takes 1 or more seconds")
 	}
 	inv.opts = o
+	inv.configPath = o.configPath
+	if inv.configPath == "" {
+		inv.configPath = defaultConfig
+	}
 
 	cfg, warns, err := loadConfig(o, stderr)
 	var pathErr *fs.PathError

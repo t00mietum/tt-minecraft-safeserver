@@ -5,11 +5,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -134,9 +139,27 @@ func TestMissingConfig(t *testing.T) {
 	if code != exitError || !strings.Contains(msg, "nope.shcl") {
 		t.Errorf("--config missing: exit %d, stderr %q; want %d", code, msg, exitError)
 	}
-	for _, args := range [][]string{{"status"}} {
-		if code, _, msg := runArgs(args...); code != exitError || !strings.Contains(msg, "isn't built yet") {
-			t.Errorf("%q: exit %d, stderr %q", args, code, msg)
-		}
+	if inv.configPath != defaultConfig {
+		t.Errorf("configPath = %q, want the default", inv.configPath)
+	}
+}
+
+// watch redraws until Ctrl-C, and sends no screen codes to a file or pipe.
+func TestWatch(t *testing.T) {
+	defer testid.Line(t, "df5yg")
+	cfg := config.Defaults()
+	cfg.ServerDir, cfg.OwnerTrees = t.TempDir(), nil
+	probe := status.NewProbe(&host.Fake{}, &cfg, filepath.Join(t.TempDir(), "plugins.shcl"))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	var out bytes.Buffer
+	if err := watch(ctx, probe, &out, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out.String(), "Every 10ms, until Ctrl-C."); n < 2 || strings.Contains(out.String(), "\x1b") {
+		t.Errorf("%d redraws, or a screen code:\n%s", n, out.String())
+	}
+	if !strings.Contains(out.String(), "Server:     not running in docker mode\n") {
+		t.Errorf("no status in:\n%s", out.String())
 	}
 }

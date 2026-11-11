@@ -199,11 +199,16 @@ func (n *Native) state(ctx context.Context) (string, error) {
 
 func (n *Native) running(ctx context.Context) (bool, error) {
 	state, err := n.state(ctx)
+	return UnitUp(state), err
+}
+
+// UnitUp says whether an ActiveState means the server's process is there.
+func UnitUp(state string) bool {
 	switch state {
 	case "active", "activating", "deactivating", "reloading", "refreshing":
-		return true, err
+		return true
 	}
-	return false, err
+	return false
 }
 
 func (n *Native) latestLog() string {

@@ -41,6 +41,9 @@ type Exec struct {
 	Root   bool
 	Out    io.Writer
 	Err    io.Writer
+	// QuietErr keeps a failed command's stderr off the terminal, and puts
+	// its first line in the error instead, as watch needs to redraw cleanly.
+	QuietErr bool
 }
 
 // NewExec gives a runner on the process's own stdout and stderr.
@@ -75,8 +78,15 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 		}
 		return nil, nil
 	}
+	var errText strings.Builder
+	if e.QuietErr {
+		cmd.Stderr = &errText
+	}
 	out, err := cmd.Output()
 	if err != nil {
+		if first, _, _ := strings.Cut(strings.TrimSpace(errText.String()), "\n"); first != "" {
+			return out, fmt.Errorf("%s: %w: %s", Quote(argv), err, first)
+		}
 		return out, fmt.Errorf("%s: %w", Quote(argv), err)
 	}
 	return out, nil

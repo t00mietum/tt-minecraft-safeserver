@@ -54,13 +54,17 @@ func HostIDs(userName, groupName string) (string, string, error) {
 	return u.Uid, g.Gid, nil
 }
 
-// state is the container's state, such as running or exited, or "" when
-// there's no container.
-func (d *Docker) state(ctx context.Context) (string, error) {
-	out, err := d.Run.Run(ctx, host.Cmd{Look: true, Args: []string{
+// ContainerState is the container's state, such as running or exited, or ""
+// when there's no container.
+func ContainerState(ctx context.Context, r host.Runner) (string, error) {
+	out, err := r.Run(ctx, host.Cmd{Look: true, Args: []string{
 		"docker", "ps", "--all", "--filter", "name=^" + Container + "$", "--filter", "label=" + Container, "--format", "{{.State}}",
 	}})
 	return strings.TrimSpace(string(out)), err
+}
+
+func (d *Docker) state(ctx context.Context) (string, error) {
+	return ContainerState(ctx, d.Run)
 }
 
 // Start runs design.md's start steps that are built so far.

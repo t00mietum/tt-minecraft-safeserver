@@ -189,6 +189,12 @@ Common:  --config PATH, --set KEY=VALUE
 	- Who owns the trees, and whether the boot unit is enabled.
 	- The last lines of the log, cut to the terminal width.
 
+- When the server isn't running, `status` names any other Paper server that is, such as one the old scripts started.
+
+- A part that can't be read, such as a file the operator's group can't see, says why, and the rest still shows.
+
+- The log is `logs/latest.log` in both modes, since the container sees the same tree. Files in the tree that aren't plain files, such as a pipe the server left there, aren't read.
+
 - `watch` redraws `status` every few seconds until Ctrl-C.
 
 ### console and cmd
@@ -424,6 +430,7 @@ cicd/                        build, test, and release scripts
 	- When the default file is missing, as before `setup`, the defaults are used with a warning. A missing `--config` file is an error.
 
 - The approved plugin list is `/etc/tt-minecraftd/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
+	- It sits beside the config, so a second config given with `--config` gets its own list.
 
 - Settings come from the defaults in the table below, then the file, then the command line. `--native` sets `runMode`, and `--set` sets any key.
 	- A key whose default comes from another one, such as `runGroup`, follows that key wherever it was set.

@@ -123,7 +123,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` sends the `stop` console command first, with an optional countdown for the players.
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
-	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) waits on a hand test, and 2026111112163393 (status and watch) is Queued.
+	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) waits on a hand test, and 2026111112163393 (status and watch) waits on a hand test.
 
 - Core commands: CLI, command runner, and tree hand-off
 	- ID: 2026111112162268
@@ -216,7 +216,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: status and watch
 	- ID: 2026111112163393
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. The ping was checked against a stand-in server only, not a real Paper.
+	- Needs hand testing: run `status` and `watch` beside the throwaway Paper server from the Docker and native hand tests. Version, players, memory, ports, and the log tail show, and Ctrl-C ends `watch`.
 	- Priority: High
 	- Opened: 20261111-121633
 	- Opened by: t00mietum
@@ -224,6 +226,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq IDs: 2026111112163174
 	- Requirements:
 		- `status` and `watch`, per `design.md`. Parts that need a later item, such as the firewall counters, show as not set up yet.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against a throwaway container named for the tool, `status` showed it running, its account, its time up, and its memory from the cgroup, then exited once stopped.
+	- Decisions:
+		- Players and the version come from a server list ping on `bindIP`, or 127.0.0.1 when it's all addresses. The Paper build comes from the jar `paper.jar` links to, so it shows when stopped too.
+		- Memory is the cgroup's `memory.current`: the container's, found through its pid, or the unit's `MemoryCurrent`. Both work without sudo.
+		- Ports come from `ss`, which can't name another account's process without root, so it shows the address that listens and the TCP connection count.
+		- The log is `logs/latest.log` in both modes, since `docker logs` of a terminal holds escape codes. Control characters are dropped from it and from op names.
+		- The server owns the tree, so files that aren't plain files are not read, and a jar that's a pipe or a device counts as changed. design.md updated.
+		- The plugin check is `plugins.CheckJars`, for `start`'s check to reuse. `watch` hashes a jar again only when its size or time changes.
+		- The approved list is read from beside the config, so a second `--config` gets its own. design.md updated.
+		- A part that can't be read says why, and the rest still shows. Exit 0, since `status` ran. A failed command's stderr goes into its line, not over the screen, through `host.Exec.QuietErr`.
+		- No color yet. design.md allows it on a terminal only, and nothing needs it.
+		- 20261111: `TestMissingConfig` (df5xn) no longer expects `status` to say it isn't built. It checks the config path `status` reads beside instead.
+		- Swept: every file read from the tree goes through `openRegular` or `Sums.Sum`; both modes judge "running" through the same calls as `start`, `launch.ContainerState` and `launch.UnitUp`.
+	- Branch: r1111
+	- Test case: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
 
 - Safe server settings
 	- ID: 2026111111065724

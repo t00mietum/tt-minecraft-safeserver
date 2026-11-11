@@ -86,3 +86,18 @@ func TestExecAs(t *testing.T) {
 		t.Errorf("Lines = %q", got)
 	}
 }
+
+// QuietErr keeps stderr off the terminal and puts it in the error.
+func TestExecQuietErr(t *testing.T) {
+	defer testid.Line(t, "df5yf")
+	var errOut bytes.Buffer
+	e := &Exec{Err: &errOut, QuietErr: true}
+	_, err := e.Run(context.Background(), Cmd{Look: true, Args: []string{"sh", "-c", "echo oops >&2; echo more >&2; exit 3"}})
+	if err == nil || !strings.HasSuffix(err.Error(), ": oops") || errOut.Len() != 0 {
+		t.Errorf("err %v, stderr %q", err, errOut.String())
+	}
+	e.QuietErr = false
+	if _, err := e.Run(context.Background(), Cmd{Look: true, Args: []string{"sh", "-c", "echo oops >&2; exit 3"}}); err == nil || strings.HasSuffix(err.Error(), ": oops") || errOut.String() != "oops\n" {
+		t.Errorf("without QuietErr: err %v, stderr %q", err, errOut.String())
+	}
+}
