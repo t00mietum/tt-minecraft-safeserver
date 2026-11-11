@@ -79,7 +79,7 @@ func about(r io.ReaderAt, size int64) string {
 				return ""
 			}
 			name, version := yamlNameVersion(io.LimitReader(rc, 64<<10))
-			rc.Close()
+			_ = rc.Close() // only read from
 			if name == "" {
 				return ""
 			}
