@@ -123,7 +123,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` sends the `stop` console command first, with an optional countdown for the players.
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
-	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off), 2026111112163174 (Docker mode), 2026111112163284 (native mode), and 2026111112163393 (status and watch).
+	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) and 2026111112163393 (status and watch) are Queued.
 
 - Core commands: CLI, command runner, and tree hand-off
 	- ID: 2026111112162268
