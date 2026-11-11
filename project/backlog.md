@@ -39,6 +39,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Note:
 		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
 		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `mcssctl` will force it on from then on.
+	- Progress log:
+		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
 
 - Config reader for shcl in Go
 	- ID: 2026111111065684

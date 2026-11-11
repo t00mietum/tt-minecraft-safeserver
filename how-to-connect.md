@@ -8,7 +8,7 @@
 
 How to join a server that runs on minecraft-safe-server, from home or from anywhere else.
 
-The examples use `mc.example.com` for the server's internet address, and `192.168.1.50` for its address at home. The person who runs the server will give you the real ones.
+From outside the home, players connect with an internet domain name that the person who runs the server gives them. The examples use `mc.example.com` for that name, and `192.168.1.50` for the server's address at home.
 
 <!-- TOC ignore:true -->
 ## Table of contents

@@ -365,6 +365,11 @@ cicd/                        build, test, and release scripts
 
 - The firewall rules go in the tool's own nftables table, rather than in ufw, firewalld, or `nftables.conf`. This matches `tt-monerodctl`.
 
+- Bedrock players log in through Floodgate, with only their Xbox account, rather than Geyser's `online` mode.
+	- In `online` mode, a Bedrock player also needs a Java account, and most console players don't have one.
+	- Java players log in with their own account the same as before.
+	- Floodgate has nothing to do with adding a server by its domain name. Java on PCs, and Bedrock on phones, tablets, and PCs, can all do that. Consoles can't, either way.
+
 - Tailscale and other VPNs were looked at for remote players, and left out as the main way in.
 	- Consoles can't run them, and phones allow only one VPN at a time.
 	- Every player would need to install and sign in to an app.
