@@ -22,6 +22,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Current Geyser needs TCP on the Bedrock port too
+	- ID: 2026111113015461
+	- Type: Bug
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-130154
+	- Opened by:
+	- Related IDs: 2026111112554261, 2026111111065829
+	- Incorrect behavior [Bug]: design.md, the firewall, `status`, and the router forward advice treat `bedrockPort` as UDP only.
+	- Expected behavior [Bug]: Bedrock players can connect with the Geyser build in use.
+	- Possible cause [Bug]: Geyser 2.12.1 defaults to the NetherNet transport with built-in signaling, which listens on the Bedrock port over TCP as well as UDP. RakNet-only was removed. Its `nxs` signaling mode also calls out to an outside service, which `egress` may need to allow.
+
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
 	- Type: Feature
@@ -259,7 +271,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Force online mode and the whitelist on. Force RCON, query, the management server, and the proxy settings off.
 		- Warn about an empty whitelist, and about more than 2 ops.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-	- Split: the Geyser rows are in child 2026111112554261, which is Queued. The rest is done.
+	- Split: the Geyser rows are in child 2026111112554261, which is Done. The rest is done too.
 	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-11: `start` checks `server.properties`, `spigot.yml`, and `paper-global.yml` in both modes, and refuses with the setting named. `repair` sets them, and `repair --check` only reports. The whitelist and ops warnings show at `start` and `repair`.
@@ -279,7 +291,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Safe server settings: Geyser config
 	- ID: 2026111112554261
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-125542
 	- Opened by: t00mietum
@@ -288,6 +300,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- With `bedrock` on, `start` checks Geyser's `config.yml` and `repair` sets it: `bedrock.address` and `bedrock.port` from `bindIP` and `bedrockPort`, and `auth-type` set to `floodgate`, per `design.md`.
 		- Check the key names against the Geyser build in use, since its config layout has changed between versions. `auth-type` has sat at the top level, under `remote:`, and under `java:`.
 		- Use the YAML and file code in `source/internal/settings`.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: `start` checks `plugins/Geyser-Spigot/config.yml` with `bedrock` on, and `repair` sets `bedrock.address`, `bedrock.port`, and `auth-type`, adding a key that's missing. Key names checked against Geyser 2.12.1 (build 1299), whose config migrations run to `config-version` 12.
+		- Verified: each new test fails with its check broken, and passes with it in place.
+	- Decisions:
+		- A missing `config.yml` is fine. Geyser writes it at its first start with online-mode logins on all addresses, which isn't unsafe, and the next start checks it. design.md updated.
+		- `auth-type` is found by the file's layout: `java:` from `config-version` 5, then `remote:`, then the top level. Geyser's own migration renames `remote` to `java` at version 5.
+		- A missing key is wrong, since Geyser's defaults don't follow the config. `repair` adds it at the end of its section.
+		- All addresses is written as `0.0.0.0`, Geyser's own default. An IPv6 address is quoted. `auth-type` compares without case.
+		- Swept: `Check` and `Fix` share one scan, so `start` through `Kit` and `repair` both get it. The Floodgate config and `key.pem` mode are left to the repair item, per design.md.
+	- Branch: r1111
+	- Test case: df5yv, df5yw, df5yx
+	- Closed: 20261111-130203
 
 - Plugin pinning
 	- ID: 2026111111065737

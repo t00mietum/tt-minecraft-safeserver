@@ -259,3 +259,157 @@ func TestWarnings(t *testing.T) {
 		t.Errorf("bad ops.json: %q", w)
 	}
 }
+
+const geyserConfig = "plugins/Geyser-Spigot/config.yml"
+
+// Trimmed from the layout Geyser 2.12.1 writes.
+var geyserNow = strings.Join([]string{
+	"# Geyser configuration",
+	"",
+	"# Network settings for the Bedrock listener",
+	"bedrock:",
+	"  # The IP address that Geyser will bind on to listen for incoming Bedrock connections.",
+	"  address: 0.0.0.0",
+	"  port: 19132",
+	"  transport: nethernet",
+	"# Network settings for the Java server connection",
+	"java:",
+	"  # Can be \"floodgate\" (see https://wiki.geysermc.org/floodgate/), \"online\", or \"offline\".",
+	"  auth-type: online",
+	"motd:",
+	"  primary-motd: Geyser",
+	"config-version: 12",
+	"",
+}, "\n")
+
+// With bedrock on, Geyser's listener follows bindIP and bedrockPort, and
+// Bedrock logins go through Floodgate. A fix keeps the comments.
+func TestGeyserConfig(t *testing.T) {
+	defer testid.Line(t, "df5yv")
+	cfg, dir := newServer(t)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.BindIP, cfg.BedrockPort = "192.168.1.123", 19133
+	put(t, dir, propertiesFile, "", 0o640)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	put(t, dir, geyserConfig, geyserNow, 0o640)
+	problems, err := Check(cfg)
+	want := []string{geyserConfig + " bedrock.address", geyserConfig + " bedrock.port", geyserConfig + " java.auth-type"}
+	if err != nil || !reflect.DeepEqual(keys(problems), want) {
+		t.Fatalf("check: %v, %q; want %q", err, keys(problems), want)
+	}
+	if got := problems[2].String(); got != geyserConfig+`: java.auth-type is "online", and should be "floodgate"` {
+		t.Errorf("String() = %q", got)
+	}
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, geyserConfig))
+	wantText := strings.NewReplacer("address: 0.0.0.0", "address: 192.168.1.123", "port: 19132", "port: 19133", "auth-type: online", "auth-type: floodgate").Replace(geyserNow)
+	if string(b) != wantText {
+		t.Errorf("config.yml:\n%s", b)
+	}
+	if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+		t.Errorf("after fix: %v, %q", err, keys(problems))
+	}
+
+	// All addresses is Geyser's 0.0.0.0, and an IPv6 address gets quoted.
+	cfg.BindIP = ""
+	put(t, dir, propertiesFile, "", 0o640)
+	put(t, dir, geyserConfig, strings.Replace(geyserNow, "auth-type: online", "auth-type: Floodgate", 1), 0o640)
+	cfg.BedrockPort = 19132
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, geyserConfig)); !strings.Contains(string(b), "auth-type: Floodgate") {
+		t.Errorf("all addresses changed a safe file:\n%s", b)
+	}
+	cfg.BindIP = "::1"
+	put(t, dir, propertiesFile, "", 0o640)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, geyserConfig)); !strings.Contains(string(b), `address: "::1"`) {
+		t.Errorf("IPv6 address:\n%s", b)
+	}
+	if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+		t.Errorf("after IPv6 fix: %v, %q", err, keys(problems))
+	}
+}
+
+// auth-type is looked for where the file's own layout keeps it, and a missing
+// key is added under its section.
+func TestGeyserLayouts(t *testing.T) {
+	defer testid.Line(t, "df5yw")
+	cfg, dir := newServer(t)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ text, key string }{
+		{"bedrock:\n  address: 0.0.0.0\n  port: 19132\nremote:\n  address: auto\n  auth-type: online\nconfig-version: 4\n", "remote.auth-type"},
+		{"bedrock:\n  address: 0.0.0.0\n  port: 19132\nauth-type: online\n", "auth-type"},
+		{"bedrock:\n  address: 0.0.0.0\n  port: 19132\nremote:\n  auth-type: offline\njava:\n  auth-type: online\nconfig-version: 5\n", "java.auth-type"},
+	} {
+		put(t, dir, geyserConfig, c.text, 0o640)
+		problems, err := Check(cfg)
+		if err != nil || !reflect.DeepEqual(keys(problems), []string{geyserConfig + " " + c.key}) {
+			t.Errorf("%q: %v, %q; want %s", c.text, err, keys(problems), c.key)
+		}
+	}
+
+	put(t, dir, geyserConfig, "bedrock:\n    port: 19132 # udp\n\n    # comment\nmotd:\n  primary-motd: hi\nconfig-version: 12\n\n", 0o640)
+	problems, err := Check(cfg)
+	if err != nil || len(problems) != 2 || !problems[0].Missing || !problems[1].Missing {
+		t.Fatalf("missing keys: %v, %+v", err, problems)
+	}
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, geyserConfig))
+	want := "bedrock:\n    port: 19132 # udp\n    address: 0.0.0.0\n\n    # comment\nmotd:\n  primary-motd: hi\nconfig-version: 12\njava:\n  auth-type: floodgate\n\n"
+	if string(b) != want {
+		t.Errorf("inserted:\n%s\nwant:\n%s", b, want)
+	}
+	if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+		t.Errorf("after fix: %v, %q", err, keys(problems))
+	}
+}
+
+// No Geyser config yet, or bedrock off, is fine. A linked Geyser folder isn't.
+func TestGeyserSkipped(t *testing.T) {
+	defer testid.Line(t, "df5yx")
+	cfg, dir := newServer(t)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "plugins", "Geyser-Spigot"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+		t.Errorf("no config.yml: %v, %q", err, keys(problems))
+	}
+	put(t, dir, geyserConfig, geyserNow, 0o640)
+	cfg.Bedrock = false
+	if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+		t.Errorf("bedrock off: %v, %q", err, keys(problems))
+	}
+
+	cfg.Bedrock = true
+	outside := t.TempDir()
+	put(t, outside, "config.yml", geyserNow, 0o640)
+	if err := os.RemoveAll(filepath.Join(dir, "plugins", "Geyser-Spigot")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "plugins", "Geyser-Spigot")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fix(cfg); err == nil || !strings.Contains(err.Error(), "link") {
+		t.Errorf("linked Geyser folder: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(outside, "config.yml")); string(b) != geyserNow {
+		t.Error("fix wrote through the link")
+	}
+}

@@ -127,7 +127,11 @@ func scan(c *config.Config, fix bool) ([]Problem, error) {
 			return problems, err
 		}
 	}
-	return problems, nil
+	if !c.Bedrock {
+		return problems, nil
+	}
+	found, err := scanGeyser(top, c, fix)
+	return append(problems, found...), err
 }
 
 func joinName(dir, file string) string {
