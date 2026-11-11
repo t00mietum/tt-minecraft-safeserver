@@ -196,7 +196,7 @@ Common:  --config PATH
 	- Native mode attaches to the service account's tmux session.
 
 - `cmd` sends one console command and prints the log lines that follow it, such as `mcssctl cmd whitelist add Steve`.
-	- Docker mode writes to the container's input wiht the Docker API.
+	- Docker mode writes to the container's input with the Docker API.
 	- Native mode uses `tmux send-keys`.
 
 - RCON is never used. See [Safe server settings](#safe-server-settings).
