@@ -404,7 +404,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
-	- Status: Queued
+	- Status: Stalled
 	- Priority: Avg
 	- Opened: 20261111-113032
 	- Opened by: t00mietum
@@ -417,6 +417,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions:
 		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
 		- GPL v2 or later.
+	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
 
 - NixOS module
 	- ID: 2026111111065855
