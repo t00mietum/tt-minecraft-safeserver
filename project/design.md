@@ -138,7 +138,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - `--set KEY=VALUE` overrides one config key for this run, such as `--set heapMax=6G`. It can be given more than once. See [Configuration model](#configuration-model).
 
-- `--dry-run` prints every command it would run, with the sudo ones marked, and doesn't run any of them.
+- `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `docker ps`, still run, so the plan matches what a real run would do.
 
 - When the boot unit is enabled, `start` and `stop` run `systemctl start` and `systemctl stop` on it instead. That way systemd and the tool don't disagree about what's running.
 
@@ -421,6 +421,7 @@ cicd/                        build, test, and release scripts
 ### Configuration model
 
 - One file, `/etc/tt-minecraftd/config.shcl`, owned by root and readable by all. `--config` points elsewhere.
+	- When the default file is missing, as before `setup`, the defaults are used with a warning. A missing `--config` file is an error.
 
 - The approved plugin list is `/etc/tt-minecraftd/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
 
@@ -555,7 +556,9 @@ cicd/                        build, test, and release scripts
 
 - In native mode, `paper.jar` and the plugin jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in Docker mode.
 
-- A tree that's `/` or less than 3 levels deep is refused.
+- A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
+
+- With `ownerAfterStop` empty, as when the boot unit stops the server, the trees stay with `runUser`. The operator's next `stop` hands them back.
 
 ### Safe server settings
 

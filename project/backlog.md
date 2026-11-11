@@ -110,6 +110,73 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` sends the `stop` console command first, with an optional countdown for the players.
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
+	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off), 2026111112163174 (Docker mode), 2026111112163284 (native mode), and 2026111112163393 (status and watch).
+
+- Core commands: CLI, command runner, and tree hand-off
+	- ID: 2026111112162268
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-121622
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Requirements:
+		- Parse the commands and the common options, `--set` and `--native` included, and load the config.
+		- Add `--help`, `--about`, `--version`, `--dry-run`, and `--debug`.
+		- One command runner, with sudo and dry run, and a fake for tests.
+		- Hand the trees to the service account and back.
+	- Actual effort: Avg
+	- Decisions:
+		- Common options work before or after the command. `--native` and `--set` reach the config in the order given, so the last one wins.
+		- A missing default config means the defaults, with a warning, so `status` works before `setup`. A missing `--config` file is an error, exit 1. A bad option is exit 2.
+		- `--dry-run` still runs commands that only look, such as `docker ps`, so the plan it prints matches a real run. design.md updated.
+		- With `ownerAfterStop` empty, as from the boot unit, `stop` leaves the trees with `runUser` and warns. The operator's next `stop` hands them back, per design.md's `stop` step 1.
+		- A tree given as a link is followed before `chown -R`, and the depth check runs on both the link and its target.
+		- `--help` lists only the built commands. `start`, `stop`, `status`, and `watch` parse and load the config, then say they aren't built yet, until the next 3 children.
+		- Swept: both flag passes share `commonFlags`; every chown goes through `tree.handOver`.
+	- Branch: r1111
+	- Test case: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn
+	- Closed: 20261111-122043
+
+- Core commands: Docker mode start and stop
+	- ID: 2026111112163174
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-121631
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Prereq IDs: 2026111112162268
+	- Requirements:
+		- `start` and `stop` in Docker mode, per `design.md`, through the runner, with `--debug`, `--foreground`, and `--warn N`.
+		- Refuse to start when a Paper server is already running, under any account.
+		- `stop` sends the `stop` console command first, and hands the trees back even after a crash.
+		- Test with the fake runner and `--dry-run` only.
+
+- Core commands: native mode start and stop
+	- ID: 2026111112163284
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-121632
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- `start` and `stop` in native mode: `systemd-run` with the sandbox options, and tmux on a socket under `/run/tt-minecraftd/`, per `design.md`.
+		- `paper.jar` and the plugin jars go to root at start.
+
+- Core commands: status and watch
+	- ID: 2026111112163393
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-121633
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- `status` and `watch`, per `design.md`. Parts that need a later item, such as the firewall counters, show as not set up yet.
 
 - Safe server settings
 	- ID: 2026111111065724
