@@ -129,12 +129,14 @@ tt-minecraftd setup   [--yes] [--dry-run] [--adopt PATH] [--accept-eula] [setup 
 tt-minecraftd update  [--yes] [--dry-run] [--self] [--paper] [--plugins] [--image] [--mc-version V]
 tt-minecraftd repair  [--yes] [--dry-run] [--check] [--approve-plugins]
 tt-minecraftd --help | --about | --version
-Common:  --config PATH
+Common:  --config PATH, --set KEY=VALUE
 ~~~
 
 - The commands match `tt-monerod-safeserver`. `console` and `cmd` are new, since a Minecraft server gets managed from its console.
 
 - Exit codes are 0 for success, 1 for an error, and 2 for bad usage.
+
+- `--set KEY=VALUE` overrides one config key for this run, such as `--set heapMax=6G`. It can be given more than once. See [Configuration model](#configuration-model).
 
 - `--dry-run` prints every command it would run, with the sudo ones marked, and doesn't run any of them.
 
@@ -422,9 +424,14 @@ cicd/                        build, test, and release scripts
 
 - The approved plugin list is `/etc/tt-minecraftd/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
 
+- Settings come from the defaults in the table below, then the file, then the command line. `--native` sets `runMode`, and `--set` sets any key.
+	- A key whose default comes from another one, such as `runGroup`, follows that key wherever it was set.
+	- An option is checked the same way as the file. A bad one is an error rather than a warning, since it was typed just now.
+
 - An unknown key or a bad value gets a warning each run, and the default is used.
 	- So does a key that's set twice with different values. Neither value is used.
 	- A list with one bad item is a bad value, so none of it is used.
+	- A `heapMin` over `heapMax` gets a warning, and `heapMax` is used for both. A `memCap` that isn't over `heapMax` gets a warning, and its default.
 
 - Key names and the words such as `docker` and `lan` don't care about case.
 
@@ -443,7 +450,7 @@ cicd/                        build, test, and release scripts
 | `zfsDataset`        | none                              | No snapshots when unset
 | `dockerImage`       | Temurin 25 JRE, by digest         | `update --image` changes it
 | `javaBin`           | `java` on PATH                    | Native mode only
-| `heapMin`           | `1G`
+| `heapMin`           | `1G`                              | Or `heapMax`, when that's less
 | `heapMax`           | `4G`
 | `memCap`            | `heapMax` plus a quarter, plus 1G | Swap is capped the same, so it stays at 0
 | `nice`              | `0`

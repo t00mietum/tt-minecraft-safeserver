@@ -10,7 +10,8 @@ import (
 	"github.com/yottacore/shcl/source/go/v3"
 )
 
-// Warning is a problem in one line of a file. The rest of the file still loads.
+// Warning is a problem in one line of a file, or between 2 keys, when File is
+// empty. The rest still loads.
 type Warning struct {
 	File string
 	Line int
@@ -18,7 +19,10 @@ type Warning struct {
 }
 
 func (w Warning) String() string {
-	if w.Line > 0 {
+	switch {
+	case w.File == "":
+		return w.Text
+	case w.Line > 0:
 		return fmt.Sprintf("%s:%d: %s", w.File, w.Line, w.Text)
 	}
 	return w.File + ": " + w.Text

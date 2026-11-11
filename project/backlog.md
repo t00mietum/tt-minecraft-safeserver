@@ -69,7 +69,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Config defaults and overrides
 	- ID: 2026111111065697
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-110656
 	- Opened by: t00mietum
@@ -79,6 +79,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Overridden by the config file.
 		- Resistant to errors, so one bad line doesn't sink the whole thing.
 		- Overridden by program options at run-time.
+	- Actual effort: Avg
+	- Decisions:
+		- Settings are built in order: the defaults, the file, the command-line options, then the keys that come from others, such as `runGroup` from `runUser`. Deriving last means an option that changes `runUser` moves `runGroup` too.
+		- Options are checked by the same code as the file. A bad one is an error, not a warning, since it was typed just now.
+		- design.md now has a common `--set KEY=VALUE`, with `--native` as a short form for `runMode`. The flags themselves are parsed in the Core commands item, which builds the CLI.
+		- `heapMin` defaults to 1G, or `heapMax` when that's less. A `heapMin` over `heapMax`, or a `memCap` not over it, gets a warning and a safe value.
+		- `ownerAfterStop` comes from `SUDO_USER`, then `USER`. It's left empty when neither names an account, as from the boot unit, and Core commands decides what `stop` does then.
+		- The default image is `eclipse-temurin:25-jre`, pinned to its multi-arch digest. `jvmArgs` defaults to Paper's recommended flags.
+		- An option value follows file syntax, so `##` starts a comment there too.
+		- Swept: every default in design.md's table that's written as a value is checked against the code by a test. The derived ones have their own cases.
+	- Branch: r1111
+	- Test case: df5x6, df5x7, df5x8, df5x9, df5xa, df5xb
+	- Closed: 20261111-121403
 
 - Core commands
 	- ID: 2026111111065711
