@@ -560,7 +560,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall
 	- ID: 2026111111065789
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -575,6 +575,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
 	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
 	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first and third are done, and the second waits on signoff.
+	- Test case: its children's: 2026111117134046: df66c, df66d, df66e, df66f; 2026111117135246: df66g, df66h, df66j; 2026111117135258: df67g, df67h, df5y7
+	- 20261111: children 2026111117135246 wait on UAT, and the rest are closed
 
 - Firewall: rules file, its unit, and the start check
 	- ID: 2026111117134046
