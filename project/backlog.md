@@ -256,7 +256,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` and `cmd` write to the container's input through the Docker API socket. Without the `docker` group the operator can't open it, and Podman's socket needs `podman.socket` running. Find a way through sudo.
 	- 20261111: Checked by hand on Podman 5.4.2 and Docker. `attach` fed from a pipe won't do. Docker refuses it. Podman takes the line but never detaches, and Ctrl-C reaches the server as an interrupt. `attach` on a pseudo-terminal works under both, and Ctrl-C detaches it with the server still up. So the plan is to drop the API write and run `sudo <runtime> attach` on a pseudo-terminal.
 	- 20261111: Checked through sudo too, rootful, under both runtimes. The line arrives, Ctrl-C detaches, and the server stays up. sudo reused the password from the operator's terminal. Writing right away worked as well as waiting 2 s.
-	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) and 2026111116104067 (status without sudo) are queued.
+	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) waits on a hand test, and 2026111116104067 (status without sudo) is queued.
 	- Decisions:
 		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
 
@@ -264,7 +264,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111116104049
 	- Type: Feature
 	- Status: Waiting on signoff
-		- Waits on the hand test below, which needs the console child too, since `stop` sends its line through the Docker API until then.
+		- Waits on the hand test below.
 	- Needs hand testing: under Podman, start a throwaway Paper server and stop it with `stop --warn 10`, with the operator out of the `docker` group. It loads, the jars can't be written, and `sudo podman ps` shows the container. Then set `runMode` to `docker` and check that `stop` finds a container that Podman started.
 	- Priority: High
 	- Opened: 20261111-161040
@@ -294,7 +294,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Run modes: console input through attach
 	- ID: 2026111116104058
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. Rootful through sudo wasn't tried here, and neither was Paper's own console.
+	- Needs hand testing: on a throwaway Paper server under Podman, then Docker, with the operator out of the `docker` group: `cmd list` prints the player count, `stop --warn 10` counts down in the chat and stops it, and `console` detaches on Ctrl-C with the server still up.
 	- Priority: High
 	- Opened: 20261111-161040
 	- Opened by: t00mietum
@@ -302,6 +304,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq IDs: 2026111116104049
 	- Requirements:
 		- `stop` and `cmd` send console lines with `sudo <runtime> attach` on a pseudo-terminal, in place of the Docker API write. See the parent's notes.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against throwaway busybox containers, rootless Podman 5.4.2 and Docker each got 2 lines in a row, detached, and stayed running.
+		- Verified: Ctrl-C written right after the line went to the stand-in in the same read, which is how attach passes it on to the server. The console now waits until the line has been read.
+	- Decisions:
+		- `launch.AttachConsole` replaces `DockerConsole`. It opens its own pty with `O_NOCTTY`, sets it raw before attach starts, and runs `sudo -n`, so sudo reuses the operator's terminal. As root it runs the runtime directly.
+		- Ctrl-C goes once the pty's input queue is empty, after the line was seen in it or 100 ms went by, since the pty hands bytes on a moment after they're written.
+		- Docker's exit 1 counts as a detach only with "read escape sequence" on stderr. Podman exits 0. An attach that ends before reading the line is an error.
+		- One line may take 15 s at most, attach and detach included. Attach's copy of the console is read and dropped, so it can't block on a full pty.
+		- `Boxed` sets its console once it knows the runtime, so `stop` and `cmd` follow a container found under the other one.
+		- `TestDockerConsole` (df5xw) is now `TestAttachConsole` under the same ID, since the API write is gone. It still checks that the line arrives with a carriage return, that a control character is refused, and the dry run.
+		- Swept: `stop`, `cmd`, and the countdown all send through `Kit.Console`; nothing reads `DOCKER_HOST` or the Docker socket now.
+	- Branch: r1112
+	- Test case: df5xw
 
 - Run modes: status without sudo
 	- ID: 2026111116104067

@@ -146,7 +146,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		kit.Console = launch.TmuxConsole{Run: runner, User: inv.cfg.RunUser}
 		srv = &launch.Native{Kit: kit}
 	} else {
-		kit.Console = launch.DockerConsole{Socket: launch.DockerSocket(), Container: launch.Container, DryRun: inv.opts.dryRun, Out: stdout}
+		// Boxed sets its own console once it knows the runtime.
 		srv = &launch.Boxed{Kit: kit, IDs: launch.HostIDs, Runtime: inv.cfg.RunMode}
 	}
 	switch name {

@@ -128,6 +128,9 @@ func (d *Boxed) locate(ctx context.Context) error {
 		d.say("The container is under %s, not %s as runMode says.", rt, d.runtime())
 		d.Runtime = rt
 	}
+	if _, ok := d.Console.(AttachConsole); ok || d.Console == nil {
+		d.Console = AttachConsole{Runtime: d.runtime(), Root: d.Root, DryRun: d.DryRun, Out: d.Out}
+	}
 	return nil
 }
 

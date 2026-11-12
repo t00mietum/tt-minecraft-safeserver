@@ -200,12 +200,14 @@ Common:  --config PATH, --set KEY=VALUE
 ### console and cmd
 
 - `console` attaches to the server console. Ctrl-C there would stop the server, so in both modes it detaches instead, and the server keeps running. It says so first.
-	- Docker mode uses `docker attach` with `--sig-proxy=false` and `ctrl-c` as the detach keys.
+	- Container mode uses `sudo <runtime> attach` with `--sig-proxy=false` and `ctrl-c` as the detach keys.
 	- Native mode attaches to the service account's tmux session, with Ctrl-C bound to `detach-client`. The binding lasts until the server stops.
 	- When the server stops while attached, such as after `stop` typed there, the trees go back to the operator, as with `stop`.
 
 - `cmd` sends one console command and prints the log lines that follow it, such as `tt-minecraftd cmd whitelist add Steve`.
-	- Docker mode writes to the container's input with the Docker API.
+	- Container mode runs `sudo -n <runtime> attach` on a pseudo-terminal of its own, in raw mode. It types the line with a carriage return, and once attach has read it, sends Ctrl-C to detach. `stop` sends its lines the same way.
+		- attach refuses a pipe under Docker, and never detaches from one under Podman. The Docker API socket would need the `docker` group.
+		- attach only takes Ctrl-C as its detach key in a read of its own. Sent with the line, it would reach the server.
 	- Native mode uses `tmux send-keys`.
 	- The lines come from `logs/latest.log`, in both modes. It waits up to 3 seconds for the first one, then until half a second goes by with nothing new, and 10 seconds at most.
 	- `cmd stop` and `cmd restart` are refused, since `stop` also hands the trees back, and Paper's `restart` only stops without a restart script.
