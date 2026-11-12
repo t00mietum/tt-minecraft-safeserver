@@ -571,6 +571,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Update plugins that have a known source, and approve the new jars.
 		- Refresh the pinned container image.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
