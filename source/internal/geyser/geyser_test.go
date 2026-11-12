@@ -137,3 +137,24 @@ func TestInstall(t *testing.T) {
 		t.Errorf("wrote through the link: %v", entries)
 	}
 }
+
+// A jar is GeyserMC's only when it sits in plugins/ and both its file name
+// and the plugin name it claims say so.
+func TestProject(t *testing.T) {
+	defer testid.Line(t, "df76p")
+	for _, c := range []struct{ name, claim, want string }{
+		{"plugins/Geyser-Spigot.jar", "Geyser-Spigot", "geyser"},
+		{"plugins/floodgate-spigot.jar", "floodgate", "floodgate"},
+		{"plugins/Floodgate-Spigot.jar", "Floodgate 2.2.5", "floodgate"},
+		{"plugins/Geyser-Spigot.jar", "", ""},
+		{"plugins/Geyser-Spigot.jar", "Other", ""},
+		{"plugins/geyser-floodgate.jar", "floodgate", ""},
+		{"plugins/Thing.jar", "Geyser-Spigot", ""},
+		{"plugins/Geyser-Spigot/extensions/geyser-ext.jar", "geyser-ext", ""},
+		{"Geyser-Spigot.jar", "Geyser-Spigot", ""},
+	} {
+		if got := Project(c.name, c.claim); got != c.want {
+			t.Errorf("Project(%q, %q) = %q, want %q", c.name, c.claim, got, c.want)
+		}
+	}
+}

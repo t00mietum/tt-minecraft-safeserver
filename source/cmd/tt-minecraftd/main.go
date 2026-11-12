@@ -531,6 +531,11 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 		}
 		fmt.Fprintf(w, "\n%s (%s)\n  sha256: %s\n  size:   %d bytes\n  date:   %s\n  says:   %s\n",
 			j.Name, state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
+		// A changed jar keeps the source it has.
+		if p := geyser.Project(info.Name, info.About); state == "new" && p != "" {
+			info.Source = geyserAPI.Source(p)
+			fmt.Fprintf(w, "  source: %s\n", info.Source)
+		}
 		answer, ok := ask(answers, w, "Approve it? [y/n] ")
 		switch {
 		case !ok:

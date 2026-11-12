@@ -4,6 +4,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
@@ -301,6 +302,46 @@ func TestRepairApprovePlugins(t *testing.T) {
 	code, out, _ = runArgs("repair", "--check", set)
 	if code != exitOK || !strings.Contains(out, "OK      plugins: 3 jars, all approved\n") {
 		t.Errorf("after: exit %d, stdout %q", code, out)
+	}
+}
+
+// A Geyser jar approved through repair gets GeyserMC's source, as setup's do.
+func TestRepairApproveGeyserSource(t *testing.T) {
+	defer testid.Line(t, "df76r")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	w, err := z.Create("plugin.yml")
+	if err == nil {
+		_, err = w.Write([]byte("name: Geyser-Spigot\nversion: 2.12.1\n"))
+	}
+	if err == nil {
+		err = z.Close()
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "plugins", "Geyser-Spigot.jar"), b.Bytes(), 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, _, done := prepare([]string{"repair", "--approve-plugins", "--set=serverDir=" + dir}, &bytes.Buffer{}, &bytes.Buffer{})
+	if done {
+		t.Fatal("prepare stopped")
+	}
+	var out bytes.Buffer
+	_ = repair(context.Background(), inv, strings.NewReader("y\n"), &out, true) // paper.jar is missing, which isn't this test's
+	src := geyserAPI.Source("geyser")
+	if !strings.Contains(out.String(), "  source: "+src+"\nApprove it?") {
+		t.Errorf("source not shown:\n%s", out.String())
+	}
+	approved, _, err := plugins.ReadApproved(inv.pluginsFile())
+	if err != nil || len(approved) != 1 || approved[0].Source != src {
+		t.Errorf("approved %v, %v; want the source %s", approved, err, src)
 	}
 }
 

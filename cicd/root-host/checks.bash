@@ -149,6 +149,10 @@ fAdopt() {
 	has 'serverDir: /srv/mc/adopted' /etc/tt-minecraftd/config.shcl || return 1
 	[[ "$(stat -c %U:%G /srv/mc/adopted/world)" == op:minecraftd ]] || return 1
 	[[ "$(grep -n 'sha256: ' adopt.out | head -1 | cut -d: -f1)" -lt "$(grep -n 'Go ahead' adopt.out | cut -d: -f1)" ]] || return 1
+	# The adopted Geyser and Floodgate keep following GeyserMC.
+	for p in geyser floodgate; do
+		has "source: \"\\?https://download.geysermc.org/v2/projects/${p}/" /etc/tt-minecraftd/plugins.shcl || { say "no GeyserMC source for ${p}"; return 1; }
+	done
 	tt-minecraftd repair --check
 }
 
@@ -174,6 +178,8 @@ fAgentHandOff() {
 	has 'Asking the update agent about' agent.out && has 'plugins/Thing.jar: no answer from the update agent' agent.out || return 1
 	# Paper's builds are --paper's.
 	! grep -q 'paper-.*update agent' agent.out || return 1
+	# So are Geyser's and Floodgate's, through their GeyserMC source.
+	! grep -qi 'geyser-spigot.jar: no answer\|floodgate-spigot.jar: no answer' agent.out || return 1
 	! compgen -G '/tmp/tt-minecraftd-agent-*' || { say "the answer file is left over"; return 1; }
 	sudo tt-minecraftd update --plugins --dry-run < /dev/null | tee agent-root.out
 	has "isn't asked when update starts as root" agent-root.out

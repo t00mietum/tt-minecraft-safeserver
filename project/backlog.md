@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup --adopt approves Geyser and Floodgate with no source
 	- ID: 2026111210364791
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261112-103647
 	- Opened by:
@@ -33,6 +33,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Incorrect behavior [Bug]: An adopted tree's Geyser and Floodgate jars go on the approved list with no source, so update --plugins never updates them from GeyserMC. With agent set, the update agent is asked about them instead.
 	- Expected behavior [Bug]: setup approves them with GeyserMC's source, as on a new install, or update --plugins knows them by name.
 	- Reproduced [Bug]: On the root host, after setup --adopt, update --plugins asked the agent about plugins/Geyser-Spigot.jar and plugins/floodgate-spigot.jar.
+	- Actual cause [Bug]: setup's step 8 approved the jars already in the tree with only their hashes. Only the jars setup downloaded got a source.
+	- Actual fix [Bug]: setup and `repair --approve-plugins` give a new jar in `plugins/` GeyserMC's source when its file name and its `plugin.yml` name both start with `geyser` or `floodgate`. The source shows in the list before the question.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: df76p, df76q, and df76r pass, and the gate passes on both temp folders. df76q and df76r fail with the fix taken out, and df76q fails when a changed jar's source gets replaced.
+		- Verified: the root host check passes all 18. df68e now checks the GeyserMC sources after `setup --adopt`, and df76n that the agent isn't asked about Geyser or Floodgate. Both fail with the fix taken out.
+	- Decisions:
+		- Fixed in setup, not by name in update, so the approved list says where each jar comes from, as on a new install.
+		- The plugin name a jar claims has to match too, so a jar only named like Geyser doesn't get replaced by GeyserMC's. `geyser.Project` holds the rule.
+		- Only new entries get it. A changed jar keeps the source it has, which may be the operator's own.
+		- `repair --approve-plugins` does the same, so a Geyser jar put in by hand follows GeyserMC too. design.md updated in both places.
+		- Swept: every `plugins.Approve` caller. setup's downloads already pass the source, update's keep it, and the agent's jars get none by design. An entry approved before this fix stays without a source; the live server hasn't been adopted yet.
+	- Branch: r1112b
+	- Test case: df76p, df76q, df76r, df68e and df76n (root host)
+	- Closed: 20261112-104958
 
 - Container start says only permission denied before a new login
 	- ID: 2026111209291851
