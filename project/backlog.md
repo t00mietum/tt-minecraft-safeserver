@@ -388,7 +388,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup
 	- ID: 2026111111065776
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -401,6 +401,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- On an existing install, run `repair` and then `update`.
 	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
 	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are done. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
+	- Test case: its children's: 2026111116415175: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n; 2026111116415186: df65p, df65q, df65r, df65d, df65f, df65j; 2026111116415196: df65x, df65y, df65z, df65d, df65f, df65r
+	- 20261111: children 2026111116415175 wait on UAT, and the rest are closed
 
 - setup: install steps and --adopt
 	- ID: 2026111116415175
