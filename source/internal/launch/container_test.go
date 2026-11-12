@@ -39,6 +39,7 @@ type rig struct {
 	ps      string
 	states  []string
 	log     string
+	tables  string
 }
 
 func newRig(t *testing.T) *rig {
@@ -77,7 +78,7 @@ func newRig(t *testing.T) *rig {
 	if err := os.WriteFile(list, []byte("jar: paper-26.3-244.jar\n\tsha256: "+empty+"\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+empty+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir}
+	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n"}
 	g.r.Reply = g.reply
 	noRuntimes(t)
 	g.d = &Boxed{
@@ -109,6 +110,8 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 		return []byte(s + "\n"), nil
 	case len(c.Args) > 2 && c.Args[1] == "logs":
 		return []byte(g.log), nil
+	case c.Args[0] == "nft":
+		return []byte(g.tables), nil
 	}
 	return nil, nil
 }
@@ -347,6 +350,45 @@ func TestStartChecksSettings(t *testing.T) {
 		}
 		if !strings.Contains(g.out.String(), "warning: the whitelist is empty") {
 			t.Errorf("native %v, empty whitelist: output %q", native, g.out.String())
+		}
+	}
+}
+
+// With firewall on, a start without the table stops after sudo, in either
+// mode, before anything changes. With it off, nft isn't asked.
+func TestStartChecksFirewall(t *testing.T) {
+	defer testid.Line(t, "df66f")
+	for _, native := range []bool{false, true} {
+		g := newNativeRig(t)
+		start := g.d.Start
+		if native {
+			start = g.n.Start
+		}
+		g.tables = "table inet filter\n"
+		err := start(context.Background(), StartMode{})
+		if err == nil || !strings.Contains(err.Error(), "inet tt_minecraftd") || !strings.Contains(err.Error(), "repair") || len(g.changes()) != 1 {
+			t.Errorf("native %v, no table: err %v, ran %q", native, err, g.changes())
+		}
+		var asked bool
+		for _, line := range g.r.Lines() {
+			asked = asked || line == "sudo nft list tables inet"
+		}
+		if !asked {
+			t.Errorf("native %v: ran %q, no nft list", native, g.r.Lines())
+		}
+
+		g = newNativeRig(t)
+		start = g.d.Start
+		if native {
+			start = g.n.Start
+		}
+		g.tables = ""
+		g.d.Cfg.Firewall = false
+		_ = start(context.Background(), StartMode{}) // only what ran matters here
+		for _, c := range g.r.Ran {
+			if c.Args[0] == "nft" {
+				t.Errorf("native %v, firewall off: asked nft", native)
+			}
 		}
 	}
 }

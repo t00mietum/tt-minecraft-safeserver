@@ -171,7 +171,10 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err := d.checkPlugins(); err != nil {
 		return err
 	}
-	// The firewall and snapshot steps come with their own items.
+	if err := d.checkFirewall(ctx); err != nil {
+		return err
+	}
+	// The snapshot step comes with its own item.
 	args, err := d.runArgs(mode)
 	if err != nil {
 		return err

@@ -702,6 +702,7 @@ cicd/                        build, test, and release scripts
 
 - `allowFrom` says who may connect to the game ports. The firewall enforces it.
 	- `lan` is the private address ranges, IPv4 and IPv6.
+		- That's 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, the link-local ranges, `fc00::/7`, and also CGNAT's 100.64.0.0/10, where tailnets live.
 	- `any` allows everyone.
 	- Addresses and ranges can be mixed with `lan`.
 
@@ -718,6 +719,7 @@ cicd/                        build, test, and release scripts
 - With `firewall` on, the tool puts its rules in its own nftables table, `inet tt_minecraftd`, so they apply to IPv4 and IPv6.
 
 - `setup` and `repair` write the rules to `/etc/tt-minecraftd/firewall.nft`, from the config. `tt-minecraftd-firewall.service` loads that file at boot.
+	- It matches the service account by name, so nft looks it up as it loads the file.
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
 	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
 
@@ -727,17 +729,21 @@ cicd/                        build, test, and release scripts
 	- Ones from loopback are always allowed. A tunnel agent connects that way.
 	- Ones from an address that's not in `allowFrom` get dropped.
 	- Past `joinRateLimit` a minute from one address, the rest get dropped. That slows down bot join floods.
+		- A burst of `joinRateLimit` is allowed too, so a minute's worth can come at once.
 
 - Inbound, new connections from anywhere but loopback get dropped on the RCON, query, and management ports, even though the server should never open them.
+	- Those are RCON's default port 25575 over TCP, and `gamePort` over UDP for query. The management server has no fixed default port, so it's left to the safe settings.
 
 - Outbound, new connections from the service account:
 	- Ones to loopback get dropped. That way the server can't connect to local services such as databases.
+		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
 		- With `bedrock` on, UDP to ports 3478 and 19302 is allowed too, for Geyser's STUN lookup. Without it, players over the internet get only the server's LAN address, and can't connect.
 		- NetherNet's connection checks from the server to a player's own addresses count as new connections, and get dropped unless they're replies. The player's checks to the server still set up the connection.
 	- With `egress` set to `open`, ones to the internet are allowed on any port.
 	- Everything that gets dropped gets counted too, and logged at a limited rate. `status` shows the counts.
+		- Inbound drops are counted but not logged, since scanners would fill the log.
 	- Replies to connections that came in still go out.
 	- It works the same in every mode, since a host-network container's sockets belong to the service account's uid.
 

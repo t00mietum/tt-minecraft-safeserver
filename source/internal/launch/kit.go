@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
@@ -134,6 +135,22 @@ func (k *Kit) checkPlugins() error {
 		k.say("changed since it was approved: %s", name)
 	}
 	return errors.New("a jar is new or changed; sudo tt-minecraftd repair --approve-plugins shows each one and asks")
+}
+
+// checkFirewall refuses a start without the tool's nftables table, so the
+// server never runs unfenced. See design.md, Firewall.
+func (k *Kit) checkFirewall(ctx context.Context) error {
+	if !k.Cfg.Firewall {
+		return nil
+	}
+	up, err := firewall.Loaded(ctx, k.Run)
+	if err != nil {
+		return err
+	}
+	if !up {
+		return fmt.Errorf("the firewall isn't loaded (nftables table inet %s); sudo tt-minecraftd repair loads it", firewall.Table)
+	}
+	return nil
 }
 
 func (k *Kit) waitLoaded(ctx context.Context, e engine) error {

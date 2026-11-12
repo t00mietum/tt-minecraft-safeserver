@@ -556,6 +556,64 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
 	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
+	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first is done, and the other 2 are queued.
+
+- Firewall: rules file, its unit, and the start check
+	- ID: 2026111117134046
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-171340
+	- Opened by:
+	- Parent ID: 2026111111065789
+	- Requirements:
+		- Render `/etc/tt-minecraftd/firewall.nft` from the config, and `tt-minecraftd-firewall.service` that loads it, per design.md's Firewall.
+		- Tests check the rendered rules for each mix of `allowFrom`, `egress`, and `bedrock`.
+		- With `firewall` on, `start` checks through sudo that the table is loaded, and refuses without it.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: `source/internal/firewall` renders `firewall.nft` and the unit. Both modes' `start` refuse without the table, after the plugin check.
+		- Verified: each rendered mix passes `nft -c`. A file loaded for real in a network namespace dropped and counted the account's connection to loopback, and let its DNS to 127.0.0.53 through. df66c fails on a v4 match against a v6 set, and df66f fails with the start check taken out.
+	- Decisions:
+		- The account is matched by name, so the file reads plainly. nft looks it up at load, after `setup` has made it.
+		- The output hook only jumps to the account's rules on a uid match. A packet with no socket, such as IPv6 neighbor discovery, has no uid, so a `!=` match would have let it reach the LAN drop.
+		- `lan` adds CGNAT's 100.64.0.0/10 to the private and link-local ranges, so a tailnet counts as LAN both ways. design.md updated.
+		- The rate limit is per address, with a burst of `joinRateLimit`. IPv6 is per address too, not per /64.
+		- DNS to the resolvers in `/etc/resolv.conf` is allowed first, so a loopback resolver still works. They're read at render time, so repair's check sees a change. design.md updated.
+		- Closed ports are RCON's 25575/tcp and query on `gamePort`/udp. The management server has no fixed default port. design.md updated.
+		- Only outbound drops are logged, at 6 a minute. Inbound ones are counted only, since scanners would fill the log. design.md updated.
+		- The unit is `WantedBy` sysinit and nftables, `PartOf` and `ReloadPropagatedFrom` nftables, so it loads again after nftables starts, restarts, or reloads.
+		- `start` says `repair` loads the table, which comes with 2026111117135246.
+		- Swept: both modes' `Start` call `checkFirewall`; every start test's fake host answers the table list.
+	- Branch: r1112
+	- Test case: df66c, df66d, df66e, df66f
+	- Closed: 20261111-172010
+
+- Firewall: setup and repair manage it
+	- ID: 2026111117135246
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-171352
+	- Opened by:
+	- Parent ID: 2026111111065789
+	- Prereq IDs: 2026111117134046
+	- Requirements:
+		- `setup` step 9: install nftables through apt when `nft` is missing, write the rules, and enable and start their unit.
+		- `repair` check 9: the rules file matches the config, its unit is enabled, and the table is loaded. With `firewall` off, the unit and the table are removed.
+		- Neither touches ufw or firewalld rules.
+
+- Firewall: drop counters in status
+	- ID: 2026111117135258
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-171352
+	- Opened by:
+	- Parent ID: 2026111111065789
+	- Prereq IDs: 2026111117134046
+	- Requirements:
+		- `status` shows the firewall's drop counters, inbound and outbound, in place of "not set up yet".
 
 - update
 	- ID: 2026111111065803
