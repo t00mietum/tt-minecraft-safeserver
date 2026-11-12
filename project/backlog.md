@@ -22,6 +22,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- staticcheck: unused values in repair tests
+	- ID: 2026111116281098
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-162810
+	- Opened by: t00mietum
+	- Incorrect behavior: staticcheck reports SA4006 at `repair_test.go` lines 158 and 313: a value of `f` that's never used.
+	- Expected behavior: staticcheck runs clean.
+	- Estimated effort: Low
+
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
