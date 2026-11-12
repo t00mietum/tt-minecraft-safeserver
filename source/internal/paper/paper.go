@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -214,4 +215,75 @@ const atSymlinkNoFollow = 0x100
 
 func fchownatNoFollow(dirfd int, name string, uid, gid int) error {
 	return syscall.Fchownat(dirfd, name, uid, gid, atSymlinkNoFollow)
+}
+
+// Linked is the build paper.jar links to, read from the target's name.
+type Linked struct {
+	Version string
+	ID      int
+	// Target is the link's text, such as paper-26.3-249.jar.
+	Target string
+	// Gone is a link to a build that isn't there.
+	Gone bool
+}
+
+// Current reads which build paper.jar links to. It's nil with no paper.jar.
+func Current(serverDir string) (*Linked, error) {
+	link := filepath.Join(serverDir, "paper.jar")
+	target, err := os.Readlink(link)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case errors.Is(err, syscall.EINVAL):
+		return nil, fmt.Errorf("%s is a file, not a link to a build, so its version is unknown; rename it to its build's name, such as paper-26.3-249.jar, and link paper.jar to that", link)
+	case err != nil:
+		return nil, err
+	}
+	l, ok := parseName(filepath.Base(target))
+	if !ok {
+		return nil, fmt.Errorf("paper.jar links to %s, which isn't named paper-VERSION-BUILD.jar, so its version is unknown", target)
+	}
+	l.Target = target
+	if _, err := os.Stat(link); errors.Is(err, fs.ErrNotExist) {
+		l.Gone = true
+	}
+	return &l, nil
+}
+
+// parseName splits paper-26.3-249.jar into 26.3 and 249.
+func parseName(name string) (Linked, bool) {
+	if !jarName.MatchString(name) {
+		return Linked{}, false
+	}
+	rest := strings.TrimSuffix(strings.TrimPrefix(name, "paper-"), ".jar")
+	i := strings.LastIndexByte(rest, '-')
+	if i <= 0 {
+		return Linked{}, false
+	}
+	id, err := strconv.Atoi(rest[i+1:])
+	if err != nil || id <= 0 || !versionText.MatchString(rest[:i]) {
+		return Linked{}, false
+	}
+	return Linked{Version: rest[:i], ID: id}, true
+}
+
+// Prune removes the Paper builds in serverDir besides the ones named in keep,
+// and gives the names it removed. Only plain files named like a build go.
+func Prune(serverDir string, keep ...string) ([]string, error) {
+	entries, err := os.ReadDir(serverDir)
+	if err != nil {
+		return nil, err
+	}
+	var gone []string
+	for _, e := range entries {
+		name := e.Name()
+		if _, build := parseName(name); !build || !e.Type().IsRegular() || slices.Contains(keep, name) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(serverDir, name)); err != nil {
+			return gone, err
+		}
+		gone = append(gone, name)
+	}
+	return gone, nil
 }

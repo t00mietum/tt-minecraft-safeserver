@@ -648,6 +648,81 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refresh the pinned container image.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
+	- 2026-11-12: Split into 5 children: 2026111117302950 (the command and `--paper`) is done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are queued.
+
+- update: the command, and --paper
+	- ID: 2026111117302950
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Requirements:
+		- `update` per design.md: needs root through sudo, asks first unless `--yes`, updates every part when none is named, and leaves a running server alone.
+		- `--paper` gets the newest stable build of the current Minecraft version, checks it, approves it, points `paper.jar` at it, and keeps the last 2 builds.
+		- setup on an existing install runs `update` after `repair`.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against the live API, `update --dry-run` on a tree at Paper 26.3 build 244 planned the move to build 249.
+		- Verified: df66x, df66y, df66z, df670, and df671 each fail with their check taken out, such as the kept build, the approval, or the update after repair, and pass with it in.
+	- Decisions:
+		- The code is `source/internal/update`, and reuses `paper.API` and the approval setup does.
+		- The version and build come from the name `paper.jar` links to. A plain `paper.jar` is refused with how to rename it, since swapping a link over it would delete the only copy. design.md updated.
+		- No `paper.jar`, or a link to a build that's gone, gets one as setup does, which makes repair's missing paper.jar message true.
+		- The 2 builds kept are the new one and the one `paper.jar` linked to. Only plain files in `serverDir` named `paper-VERSION-BUILD.jar` are removed. Their approved entries stay, since they're harmless.
+		- Everything is looked up before the plan, so a failed lookup changes nothing.
+		- With only `--paper` built, `update` with no part named is the same as `--paper`. The other flags come with their children.
+		- On an existing install setup asks once, then runs `repair` and `update` without asking again. Update runs even when a repair check failed, since a missing `paper.jar` is one update fixes, and both errors are returned.
+		- Swept: setup's new-install path and update share `paper.API` and `plugins.Approve`; `asRoot`'s message now fits both callers.
+	- Branch: r1112
+	- Test case: df66x, df66y, df66z, df670, df671
+	- Closed: 20261111-173642
+
+- update --mc-version
+	- ID: 2026111117302963
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Prereq IDs: 2026111112264283
+	- Requirements:
+		- `--mc-version V` moves Paper to another Minecraft version, per design.md: a yes even with `--yes`, and a ZFS snapshot first.
+
+- update --plugins
+	- ID: 2026111117302973
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Requirements:
+		- `--plugins` updates each approved jar with a known source, such as Geyser and Floodgate, shows the old and new versions, checks the source's hash, and approves the new jar.
+
+- update --image
+	- ID: 2026111117302985
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Requirements:
+		- `--image` pulls the newest base image, checks that its `java -version` is new enough for this Paper, and pins its digest in the config.
+
+- update --self
+	- ID: 2026111117302995
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Requirements:
+		- `--self` gets the latest release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename. On NixOS it only prints what to change.
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283

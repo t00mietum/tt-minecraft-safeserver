@@ -596,6 +596,42 @@ func TestExistingBedrock(t *testing.T) {
 	}
 }
 
+// On an existing install, update runs after repair, even when a repair check
+// failed, since update can be what fixes it.
+func TestExistingUpdate(t *testing.T) {
+	defer testid.Line(t, "df670")
+	r := newRig(t, nil, "y\n")
+	if err := os.MkdirAll(filepath.Dir(r.s.ConfigPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.s.ConfigPath, []byte("runMode: podman\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.s.Loaded = &config.Config{RunMode: "podman", ServerDir: r.server}
+	var order []string
+	r.s.Repair = func(context.Context, *config.Config, bool) error {
+		order = append(order, "repair")
+		return errors.New("no paper.jar")
+	}
+	r.s.Update = func(_ context.Context, c *config.Config) error {
+		order = append(order, "update "+c.ServerDir)
+		return nil
+	}
+	err := r.s.Do(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no paper.jar") || !reflect.DeepEqual(order, []string{"repair", "update " + r.server}) {
+		t.Errorf("%v, ran %q\n%s", err, order, r.out)
+	}
+	if !strings.Contains(r.out.String(), "runs repair and then update on it") || !strings.Contains(r.out.String(), "Run repair and update?") {
+		t.Errorf("no plan:\n%s", r.out)
+	}
+
+	order = nil
+	r.s.In = bufio.NewScanner(strings.NewReader("n\n"))
+	if err := r.s.Do(context.Background()); err == nil || len(order) > 0 {
+		t.Errorf("a no went on: %v, ran %q", err, order)
+	}
+}
+
 // Step 9 installs nftables when it's missing, writes the rules and the unit,
 // and starts it, before the image pull. Without nft, setup stops there.
 func TestFirewall(t *testing.T) {

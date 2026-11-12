@@ -58,6 +58,9 @@ type Setup struct {
 	Accounts func(c *config.Config) *repair.Host
 	// Repair runs the repair command on c, with check for --check.
 	Repair func(ctx context.Context, c *config.Config, check bool) error
+	// Update runs the update command on c, without asking, after repair on
+	// an existing install. Nil leaves it out.
+	Update func(ctx context.Context, c *config.Config) error
 	Paper  PaperSource
 	Geyser GeyserSource
 }
@@ -179,9 +182,9 @@ func (s *Setup) Do(ctx context.Context) error {
 	return s.Repair(ctx, &cfg, true)
 }
 
-// existing runs repair on an install that's already there, after getting a
-// Geyser or Floodgate that's missing, since repair only reports those. update
-// comes after it once update is built.
+// existing runs repair and then update on an install that's already there,
+// after getting a Geyser or Floodgate that's missing, since repair only
+// reports those.
 func (s *Setup) existing(ctx context.Context) error {
 	if s.Adopt != "" {
 		return fmt.Errorf("%s is there already, so this isn't a new install; set serverDir in it to move to another server folder", s.ConfigPath)
@@ -194,13 +197,16 @@ func (s *Setup) existing(ctx context.Context) error {
 			return err
 		}
 	}
-	prompt := "Run repair? [y/n] "
+	what, prompt := "repair", "Run repair? [y/n] "
+	if s.Update != nil {
+		what, prompt = "repair and then update", "Run repair and update? [y/n] "
+	}
 	if len(bedrock) == 0 {
-		fmt.Fprintf(s.Out, "\nFound an install at %s, so setup runs repair on it.\n\n", s.ConfigPath)
+		fmt.Fprintf(s.Out, "\nFound an install at %s, so setup runs %s on it.\n\n", s.ConfigPath, what)
 	} else {
 		fmt.Fprintf(s.Out, "\nFound an install at %s, so setup will:\n", s.ConfigPath)
 		s.planBedrock(bedrock)
-		fmt.Fprintf(s.Out, "  - Run repair on it.\n\n")
+		fmt.Fprintf(s.Out, "  - Run %s on it.\n\n", what)
 		prompt = "Go ahead? [y/n] "
 	}
 	if !s.confirm(prompt) {
@@ -209,7 +215,14 @@ func (s *Setup) existing(ctx context.Context) error {
 	if err := s.getBedrock(ctx, *cfg, bedrock); err != nil {
 		return err
 	}
-	return s.Repair(ctx, cfg, s.DryRun)
+	err := s.Repair(ctx, cfg, s.DryRun)
+	if s.Update == nil {
+		return err
+	}
+	// A failed repair check, such as a missing paper.jar, can be what
+	// update fixes.
+	fmt.Fprintln(s.Out, "\nUpdating:")
+	return errors.Join(err, s.Update(ctx, cfg))
 }
 
 func (s *Setup) refuseRunning(ctx context.Context) error {

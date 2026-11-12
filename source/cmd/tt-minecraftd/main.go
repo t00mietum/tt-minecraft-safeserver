@@ -34,6 +34,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	setuppkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/setup"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
+	updatepkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/update"
 )
 
 // version is set at release with -ldflags "-X main.version=...".
@@ -62,6 +63,8 @@ type options struct {
 	yes        bool
 	adopt      string
 	acceptEULA bool
+	// paper is update --paper. With no part named, update does them all.
+	paper bool
 	// line is cmd's console command.
 	line string
 }
@@ -99,6 +102,11 @@ var commands = []command{
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan and the commands, and change nothing")
 		fs.StringVar(&o.adopt, "adopt", "", "Take over the server folder at `PATH` as it is")
 		fs.BoolVar(&o.acceptEULA, "accept-eula", false, "Accept the Minecraft EULA, "+settings.EULAURL)
+	}},
+	{"update", "Get newer builds. A running server uses them from its next start", func(fs *flag.FlagSet, o *options) {
+		fs.BoolVar(&o.paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
+		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
+		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan, and change nothing")
 	}},
 	{"status", "Show what the server is doing", func(*flag.FlagSet, *options) {}},
 	{"watch", "Redraw status every few seconds, until Ctrl-C", func(fs *flag.FlagSet, o *options) {
@@ -155,6 +163,9 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	if name == "setup" {
 		return setup(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
 	}
+	if name == "update" {
+		return update(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
+	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
 	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
@@ -188,12 +199,12 @@ func (inv invocation) pluginsFile() string {
 	return filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl")
 }
 
-// asRoot runs the tool again through sudo with the same arguments, for setup.
-// A var so tests don't exec.
+// asRoot runs the tool again through sudo with the same arguments, for setup
+// and update. A var so tests don't exec.
 var asRoot = func(args []string) error {
 	sudo, err := exec.LookPath("sudo")
 	if err != nil {
-		return fmt.Errorf("setup needs root, and there's no sudo: %w", err)
+		return fmt.Errorf("this needs root, and there's no sudo: %w", err)
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -219,7 +230,6 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 	// With no path to it, the copy to /usr/local/bin is left out.
 	exe, _ := os.Executable()
 	runner, accounts := setupSteps(inv)
-	userAgent := "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
 	s := &setuppkg.Setup{
 		Run:         runner,
 		Loaded:      &inv.cfg,
@@ -234,7 +244,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		Out:         w,
 		Exe:         exe,
 		Accounts:    accounts,
-		Paper:       paper.API{UserAgent: userAgent},
+		Paper:       paperAPI,
 		Geyser:      geyser.API{UserAgent: userAgent},
 		Repair: func(ctx context.Context, c *config.Config, check bool) error {
 			again := inv
@@ -243,8 +253,38 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 			again.opts.approve = false
 			return repair(ctx, again, in, w, root)
 		},
+		// setup asked already.
+		Update: func(ctx context.Context, c *config.Config) error {
+			again := inv
+			again.cfg = *c
+			again.opts.yes = true
+			return update(ctx, again, in, w, root)
+		},
 	}
 	return s.Do(ctx)
+}
+
+var userAgent = "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
+
+// paperAPI is a var so tests don't reach PaperMC.
+var paperAPI = paper.API{UserAgent: userAgent}
+
+// update needs root, so it runs itself again through sudo, unless it's a dry
+// run.
+func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
+	if !root && !inv.opts.dryRun {
+		return asRoot(inv.args)
+	}
+	u := &updatepkg.Update{
+		Cfg:         &inv.cfg,
+		PluginsFile: inv.pluginsFile(),
+		Yes:         inv.opts.yes,
+		DryRun:      inv.opts.dryRun,
+		In:          bufio.NewScanner(in),
+		Out:         w,
+		Paper:       paperAPI,
+	}
+	return u.Do(ctx)
 }
 
 // repairSteps gives the checks around the safe settings and plugins. It's a

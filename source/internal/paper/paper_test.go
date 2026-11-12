@@ -154,3 +154,70 @@ func TestInstall(t *testing.T) {
 		t.Errorf("left in the tree: %q", names)
 	}
 }
+
+// Current reads the version and build from the name paper.jar links to.
+func TestCurrent(t *testing.T) {
+	defer testid.Line(t, "df66x")
+	dir := t.TempDir()
+	if l, err := Current(dir); l != nil || err != nil {
+		t.Errorf("no paper.jar: %+v, %v", l, err)
+	}
+	jar := filepath.Join(dir, "paper.jar")
+	if err := os.WriteFile(jar, []byte("jar"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Current(dir); err == nil || !strings.Contains(err.Error(), "not a link") {
+		t.Errorf("plain paper.jar: %v", err)
+	}
+	for target, want := range map[string]string{
+		"paper-26.3-244.jar":         "26.3 244 false",
+		"paper-26.3-rc-3-5.jar":      "26.3-rc-3 5 true",
+		"builds/paper-1.21.11-7.jar": "1.21.11 7 true",
+		"paper-26.3.jar":             "error",
+		"paper-26.3-0.jar":           "error",
+		"server.jar":                 "error",
+	} {
+		if err := os.Remove(jar); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, jar); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "paper-26.3-244.jar"), []byte("jar"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		l, err := Current(dir)
+		got := "error"
+		if err == nil {
+			got = fmt.Sprintf("%s %d %t", l.Version, l.ID, l.Gone)
+			if l.Target != target {
+				t.Errorf("%s: target %q", target, l.Target)
+			}
+		}
+		if got != want {
+			t.Errorf("%s: got %q, %v; want %q", target, got, err, want)
+		}
+	}
+}
+
+// Prune leaves the builds it's told to keep, and anything that isn't a build.
+func TestPrune(t *testing.T) {
+	defer testid.Line(t, "df66y")
+	dir := t.TempDir()
+	for _, name := range []string{"paper-26.3-240.jar", "paper-26.3-244.jar", "paper-26.3-249.jar", "paper-1.21.11-7.jar", "paper-stuff.jar", "paper.jar.bak"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("jar"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("paper-26.3-249.jar", filepath.Join(dir, "paper-26.3-1.jar")); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := Prune(dir, "paper-26.3-249.jar", "paper-26.3-244.jar")
+	if err != nil || strings.Join(gone, " ") != "paper-1.21.11-7.jar paper-26.3-240.jar" {
+		t.Errorf("removed %q, %v", gone, err)
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, "*"))
+	if len(left) != 5 {
+		t.Errorf("left %q", left)
+	}
+}

@@ -6,6 +6,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,6 +39,25 @@ func noHostChecks(t *testing.T) {
 		return &repairpkg.Host{Cfg: &inv.cfg}, nil, nil
 	}
 	t.Cleanup(func() { repairSteps = old })
+}
+
+// fakePaperMC points paperAPI at a stand-in that has build 249 of 26.3 only.
+func fakePaperMC(t *testing.T) {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/paper":
+			fmt.Fprint(w, `{"versions":{"26.3":["26.3"]}}`)
+		case "/paper/versions/26.3/builds":
+			fmt.Fprintf(w, `[{"id":249,"channel":"STABLE","downloads":{"server:default":{"name":"paper-26.3-249.jar","checksums":{"sha256":"%s"},"size":3,"url":"https://x/jar"}}}]`, strings.Repeat("ab", 32))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	old := paperAPI
+	paperAPI.Base, paperAPI.Client = srv.URL+"/paper", srv.Client()
+	t.Cleanup(func() { paperAPI = old })
 }
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
@@ -316,6 +338,7 @@ func TestSetup(t *testing.T) {
 	defer testid.Line(t, "df65m")
 	noDefaultConfig(t)
 	noHostChecks(t)
+	fakePaperMC(t)
 	var again []string
 	old := asRoot
 	asRoot = func(args []string) error { again = args; return nil }
@@ -344,5 +367,44 @@ func TestSetup(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
 		t.Error("a dry run wrote server.properties")
+	}
+}
+
+// update runs itself through sudo unless it's root or a dry run, and a dry
+// run shows the plan without downloading.
+func TestUpdate(t *testing.T) {
+	defer testid.Line(t, "df671")
+	noDefaultConfig(t)
+	fakePaperMC(t)
+	var again []string
+	old := asRoot
+	asRoot = func(args []string) error { again = args; return nil }
+	t.Cleanup(func() { asRoot = old })
+
+	code, out, _ := runArgs("update", "--help")
+	for _, want := range []string{"--paper ", "--yes ", "--dry-run "} {
+		if code != exitOK || !strings.Contains(out, want) {
+			t.Errorf("update --help lacks %q: %q", want, out)
+		}
+	}
+	if os.Geteuid() != 0 {
+		if code, _, msg := runArgs("update", "--paper", "--yes"); code != exitOK || !reflect.DeepEqual(again, []string{"update", "--paper", "--yes"}) {
+			t.Errorf("not root: exit %d, ran again with %q, stderr %q", code, again, msg)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.Symlink("paper-26.3-244.jar", filepath.Join(dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "paper-26.3-244.jar"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, msg := runArgs("update", "--dry-run", "--set=serverDir="+dir)
+	if code != exitOK || !strings.Contains(out, "from build 244 to build 249") || !strings.Contains(out, "would download paper-26.3-249.jar") {
+		t.Errorf("dry run: exit %d, stdout %q, stderr %q", code, out, msg)
+	}
+	if target, _ := os.Readlink(filepath.Join(dir, "paper.jar")); target != "paper-26.3-244.jar" {
+		t.Errorf("a dry run moved paper.jar to %q", target)
 	}
 }
