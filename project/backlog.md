@@ -25,12 +25,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Container start says only permission denied before a new login
 	- ID: 2026111209291851
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261112-092918
 	- Opened by:
+	- Related IDs: 2026111118183922
+	- Actual cause [Bug]:
+		- Container start reads the tree for its safe settings and plugin checks before the tree changes hands. After a crash it's still the server's, so the read goes through the group the login doesn't have yet.
+	- Actual effort: Low
 	- Progress log:
 		- 2026-11-12: Left open by 2026111207565307. Container start on a tree the server still owns, such as after a crash, by a login without the server's group yet, fails at the safe settings read with a bare permission denied. The login check runs after that step in container mode.
+		- 20261112: A refused read in start's safe settings or plugin check gives the login group reason, to log in again or the `gpasswd` line. Its whitelist and ops warnings now come after the settings read, so they don't print twice before the error.
+		- Verified: df74x fails without the change and passes with it.
+	- Decisions:
+		- The reason is given on a refused read, not checked up front as in native start. Container start doesn't need the group when the tree is the operator's, which is the usual case.
+		- A refused read with the group in this login keeps the plain error, since the group isn't the cause then.
+		- Swept: native start checks the group first, `cmd` checks it before sending, and `repair`, `setup`, and `update` read the tree as root.
+	- Actual fix [Bug]: container start's refused tree reads say to log in again, or give the `gpasswd` line.
+	- Branch: r1112b
+	- Test case: df74x
+	- Acceptance signoff: Self-closed: df74x passes, per the standing close policy.
+	- Closed: 20261112-093323
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
@@ -287,7 +302,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - status says no paper.jar when it can't read the folder
 	- ID: 2026111118183922
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261111-181839
 	- Opened by:
@@ -296,6 +311,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: It says the jar can't be read, and why, as the whitelist line does. design.md: a part that can't be read says why.
 	- Reproduced [Bug]: 20261111, beside a server under Podman, with the tree owned by an account and group the operator wasn't in.
 	- Possible cause [Bug]: `Probe.version` takes any error from resolving `paper.jar` as a missing jar.
+	- Actual cause [Bug]:
+		- `Probe.version` took any error from resolving `paper.jar` as a missing jar.
+	- Actual effort: Low
+	- Progress log:
+		- 20261112: The Version line says it can't read `paper.jar`, and why, as the whitelist line does. A missing one still says no paper.jar. When any read of the tree is refused and the login doesn't have `runGroup` yet, the trees section says to log in again, or gives the `gpasswd` line.
+		- Verified: df74y fails without the change and passes with it.
+	- Decisions:
+		- The group reason shows once, under the trees, not on each line that couldn't be read. It shows only after a refused read, since a login without the group reads a tree the operator owns. design.md updated.
+		- It uses `launch.GroupProblem`, the check native start and `cmd` use, now exported.
+		- Swept: the whitelist, ops, plugin jar, and log reads all mark a refused read. The approved list is in `/etc`, not the tree, so it doesn't.
+	- Actual fix [Bug]: the Version line says `paper.jar` can't be read and why, and the trees say to log in again.
+	- Branch: r1112b
+	- Test case: df74y
+	- Acceptance signoff: Self-closed: df74y passes, per the standing close policy.
+	- Closed: 20261112-093323
 
 - plugins.shcl keys come back lower case after an approve
 	- ID: 2026111118053419

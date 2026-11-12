@@ -193,6 +193,7 @@ Common:  --config PATH, --set KEY=VALUE
 - `status` names any other Paper server that runs, such as one the old scripts started, or one in a container this tool didn't start.
 
 - A part that can't be read, such as a file the operator's group can't see, says why, and the rest still shows.
+	- When a read of the tree is refused and the login doesn't have `runGroup` yet, the trees line says so, as `start` does.
 
 - The log is `logs/latest.log` in both modes, since the container sees the same tree. Files in the tree that aren't plain files, such as a pipe the server left there, aren't read.
 
@@ -622,6 +623,7 @@ cicd/                        build, test, and release scripts
 	- Before a start, the trees go to `runUser`. After a stop, they go to `ownerAfterStop`.
 	- The group is always `runGroup`, and the operator is in it. So logs and `status` work while the server runs.
 		- A login from before the operator joined the group, as right after setup, doesn't have it yet. Native `start` and `cmd` say to log in again before they change or send anything, and container `start` warns once the server is up.
+		- Container `start` reads the tree before it changes hands. After a crash the tree is still the server's, so when that read is refused, `start` gives the same reason.
 
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
 

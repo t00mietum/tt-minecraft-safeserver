@@ -26,6 +26,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
@@ -49,12 +50,17 @@ type Probe struct {
 	// Root is when status runs as root, which reading the drop counters
 	// needs. It never asks sudo, so the output doesn't change with sudo's cache.
 	Root bool
-	sums plugins.Sums
+	// Group says why this login can't read the tree through runGroup, for a
+	// read that was refused. nil leaves that out.
+	Group func(group, what string) error
+	sums  plugins.Sums
+	// denied is a read of the tree refused in this reading.
+	denied bool
 }
 
 // NewProbe gives a Probe on the real host.
 func NewProbe(r host.Runner, c *config.Config, pluginsFile string) *Probe {
-	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0}
+	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0, Group: launch.GroupProblem}
 }
 
 // Line is one labeled line. A Line with no label goes on under the one above.
@@ -76,16 +82,23 @@ type running struct {
 // Take reads everything once. A part that can't be read says why, and the
 // rest still shows.
 func (p *Probe) Take(ctx context.Context) Report {
+	p.denied = false
 	srv, run := p.server(ctx)
 	srv = append(srv, p.version(ctx, run)...)
 	srv = append(srv, p.memory(run))
-	return Report{
-		srv,
-		p.ports(ctx),
-		{p.whitelist(), p.ops(), p.plugins()},
-		append(p.trees(), p.boot(ctx)),
-		p.log(),
+	ports := p.ports(ctx)
+	players := []Line{p.whitelist(), p.ops(), p.plugins()}
+	log := p.log()
+	// trees goes after every read of the tree, since it says why one was refused.
+	return Report{srv, ports, players, append(p.trees(), p.boot(ctx)), log}
+}
+
+// cantRead is err for a line, and notes a read of the tree that was refused.
+func (p *Probe) cantRead(err error) string {
+	if errors.Is(err, fs.ErrPermission) {
+		p.denied = true
 	}
+	return err.Error()
 }
 
 func (p *Probe) server(ctx context.Context) ([]Line, running) {
@@ -137,8 +150,12 @@ func (p *Probe) cgroupMemory(pid string) (int64, string) {
 
 func (p *Probe) version(ctx context.Context, run running) []Line {
 	jar := "no paper.jar"
-	if real, err := filepath.EvalSymlinks(filepath.Join(p.Cfg.ServerDir, "paper.jar")); err == nil {
+	real, err := filepath.EvalSymlinks(filepath.Join(p.Cfg.ServerDir, "paper.jar"))
+	switch {
+	case err == nil:
 		jar = filepath.Base(real)
+	case !errors.Is(err, fs.ErrNotExist):
+		jar = "can't read paper.jar: " + p.cantRead(err)
 	}
 	if !run.up {
 		return []Line{{"Version", jar}}
@@ -271,7 +288,7 @@ func (p *Probe) whitelist() Line {
 	case errors.Is(err, fs.ErrNotExist):
 		return Line{"Whitelist", "no whitelist.json yet"}
 	case err != nil:
-		return Line{"Whitelist", "can't read it: " + err.Error()}
+		return Line{"Whitelist", "can't read it: " + p.cantRead(err)}
 	}
 	return Line{"Whitelist", fmt.Sprintf("%d %s", len(list), plural(len(list), "player"))}
 }
@@ -282,7 +299,7 @@ func (p *Probe) ops() Line {
 	case errors.Is(err, fs.ErrNotExist):
 		return Line{"Ops", "none"}
 	case err != nil:
-		return Line{"Ops", "can't read them: " + err.Error()}
+		return Line{"Ops", "can't read them: " + p.cantRead(err)}
 	case len(list) == 0:
 		return Line{"Ops", "none"}
 	}
@@ -303,7 +320,7 @@ func (p *Probe) plugins() Line {
 	}
 	c, err := plugins.CheckJars(p.Cfg.ServerDir, approved, &p.sums)
 	if err != nil {
-		return Line{"Plugins", "can't check the jars: " + err.Error()}
+		return Line{"Plugins", "can't check the jars: " + p.cantRead(err)}
 	}
 	var text string
 	switch {
@@ -341,6 +358,11 @@ func (p *Probe) trees() []Line {
 		uid, gid := strconv.FormatUint(uint64(st.Uid), 10), strconv.FormatUint(uint64(st.Gid), 10)
 		lines = append(lines, Line{"", fmt.Sprintf("%s owned by %s:%s", t, userName(uid), groupName(gid))})
 	}
+	if p.denied && p.Group != nil {
+		if why := p.Group(p.Cfg.RunGroup, "the server tree"); why != nil {
+			lines = append(lines, Line{"", why.Error()})
+		}
+	}
 	if len(lines) == 0 {
 		return lines
 	}
@@ -369,7 +391,7 @@ func (p *Probe) log() []Line {
 	case errors.Is(err, fs.ErrNotExist):
 		return []Line{{"Log", "no " + file + " yet"}}
 	case err != nil:
-		return []Line{{"Log", "can't read it: " + err.Error()}}
+		return []Line{{"Log", "can't read it: " + p.cantRead(err)}}
 	}
 	lines := []Line{{"Log", file}}
 	for _, l := range tail {

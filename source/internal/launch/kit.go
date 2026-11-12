@@ -94,11 +94,11 @@ func (k *Kit) refuseOthers(ctx context.Context) error {
 // checkSettings refuses a start when a safe setting is off, and warns about
 // what's allowed but likely a mistake.
 func (k *Kit) checkSettings() error {
-	k.warn(settings.Warnings(k.Cfg.ServerDir))
 	problems, err := settings.Check(k.Cfg)
 	if err != nil {
-		return fmt.Errorf("can't check the safe settings: %w", err)
+		return k.denied(fmt.Errorf("can't check the safe settings: %w", err))
 	}
+	k.warn(settings.Warnings(k.Cfg.ServerDir))
 	if len(problems) == 0 {
 		return nil
 	}
@@ -106,6 +106,19 @@ func (k *Kit) checkSettings() error {
 		k.say("unsafe: %s", p)
 	}
 	return errors.New("the safe settings aren't in place; sudo tt-minecraftd repair sets them")
+}
+
+// denied gives the reason for a read of the tree that was refused, when it's
+// a group this login doesn't have yet. Container start reads the tree before
+// it changes hands, which after a crash is still the server's.
+func (k *Kit) denied(err error) error {
+	if !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	if why := k.groupProblem("the server tree"); why != nil {
+		return why
+	}
+	return err
 }
 
 // checkPlugins refuses a start when a jar is new or changed since it was
@@ -123,7 +136,7 @@ func (k *Kit) checkPlugins() error {
 	}
 	c, err := plugins.CheckJars(k.Cfg.ServerDir, approved, &plugins.Sums{})
 	if err != nil {
-		return fmt.Errorf("can't check the plugin jars: %w", err)
+		return k.denied(fmt.Errorf("can't check the plugin jars: %w", err))
 	}
 	if c.OK() {
 		return nil

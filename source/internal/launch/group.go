@@ -64,7 +64,12 @@ func (k *Kit) groupProblem(what string) error {
 	if k.Root {
 		return nil
 	}
-	group := k.Cfg.RunGroup
+	return GroupProblem(k.Cfg.RunGroup, what)
+}
+
+// GroupProblem says why this login can't read what through group, or nil
+// when it can, or when the group or account can't be looked up.
+func GroupProblem(group, what string) error {
 	state, name := loginGroup(group)
 	switch state {
 	case groupNextLogin:

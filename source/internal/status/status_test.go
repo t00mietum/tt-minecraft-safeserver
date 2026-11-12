@@ -371,6 +371,38 @@ func TestStatusBroken(t *testing.T) {
 	}
 }
 
+// A tree this login can't read says why: the jar line says so rather than
+// that there's no paper.jar, and the trees say to log in again.
+func TestStatusTreeDenied(t *testing.T) {
+	defer testid.Line(t, "df74y")
+	if os.Geteuid() == 0 {
+		t.Skip("root reads the tree anyway")
+	}
+	g := newRig(t)
+	g.p.Cfg.RunGroup = "minecraftd"
+	g.p.Group = func(group, what string) error {
+		return errors.New("this login isn't in group " + group + " yet, so it can't read " + what + "; log in again")
+	}
+	if out := g.text(t, 0); strings.Contains(out, "log in again") {
+		t.Errorf("group line with nothing refused:\n%s", out)
+	}
+	if err := os.Chmod(g.dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(g.dir, 0o700) })
+	out := g.text(t, 0)
+	wantLines(t, out, "            this login isn't in group minecraftd yet, so it can't read the server tree; log in again")
+	for _, w := range []string{"Version:    can't read paper.jar: lstat " + g.dir + "/paper.jar: permission denied", "Whitelist:  can't read it:", "Log:        can't read it:"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("lacks %q:\n%s", w, out)
+		}
+	}
+	g.p.Group = nil
+	if out := g.text(t, 0); strings.Contains(out, "log in again") {
+		t.Errorf("group line with no Group:\n%s", out)
+	}
+}
+
 func TestTailFile(t *testing.T) {
 	defer testid.Line(t, "df5yb")
 	file := filepath.Join(t.TempDir(), "latest.log")

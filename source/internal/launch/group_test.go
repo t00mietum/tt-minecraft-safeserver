@@ -87,3 +87,32 @@ func TestLoginGroupHost(t *testing.T) {
 		t.Errorf("missing group: %d", state)
 	}
 }
+
+// Container start reads the tree before it changes hands, which after a crash
+// is still the server's. A login without the group yet gets told why, not a
+// bare permission denied.
+func TestStartTreeDenied(t *testing.T) {
+	defer testid.Line(t, "df74x")
+	if os.Geteuid() == 0 {
+		t.Skip("root reads the tree anyway")
+	}
+	for _, c := range []struct {
+		state groupState
+		want  string
+	}{
+		{groupNextLogin, "isn't in group minecraftd yet, so it can't read the server tree"},
+		{groupMissing, "sudo gpasswd --add alice minecraftd"},
+		{groupHere, "can't check the safe settings: open "},
+	} {
+		d := newRig(t)
+		inGroup(t, c.state)
+		if err := os.Chmod(d.dir, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(d.dir, 0o700) })
+		err := d.d.Start(context.Background(), StartMode{})
+		if err == nil || !strings.Contains(err.Error(), c.want) || len(d.changes()) != 1 || strings.Contains(d.out.String(), "can't read the whitelist") {
+			t.Errorf("state %d: err %v, ran %q, output %q", c.state, err, d.changes(), d.out.String())
+		}
+	}
+}
