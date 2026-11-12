@@ -307,7 +307,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Podman warns the input isn't a TTY on every start from a script
 	- ID: 2026111207565309
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -315,6 +315,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: No warning, since the server's terminal is the container's own.
 	- Reproduced [Bug]: 20261112, in the root host check.
 	- Possible cause [Bug]: Podman checks the caller's stdin for `-i -t`, even with `-d`.
+	- Actual cause [Bug]:
+		- Podman 5.4.2's `run` warns whenever `-i -t` is given and its own stdin isn't a terminal, with no check for `--detach`. Its `create` and `start` don't. Docker doesn't warn either way.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: under rootless Podman 5.4.2, `run -d -i -t` with stdin from `/dev/null` warns, and `create -i -t` then `start` doesn't. The container still has a terminal and open stdin, and `attach` under Podman and Docker took a line and detached on Ctrl-C.
+		- Verified: df682 fails on the old code with the warning, and passes with the fix. All 17 root host checks pass, console and cmd under rootful Podman included.
+		- 20261112: df5xp now expects `create` and `start` in place of `run --detach`. df5xs and df5z4 read the `create` line, and df5xs's debug case expects `run` with no `--detach`.
+	- Decisions:
+		- Container `start` makes the container with `create` and then runs `start`, under both runtimes, so the flags and the steps stay the same for each. `--debug` keeps `run`, on the operator's terminal. A failed `start` leaves a created container, as a failed `run` did, and the next `start` removes it. design.md updated.
+		- Not a pty for Podman's stdin, nor a filter on its stderr, since `create` and `start` need neither.
+		- Swept: the only other runtime `run` is `update --image`'s version check, which has no `-i -t`.
+	- Actual fix [Bug]: container `start` runs `create` and then `start` in place of `run --detach`.
+	- Branch: r1112b
+	- Test case: df5xp, df5xs, df682
+	- Acceptance signoff: Self-closed: df682 passes in the root host check, per the standing close policy.
+	- Closed: 20261112-095714
 
 - status says no paper.jar when it can't read the folder
 	- ID: 2026111118183922

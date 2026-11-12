@@ -135,6 +135,8 @@ func (g *rig) changes() []string {
 	return lines
 }
 
+// create then start, since Podman's run --detach warns when started from a
+// script.
 func TestDockerStart(t *testing.T) {
 	defer testid.Line(t, "df5xp")
 	g := newRig(t)
@@ -145,7 +147,7 @@ func TestDockerStart(t *testing.T) {
 	}
 	q := func(s string) string { return host.Quote([]string{s}) }
 	cfg := g.d.Cfg
-	run := []string{"docker", "run", "--detach", "--name", "tt-minecraftd", "--label", "tt-minecraftd",
+	run := []string{"docker", "create", "--name", "tt-minecraftd", "--label", "tt-minecraftd",
 		"--user", "990:991", "--network", "host", "--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,nodev",
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "2048",
 		"--memory", "6442450944", "--memory-swap", "6442450944", "--oom-score-adj", "1000",
@@ -162,6 +164,7 @@ func TestDockerStart(t *testing.T) {
 		"sudo chown -R -- minecraftd:minecraftd " + q(g.dir),
 		"sudo chmod -R ug+rwX,o-rwx -- " + q(g.dir),
 		"sudo " + host.Quote(run),
+		"sudo docker start tt-minecraftd",
 	}
 	if got := g.changes(); !reflect.DeepEqual(got, want) {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -226,7 +229,7 @@ func TestDockerStartModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := g.changes()
-	if len(got) != 5 || strings.Contains(got[3], "--detach") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[4], "chown -R -- alice:minecraftd") {
+	if len(got) != 5 || !strings.HasPrefix(got[3], "sudo docker run --name") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[4], "chown -R -- alice:minecraftd") {
 		t.Errorf("debug ran %q", got)
 	}
 
@@ -247,8 +250,9 @@ func TestDockerStartModes(t *testing.T) {
 	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
 		t.Fatal(err)
 	}
-	if last := g.r.Lines()[len(g.r.Ran)-1]; !strings.HasPrefix(last, "sudo docker run --detach") || g.slept != 0 {
-		t.Errorf("dry run ended with %q, slept %s", last, g.slept)
+	lines = g.r.Lines()
+	if tail := lines[len(lines)-2:]; !strings.HasPrefix(tail[0], "sudo docker create --name") || tail[1] != "sudo docker start tt-minecraftd" || g.slept != 0 {
+		t.Errorf("dry run ended with %q, slept %s", tail, g.slept)
 	}
 }
 
@@ -464,8 +468,8 @@ func TestStartChecksPlugins(t *testing.T) {
 		t.Fatal(err)
 	}
 	mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
-	if last := g.r.Lines()[len(g.r.Ran)-1]; !strings.Contains(last, mount) {
-		t.Errorf("no read-only mount for the extension in %q", last)
+	if create := g.r.Lines()[len(g.r.Ran)-2]; !strings.Contains(create, mount) {
+		t.Errorf("no read-only mount for the extension in %q", create)
 	}
 }
 

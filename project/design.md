@@ -600,6 +600,7 @@ cicd/                        build, test, and release scripts
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
 	- `-i -t`, so the console works with the runtime's `attach`.
+		- The container is made with `create` and then `start`, not `run --detach`. Podman's `run` warns that its input isn't a terminal when `start` runs from a script or the boot unit, even detached. `--debug` still uses `run`, on the operator's terminal.
 	- There's no `--rm`, so the runtime's `logs` still works after a crash. `start` removes the old container, but only one that has this tool's label.
 
 - `stop`, `console`, `cmd`, and `repair` look for the tool's label in both runtimes. A container started before a `runMode` change still gets found, and a running one wins over a stopped one. Only `runMode`'s runtime has to answer, since Docker's daemon may be down on a host that moved to Podman.

@@ -53,7 +53,9 @@ fNftRestart() {
 
 fPodmanStart() {
 	! getent group docker || return 1
-	tt-minecraftd start || return 1
+	# No terminal, as from the boot unit. Podman's run warned then.
+	tt-minecraftd start < /dev/null 2>&1 | tee start.out || return 1
+	! grep -q 'not a TTY' start.out || return 1
 	sudo podman ps --format '{{.Names}}' | grep -qx tt-minecraftd
 }
 
