@@ -88,7 +88,7 @@ func TestAnthropicRunsFetches(t *testing.T) {
 	done := `{"stop_reason": "end_turn", "content": [{"type": "text", "text": "{\"jars\": []}"}]}`
 	api := fakeAPI(t, func(n int, r *http.Request, body map[string]any) {
 		if r.URL.Path != "/v1/messages" || r.Header.Get("x-api-key") != "k2" || r.Header.Get("anthropic-version") == "" ||
-			r.Header.Get("Authorization") != "" || body["model"] != "claude-sonnet-4-5" {
+			r.Header.Get("Authorization") != "" || body["model"] != "sonnet-x" {
 			t.Errorf("call %d: %s %v", n, r.URL.Path, r.Header)
 		}
 		if n == 1 {
@@ -98,7 +98,7 @@ func TestAnthropicRunsFetches(t *testing.T) {
 			}
 		}
 	}, call, done)
-	a := API{Kind: "anthropic", URL: api.URL + "/v1", Model: "claude-sonnet-4-5", Key: "k2", Fetch: &Fetcher{Client: page.Client()}}
+	a := API{Kind: "anthropic", URL: api.URL + "/v1", Model: "sonnet-x", Key: "k2", Fetch: &Fetcher{Client: page.Client()}}
 	if got, err := a.Ask(context.Background(), "q"); err != nil || got != `{"jars": []}` {
 		t.Errorf("got %q, %v", got, err)
 	}

@@ -170,7 +170,7 @@ func TestNewPicksTheKind(t *testing.T) {
 			t.Errorf("%s: got %v", kind, err)
 		}
 	}
-	cfg.Agent, cfg.AgentCommand = "command", []string{"llm", "-m", "gpt-5"}
+	cfg.Agent, cfg.AgentCommand = "command", []string{"ask", "--json"}
 	a, err := New(&cfg)
 	if err != nil || !reflect.DeepEqual(a, Command{Argv: cfg.AgentCommand}) {
 		t.Errorf("got %+v, %v", a, err)
@@ -180,7 +180,7 @@ func TestNewPicksTheKind(t *testing.T) {
 	old := getenv
 	getenv = func(k string) string { return env[k] }
 	t.Cleanup(func() { getenv = old })
-	cfg.Agent, cfg.AgentModel = "anthropic", "claude-sonnet-4-5"
+	cfg.Agent, cfg.AgentModel = "anthropic", "sonnet-x"
 	if a, err = New(&cfg); err != nil || !reflect.DeepEqual(a, API{Kind: "anthropic", URL: "https://api.anthropic.com/v1", Model: cfg.AgentModel, Key: "ak"}) {
 		t.Errorf("anthropic: %+v, %v", a, err)
 	}

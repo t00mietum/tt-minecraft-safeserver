@@ -84,7 +84,7 @@ extraArgs: [--nogui]
 agent: Command
 agentURL: http://127.0.0.1:11434/v1/
 agentModel: qwen3:32b
-agentCommand: [/usr/local/bin/llm, -m, gpt-5]
+agentCommand: [/usr/local/bin/ask, --json]
 agentHosts: [CDN.Modrinth.com, ci.example.org]
 `
 	var c Config
@@ -123,7 +123,7 @@ agentHosts: [CDN.Modrinth.com, ci.example.org]
 		Agent:             "command",
 		AgentURL:          "http://127.0.0.1:11434/v1",
 		AgentModel:        "qwen3:32b",
-		AgentCommand:      []string{"/usr/local/bin/llm", "-m", "gpt-5"},
+		AgentCommand:      []string{"/usr/local/bin/ask", "--json"},
 		AgentHosts:        []string{"cdn.modrinth.com", "ci.example.org"},
 	}
 	if !reflect.DeepEqual(c, want) {
@@ -188,7 +188,7 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 		{"agentModel: \"gpt 5\"", "isn't a model name"},
 		{"agentModel: --help", "isn't a model name"},
 		{"agentCommand: []", "takes a program and its arguments"},
-		{"agentCommand: [bin/llm, -m]", "isn't a full path or a program name"},
+		{"agentCommand: [bin/ask, --json]", "isn't a full path or a program name"},
 		{"agentHosts: [cdn.modrinth.com, https://github.com]", "isn't a host name"},
 		{"agentHosts: localhost", "isn't a host name"},
 	}

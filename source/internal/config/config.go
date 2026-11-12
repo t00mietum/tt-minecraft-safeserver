@@ -430,7 +430,7 @@ func argv(dst *[]string) setter {
 			return err
 		}
 		if len(items) == 0 {
-			return errors.New("takes a program and its arguments, such as [llm, -m, gpt-5]")
+			return errors.New("takes a program and its arguments, such as [/usr/local/bin/ask, --json]")
 		}
 		if _, err := checkProgram(items[0]); err != nil {
 			return err

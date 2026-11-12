@@ -726,7 +726,7 @@ cicd/                        build, test, and release scripts
 - Kinds of agent:
 	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio.
 	- `anthropic`: Anthropic's messages API.
-	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Claude Code, Codex, and Gemini CLI, and wrappers such as `llm`.
+	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents.
 	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
 
 - The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.
