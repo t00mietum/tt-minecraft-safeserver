@@ -43,6 +43,7 @@ type GeyserSource interface {
 
 // Parts are the ones named on the command line. None named means all.
 type Parts struct {
+	Self    bool
 	Paper   bool
 	Plugins bool
 	Image   bool
@@ -60,6 +61,12 @@ type Update struct {
 	Out         io.Writer
 	Paper       PaperSource
 	Geyser      GeyserSource
+	// Self gets tt-minecraftd releases, to replace Exe, the running binary,
+	// which is Version. With NixOS, it only says what to change.
+	Self    SelfSource
+	Exe     string
+	Version string
+	NixOS   bool
 	// Run pulls and tries the image.
 	Run host.Runner
 	// Agent answers about the jars no known source covers, per design.md's
@@ -92,12 +99,14 @@ type pluginStep struct {
 // Do looks everything up first, so a failed lookup changes nothing, then shows
 // the plan and asks.
 func (u *Update) Do(ctx context.Context) error {
-	if _, err := os.Stat(u.Cfg.ServerDir); err != nil {
-		return fmt.Errorf("no server folder: %w", err)
-	}
 	parts := u.Parts
 	if parts == (Parts{}) {
-		parts = Parts{Paper: true, Plugins: true, Image: true}
+		parts = Parts{Self: true, Paper: true, Plugins: true, Image: true}
+	}
+	if parts != (Parts{Self: true}) {
+		if _, err := os.Stat(u.Cfg.ServerDir); err != nil {
+			return fmt.Errorf("no server folder: %w", err)
+		}
 	}
 	var plan []string
 	var ps *paperStep
@@ -134,6 +143,15 @@ func (u *Update) Do(ctx context.Context) error {
 			plan = append(plan, is.plan(u.ConfigPath))
 		}
 	}
+	var ss *selfStep
+	if parts.Self {
+		if ss, err = u.selfLookup(ctx); err != nil {
+			return err
+		}
+		if ss != nil {
+			plan = append(plan, u.selfPlan(*ss))
+		}
+	}
 	if len(plan) == 0 {
 		return nil
 	}
@@ -161,7 +179,13 @@ func (u *Update) Do(ctx context.Context) error {
 			return err
 		}
 	}
-	if !u.DryRun {
+	// Last, so a failed swap leaves the rest done.
+	if ss != nil {
+		if err := u.getSelf(ctx, *ss); err != nil {
+			return err
+		}
+	}
+	if !u.DryRun && (ps != nil || len(steps) > 0 || len(found) > 0 || is != nil) {
 		fmt.Fprintln(u.Out, "A running server goes on with what it started with, and uses the new builds from its next start.")
 	}
 	return nil

@@ -15,7 +15,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/selfupdate"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -64,6 +67,31 @@ func fakePaperMC(t *testing.T) {
 	old := paperAPI
 	paperAPI.Base, paperAPI.Client = srv.URL+"/paper", srv.Client()
 	t.Cleanup(func() { paperAPI = old })
+}
+
+// fakeReleases points selfAPI at a stand-in GitHub with release v9.0.0, and
+// counts the lookups.
+func fakeReleases(t *testing.T) *atomic.Int32 {
+	t.Helper()
+	var hits atomic.Int32
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bin := selfupdate.AssetName(runtime.GOARCH)
+		switch r.URL.Path {
+		case "/repo/releases":
+			hits.Add(1)
+			fmt.Fprintf(w, `[{"tag_name":"v9.0.0","assets":[{"name":%q,"browser_download_url":"%s/bin"},{"name":"SHA256SUMS","browser_download_url":"%s/sums"}]}]`, bin, srv.URL, srv.URL)
+		case "/sums":
+			fmt.Fprintf(w, "%s  %s\n", strings.Repeat("ab", 32), bin)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	old := selfAPI
+	selfAPI.Base, selfAPI.Client = srv.URL+"/repo", srv.Client()
+	t.Cleanup(func() { selfAPI = old })
+	return &hits
 }
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
@@ -419,6 +447,7 @@ func TestSetup(t *testing.T) {
 	noDefaultConfig(t)
 	noHostChecks(t)
 	fakePaperMC(t)
+	hits := fakeReleases(t)
 	var again []string
 	old := asRoot
 	asRoot = func(args []string) error { again = args; return nil }
@@ -448,6 +477,9 @@ func TestSetup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
 		t.Error("a dry run wrote server.properties")
 	}
+	if !strings.Contains(out, "Updating:") || hits.Load() != 0 {
+		t.Errorf("setup's update looked for a release %d times:\n%s", hits.Load(), out)
+	}
 }
 
 // update runs itself through sudo unless it's root or a dry run, and a dry
@@ -456,13 +488,14 @@ func TestUpdate(t *testing.T) {
 	defer testid.Line(t, "df671")
 	noDefaultConfig(t)
 	fakePaperMC(t)
+	hits := fakeReleases(t)
 	var again []string
 	old := asRoot
 	asRoot = func(args []string) error { again = args; return nil }
 	t.Cleanup(func() { asRoot = old })
 
 	code, out, _ := runArgs("update", "--help")
-	for _, want := range []string{"--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
+	for _, want := range []string{"--self ", "--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
 		if code != exitOK || !strings.Contains(out, want) {
 			t.Errorf("update --help lacks %q: %q", want, out)
 		}
@@ -486,6 +519,15 @@ func TestUpdate(t *testing.T) {
 	}
 	if target, _ := os.Readlink(filepath.Join(dir, "paper.jar")); target != "paper-26.3-244.jar" {
 		t.Errorf("a dry run moved paper.jar to %q", target)
+	}
+	if !strings.Contains(out, "Move tt-minecraftd from "+version+" to v9.0.0") || !strings.Contains(out, "would download tt-minecraftd v9.0.0 and rename it over /") || hits.Load() != 1 {
+		t.Errorf("dry run, %d lookups: stdout %q", hits.Load(), out)
+	}
+
+	// Only --self needs no server folder.
+	code, out, msg = runArgs("update", "--self", "--dry-run", "--set=serverDir="+filepath.Join(dir, "none"))
+	if code != exitOK || !strings.Contains(out, "to v9.0.0") || strings.Contains(out, "Paper") {
+		t.Errorf("--self: exit %d, stdout %q, stderr %q", code, out, msg)
 	}
 }
 

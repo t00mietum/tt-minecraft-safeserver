@@ -266,6 +266,9 @@ Common:  --config PATH, --set KEY=VALUE
 - Needs root, and asks first unless `--yes` is given. When a part isn't named, it updates all of them.
 
 - `--self` gets the latest `tt-minecraft-safeserver` release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename.
+	- A release holds `tt-minecraftd-linux-amd64` and `tt-minecraftd-linux-arm64`, plus `SHA256SUMS` in `sha256sum`'s format. The new build has to match its line there, and its `--version` has to name the release, before it's renamed over the old one. It keeps the old one's owner, group, and mode.
+	- A pre-release is only taken by a build that's a pre-release itself. Drafts are skipped, and it never goes back to an older version.
+	- It needs no server folder. `setup` leaves it out of the update it runs on an existing install, since the binary setup runs is the one it installs.
 
 - `--paper` asks the PaperMC download API for the newest stable build of the current Minecraft version. It downloads the jar, checks its SHA-256 sum against the API, puts it beside the old ones, and points `paper.jar` at it. The last 2 builds stay on disk.
 	- The current version and build come from the name `paper.jar` links to, such as `paper-26.3-249.jar`. A `paper.jar` that's a plain file is refused, with how to rename it.
@@ -289,7 +292,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - A running server is left alone. It uses the new files on its next start.
 
-- On NixOS, `--self` only prints what to change, since it comes from the Nix store.
+- On NixOS, `--self` only prints what to change, since it comes from the Nix store. So does a binary run from the Nix store on another distro.
 
 ### repair
 

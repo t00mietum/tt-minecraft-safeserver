@@ -130,7 +130,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refresh the pinned container image.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
-	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), and 2026111117302985 (`--image`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302995 (`--self`), and 2026111117404480 (Modrinth and Hangar sources) are queued.
+	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) and 2026111117404480 (Modrinth and Hangar sources) are queued.
 
 - Commands fail for the operator until a new login after setup
 	- ID: 2026111207565307
@@ -175,13 +175,31 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --self
 	- ID: 2026111117302995
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
 	- Parent ID: 2026111111065803
+	- Related IDs: 2026111111070774, 2026111111070761
 	- Requirements:
 		- `--self` gets the latest release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename. On NixOS it only prints what to change.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-12: `update --self` reads the release list, picks the newest release past this build, checks the binary for this arch against the release's `SHA256SUMS`, runs its `--version`, and renames it over the running binary with the old one's owner, group, and mode. On NixOS, or from the Nix store, it prints the newer version and the flake update to run. A plain `update` includes it.
+		- Verified: df77g, df77h, df77j, df77k, df77m, and the new lines in df671 and df65m pass. Taking out the hash check, the pre-release rule, the `--version` check, the NixOS case, setup's leaving it out, or the server folder exception each fails a test.
+		- Verified: against the live GitHub API, with no release yet, `update --self --dry-run` says `v1.0.0-alpha.1` is the newest.
+	- Decisions:
+		- Release files are `tt-minecraftd-linux-amd64` and `tt-minecraftd-linux-arm64` as plain binaries, plus `SHA256SUMS` in `sha256sum`'s format. The First release and the install script follow it. The build's `--version` has to name the tag, so the release sets `main.version` to it. Filed as a Check in questions.md.
+		- A pre-release is only taken by a pre-release build. The release list is read, since `/releases/latest` leaves pre-releases out. Drafts are skipped, and it never moves to an older version.
+		- `setup` leaves `--self` out of the update it runs on an existing install, since the binary setup runs is the one it installs.
+		- `--self` alone needs no server folder. The swap goes last, so a failed one leaves the other parts done.
+		- A link to the binary is followed, and the file it points at is replaced, so the link still works.
+		- The code is `source/internal/selfupdate`, one of the shared parts design.md lists for `tt-safeserver`.
+		- Swept: every `Parts` literal, setup's call to update, the help text, and design.md's update and CLI lines.
+	- Branch: r1112b
+	- Test case: df77g, df77h, df77j, df77k, df77m, df671, df65m
+	- Acceptance signoff: Self-closed: tested against a stand-in release server, with a real swap of a binary on disk. A run against the real first release is part of 2026111111070774.
+	- Closed: 20261112-105801
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
