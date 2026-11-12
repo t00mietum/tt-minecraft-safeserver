@@ -217,13 +217,20 @@ Common:  --config PATH, --set KEY=VALUE
 ### setup
 
 - Needs root, so it runs itself again through sudo when needed. It states its plan and asks before it changes anything, unless `--yes` is given.
+	- `--dry-run` doesn't need root, since it changes nothing.
+	- It refuses while a Paper server runs, under any account.
 
 - On a new install it:
 	1. Writes the config, from defaults and the setup options.
+		- The file gets only the keys given on the command line, plus `runMode` and `serverDir` from the picks below. The rest keep following the defaults.
+		- It's written last, after step 12, so a setup that stops partway runs again as a new install.
 	2. Creates the service account and its group, and adds the operator to the group.
 	3. Creates the server tree, or with `--adopt PATH` uses an existing server folder as it is.
+		- A new tree belongs to the operator, the same as a stopped server's. An adopted one is handed to the operator too.
+		- A `serverDir` that has files in it already is refused without `--adopt`.
 	4. Downloads and checks Paper on a new tree, the same way `update` does.
 	5. Asks the operator to accept the Minecraft EULA, and writes `eula.txt` only after a yes or `--accept-eula`.
+		- `--yes` doesn't count as that yes. With no answer, setup goes on without `eula.txt`, and says how to add it.
 	6. Writes the safe settings. See [Safe server settings](#safe-server-settings).
 	7. With `bedrock` on, downloads Geyser and Floodgate and sets them up. See [Bedrock players](#bedrock-players).
 	8. Approves the plugin jars that are there, after listing each one with its hash.
@@ -233,9 +240,10 @@ Common:  --config PATH, --set KEY=VALUE
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else.
 	13. Ends with `repair --check`.
 
-- When it finds an install already, it runs `repair` and then `update`.
+- When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
 
 - It sets `runMode` to `podman` when Podman is installed, and to `docker` when only Docker is. With neither, it offers to install Podman and `catatonit` through apt, or to use native mode. It never installs Docker.
+	- A `runMode` given with `--set` or `--native` skips the pick. `--yes` takes Podman.
 
 - On NixOS it skips steps 2, 9, 11, and 12. It checks those parts instead, and prints the module settings for whatever is missing.
 

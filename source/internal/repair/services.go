@@ -52,17 +52,22 @@ var containerCheck = Check{
 var catatonitCheck = Check{
 	Name:    "catatonit, for Podman's --init",
 	Applies: func(c *config.Config) bool { return c.RunMode == "podman" },
-	Look: func(ctx context.Context, h *Host) ([]Finding, error) {
-		for _, p := range catatonitPaths {
-			if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-				return nil, nil
-			}
-		}
-		if launch.Installed("catatonit") {
+	Look: func(context.Context, *Host) ([]Finding, error) {
+		if HasCatatonit() {
 			return nil, nil
 		}
 		return []Finding{{Problem: "catatonit isn't installed, so Podman can't start the container; apt-get install catatonit adds it"}}, nil
 	},
+}
+
+// HasCatatonit tells whether catatonit is where Podman looks, or on PATH.
+func HasCatatonit() bool {
+	for _, p := range catatonitPaths {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return launch.Installed("catatonit")
 }
 
 // catatonitPaths are where Podman looks for it, as init_path's default and

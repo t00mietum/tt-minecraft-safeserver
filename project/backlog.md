@@ -378,6 +378,68 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Install and set up Geyser and Floodgate when `bedrock` is on.
 		- On an existing install, run `repair` and then `update`.
 	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
+	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, and 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are queued. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
+
+- setup: install steps and --adopt
+	- ID: 2026111116415175
+	- Type: Feature
+	- Status: Waiting on signoff
+		- Waits on the hand test below. No root step ran here.
+	- Needs hand testing: on a throwaway host or VM with Podman, run `setup --dry-run`, then `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `repair --check` is clean apart from `paper.jar`, which comes with 2026111116415186.
+	- Priority: High
+	- Opened: 20261111-164151
+	- Opened by:
+	- Parent ID: 2026111111065776
+	- Requirements:
+		- Runs itself again through sudo, states its plan, and asks first unless `--yes`, per design.md's setup.
+		- Picks the runtime, writes the config, makes the account and group, and makes the server tree or adopts one with `--adopt PATH`.
+		- Asks before writing `eula.txt`, writes the safe settings, approves the jars that are there, pulls the image, copies itself to `/usr/local/bin`, and ends with `repair --check`.
+		- On an existing install, runs `repair`.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: each new test fails with its step broken, such as the plan not asked or the EULA not asked, and passes with it in place.
+	- Decisions:
+		- The config is written last, not first, so a setup that stops partway runs again as a new install. Every earlier step does nothing when it's done already. design.md updated.
+		- The config gets only the keys given, plus `runMode` and `serverDir`, so the rest keep following the defaults.
+		- A config file at the path is what counts as an install. There, setup asks once, then runs `repair`. `update` joins it with 2026111111065803.
+		- `--yes` doesn't accept the EULA; with no answer setup goes on without `eula.txt`. `--yes` takes Podman when neither runtime is there. design.md updated.
+		- A new install refuses a `serverDir` with files in it, and names `--adopt`. An adopted tree is handed to the operator, the same as a stopped server's.
+		- setup refuses while any Paper server runs, so it never changes a tree under a live server.
+		- It stops at a FAILED account or safe settings step, before the tree changes hands or the config is written.
+		- `--dry-run` doesn't go through sudo. It shows the account steps as PLAN, and skips the final `repair --check`, since there's no config yet.
+		- `--adopt` takes only a plain path, of letters, digits, and `._-/`. Anything else goes through `--set serverDir=`, quoted the shcl way.
+		- The account steps reuse repair's account and operator checks. `eula.txt` goes through the settings package's link-safe writer.
+		- Firewall (step 9), the boot unit (11), and the NixOS skips come with 2026111111065789, 2026111111065816, and the NixOS module item.
+		- Swept: `loadConfig` has the one caller; `HasCatatonit` serves both repair's check and setup's package pick.
+	- Branch: r1112
+	- Test case: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n
+
+- setup: download Paper
+	- ID: 2026111116415186
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-164151
+	- Opened by:
+	- Parent ID: 2026111111065776
+	- Related IDs: 2026111111065803
+	- Requirements:
+		- On a new tree, get the newest stable Paper build from the PaperMC download API, check its SHA-256, and point `paper.jar` at it, the same way `update --paper` does.
+		- Share the code with `update --paper`.
+
+- setup: Geyser and Floodgate
+	- ID: 2026111116415196
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-164151
+	- Opened by:
+	- Parent ID: 2026111111065776
+	- Prereq IDs: 2026111116415186
+	- Related IDs: 2026111111065803
+	- Requirements:
+		- With `bedrock` on, download Geyser and Floodgate, check their hashes, approve them, and set them up per design.md's Bedrock players.
+	- Shares the download and hash check with 2026111116415186, and `update --plugins` reuses it.
 
 - Firewall
 	- ID: 2026111111065789

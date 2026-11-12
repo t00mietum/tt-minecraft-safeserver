@@ -451,3 +451,52 @@ func TestGeyserNetherNetPort(t *testing.T) {
 		t.Errorf("config.yml:\n%s\nwant:\n%s", b, wantText)
 	}
 }
+
+func TestEULAFile(t *testing.T) {
+	defer testid.Line(t, "df65n")
+	dir := t.TempDir()
+	if ok, err := EULAAccepted(dir); ok || err != nil {
+		t.Errorf("no eula.txt: %v %v", ok, err)
+	}
+	if err := AcceptEULA(dir); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := EULAAccepted(dir); !ok || err != nil {
+		t.Errorf("after AcceptEULA: %v %v", ok, err)
+	}
+	file := filepath.Join(dir, "eula.txt")
+	if err := os.WriteFile(file, []byte("#kept\neula=FALSE\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(file, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := AcceptEULA(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(file) // #nosec G304 -- the test's own file
+	if err != nil || !strings.Contains(string(b), "#kept") || !strings.Contains(string(b), "eula=true") || strings.Contains(string(b), "FALSE") {
+		t.Errorf("eula.txt now %q, %v", b, err)
+	}
+	if fi, err := os.Stat(file); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Errorf("mode %v %v", fi.Mode(), err)
+	}
+
+	// A link in its place isn't followed.
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.WriteFile(target, []byte("eula=true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, file); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := EULAAccepted(dir); ok || err == nil {
+		t.Errorf("through a link: %v %v", ok, err)
+	}
+	if err := AcceptEULA(dir); err == nil {
+		t.Error("AcceptEULA wrote through a link")
+	}
+}

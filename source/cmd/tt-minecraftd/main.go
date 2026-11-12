@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
@@ -29,6 +30,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
+	setuppkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/setup"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 )
 
@@ -55,6 +57,9 @@ type options struct {
 	interval   int
 	check      bool
 	approve    bool
+	yes        bool
+	adopt      string
+	acceptEULA bool
 	// line is cmd's console command.
 	line string
 }
@@ -83,6 +88,16 @@ var commands = []command{
 		fs.BoolVar(&o.check, "check", false, "Only report, and change nothing. Doesn't need root")
 		fs.BoolVar(&o.approve, "approve-plugins", false, "Show each new or changed jar, and ask whether to approve it")
 	}},
+	{"setup", "Install the server, or adopt a server folder", func(fs *flag.FlagSet, o *options) {
+		fs.BoolFunc("native", "Use native mode, the same as --set runMode=native", func(string) error {
+			o.sets = append(o.sets, config.Option{Key: "runMode", Value: "native"})
+			return nil
+		})
+		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things. The EULA still needs a yes or --accept-eula")
+		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan and the commands, and change nothing")
+		fs.StringVar(&o.adopt, "adopt", "", "Take over the server folder at `PATH` as it is")
+		fs.BoolVar(&o.acceptEULA, "accept-eula", false, "Accept the Minecraft EULA, "+settings.EULAURL)
+	}},
 	{"status", "Show what the server is doing", func(*flag.FlagSet, *options) {}},
 	{"watch", "Redraw status every few seconds, until Ctrl-C", func(fs *flag.FlagSet, o *options) {
 		fs.IntVar(&o.interval, "interval", 2, "Seconds `N` between redraws")
@@ -98,6 +113,8 @@ type invocation struct {
 	cfg  config.Config
 	// configPath is the file the config came from, or would have.
 	configPath string
+	// args are the arguments as given, for setup to run itself through sudo.
+	args []string
 }
 
 func main() {
@@ -133,6 +150,9 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	if name == "repair" {
 		return repair(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
 	}
+	if name == "setup" {
+		return setup(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
+	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
 	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
@@ -164,6 +184,62 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 // --config gets its own.
 func (inv invocation) pluginsFile() string {
 	return filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl")
+}
+
+// asRoot runs the tool again through sudo with the same arguments, for setup.
+// A var so tests don't exec.
+var asRoot = func(args []string) error {
+	sudo, err := exec.LookPath("sudo")
+	if err != nil {
+		return fmt.Errorf("setup needs root, and there's no sudo: %w", err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return syscall.Exec(sudo, append([]string{"sudo", "--", exe}, args...), os.Environ()) // #nosec G204 -- this binary, with its own arguments
+}
+
+// setupSteps gives setup its runner and the Host its account checks look at.
+func setupSteps(inv invocation) (host.Runner, func(c *config.Config) *repairpkg.Host) {
+	runner := host.NewExec(inv.opts.dryRun)
+	return runner, func(c *config.Config) *repairpkg.Host {
+		return repairpkg.NewHost(runner, c, inv.configPath)
+	}
+}
+
+// setup needs root, so it runs itself again through sudo, unless it's a dry
+// run, which changes nothing.
+func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
+	if !root && !inv.opts.dryRun {
+		return asRoot(inv.args)
+	}
+	// With no path to it, the copy to /usr/local/bin is left out.
+	exe, _ := os.Executable()
+	runner, accounts := setupSteps(inv)
+	s := &setuppkg.Setup{
+		Run:         runner,
+		Loaded:      &inv.cfg,
+		ConfigPath:  inv.configPath,
+		PluginsFile: inv.pluginsFile(),
+		Sets:        inv.opts.sets,
+		Adopt:       inv.opts.adopt,
+		Yes:         inv.opts.yes,
+		DryRun:      inv.opts.dryRun,
+		AcceptEULA:  inv.opts.acceptEULA,
+		In:          bufio.NewScanner(in),
+		Out:         w,
+		Exe:         exe,
+		Accounts:    accounts,
+		Repair: func(ctx context.Context, c *config.Config, check bool) error {
+			again := inv
+			again.cfg = *c
+			again.opts.check = check
+			again.opts.approve = false
+			return repair(ctx, again, in, w, root)
+		},
+	}
+	return s.Do(ctx)
 }
 
 // repairSteps gives the checks around the safe settings and plugins. It's a
@@ -468,12 +544,13 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		return usageErr("watch: --interval takes 1 or more seconds")
 	}
 	inv.opts = o
+	inv.args = args
 	inv.configPath = o.configPath
 	if inv.configPath == "" {
 		inv.configPath = defaultConfig
 	}
 
-	cfg, warns, err := loadConfig(o, stderr)
+	cfg, warns, err := loadConfig(o, name == "setup", stderr)
 	var pathErr *fs.PathError
 	switch {
 	case errors.As(err, &pathErr):
@@ -492,13 +569,20 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 // loadConfig reads --config, or the default file. A missing default file means
 // the defaults, since status and the like should work before setup. A missing
 // --config file is an error, since it was named just now.
-func loadConfig(o options, stderr io.Writer) (config.Config, []config.Warning, error) {
-	if o.configPath != "" {
+func loadConfig(o options, setup bool, stderr io.Writer) (config.Config, []config.Warning, error) {
+	if o.configPath != "" && !setup {
 		return config.Load(o.configPath, o.sets)
 	}
-	cfg, warns, err := config.Load(defaultConfig, o.sets)
+	path := o.configPath
+	if path == "" {
+		path = defaultConfig
+	}
+	cfg, warns, err := config.Load(path, o.sets)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(stderr, "warning: no config at %s, so the defaults are used; setup writes one\n", defaultConfig)
+		// setup writes it, and reads it again itself on an existing install.
+		if !setup {
+			fmt.Fprintf(stderr, "warning: no config at %s, so the defaults are used; setup writes one\n", defaultConfig)
+		}
 		return config.Load("", o.sets)
 	}
 	return cfg, warns, err

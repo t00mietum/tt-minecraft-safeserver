@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +307,42 @@ func TestRepairOrder(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if code != exitError || lines[0] != "OK      early" || !strings.HasPrefix(lines[1], "FAILED  server.properties: online-mode") || lines[len(lines)-1] != "FAILED  late is wrong" {
 		t.Errorf("exit %d, stdout:\n%s", code, out)
+	}
+}
+
+// setup runs itself through sudo unless it's root or a dry run, and on an
+// existing install it runs repair.
+func TestSetup(t *testing.T) {
+	defer testid.Line(t, "df65m")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	var again []string
+	old := asRoot
+	asRoot = func(args []string) error { again = args; return nil }
+	t.Cleanup(func() { asRoot = old })
+
+	code, out, _ := runArgs("setup", "--help")
+	for _, want := range []string{"--yes ", "--dry-run ", "--adopt PATH", "--accept-eula ", "--native "} {
+		if code != exitOK || !strings.Contains(out, want) {
+			t.Errorf("setup --help lacks %q: %q", want, out)
+		}
+	}
+	if os.Geteuid() != 0 {
+		if code, _, msg := runArgs("setup", "--yes", "--adopt", "/srv/x"); code != exitOK || !reflect.DeepEqual(again, []string{"setup", "--yes", "--adopt", "/srv/x"}) {
+			t.Errorf("not root: exit %d, ran again with %q, stderr %q", code, again, msg)
+		}
+	}
+
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "config.shcl")
+	if err := os.WriteFile(conf, []byte("serverDir: "+dir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, msg := runArgs("setup", "--dry-run", "--config", conf)
+	if code != exitError || !strings.Contains(out, "Found an install at "+conf) || !strings.Contains(out, "FAILED  server.properties: white-list isn't set") {
+		t.Errorf("existing install: exit %d, stdout %q, stderr %q", code, out, msg)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
+		t.Error("a dry run wrote server.properties")
 	}
 }

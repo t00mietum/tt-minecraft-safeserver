@@ -85,6 +85,8 @@ func Run(ctx context.Context, h *Host, checks []Check, checkOnly bool, report Re
 var (
 	Before = []Check{configCheck, accountCheck, operatorCheck, serverTreeCheck, ownershipCheck}
 	After  = []Check{bedrockCheck, hostFirewallCheck, containerCheck, catatonitCheck, datasetCheck, othersCheck}
+	// AccountCheck and OperatorCheck are setup's second step.
+	AccountCheck, OperatorCheck = accountCheck, operatorCheck
 )
 
 // fix runs one command as root.
