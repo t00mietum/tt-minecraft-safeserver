@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
@@ -218,6 +219,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 	// With no path to it, the copy to /usr/local/bin is left out.
 	exe, _ := os.Executable()
 	runner, accounts := setupSteps(inv)
+	userAgent := "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
 	s := &setuppkg.Setup{
 		Run:         runner,
 		Loaded:      &inv.cfg,
@@ -232,7 +234,8 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		Out:         w,
 		Exe:         exe,
 		Accounts:    accounts,
-		Paper:       paper.API{UserAgent: "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"},
+		Paper:       paper.API{UserAgent: userAgent},
+		Geyser:      geyser.API{UserAgent: userAgent},
 		Repair: func(ctx context.Context, c *config.Config, check bool) error {
 			again := inv
 			again.cfg = *c

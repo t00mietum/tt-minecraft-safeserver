@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
@@ -57,6 +58,7 @@ type Setup struct {
 	// Repair runs the repair command on c, with check for --check.
 	Repair func(ctx context.Context, c *config.Config, check bool) error
 	Paper  PaperSource
+	Geyser GeyserSource
 }
 
 // PaperSource is where Paper builds come from: paper.API, or a test's.
@@ -64,6 +66,14 @@ type PaperSource interface {
 	NewestVersion(ctx context.Context) (string, error)
 	NewestStable(ctx context.Context, version string) (paper.Build, error)
 	Install(ctx context.Context, serverDir string, b paper.Build) error
+}
+
+// GeyserSource is where Geyser and Floodgate come from: geyser.API, or a
+// test's.
+type GeyserSource interface {
+	Latest(ctx context.Context, project string) (geyser.Build, error)
+	Install(ctx context.Context, serverDir string, b geyser.Build) error
+	Source(project string) string
 }
 
 // Do runs setup: repair on an existing install, the install steps otherwise.
@@ -104,8 +114,12 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	bedrock, err := s.bedrockBuilds(ctx, cfg)
+	if err != nil {
+		return err
+	}
 
-	s.plan(cfg, opts, len(jars), exe, build)
+	s.plan(cfg, opts, len(jars), exe, build, bedrock)
 	if !s.confirm("Go ahead? [y/n] ") {
 		return errors.New("nothing changed")
 	}
@@ -131,6 +145,9 @@ func (s *Setup) Do(ctx context.Context) error {
 	s.safeSettings(&cfg, report)
 	if failed {
 		return stopped
+	}
+	if err := s.getBedrock(ctx, cfg, bedrock); err != nil {
+		return err
 	}
 	if err := s.approve(jars); err != nil {
 		return err
@@ -335,7 +352,7 @@ func (s *Setup) copyTarget() string {
 	return exe
 }
 
-func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string, build *paper.Build) {
+func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string, build *paper.Build, bedrock []geyser.Build) {
 	w := s.Out
 	fmt.Fprintf(w, "\nsetup will:\n")
 	if pkgs := s.packages(c); len(pkgs) > 0 {
@@ -354,6 +371,13 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string
 		fmt.Fprintf(w, "  - Ask whether you accept the Minecraft EULA, and write eula.txt only after a yes.\n")
 	}
 	fmt.Fprintf(w, "  - Write the safe server settings.\n")
+	if len(bedrock) > 0 {
+		names := make([]string, len(bedrock))
+		for i, b := range bedrock {
+			names[i] = fmt.Sprintf("%s %s build %d", geyser.Title(b.Project), b.Version, b.ID)
+		}
+		fmt.Fprintf(w, "  - Download %s into plugins/, check %s SHA-256, and approve %s.\n", strings.Join(names, " and "), plural(len(bedrock), "its", "their"), plural(len(bedrock), "it", "them"))
+	}
 	if jars > 0 {
 		fmt.Fprintf(w, "  - Approve the %d plugin %s there, listed with %s hashes below.\n", jars, plural(jars, "jar"), plural(jars, "its", "their"))
 	}
@@ -529,6 +553,64 @@ func (s *Setup) getPaper(ctx context.Context, c config.Config, b *paper.Build) e
 		return fmt.Errorf("can't write the approved list: %w", err)
 	}
 	fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", b.Name)
+	return nil
+}
+
+// bedrockBuilds are the Geyser and Floodgate builds to download with bedrock
+// on. A tree that has one already keeps it, as with paper.jar, and setup
+// approves it with the other jars.
+func (s *Setup) bedrockBuilds(ctx context.Context, c config.Config) ([]geyser.Build, error) {
+	if !c.Bedrock {
+		return nil, nil
+	}
+	has, err := geyser.Installed(c.ServerDir)
+	if err != nil {
+		return nil, err
+	}
+	var builds []geyser.Build
+	for _, p := range geyser.Projects {
+		if has[p] {
+			continue
+		}
+		b, err := s.Geyser.Latest(ctx, p)
+		if err != nil {
+			return nil, fmt.Errorf("can't get %s: %w; or give --set bedrock=false", geyser.Title(p), err)
+		}
+		builds = append(builds, b)
+	}
+	return builds, nil
+}
+
+// getBedrock downloads Geyser and Floodgate, and approves them with their
+// source, for update --plugins. Their configs are left to the plugins' own
+// first start, and the safe settings check Geyser's after it.
+func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser.Build) error {
+	if len(builds) == 0 {
+		return nil
+	}
+	if s.DryRun {
+		for _, b := range builds {
+			fmt.Fprintf(s.Out, "would download %s into %s\n", b.Name, filepath.Join(c.ServerDir, "plugins"))
+		}
+		return nil
+	}
+	jars := make([]plugins.Info, 0, len(builds))
+	for _, b := range builds {
+		if err := s.Geyser.Install(ctx, c.ServerDir, b); err != nil {
+			return err
+		}
+		fmt.Fprintf(s.Out, "%-7s %s %s build %d downloaded, and its SHA-256 matches\n", "FIXED", geyser.Title(b.Project), b.Version, b.ID)
+		jars = append(jars, plugins.Info{Jar: plugins.Jar{Name: b.Path()}, SHA256: b.SHA256, Source: s.Geyser.Source(b.Project)})
+	}
+	if _, err := s.configDir(); err != nil {
+		return err
+	}
+	if err := plugins.Approve(s.PluginsFile, jars); err != nil {
+		return fmt.Errorf("can't write the approved list: %w", err)
+	}
+	for _, j := range jars {
+		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", j.Name)
+	}
 	return nil
 }
 

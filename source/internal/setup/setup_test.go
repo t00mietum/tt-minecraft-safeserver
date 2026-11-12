@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
@@ -36,6 +37,7 @@ type rig struct {
 	repairs []bool
 	repCfg  config.Config
 	paper   fakePaper
+	geyser  fakeGeyser
 }
 
 // fakePaper hands out one build, and writes it as a file.
@@ -57,6 +59,29 @@ func (p *fakePaper) Install(_ context.Context, dir string, b paper.Build) error 
 	}
 	return os.Symlink(b.Name, filepath.Join(dir, "paper.jar"))
 }
+
+// fakeGeyser hands out one build of each plugin, and writes it in plugins/.
+type fakeGeyser struct {
+	err       error
+	asked     []string
+	installed []string
+}
+
+func (g *fakeGeyser) Latest(_ context.Context, p string) (geyser.Build, error) {
+	g.asked = append(g.asked, p)
+	name := map[string]string{"geyser": "Geyser-Spigot.jar", "floodgate": "floodgate-spigot.jar"}[p]
+	return geyser.Build{Project: p, Version: "2.0", ID: 7, Name: name, SHA256: strings.Repeat("cd", 32)}, g.err
+}
+
+func (g *fakeGeyser) Install(_ context.Context, dir string, b geyser.Build) error {
+	g.installed = append(g.installed, b.Name)
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, b.Path()), []byte("jar"), 0o600)
+}
+
+func (g *fakeGeyser) Source(p string) string { return "https://example.com/" + p }
 
 func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 	t.Helper()
@@ -105,7 +130,8 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		Accounts: func(c *config.Config) *repair.Host {
 			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group}
 		},
-		Paper: &r.paper,
+		Paper:  &r.paper,
+		Geyser: &r.geyser,
 		Repair: func(_ context.Context, c *config.Config, check bool) error {
 			r.repairs = append(r.repairs, check)
 			r.repCfg = *c
@@ -172,10 +198,13 @@ func TestNewInstall(t *testing.T) {
 		t.Errorf("Paper installs: %q", r.paper.installed)
 	}
 	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
-	if err != nil || len(approved) != 1 || approved[0].Name != "paper-26.3-249.jar" || approved[0].SHA256 != strings.Repeat("ab", 32) {
+	if err != nil || len(approved) != 3 || approved[0].Name != "paper-26.3-249.jar" || approved[0].SHA256 != strings.Repeat("ab", 32) {
 		t.Errorf("approved list: %v %v", approved, err)
 	}
-	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "setup will:", "Pull docker.io/", "Download Paper 26.3 build 249", "FIXED   Paper 26.3 build 249 downloaded", "eula.txt: eula is now true", "server.properties: white-list is now")
+	if !reflect.DeepEqual(r.geyser.installed, []string{"Geyser-Spigot.jar", "floodgate-spigot.jar"}) {
+		t.Errorf("Geyser installs: %q", r.geyser.installed)
+	}
+	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "setup will:", "Pull docker.io/", "Download Paper 26.3 build 249", "FIXED   Paper 26.3 build 249 downloaded", "eula.txt: eula is now true", "server.properties: white-list is now", "Download Geyser 2.0 build 7 and Floodgate 2.0 build 7 into plugins/", "FIXED   plugins/floodgate-spigot.jar approved")
 	if !reflect.DeepEqual(r.repairs, []bool{true}) {
 		t.Errorf("repair runs: %v, want one --check", r.repairs)
 	}
@@ -287,7 +316,7 @@ func TestAdopt(t *testing.T) {
 		t.Errorf("server.properties:\n%s", props)
 	}
 	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
-	if err != nil || len(approved) != 2 || approved[0].Name != "paper.jar" && approved[1].Name != "paper.jar" {
+	if err != nil || len(approved) != 4 || !slices.ContainsFunc(approved, func(a plugins.Approved) bool { return a.Name == "paper.jar" }) {
 		t.Errorf("approved list, which should have the plugin and paper.jar: %v %v", approved, err)
 	}
 	if len(r.paper.installed) > 0 {
@@ -426,5 +455,74 @@ func TestDryRun(t *testing.T) {
 	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "would write "+r.s.ConfigPath, "runMode: podman", "PLAN    group minecraftd made", "PLAN    alice added to group minecraftd", "PLAN    repair --check runs last", "would download paper-26.3-249.jar")
 	if len(r.repairs) > 0 {
 		t.Errorf("repair runs %v", r.repairs)
+	}
+}
+
+func TestBedrock(t *testing.T) {
+	defer testid.Line(t, "df65z")
+	approved := func(r *rig) map[string]plugins.Approved {
+		list, _, err := plugins.ReadApproved(r.s.PluginsFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]plugins.Approved{}
+		for _, a := range list {
+			m[a.Name] = a
+		}
+		return m
+	}
+
+	// The sources go in the list, for update --plugins.
+	r := newRig(t, []string{"podman", "catatonit"}, "y\ny\n")
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	got := approved(r)
+	for name, src := range map[string]string{"plugins/Geyser-Spigot.jar": "https://example.com/geyser", "plugins/floodgate-spigot.jar": "https://example.com/floodgate"} {
+		if got[name].Source != src || got[name].SHA256 != strings.Repeat("cd", 32) {
+			t.Errorf("%s: %+v", name, got[name])
+		}
+	}
+
+	// bedrock off asks for neither.
+	r = newRig(t, []string{"podman", "catatonit"}, "y\ny\n", "bedrock=false")
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if len(r.geyser.asked) > 0 || strings.Contains(r.out.String(), "Geyser") {
+		t.Errorf("bedrock off: asked %q\n%s", r.geyser.asked, r.out)
+	}
+
+	// An adopted tree keeps the Geyser it has, and gets only Floodgate.
+	r = newRig(t, []string{"podman", "catatonit"}, "")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	old := filepath.Join(r.dir, "old")
+	if err := os.MkdirAll(filepath.Join(old, "plugins"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"paper.jar": "jar", "plugins/Geyser-Spigot.jar": "mine"} {
+		if err := os.WriteFile(filepath.Join(old, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.s.Adopt = old
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if !reflect.DeepEqual(r.geyser.asked, []string{"floodgate"}) || readFile(t, filepath.Join(old, "plugins", "Geyser-Spigot.jar")) != "mine" {
+		t.Errorf("adopted: asked %q", r.geyser.asked)
+	}
+	if got := approved(r); got["plugins/Geyser-Spigot.jar"].Source != "" || got["plugins/floodgate-spigot.jar"].Source == "" {
+		t.Errorf("adopted: %+v", got)
+	}
+
+	// A failed lookup stops setup before it changes anything.
+	r = newRig(t, []string{"podman", "catatonit"}, "y\ny\n")
+	r.geyser.err = errors.New("no answer")
+	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "can't get Geyser: no answer") {
+		t.Errorf("failed lookup: %v", err)
+	}
+	if len(r.ran()) > 1 || strings.Contains(r.out.String(), "setup will:") {
+		t.Errorf("a failed lookup went on:\n%s\n%s", strings.Join(r.ran(), "\n"), r.out)
 	}
 }

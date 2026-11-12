@@ -22,6 +22,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Check Geyser's first config against the next start
+	- ID: 2026111117052206
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-170522
+	- Opened by:
+	- Related IDs: 2026111116415196 2026111112554261
+	- Requirements: After a new setup with `bedrock` on, start Paper on a throwaway tree, stop it, and start it again. Check that the config.yml Geyser wrote at its first start passes `start`'s check, with default and non-default `bindIP` and `bedrockPort`. If it doesn't, setup or `start` should set Geyser's keys before the first start.
+
+- repair sends a missing Geyser to setup, which only runs repair again
+	- ID: 2026111117052190
+	- Type: Bug
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-170521
+	- Opened by:
+	- Related IDs: 2026111116415196 2026111111065803
+	- Incorrect behavior [Bug]: With `bedrock` turned on after install, `repair` says Geyser or Floodgate is missing and that `sudo tt-minecraftd setup` installs it. On an existing install setup only runs `repair`, so the same message comes back.
+	- Expected behavior [Bug]: The message names a command that installs them, or setup's existing-install path installs the missing ones.
+	- Reproduced [Bug]: From the code, not on a host.
+
 - staticcheck: unused values in repair tests
 	- ID: 2026111116281098
 	- Type: Bug
@@ -378,7 +400,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Install and set up Geyser and Floodgate when `bedrock` is on.
 		- On an existing install, run `repair` and then `update`.
 	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
-	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) is done, and 2026111116415196 (Geyser and Floodgate) is queued. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
+	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are done. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
 
 - setup: install steps and --adopt
 	- ID: 2026111116415175
@@ -445,16 +467,35 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup: Geyser and Floodgate
 	- ID: 2026111116415196
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
 	- Parent ID: 2026111111065776
 	- Prereq IDs: 2026111116415186
-	- Related IDs: 2026111111065803
+	- Related IDs: 2026111111065803, 2026111117052190, 2026111117052206
 	- Requirements:
 		- With `bedrock` on, download Geyser and Floodgate, check their hashes, approve them, and set them up per design.md's Bedrock players.
 	- Shares the download and hash check with 2026111116415186, and `update --plugins` reuses it.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: With `bedrock` on, setup gets the newest Geyser and Floodgate builds from GeyserMC's download API before the plan, downloads them into `plugins/`, checks each SHA-256, and approves them with their source.
+		- Verified: the live API's latest Geyser 2.12.1 build 1300 and Floodgate 2.2.5 build 141 Spigot jars, fetched from the version and build address, match the API's SHA-256.
+		- Verified: df65x, df65y, df65z, df65d, df65f, and df65r each fail with their check taken out, and pass with it in.
+		- 20261111: df65d `TestNewInstall` expects 3 approved jars, was 1. df65f `TestAdopt` expects 4, was 2, and finds `paper.jar` anywhere in the list. Both now get Geyser and Floodgate too.
+	- Decisions:
+		- The download, size cap, and hash check moved from `source/internal/paper` to `source/internal/download`, which `paper` and the new `source/internal/geyser` share. Paper's behavior is the same.
+		- The API is `download.geysermc.org/v2`. Its `latest` answer is read, and the jar is fetched from the address naming that version and build, so the file can't be a newer build than the hash.
+		- GeyserMC gives no size, so the 512 MiB cap is the only size check. The jar's name has to start with its project's name, since `repair` tells the plugins apart by name.
+		- A tree that has a Geyser or Floodgate jar keeps it, and setup approves it with the other jars, as with `paper.jar`.
+		- The approved entry gets the `latest` Spigot download address as its source, as design.md's example has it, for `update --plugins`. `plugins.Info` gained a `Source`.
+		- A missing `plugins/` is made mode 0770, owned like `serverDir`.
+		- Geyser's and Floodgate's configs are left to their first start, per 2026111112554261. Whether Geyser's first config passes the next start is 2026111117052206.
+		- `repair`'s Geyser and Floodgate check now uses `geyser.Installed`, so setup and repair agree on what counts as installed.
+		- Swept: `paper.Install` and `geyser.Install` both go through `download.Client.Into`; `repair` and setup share `geyser.Installed`; the only other `plugins.Approve` callers pass no source.
+	- Branch: r1112
+	- Test case: df65x, df65y, df65z, df65d, df65f, df65r
+	- Closed: 20261111-170548
 
 - Firewall
 	- ID: 2026111111065789

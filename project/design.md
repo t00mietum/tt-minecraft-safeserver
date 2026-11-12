@@ -236,6 +236,10 @@ Common:  --config PATH, --set KEY=VALUE
 		- `--yes` doesn't count as that yes. With no answer, setup goes on without `eula.txt`, and says how to add it.
 	6. Writes the safe settings. See [Safe server settings](#safe-server-settings).
 	7. With `bedrock` on, downloads Geyser and Floodgate and sets them up. See [Bedrock players](#bedrock-players).
+		- It takes each one's newest build for Paper from GeyserMC's download API at `download.geysermc.org`, and checks the jar's SHA-256 against it. They go in `plugins/`, which setup makes when it's missing.
+		- Each jar goes on the approved list with its source, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 approves it.
+		- Their configs are left to their first start. The safe settings check Geyser's after that, and `repair` sets it and the Floodgate key's mode.
+		- The lookup happens before the plan is shown, along with Paper's.
 	8. Approves the plugin jars that are there, after listing each one with its hash.
 	9. With `firewall` on, installs nftables through apt when `nft` is missing, writes the rules, and starts their unit. See [Firewall](#firewall).
 	10. Pulls the pinned container image in container mode.

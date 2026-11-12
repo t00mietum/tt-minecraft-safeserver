@@ -34,6 +34,8 @@ type Info struct {
 	// About is the name and version from the jar's own plugin.yml,
 	// paper-plugin.yml, or Geyser's extension.yml, or empty.
 	About string
+	// Source goes in the list for update --plugins, when it's known.
+	Source string
 }
 
 // Describe gives the jar's hash, size, date, and what it says it is.
@@ -125,8 +127,9 @@ func clean(s string) string {
 }
 
 // Approve writes the hashes of jars into the approved list, adding the ones
-// it doesn't have. Other entries, comments, and sources stay as they were. A
-// new file is made readable by all, so status works without sudo.
+// it doesn't have, and a jar's source when it has one. Other entries,
+// comments, and sources stay as they were. A new file is made readable by
+// all, so status works without sudo.
 func Approve(file string, jars []Info) error {
 	doc, st := shcl.LoadFile(file)
 	fresh := st == shcl.FileNotFound
@@ -143,6 +146,13 @@ func Approve(file string, jars []Info) error {
 		key := "jar(" + shcl.QuoteSegment(j.Name) + ").sha256"
 		if s := doc.SetString(key, j.SHA256); s != shcl.SetOk {
 			return fmt.Errorf("%s: can't add %s: %s", file, j.Name, s)
+		}
+		if j.Source == "" {
+			continue
+		}
+		key = "jar(" + shcl.QuoteSegment(j.Name) + ").source"
+		if s := doc.SetString(key, j.Source); s != shcl.SetOk {
+			return fmt.Errorf("%s: can't add %s's source: %s", file, j.Name, s)
 		}
 	}
 	if err := doc.SaveFile(file); err != nil {

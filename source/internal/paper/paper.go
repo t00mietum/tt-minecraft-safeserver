@@ -7,13 +7,8 @@ package paper
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -22,8 +17,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 )
 
 // DefaultBase is PaperMC's download API, called Fill.
@@ -46,17 +42,9 @@ type Build struct {
 	URL     string
 }
 
-// maxJSON caps an API answer. The build list for one version is well under it.
-const maxJSON = 8 << 20
-
-// maxJar caps a download, whatever size the API gives.
-const maxJar = 512 << 20
-
 // jarName is what the API's file name has to look like, since it becomes a
 // file in the server tree.
 var jarName = regexp.MustCompile(`^paper-[A-Za-z0-9._-]+\.jar$`)
-
-var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func (a API) base() string {
 	if a.Base == "" {
@@ -65,51 +53,8 @@ func (a API) base() string {
 	return strings.TrimRight(a.Base, "/")
 }
 
-func (a API) client() *http.Client {
-	if a.Client == nil {
-		return &http.Client{Timeout: 10 * time.Minute}
-	}
-	return a.Client
-}
-
-func (a API) get(ctx context.Context, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	ua := a.UserAgent
-	if ua == "" {
-		ua = "tt-minecraftd (https://github.com/t00mietum/tt-minecraft-safeserver)"
-	}
-	req.Header.Set("User-Agent", ua)
-	resp, err := a.client().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		_ = resp.Body.Close() // the status is the error that matters
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
-	}
-	return resp, nil
-}
-
-func (a API) getJSON(ctx context.Context, url string, v any) error {
-	resp, err := a.get(ctx, url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxJSON+1))
-	if err != nil {
-		return err
-	}
-	if len(b) > maxJSON {
-		return fmt.Errorf("%s: answer over %d MiB", url, maxJSON>>20)
-	}
-	if err := json.Unmarshal(b, v); err != nil {
-		return fmt.Errorf("%s: %w", url, err)
-	}
-	return nil
+func (a API) fetch() download.Client {
+	return download.Client{HTTP: a.Client, UserAgent: a.UserAgent}
 }
 
 // release is a version without a pre-release part, such as 26.3 or 1.21.11
@@ -124,7 +69,7 @@ func (a API) NewestVersion(ctx context.Context) (string, error) {
 	var project struct {
 		Versions map[string][]string `json:"versions"`
 	}
-	if err := a.getJSON(ctx, a.base(), &project); err != nil {
+	if err := a.fetch().JSON(ctx, a.base(), &project); err != nil {
 		return "", err
 	}
 	var all []string
@@ -177,7 +122,7 @@ func (a API) NewestStable(ctx context.Context, version string) (Build, error) {
 			URL       string            `json:"url"`
 		} `json:"downloads"`
 	}
-	if err := a.getJSON(ctx, a.base()+"/versions/"+version+"/builds", &builds); err != nil {
+	if err := a.fetch().JSON(ctx, a.base()+"/versions/"+version+"/builds", &builds); err != nil {
 		return Build{}, err
 	}
 	best := -1
@@ -197,9 +142,9 @@ func (a API) NewestStable(ctx context.Context, version string) (Build, error) {
 		return Build{}, errors.New(what + " has no server download")
 	case !jarName.MatchString(b.Name):
 		return Build{}, fmt.Errorf("%s: odd file name %q", what, b.Name)
-	case !sha256Hex.MatchString(b.SHA256):
+	case !download.SHA256Hex.MatchString(b.SHA256):
 		return Build{}, errors.New(what + " has no SHA-256")
-	case b.Size <= 0 || b.Size > maxJar:
+	case b.Size <= 0 || b.Size > download.MaxJar:
 		return Build{}, fmt.Errorf("%s: odd size %d", what, b.Size)
 	case !strings.HasPrefix(b.URL, "https://"):
 		return Build{}, errors.New(what + ": download isn't https")
@@ -217,64 +162,19 @@ func (a API) Install(ctx context.Context, serverDir string, b Build) error {
 		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
 	}
 	defer syscall.Close(dirfd)
+	if err := a.fetch().Into(ctx, dirfd, serverDir, download.File{Name: b.Name, URL: b.URL, SHA256: b.SHA256, Size: b.Size}); err != nil {
+		return err
+	}
 	var st syscall.Stat_t
 	if err := syscall.Fstat(dirfd, &st); err != nil {
 		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
 	}
-
-	resp, err := a.get(ctx, b.URL)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	tmp, err := tempName(b.Name)
-	if err != nil {
-		return err
-	}
-	fd, err := syscall.Openat(dirfd, tmp, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o600)
-	if err != nil {
-		return &fs.PathError{Op: "create", Path: serverDir + "/" + tmp, Err: err}
-	}
-	f := os.NewFile(uintptr(fd), serverDir+"/"+tmp)
-	err = fill(f, fd, resp.Body, b, st)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = syscall.Renameat(dirfd, tmp, dirfd, b.Name)
-	}
-	if err != nil {
-		_ = syscall.Unlinkat(dirfd, tmp) // best effort; err is what matters
-		return err
-	}
 	return link(dirfd, serverDir, b.Name, st)
-}
-
-func fill(f *os.File, fd int, body io.Reader, b Build, st syscall.Stat_t) error {
-	sum := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, sum), io.LimitReader(body, b.Size+1))
-	switch {
-	case err != nil:
-		return fmt.Errorf("downloading %s: %w", b.Name, err)
-	case n != b.Size:
-		return fmt.Errorf("%s: got %d bytes, the API said %d", b.Name, n, b.Size)
-	case hex.EncodeToString(sum.Sum(nil)) != b.SHA256:
-		return fmt.Errorf("%s: SHA-256 doesn't match the API's; not used", b.Name)
-	}
-	if os.Geteuid() == 0 {
-		if err := syscall.Fchown(fd, int(st.Uid), int(st.Gid)); err != nil {
-			return fmt.Errorf("chown %s: %w", b.Name, err)
-		}
-	}
-	if err := syscall.Fchmod(fd, 0o660); err != nil {
-		return fmt.Errorf("chmod %s: %w", b.Name, err)
-	}
-	return f.Sync()
 }
 
 // link makes paper.jar a link to name, replacing what's there in one rename.
 func link(dirfd int, serverDir, name string, st syscall.Stat_t) error {
-	tmp, err := tempName("paper.jar")
+	tmp, err := download.TempName("paper.jar")
 	if err != nil {
 		return err
 	}
@@ -292,14 +192,6 @@ func link(dirfd int, serverDir, name string, st syscall.Stat_t) error {
 		return &fs.PathError{Op: "rename", Path: serverDir + "/paper.jar", Err: err}
 	}
 	return nil
-}
-
-func tempName(name string) (string, error) {
-	var rnd [6]byte
-	if _, err := rand.Read(rnd[:]); err != nil {
-		return "", err
-	}
-	return "." + name + ".tt-minecraftd-" + hex.EncodeToString(rnd[:]), nil
 }
 
 func symlinkat(target string, dirfd int, name string) error {
