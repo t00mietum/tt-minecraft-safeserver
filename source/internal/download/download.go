@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -101,64 +102,120 @@ func (c Client) JSON(ctx context.Context, url string, v any) error {
 // without following links, since the server account may own the tree. The
 // jar takes the folder's owner and group, mode 0660.
 func (c Client) Into(ctx context.Context, dirfd int, dir string, f File) error {
+	limit := int64(MaxJar)
+	if f.Size > 0 {
+		// One over, so a long one says how long.
+		limit = f.Size + 1
+	}
+	s, err := c.Stage(ctx, dirfd, dir, f.Name, f.URL, limit)
+	if err != nil {
+		return err
+	}
+	switch {
+	case f.Size > 0 && s.Size != f.Size:
+		err = fmt.Errorf("%s: got %d bytes, the API said %d", f.Name, s.Size, f.Size)
+	case s.SHA256 != f.SHA256:
+		err = fmt.Errorf("%s: SHA-256 doesn't match the API's; not used", f.Name)
+	}
+	if err != nil {
+		s.Drop()
+		return err
+	}
+	return s.Keep()
+}
+
+// Staged is a download written beside the name it's for, under a temp name,
+// until Keep or Drop. Its folder's fd has to stay open until then.
+type Staged struct {
+	dirfd  int
+	dir    string
+	Name   string
+	Temp   string
+	Size   int64
+	SHA256 string
+	SHA512 string
+}
+
+// Stage downloads url into the folder open as dirfd, under a temp name beside
+// name, with the folder's owner and group and mode 0660. More than limit bytes
+// is an error.
+func (c Client) Stage(ctx context.Context, dirfd int, dir, name, url string, limit int64) (*Staged, error) {
 	var st syscall.Stat_t
 	if err := syscall.Fstat(dirfd, &st); err != nil {
-		return &fs.PathError{Op: "stat", Path: dir, Err: err}
+		return nil, &fs.PathError{Op: "stat", Path: dir, Err: err}
 	}
-	resp, err := c.Get(ctx, f.URL)
+	resp, err := c.Get(ctx, url)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	tmp, err := TempName(f.Name)
+	tmp, err := TempName(name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fd, err := syscall.Openat(dirfd, tmp, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o600)
 	if err != nil {
-		return &fs.PathError{Op: "create", Path: dir + "/" + tmp, Err: err}
+		return nil, &fs.PathError{Op: "create", Path: dir + "/" + tmp, Err: err}
 	}
+	s := &Staged{dirfd: dirfd, dir: dir, Name: name, Temp: tmp}
 	file := os.NewFile(uintptr(fd), dir+"/"+tmp)
-	err = fill(file, fd, resp.Body, f, st)
+	err = s.fill(file, fd, resp.Body, limit, st)
 	if cerr := file.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
-		err = syscall.Renameat(dirfd, tmp, dirfd, f.Name)
-	}
 	if err != nil {
-		_ = syscall.Unlinkat(dirfd, tmp) // best effort; err is what matters
-		return err
+		s.Drop()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Staged) fill(file *os.File, fd int, body io.Reader, limit int64, st syscall.Stat_t) error {
+	sum256, sum512 := sha256.New(), sha512.New()
+	n, err := io.Copy(io.MultiWriter(file, sum256, sum512), io.LimitReader(body, limit+1))
+	switch {
+	case err != nil:
+		return fmt.Errorf("downloading %s: %w", s.Name, err)
+	case n > limit && limit < 1<<20:
+		return fmt.Errorf("%s: over %d bytes; not used", s.Name, limit)
+	case n > limit:
+		return fmt.Errorf("%s: over %d MiB; not used", s.Name, limit>>20)
+	}
+	s.Size = n
+	s.SHA256 = hex.EncodeToString(sum256.Sum(nil))
+	s.SHA512 = hex.EncodeToString(sum512.Sum(nil))
+	if os.Geteuid() == 0 {
+		if err := syscall.Fchown(fd, int(st.Uid), int(st.Gid)); err != nil {
+			return fmt.Errorf("chown %s: %w", s.Name, err)
+		}
+	}
+	if err := syscall.Fchmod(fd, 0o660); err != nil {
+		return fmt.Errorf("chmod %s: %w", s.Name, err)
+	}
+	return file.Sync()
+}
+
+// Open gives the staged file, for reading.
+func (s *Staged) Open() (*os.File, error) {
+	fd, err := syscall.Openat(s.dirfd, s.Temp, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: s.dir + "/" + s.Temp, Err: err}
+	}
+	return os.NewFile(uintptr(fd), s.dir+"/"+s.Temp), nil
+}
+
+// Keep renames the download over the name it's for.
+func (s *Staged) Keep() error {
+	if err := syscall.Renameat(s.dirfd, s.Temp, s.dirfd, s.Name); err != nil {
+		s.Drop()
+		return &fs.PathError{Op: "rename", Path: s.dir + "/" + s.Name, Err: err}
 	}
 	return nil
 }
 
-func fill(file *os.File, fd int, body io.Reader, f File, st syscall.Stat_t) error {
-	limit := f.Size
-	if limit <= 0 {
-		limit = MaxJar
-	}
-	sum := sha256.New()
-	n, err := io.Copy(io.MultiWriter(file, sum), io.LimitReader(body, limit+1))
-	switch {
-	case err != nil:
-		return fmt.Errorf("downloading %s: %w", f.Name, err)
-	case f.Size > 0 && n != f.Size:
-		return fmt.Errorf("%s: got %d bytes, the API said %d", f.Name, n, f.Size)
-	case n > limit:
-		return fmt.Errorf("%s: over %d MiB; not used", f.Name, MaxJar>>20)
-	case hex.EncodeToString(sum.Sum(nil)) != f.SHA256:
-		return fmt.Errorf("%s: SHA-256 doesn't match the API's; not used", f.Name)
-	}
-	if os.Geteuid() == 0 {
-		if err := syscall.Fchown(fd, int(st.Uid), int(st.Gid)); err != nil {
-			return fmt.Errorf("chown %s: %w", f.Name, err)
-		}
-	}
-	if err := syscall.Fchmod(fd, 0o660); err != nil {
-		return fmt.Errorf("chmod %s: %w", f.Name, err)
-	}
-	return file.Sync()
+// Drop removes the download.
+func (s *Staged) Drop() {
+	_ = syscall.Unlinkat(s.dirfd, s.Temp) // best effort; the caller has the error that matters
 }
 
 // TempName is a hidden name beside name, for writing before a rename.

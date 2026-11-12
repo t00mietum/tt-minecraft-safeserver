@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -151,6 +152,23 @@ func chownLike(top int, name string) error {
 
 // atSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
 const atSymlinkNoFollow = 0x100
+
+// Project is the GeyserMC project a jar in plugins/ is, when both its file
+// name and the plugin name it claims start with the project's name, or "".
+// setup and repair give such a jar GeyserMC's source when they first approve
+// it, so update --plugins keeps it current, as it does the ones setup got.
+func Project(name, claim string) string {
+	if path.Dir(name) != "plugins" {
+		return ""
+	}
+	file, claim := strings.ToLower(path.Base(name)), strings.ToLower(claim)
+	for _, p := range Projects {
+		if strings.HasPrefix(file, p) && strings.HasPrefix(claim, p) {
+			return p
+		}
+	}
+	return ""
+}
 
 // Installed tells which projects have a jar in serverDir's plugins folder,
 // by the jar's name, as GeyserMC names them.

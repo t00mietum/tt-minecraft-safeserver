@@ -357,8 +357,11 @@ func (s *Setup) newJars(c config.Config) ([]plugins.Info, error) {
 		return nil, err
 	}
 	want := make(map[string]bool, len(check.New)+len(check.Changed))
-	for _, name := range append(check.New, check.Changed...) {
+	for _, name := range check.New {
 		want[name] = true
+	}
+	for _, name := range check.Changed {
+		want[name] = false
 	}
 	all, err := plugins.Jars(c.ServerDir)
 	if err != nil {
@@ -366,12 +369,17 @@ func (s *Setup) newJars(c config.Config) ([]plugins.Info, error) {
 	}
 	var jars []plugins.Info
 	for _, j := range all {
-		if !want[j.Name] {
+		isNew, ok := want[j.Name]
+		if !ok {
 			continue
 		}
 		info, err := plugins.Describe(j)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", j.Name, err)
+		}
+		// A changed jar keeps the source it has.
+		if p := geyser.Project(info.Name, info.About); isNew && p != "" && s.Geyser != nil {
+			info.Source = s.Geyser.Source(p)
 		}
 		jars = append(jars, info)
 	}
@@ -435,6 +443,9 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 			about = "no plugin.yml"
 		}
 		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", j.Name, j.SHA256, about)
+		if j.Source != "" {
+			fmt.Fprintf(w, "  source: %s\n", j.Source)
+		}
 	}
 	if len(jars) > 0 {
 		fmt.Fprintln(w)

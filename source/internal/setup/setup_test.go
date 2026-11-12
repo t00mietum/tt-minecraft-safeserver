@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -357,6 +358,80 @@ func TestAdopt(t *testing.T) {
 	}
 	if strings.Contains(r.out.String(), "EULA") {
 		t.Error("asked about the EULA when eula.txt already says true")
+	}
+}
+
+// An adopted tree's Geyser and Floodgate go on the approved list with
+// GeyserMC's source, so update --plugins keeps them current. A jar only
+// named like one doesn't, and a changed one keeps the source it had.
+func TestAdoptGeyserSource(t *testing.T) {
+	defer testid.Line(t, "df76q")
+	r := newRig(t, []string{"docker"}, "")
+	r.s.Yes = true
+	old := filepath.Join(r.dir, "old", "paper")
+	if err := os.MkdirAll(filepath.Join(old, "plugins"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"paper.jar": "jar", "eula.txt": "eula=true\n"} {
+		if err := os.WriteFile(filepath.Join(old, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeJar(t, filepath.Join(old, "plugins", "Geyser-Spigot.jar"), "name: Geyser-Spigot\nversion: 2.12.1\n")
+	writeJar(t, filepath.Join(old, "plugins", "floodgate-spigot.jar"), "name: floodgate\nversion: 2.2.5\n")
+	writeJar(t, filepath.Join(old, "plugins", "geyser-lookalike.jar"), "name: Lookalike\nversion: 1\n")
+	if err := os.MkdirAll(filepath.Dir(r.s.PluginsFile), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	own := "https://example.org/own-floodgate"
+	if err := plugins.Approve(r.s.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: "plugins/floodgate-spigot.jar"}, SHA256: strings.Repeat("cd", 32), Source: own}}); err != nil {
+		t.Fatal(err)
+	}
+	r.s.Adopt = old
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if len(r.geyser.installed) > 0 {
+		t.Errorf("downloaded over the adopted jars: %q", r.geyser.installed)
+	}
+	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, a := range approved {
+		got[a.Name] = a.Source
+	}
+	want := map[string]string{
+		"paper.jar":                    "",
+		"plugins/Geyser-Spigot.jar":    r.geyser.Source("geyser"),
+		"plugins/floodgate-spigot.jar": own,
+		"plugins/geyser-lookalike.jar": "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sources %v, want %v", got, want)
+	}
+	if !strings.Contains(r.out.String(), "says:   Geyser-Spigot 2.12.1\n  source: "+r.geyser.Source("geyser")+"\n") {
+		t.Errorf("plan doesn't show the source:\n%s", r.out)
+	}
+}
+
+func writeJar(t *testing.T, file, pluginYML string) {
+	t.Helper()
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	w, err := z.Create("plugin.yml")
+	if err == nil {
+		_, err = w.Write([]byte(pluginYML))
+	}
+	if err == nil {
+		err = z.Close()
+	}
+	if err == nil {
+		err = os.WriteFile(file, b.Bytes(), 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

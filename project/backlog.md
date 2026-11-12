@@ -22,6 +22,70 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- setup and repair offer zfs allow for snapshots
+	- ID: 2026111211050654
+	- Type: Feature
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261112-110506
+	- Opened by:
+	- Prereq IDs: 2026111112264283
+	- Requirements:
+		- With `zfsDataset` set, `setup` offers `zfs allow` for snapshot, destroy, and mount on the dataset to the operator, per design.md's ZFS snapshots, so snapshots don't need sudo.
+		- `repair` reports it when it's missing.
+
+- setup --adopt approves Geyser and Floodgate with no source
+	- ID: 2026111210364791
+	- Type: Bug
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261112-103647
+	- Opened by:
+	- Related IDs: 2026111116415196 2026111210034298
+	- Incorrect behavior [Bug]: An adopted tree's Geyser and Floodgate jars go on the approved list with no source, so update --plugins never updates them from GeyserMC. With agent set, the update agent is asked about them instead.
+	- Expected behavior [Bug]: setup approves them with GeyserMC's source, as on a new install, or update --plugins knows them by name.
+	- Reproduced [Bug]: On the root host, after setup --adopt, update --plugins asked the agent about plugins/Geyser-Spigot.jar and plugins/floodgate-spigot.jar.
+	- Actual cause [Bug]: setup's step 8 approved the jars already in the tree with only their hashes. Only the jars setup downloaded got a source.
+	- Actual fix [Bug]: setup and `repair --approve-plugins` give a new jar in `plugins/` GeyserMC's source when its file name and its `plugin.yml` name both start with `geyser` or `floodgate`. The source shows in the list before the question.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: df76p, df76q, and df76r pass, and the gate passes on both temp folders. df76q and df76r fail with the fix taken out, and df76q fails when a changed jar's source gets replaced.
+		- Verified: the root host check passes all 18. df68e now checks the GeyserMC sources after `setup --adopt`, and df76n that the agent isn't asked about Geyser or Floodgate. Both fail with the fix taken out.
+	- Decisions:
+		- Fixed in setup, not by name in update, so the approved list says where each jar comes from, as on a new install.
+		- The plugin name a jar claims has to match too, so a jar only named like Geyser doesn't get replaced by GeyserMC's. `geyser.Project` holds the rule.
+		- Only new entries get it. A changed jar keeps the source it has, which may be the operator's own.
+		- `repair --approve-plugins` does the same, so a Geyser jar put in by hand follows GeyserMC too. design.md updated in both places.
+		- Swept: every `plugins.Approve` caller. setup's downloads already pass the source, update's keep it, and the agent's jars get none by design. An entry approved before this fix stays without a source; the live server hasn't been adopted yet.
+	- Branch: r1112b
+	- Test case: df76p, df76q, df76r, df68e and df76n (root host)
+	- Closed: 20261112-104958
+
+- Container start says only permission denied before a new login
+	- ID: 2026111209291851
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261112-092918
+	- Opened by:
+	- Related IDs: 2026111118183922
+	- Actual cause [Bug]:
+		- Container start reads the tree for its safe settings and plugin checks before the tree changes hands. After a crash it's still the server's, so the read goes through the group the login doesn't have yet.
+	- Actual effort: Low
+	- Progress log:
+		- 2026-11-12: Left open by 2026111207565307. Container start on a tree the server still owns, such as after a crash, by a login without the server's group yet, fails at the safe settings read with a bare permission denied. The login check runs after that step in container mode.
+		- 20261112: A refused read in start's safe settings or plugin check gives the login group reason, to log in again or the `gpasswd` line. Its whitelist and ops warnings now come after the settings read, so they don't print twice before the error.
+		- Verified: df74x fails without the change and passes with it.
+	- Decisions:
+		- The reason is given on a refused read, not checked up front as in native start. Container start doesn't need the group when the tree is the operator's, which is the usual case.
+		- A refused read with the group in this login keeps the plain error, since the group isn't the cause then.
+		- Swept: native start checks the group first, `cmd` checks it before sending, and `repair`, `setup`, and `update` read the tree as root.
+	- Actual fix [Bug]: container start's refused tree reads say to log in again, or give the `gpasswd` line.
+	- Branch: r1112b
+	- Test case: df74x
+	- Acceptance signoff: Self-closed: df74x passes, per the standing close policy.
+	- Closed: 20261112-093323
+
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -78,12 +142,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refresh the pinned container image.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
-	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), and 2026111117302985 (`--image`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302995 (`--self`), and 2026111117404480 (Modrinth and Hangar sources) are queued.
+	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) and 2026111117404480 (Modrinth and Hangar sources) are queued.
 
 - Commands fail for the operator until a new login after setup
 	- ID: 2026111207565307
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -91,6 +155,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Incorrect behavior [Bug]: Right after setup, in the same login, the operator isn't in the server's group yet. Native `start` started the unit, then failed with "stat .../latest.log: permission denied" while it waited for the server to load. `cmd` failed with "open .../latest.log: permission denied". setup does say the group counts from the next login.
 	- Expected behavior [Bug]: Those commands read what they need through sudo, or say plainly to log in again first.
 	- Reproduced [Bug]: 20261112, in the root host check, with every check run in the login setup ran in.
+	- Actual cause [Bug]:
+		- The tree goes to the server's account and group at start, and native start's wait and `cmd` read `latest.log` through the group. A login from before setup added the operator doesn't have it.
+	- Actual effort: Low
+	- Progress log:
+		- 20261112: Native `start` and `cmd` check the login's groups first. Without the server's group they stop before changing or sending anything, and say to log in again, or give the `gpasswd` line when the account isn't in the group at all. Container `start` warns once the server is up, since only `cmd` and `status` read the tree there.
+		- Verified: df68g fails with the check taken out and passes with it. df68j, in setup's login on the root host check, fails the same way and passes with it, and all 17 root host checks pass.
+	- Decisions:
+		- A plain message, not reads through sudo. design.md has the operator read logs through the group, and root reads in a tree the server owns could follow a link it planted. design.md's Tree ownership says so now.
+		- `start --debug` and root skip the check, since neither reads the tree as the operator. A group that can't be looked up is left to the steps that need it, as before.
+		- `cmd` checks after it finds the server running, so a stopped server still says that first.
+		- Swept: `stop`, `console`, and native `stop`'s countdown go through sudo or tmux as the account, and container `start` reads the log through the runtime. `status` already says why a part can't be read, apart from 2026111118183922.
+	- Actual fix [Bug]: native `start` and `cmd` refuse without the server's group in this login, and say to log in again. Container `start` warns.
+	- Branch: r1112b
+	- Test case: df68g, df68h, df68j
+	- Acceptance signoff: Self-closed: df68j passed in the root host check on b23.
+	- Closed: 20261112-092846
 
 - update --mc-version
 	- ID: 2026111117302963
@@ -107,18 +187,36 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --self
 	- ID: 2026111117302995
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
 	- Parent ID: 2026111111065803
+	- Related IDs: 2026111111070774, 2026111111070761
 	- Requirements:
 		- `--self` gets the latest release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename. On NixOS it only prints what to change.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-12: `update --self` reads the release list, picks the newest release past this build, checks the binary for this arch against the release's `SHA256SUMS`, runs its `--version`, and renames it over the running binary with the old one's owner, group, and mode. On NixOS, or from the Nix store, it prints the newer version and the flake update to run. A plain `update` includes it.
+		- Verified: df77g, df77h, df77j, df77k, df77m, and the new lines in df671 and df65m pass. Taking out the hash check, the pre-release rule, the `--version` check, the NixOS case, setup's leaving it out, or the server folder exception each fails a test.
+		- Verified: against the live GitHub API, with no release yet, `update --self --dry-run` says `v1.0.0-alpha.1` is the newest.
+	- Decisions:
+		- Release files are `tt-minecraftd-linux-amd64` and `tt-minecraftd-linux-arm64` as plain binaries, plus `SHA256SUMS` in `sha256sum`'s format. The First release and the install script follow it. The build's `--version` has to name the tag, so the release sets `main.version` to it. Filed as a Check in questions.md.
+		- A pre-release is only taken by a pre-release build. The release list is read, since `/releases/latest` leaves pre-releases out. Drafts are skipped, and it never moves to an older version.
+		- `setup` leaves `--self` out of the update it runs on an existing install, since the binary setup runs is the one it installs.
+		- `--self` alone needs no server folder. The swap goes last, so a failed one leaves the other parts done.
+		- A link to the binary is followed, and the file it points at is replaced, so the link still works.
+		- The code is `source/internal/selfupdate`, one of the shared parts design.md lists for `tt-safeserver`.
+		- Swept: every `Parts` literal, setup's call to update, the help text, and design.md's update and CLI lines.
+	- Branch: r1112b
+	- Test case: df77g, df77h, df77j, df77k, df77m, df671, df65m
+	- Acceptance signoff: Self-closed: tested against a stand-in release server, with a real swap of a binary on disk. A run against the real first release is part of 2026111111070774.
+	- Closed: 20261112-105801
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-122642
 	- Opened by: t00mietum
@@ -127,6 +225,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- With `zfsDataset` set, `start` takes a snapshot before the hand-off, and `stop` takes one after the worlds are saved, per `design.md`.
 		- Prune old ones on the schedule there, touching only the tool's own.
+	- Actual effort: Avg
+	- Progress log:
+		- 20261112: `start` takes the snapshot in both modes right before the trees change hands, and `stop` takes one once the server is down, before they go back. Each one is followed by a prune, which destroys what the schedule drops in one `zfs destroy`.
+		- Verified: df77n to df77r pass, and df77q fails with `stop`'s snapshot taken out. The `zfs list` form that the prune reads checked against zfs 2.3.9.
+		- `setup` offering `zfs allow` is 2026111211050654. Until then the sudo fallback covers it.
+		- 20261112: The root host check takes `--zfs`, which runs setup and then 5 checks on a throwaway file-backed pool, destroyed on the way out: the server's tree on its own dataset, `start`'s snapshot through sudo, `stop`'s after the save and before the hand-back, a prune that drops only the tool's own in one comma-list destroy, and with `zfs allow` the operator taking and pruning without sudo.
+		- Verified: df780 to df784 pass in podman mode, and the pool is gone from the host after. df782 fails with `stop`'s snapshot moved after the hand-back, and df783 with the prune split into one destroy per snapshot.
+	- Decisions:
+		- Each zfs change runs as the operator first, then through sudo. That uses whatever `zfs allow` grants, by user, group, or set, with no parsing of its output. The first try's error stays off the terminal.
+		- The snapshot comes after the "already running" checks, so a refused start leaves none. A failed snapshot refuses the start. At `stop` the trees go back anyway, and the error is shown.
+		- A `stop` that finds the server down takes none. A stop from `console`, `--debug`, or the boot unit takes none either, since the next start's snapshot holds the same state.
+		- The prune runs after `stop`'s snapshot too, and a failed prune only warns. Days, weeks, and months count only those that have a snapshot, so a server left off for months keeps its history. Weeks are ISO weeks, and the time in the name counts, not the clock.
+		- design.md's ZFS snapshots says all of this now.
+		- Swept: both modes' `start` snapshot before `tree.ToServer`. `Kit.stop` is the one path that hands back after stopping a running server. setup and repair hand off without stopping one.
+		- The host check runs in podman mode only. Native mode shares `Kit.snapshot` and `Kit.stop`, and df77n covers its `start` order.
+		- `--zfs` is its own run, not part of every root host run, since its pool lives in the host's kernel while it runs.
+	- Branch: r1112b
+	- Test case: df77n, df77p, df77q, df77r, df780, df781, df782, df783, df784
+	- Acceptance signoff: Self-closed: df780 to df784 pass in the root host check with `--zfs`, per the standing close policy.
+	- Closed: 20261112-111928
 
 - Start at boot
 	- ID: 2026111111065816
@@ -193,6 +311,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
+	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
 
 - First release
 	- ID: 2026111111070774
@@ -204,6 +323,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq IDs: 2026111111065868, 2026111111070761
 	- Requirements:
 		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
 
 - Move the first server over
 	- ID: 2026111111070787
@@ -223,8 +343,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Connect the service to an AI agent to update the game programs and add-ons
 	- ID: 2026111207010610
 	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
+	- Status: Started
+	- Priority: High
 	- Opened: 20261112-070106
 	- Opened by: t00mietum
 	- Requirements:
@@ -232,24 +352,163 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
 	- Note:
 		- Pre-next-cut.
+	- Progress log:
+		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
+		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is queued.
+	- Decisions:
+		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
+		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
+		- Kinds: `openai` (cloud hosts and local servers), `anthropic`, and `command` (subscription CLIs), since those cover nearly every agent.
+		- It runs as the operator, before `update` runs itself through sudo. A run that starts as root skips it with a note.
+		- The API key comes from the operator's environment, never the config, which everyone can read.
+		- `--yes` doesn't cover a jar the agent found, the same as `--mc-version`.
+		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
+
+- Update agent: config keys, answer format, and the command kind
+	- ID: 2026111210033639
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-100336
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Requirements:
+		- The `agent`, `agentURL`, `agentModel`, `agentCommand`, and `agentHosts` keys, per design.md's Update agent.
+		- A package that builds the question from the jars, runs `agentCommand` as the operator in an empty temp folder with the question on stdin, and reads the JSON answer.
+		- Each suggestion is checked against the approved list, `https`, and `agentHosts`.
+	- Estimated effort: Avg
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: df75x to df765 pass, and so do the config tests with the new keys. The gate passes on both temp folders.
+		- Verified: df75z, df764, and df760 fail with the host check, the root refusal, or the text cleaning taken out.
+		- 2026-11-12: df763's size cap failed at first, since the reply buffer was embedded and the copy went past the cap through its `ReadFrom`. Fixed before the commit.
+	- Decisions:
+		- The code is `source/internal/agent`. `Suggest` builds the question, asks, reads the JSON, and checks it. The download and hash page checks are 2026111210034298's.
+		- The answer is found inside prose or a code fence, since CLIs often wrap it. Unknown fields are ignored.
+		- A suggestion is refused when it names a jar not asked about or one twice, has no version, or its download or hash page isn't `https` on a host in `agentHosts`, on the usual port, with no user name. A hash must be 64 or 128 hex digits. With no hash, the hash page is dropped.
+		- The agent's text loses its control and direction characters, and is cut to a length per field.
+		- `command` refuses to run as root, runs in an empty temp folder in its own process group, gets 15 minutes, and its reply is capped at 1 MiB.
+		- `agentURL` can't hold a user or key, and takes plain `http` only to localhost or a loopback address. `agentHosts` takes host names, lower-cased. Its default lists the Hangar, Modrinth, GitHub, GeyserMC, and PaperMC hosts, with their API and CDN names.
+		- The keys do nothing until 2026111210034298 uses them. `openai` and `anthropic` say they aren't built yet, until 2026111210033649.
+		- Swept: design.md's settings table matches the config's keys (df5x2) and the `agent` default (df5x6).
+	- Branch: r1112b
+	- Test case: df75x, df75y, df75z, df760, df761, df762, df763, df764, df765, df5wt, df5ww, df5x2, df5x6
+	- Closed: 20261112-100929
+
+- Update agent: OpenAI and Anthropic APIs, with fetch
+	- ID: 2026111210033649
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-100336
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Requirements:
+		- The `openai` and `anthropic` kinds, per design.md's Update agent, with the key from the operator's environment.
+		- The `fetch` tool: GET only, `https` only, no loopback, LAN, or link-local addresses, a size cap per page, and a cap per run.
+	- Estimated effort: Avg
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: df766, df767, df769, df76a, and df76b pass, against stand-in API servers and pages. The gate passes on both temp folders.
+		- Verified: df767, df766, and df76b fail with the public address check, the redirect check, the https check, the fetch cap, the page cleanup, or the root refusal taken out.
+		- 2026-11-12: df761 `TestNewPicksTheKind` expects `openai` and `anthropic` to say `agentModel` isn't set, was "isn't built yet". It also checks the default URLs and where the key comes from.
+		- Verified: df76c against a local Ollama with `qwen2.5:7b-instruct`: the conversation, its answer, and the checks ran end to end in 66 s. That model said Chunky has no build for 1.21.4, which it does, so a small local model may not be enough to rely on.
+	- Decisions:
+		- One `API` type covers both kinds. The base URL includes `/v1`, so `agentURL` for a local Ollama is `http://127.0.0.1:11434/v1`, the same as its OpenAI docs. The defaults are `https://api.openai.com/v1` and `https://api.anthropic.com/v1`.
+		- The key is `TT_MINECRAFTD_AGENT_KEY`, else `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. With none, no key header is sent, for a local server. A 401 or 403 names the variable, and never shows the key.
+		- `fetch` is a function tool for OpenAI and a client tool for Anthropic. A call to any other tool is answered as refused.
+		- `fetch` checks the address each name resolves to just before connecting, so a name can't point it at this host. It refuses loopback, private, link-local, multicast, and the 100.64.0.0/10 shared range, IPv4 inside IPv6 included. Redirects must stay on `https`, 5 at most.
+		- Pages are cut at 64 KiB, since each one stays in the agent's context for the rest of the run. 40 fetches a run, refused ones included, and 30 calls to the API.
+		- HTML is turned into rough text: scripts, styles, and comments go, and links keep their address. Only text, JSON, and XML are read.
+		- The API calls themselves don't go through the public address check, since a local server is on loopback.
+		- Swept: both kinds go through `runTool` and `post`, and `API.Ask` and `Command.Ask` both refuse root.
+	- Branch: r1112b
+	- Test case: df766, df767, df769, df76a, df76b, df761, df76c (skipped without `TT_MINECRAFTD_LIVE_AGENT`)
+	- Closed: 20261112-101356
+
+- update --plugins asks the update agent
+	- ID: 2026111210034298
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-100342
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Prereq IDs: 2026111210033639
+	- Requirements:
+		- `update --plugins` asks the agent about approved jars with no known source, or whose lookup failed, as the operator before sudo, per design.md's Update agent.
+		- Each jar is downloaded and checked: size, hash, the hash page, and the same plugin name. Each needs its own yes, and `--yes` doesn't count.
+		- README says how to connect an agent, with example `agentCommand` lines for the common CLIs.
+	- Estimated effort: Avg
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-12: `update` asks the agent as the operator, writes its answer to a file only the operator can read, runs itself through sudo with that file, and removes it after. The root run checks the answer again. A dry run asks and shows the plan as not checked; a run started as root skips it with a note.
+		- 2026-11-12: Each jar the agent found has its hash checked on the hash page first, then is downloaded beside the old one, checked for size, hash, and plugin name, and needs its own yes. A failed check is reported and the rest go on.
+		- 2026-11-12: README's Update agent section has example configs for the API kinds and `agentCommand` lines for Codex and Gemini CLI. design.md notes the hand-off file and the kept file name.
+		- Verified: df76h, df76j, df76k, and df76m pass, and so does the gate on both temp folders. Each fails with its check taken out: the hash page, the hash, the plugin name, the own yes, the replay's hash match, the failed lookup going to the agent, the temp folder removal, and the hidden flag.
+		- Verified: root host check df76n passes with the other 18: `update` as the operator asks a command agent, the answer reaches the run through real sudo, the temp folder is gone after, and a run started as root says it skipped the agent.
+		- 2026-11-12: df76n first found the agent asked about Paper's own approved build. Paper's builds are now left to `--paper`; df76h fails without that.
+	- Decisions:
+		- The hand-off file sits in its own temp folder, named by a hidden `--agent-answer`. sudo runs as a child rather than replacing the process, so the operator's run can remove the file after; the root run's exit code passes through.
+		- The root run uses an answer only for jars both runs asked about with the same hash, and runs `agent.Check` on it again.
+		- A known source's failed lookup goes to the agent with a warning, rather than stopping update, when the agent is on. With it off, it still stops update.
+		- The new jar takes the old one's file name, so the approved list keeps one entry. A jar whose known source failed keeps that source.
+		- Jars and hash pages are fetched through the agent package's public-address client. The hash page is searched as is, up to 4 MiB, ignoring case.
+		- `download.Stage` writes the temp file and gives both hashes, and `Into` now uses it, so the checks aren't written twice. `plugins.Claims` gives the name a jar says it has.
+		- README's CLI flags were checked against `codex` 0.163.0 and `gemini` 0.59.0's help, not run against a subscription. README says to check them against the CLI's docs.
+		- Swept: `Into`'s callers in `paper` and `geyser` pass their tests; `about` and `Claims` share one reader; `update`'s other callers (setup's Update step) run as root and get the note.
+	- Branch: r1112b
+	- Test case: df76h, df76j, df76k, df76m, df76n (root host)
+	- Closed: 20261112-103705
+
+- Update agent: Paper fallback and the --mc-version report
+	- ID: 2026111210034308
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-100343
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Prereq IDs: 2026111210034298 2026111117302963
+	- Requirements:
+		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
+		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
+	- Estimated effort: Avg
 
 - cmd sometimes misses its answer right after a start
 	- ID: 2026111207565308
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
 	- Related IDs: 2026111111065750
 	- Incorrect behavior [Bug]: In 2 of 7 root host runs, `cmd list` right after `start` printed no "players online" line, once in each mode. 14 tries by hand, some with the CPUs loaded, didn't repeat it.
 	- Expected behavior [Bug]: `cmd` shows the answer.
+	- Reproduced [Bug]: No. 20261112: a real Paper 26.3-249 start with Geyser logs 2 STUN lines from Geyser's own thread 0.9 to 1.5 s after Done, which is when the root host check runs `cmd`. Paper answered `list` in 60 ms each time.
 	- Possible cause [Bug]: `cmd` stops half a second after the last log line, and any line counts. Right after a start, Geyser and STUN lines come in, and a stall on the server thread could end the wait before the answer.
 	- Note: The root host check prints the log tail when it happens.
+	- Actual cause [Bug]:
+		- `cmd` ended its wait half a second after any new line. Geyser's STUN lines come in from their own thread just after a start, so an answer that took longer than that after them was missed. The stall itself wasn't caught.
+	- Actual effort: Low
+	- Progress log:
+		- 20261112: Only lines from the server thread count for `cmd`'s waits. The rest are still shown. design.md says so.
+		- Verified: df753 fails without the change and passes with it. All 17 root host checks pass with it in 2 runs, df685 and df68c included.
+	- Decisions:
+		- Count lines by the thread in latest.log's line, not by sending a marker command after the line. A marker would put an unknown command in the log, and in the console of anyone attached.
+		- A line with no thread, such as a message's second line, goes with the line before it. A log with no thread names at all counts every line, as before.
+		- When a plugin answers from a thread of its own, `cmd` now waits the full 3 seconds and shows what came in that time. Before, it stopped half a second after the first line.
+		- Swept: `logFollow` is only read by `cmd`; native and container start wait for Paper's Done line by its text.
+	- Actual fix [Bug]: `cmd` waits on the server thread's lines only, and shows the rest.
+	- Branch: r1112b
+	- Test case: df753, df754
+	- Acceptance signoff: Self-closed: df753 passes and the root host check passes, per the standing close policy.
+	- Closed: 20261112-094325
 
 - Podman warns the input isn't a TTY on every start from a script
 	- ID: 2026111207565309
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -257,11 +516,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: No warning, since the server's terminal is the container's own.
 	- Reproduced [Bug]: 20261112, in the root host check.
 	- Possible cause [Bug]: Podman checks the caller's stdin for `-i -t`, even with `-d`.
+	- Actual cause [Bug]:
+		- Podman 5.4.2's `run` warns whenever `-i -t` is given and its own stdin isn't a terminal, with no check for `--detach`. Its `create` and `start` don't. Docker doesn't warn either way.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: under rootless Podman 5.4.2, `run -d -i -t` with stdin from `/dev/null` warns, and `create -i -t` then `start` doesn't. The container still has a terminal and open stdin, and `attach` under Podman and Docker took a line and detached on Ctrl-C.
+		- Verified: df682 fails on the old code with the warning, and passes with the fix. All 17 root host checks pass, console and cmd under rootful Podman included.
+		- 20261112: df5xp now expects `create` and `start` in place of `run --detach`. df5xs and df5z4 read the `create` line, and df5xs's debug case expects `run` with no `--detach`.
+	- Decisions:
+		- Container `start` makes the container with `create` and then runs `start`, under both runtimes, so the flags and the steps stay the same for each. `--debug` keeps `run`, on the operator's terminal. A failed `start` leaves a created container, as a failed `run` did, and the next `start` removes it. design.md updated.
+		- Not a pty for Podman's stdin, nor a filter on its stderr, since `create` and `start` need neither.
+		- Swept: the only other runtime `run` is `update --image`'s version check, which has no `-i -t`.
+	- Actual fix [Bug]: container `start` runs `create` and then `start` in place of `run --detach`.
+	- Branch: r1112b
+	- Test case: df5xp, df5xs, df682
+	- Acceptance signoff: Self-closed: df682 passes in the root host check, per the standing close policy.
+	- Closed: 20261112-095714
 
 - status says no paper.jar when it can't read the folder
 	- ID: 2026111118183922
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261111-181839
 	- Opened by:
@@ -270,11 +545,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: It says the jar can't be read, and why, as the whitelist line does. design.md: a part that can't be read says why.
 	- Reproduced [Bug]: 20261111, beside a server under Podman, with the tree owned by an account and group the operator wasn't in.
 	- Possible cause [Bug]: `Probe.version` takes any error from resolving `paper.jar` as a missing jar.
+	- Actual cause [Bug]:
+		- `Probe.version` took any error from resolving `paper.jar` as a missing jar.
+	- Actual effort: Low
+	- Progress log:
+		- 20261112: The Version line says it can't read `paper.jar`, and why, as the whitelist line does. A missing one still says no paper.jar. When any read of the tree is refused and the login doesn't have `runGroup` yet, the trees section says to log in again, or gives the `gpasswd` line.
+		- Verified: df74y fails without the change and passes with it.
+	- Decisions:
+		- The group reason shows once, under the trees, not on each line that couldn't be read. It shows only after a refused read, since a login without the group reads a tree the operator owns. design.md updated.
+		- It uses `launch.GroupProblem`, the check native start and `cmd` use, now exported.
+		- Swept: the whitelist, ops, plugin jar, and log reads all mark a refused read. The approved list is in `/etc`, not the tree, so it doesn't.
+	- Actual fix [Bug]: the Version line says `paper.jar` can't be read and why, and the trees say to log in again.
+	- Branch: r1112b
+	- Test case: df74y
+	- Acceptance signoff: Self-closed: df74y passes, per the standing close policy.
+	- Closed: 20261112-093323
 
 - plugins.shcl keys come back lower case after an approve
 	- ID: 2026111118053419
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261111-180534
 	- Opened by:
@@ -283,6 +573,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Low
 	- Progress log:
 		- 2026-11-12: Found while building update --image. Also shcl friction: SaveFile always writes the canonical form.
+		- 20261112: Approve loads and saves with the keep-lines calls, so the operator's other lines stay byte for byte. Verified: df5z2 now has a mixed-case key in its list, and fails on the old save and passes on the new.
+	- Actual effort: Low
+	- Decisions:
+		- Same calls as `update --image`. A changed value may still come back quoted.
+		- Swept: `Approve` is the only `SaveFile` in `plugins`; `update --image` already used keep-lines.
+	- Branch: r1112b
+	- Test case: df5z2
+	- Acceptance signoff: Self-closed: df5z2 passes, per the standing close policy.
+	- Closed: 20261112-135900
 
 - update --plugins: Modrinth and Hangar sources
 	- ID: 2026111117404480

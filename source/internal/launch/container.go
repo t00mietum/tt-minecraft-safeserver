@@ -18,6 +18,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
 // Container is the name and the label of the one container this tool runs.
@@ -174,8 +175,7 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err := d.checkFirewall(ctx); err != nil {
 		return err
 	}
-	// The snapshot step comes with its own item.
-	args, err := d.runArgs(mode)
+	args, err := d.runArgs()
 	if err != nil {
 		return err
 	}
@@ -192,6 +192,9 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 	}
+	if err := d.snapshot(ctx, zfs.PreStart); err != nil {
+		return err
+	}
 	warns, err := tree.ToServer(ctx, d.Run, d.Cfg)
 	d.warn(warns)
 	if err != nil {
@@ -200,12 +203,17 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 
 	if mode.Debug {
 		d.say("Starting with the console attached. Type stop to stop the server.")
-		c := d.box(false, args...)
+		c := d.box(false, append([]string{"run"}, args...)...)
 		c.Tty = true
 		_, err := d.Run.Run(ctx, c)
 		return errors.Join(err, d.handBack(ctx))
 	}
-	if _, err := d.Run.Run(ctx, d.box(false, args...)); err != nil {
+	// Not run --detach: Podman's run warns when its own stdin isn't a
+	// terminal, as from a script or the boot unit, detached or not.
+	if _, err := d.Run.Run(ctx, d.box(false, append([]string{"create"}, args...)...)); err != nil {
+		return err
+	}
+	if _, err := d.Run.Run(ctx, d.box(false, "start", Container)); err != nil {
 		return err
 	}
 	if d.DryRun {
@@ -213,6 +221,11 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	}
 	if err := d.waitLoaded(ctx, d); err != nil {
 		return err
+	}
+	// The container's log comes through the runtime, but cmd and status
+	// read the tree.
+	if err := d.groupProblem("the server's log for cmd and status"); err != nil {
+		d.say("warning: %s", err)
 	}
 	if !mode.Foreground {
 		return nil
@@ -246,22 +259,18 @@ func (d *Boxed) kill(ctx context.Context) error {
 	return err
 }
 
-// runArgs builds the run command, after the runtime's name. Podman and Docker
-// get the same flags. See design.md, Run modes.
-func (d *Boxed) runArgs(mode StartMode) ([]string, error) {
+// runArgs builds what follows run or create. Podman and Docker get the same
+// flags. See design.md, Run modes.
+func (d *Boxed) runArgs() ([]string, error) {
 	c := d.Cfg
 	uid, gid, err := d.IDs(c.RunUser, c.RunGroup)
 	if err != nil {
 		return nil, fmt.Errorf("service account: %w", err)
 	}
 	memCap := strconv.FormatInt(c.MemCap, 10)
-	args := []string{"run"}
-	if !mode.Debug {
-		args = append(args, "--detach")
-	}
-	args = append(args,
+	args := []string{
 		"--name", Container, "--label", Container,
-		"--user", uid+":"+gid,
+		"--user", uid + ":" + gid,
 		"--network", "host",
 		"--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,nodev",
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -270,7 +279,7 @@ func (d *Boxed) runArgs(mode StartMode) ([]string, error) {
 		"--oom-score-adj", "1000",
 		"--init", "--interactive", "--tty",
 		"--workdir", c.ServerDir,
-	)
+	}
 	for _, t := range c.OwnerTrees {
 		real, err := filepath.EvalSymlinks(t)
 		if err != nil {

@@ -4,14 +4,25 @@
 # rootful Podman, native mode, and the firewall. See checks.bash.
 # Needs docker that can run --privileged, and the internet.
 #
-# Usage: root-host.bash [--keep-temp]
+# --zfs runs setup and then the ZFS snapshot checks instead, on a throwaway
+# pool backed by a file in the run's folder. The container shares this host's
+# kernel, so the pool shows in its zpool list until the run destroys it.
+#
+# Usage: root-host.bash [--keep-temp] [--zfs]
 set -euo pipefail
 
 projectName=tt-minecraft-safeserver
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "${here}/../.." && pwd)"
 keep=0
-[[ "${1:-}" == --keep-temp ]] && keep=1
+pool=''
+for a in "${@}"; do
+	case "${a}" in
+		--keep-temp) keep=1 ;;
+		--zfs) pool="ttmcss-test-$(od -An -N4 -tx4 /dev/urandom | tr -d ' ')" ;;
+		*) echo "unknown option: ${a}" >&2; exit 2 ;;
+	esac
+done
 
 HOST_TEMP="$(realpath -m "${HOST_TEMP:-${TMPDIR:-/tmp}}")"
 mkdir -p "${HOST_TEMP}/${projectName}"
@@ -42,7 +53,26 @@ fSafeRm() {
 	rm -rf --one-file-system -- "${p}" && printf 'removed %s\n' "${p}"
 }
 
+# Only this run's pool, by the name it made. Its server goes first, since
+# Podman's mounts of the dataset keep it busy.
+fPoolGone() {
+	[[ "${pool}" == ttmcss-test-* ]] && zpool list -H -o name "${pool}" > /dev/null 2>&1 || return 0
+	docker exec "${box}" zpool destroy -f "${pool}" 2> /dev/null && return 0
+	docker exec "${box}" podman stop -a -t 20 > /dev/null 2>&1
+	docker exec "${box}" systemctl stop tt-minecraftd-server > /dev/null 2>&1
+	docker exec "${box}" zpool destroy -f "${pool}"
+}
+
 fCleanup() {
+	if [[ -n "${pool}" ]]; then
+		fPoolGone || true
+		if zpool list -H -o name "${pool}" > /dev/null 2>&1; then
+			echo "FAIL pool ${pool} is still imported; destroy it as root, then remove ${runDir}" >&2
+			keep=1
+		else
+			echo "pool ${pool} is gone"
+		fi
+	fi
 	if ((keep)); then
 		echo "kept container ${box} and ${runDir}"
 		return
@@ -79,7 +109,7 @@ docker run -d --name "${box}" --label "dev.project=${projectName}" --label "dev.
 	--privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock \
 	--tmpfs /var/lib/containers:size=4g,exec \
 	--memory 6g --memory-swap 6g --oom-score-adj 1000 --cpus "${jobs}" --cpu-shares 256 \
-	"${tag}" > /dev/null
+	${pool:+-v "${runDir}:${runDir}"} "${tag}" > /dev/null
 for ((i = 0; i < 60; i++)); do
 	state="$(docker exec "${box}" systemctl is-system-running 2> /dev/null || true)"
 	[[ "${state}" == running || "${state}" == degraded ]] && break
@@ -91,5 +121,12 @@ docker cp "${here}/checks.bash" "${box}:/usr/local/share/root-host/checks.bash"
 docker cp "${here}/console.py" "${box}:/usr/local/share/root-host/console.py"
 docker exec "${box}" chown op: /home/op/tt-minecraftd
 
+if [[ -n "${pool}" ]]; then
+	echo "Installing zfsutils-linux for pool ${pool}"
+	docker cp "${here}/zfs-tools.bash" "${box}:/usr/local/share/root-host/zfs-tools.bash"
+	docker exec "${box}" bash /usr/local/share/root-host/zfs-tools.bash
+fi
+
 echo "Running the checks; setup downloads Paper, Geyser, Podman, and the image"
-docker exec -u op -e TERM=xterm -w /home/op "${box}" nice -n 10 bash /usr/local/share/root-host/checks.bash
+docker exec -u op -e TERM=xterm -e ZFS_POOL="${pool}" -e ZFS_FILE="${pool:+${runDir}/zpool.img}" -w /home/op "${box}" \
+	nice -n 10 bash /usr/local/share/root-host/checks.bash

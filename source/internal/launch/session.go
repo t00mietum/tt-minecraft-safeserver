@@ -93,6 +93,10 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 	if err := k.mustRun(ctx, e); err != nil {
 		return err
 	}
+	// Checked before the line goes out, so it isn't sent with no answer shown.
+	if err := k.groupProblem("the server's log"); err != nil {
+		return err
+	}
 	log := &logFollow{file: server.LogFile(k.Cfg.ServerDir)}
 	defer log.close()
 	if err := log.skip(); err != nil {
@@ -104,7 +108,10 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 	if k.DryRun {
 		return nil
 	}
-	seen, quiet := false, 0
+	// Only the server thread's lines count, since the answer comes from there.
+	// Geyser's STUN lines just after a start used to end the wait before it.
+	// A line with no thread goes with the one before it.
+	seen, quiet, ours := false, 0, true
 	for i := range answerMax {
 		if ctx.Err() != nil {
 			return nil
@@ -114,11 +121,16 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 		if err != nil {
 			return err
 		}
+		heard := false
 		for _, l := range lines {
 			k.say("%s", server.Clean(l))
+			if thread, ok := server.LogThread(l); ok {
+				ours = thread == server.MainThread
+			}
+			heard = heard || ours
 		}
 		switch {
-		case len(lines) > 0:
+		case heard:
 			seen, quiet = true, 0
 		case seen:
 			quiet++

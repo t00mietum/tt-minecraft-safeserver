@@ -30,6 +30,9 @@ type Cmd struct {
 	Tty bool
 	// Stdin is fed to it, such as a file for install to put in place.
 	Stdin []byte
+	// Quiet keeps its stderr off the terminal, for a try that has a fallback.
+	// The first line goes in the error instead.
+	Quiet bool
 }
 
 // Runner runs outside commands. Tests use Fake.
@@ -85,7 +88,7 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 		cmd.Stdin = bytes.NewReader(c.Stdin)
 	}
 	var errText strings.Builder
-	if e.QuietErr {
+	if e.QuietErr || c.Quiet {
 		cmd.Stderr = &errText
 	}
 	out, err := cmd.Output()

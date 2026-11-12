@@ -194,6 +194,35 @@ func TestSendCmd(t *testing.T) {
 	}
 }
 
+// Lines from other threads, such as Geyser's just after a start, are shown
+// but don't end the wait while the server thread is slow to answer.
+func TestSendCmdOtherThreads(t *testing.T) {
+	defer testid.Line(t, "df753")
+	stun := "[12:00:03] [NetherNet Built-in Signaling-4-1/INFO]: [StunObserver] STUN discovery maps this host\n"
+	answer := "[12:00:04] [Server thread/INFO]: There are 0 of a max of 20 players online: \n"
+	g := newCmdRig(t, "")
+	g.feed = make([]string, 12)
+	g.feed[0] = stun
+	g.feed[2] = "[12:00:03] [ForkJoinPool.commonPool-worker-2/WARN]: [Geyser-Spigot] slow\n\tat its second line\n"
+	g.feed[4] = "\tat a third line, later\n"
+	g.feed[10] = answer
+	g.feed[11] = "a second line of the answer\n"
+	if err := g.n.SendCmd(context.Background(), "list"); err != nil {
+		t.Fatal(err)
+	}
+	out := g.out.String()
+	if !strings.Contains(out, "players online") || !strings.HasSuffix(out, "a second line of the answer\n") || g.polls != 12+answerQuiet {
+		t.Errorf("slow answer: output %q, polled %d times", out, g.polls)
+	}
+
+	// Only other threads: shown, and the wait ends as with nothing back.
+	g = newCmdRig(t, "")
+	g.feed = []string{stun, "", stun}
+	if err := g.n.SendCmd(context.Background(), "list"); err != nil || strings.Count(g.out.String(), "STUN") != 2 || g.polls != answerFirst {
+		t.Errorf("other threads only: err %v, output %q, polled %d times", err, g.out.String(), g.polls)
+	}
+}
+
 // A log removed and made again, as at a rollover, is read from its start,
 // even where the new file gets the old one's inode, as on ext4.
 func TestLogFollowNewFile(t *testing.T) {

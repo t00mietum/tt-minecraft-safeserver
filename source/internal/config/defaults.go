@@ -61,6 +61,16 @@ func Defaults() Config {
 		StartTimeout:      300 * time.Second,
 		StopTimeout:       120 * time.Second,
 		Firewall:          true,
+		Agent:             "none",
+		// Where plugins are published by the hosts themselves. See
+		// design.md's Update agent.
+		AgentHosts: []string{
+			"hangar.papermc.io", "hangarcdn.papermc.io",
+			"modrinth.com", "api.modrinth.com", "cdn.modrinth.com",
+			"github.com", "api.github.com",
+			"download.geysermc.org",
+			"fill.papermc.io", "fill-data.papermc.io",
+		},
 	}
 }
 

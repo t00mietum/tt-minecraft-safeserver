@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,18 +20,22 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 	"unsafe"
 
+	agentpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/selfupdate"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	setuppkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/setup"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -65,8 +70,14 @@ type options struct {
 	acceptEULA bool
 	// parts are update's --paper and the like. None named means all.
 	parts updatepkg.Parts
+	// keepSelf leaves --self out of an update that names no part, for
+	// setup, since the binary it runs is the one it installs.
+	keepSelf bool
 	// line is cmd's console command.
 	line string
+	// agentAnswer is the file update's operator run left the agent's answer
+	// in, for its run through sudo.
+	agentAnswer string
 }
 
 type command struct {
@@ -105,11 +116,13 @@ var commands = []command{
 		fs.BoolVar(&o.acceptEULA, "accept-eula", false, "Accept the Minecraft EULA, "+settings.EULAURL)
 	}},
 	{"update", "Get newer builds. A running server uses them from its next start", func(fs *flag.FlagSet, o *options) {
+		fs.BoolVar(&o.parts.Self, "self", false, "Replace tt-minecraftd with its newest release from GitHub. On NixOS, say what to change")
 		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
-		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate")
+		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
 		fs.BoolVar(&o.parts.Image, "image", false, "Pull the newest build of the image's tag, check its Java, and pin its digest in the config")
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan, and change nothing")
+		fs.StringVar(&o.agentAnswer, "agent-answer", "", "")
 	}},
 	{"status", "Show what the server is doing", func(*flag.FlagSet, *options) {}},
 	{"watch", "Redraw status every few seconds, until Ctrl-C", func(fs *flag.FlagSet, o *options) {
@@ -142,6 +155,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	if err := dispatch(ctx, inv, stdout); err != nil {
+		var code exitCode
+		if errors.As(err, &code) {
+			return int(code)
+		}
 		fmt.Fprintf(stderr, "tt-minecraftd: %v\n", err)
 		return exitError
 	}
@@ -286,6 +303,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 			again := inv
 			again.cfg = *c
 			again.opts.yes = true
+			again.opts.keepSelf = true
 			return update(ctx, again, in, w, root)
 		},
 	}
@@ -294,17 +312,35 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 
 var userAgent = "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
 
-// paperAPI and geyserAPI are vars so tests don't reach the real ones.
+// paperAPI, geyserAPI, and selfAPI are vars so tests don't reach the real
+// ones.
 var (
 	paperAPI  = paper.API{UserAgent: userAgent}
 	geyserAPI = geyser.API{UserAgent: userAgent}
+	selfAPI   = selfupdate.API{UserAgent: userAgent}
 )
 
+// running is the binary to replace, past any link to it, so the link still
+// works after. "" when it can't be found.
+func running() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
+}
+
 // update needs root, so it runs itself again through sudo, unless it's a dry
-// run.
+// run. With agent set, the agent is asked first, as the operator, and its
+// answer goes to the root run in a file. See design.md's Update agent.
 func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
-	if !root && !inv.opts.dryRun {
-		return asRoot(inv.args)
+	exe := running()
+	var self updatepkg.SelfSource = selfAPI
+	if inv.opts.keepSelf {
+		self = nil
 	}
 	u := &updatepkg.Update{
 		Cfg:         &inv.cfg,
@@ -317,10 +353,95 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		Out:         w,
 		Paper:       paperAPI,
 		Geyser:      geyserAPI,
+		Self:        self,
+		Exe:         exe,
+		Version:     version,
+		NixOS:       selfupdate.FromNix(exe),
 		Run:         host.NewExec(inv.opts.dryRun),
+		Fetch:       download.Client{UserAgent: userAgent},
+	}
+	parts := inv.opts.parts
+	agentOn := inv.cfg.Agent != "" && inv.cfg.Agent != "none" && (parts == updatepkg.Parts{} || parts.Plugins)
+	switch {
+	case inv.opts.agentAnswer != "" && (root || inv.opts.dryRun):
+		a, err := updatepkg.ReadAgentAnswer(inv.opts.agentAnswer)
+		if err != nil {
+			return fmt.Errorf("can't read the update agent's answer: %w", err)
+		}
+		u.Agent = a.Replay
+	case !agentOn || inv.opts.agentAnswer != "":
+	case root:
+		u.AgentNote = "the update agent isn't asked when update starts as root. Run update without sudo, and it asks the agent before it runs itself through sudo"
+	default:
+		asker, err := agentpkg.New(&inv.cfg)
+		if err != nil {
+			return err
+		}
+		u.Agent = updatepkg.Live(asker)
+		if !inv.opts.dryRun {
+			return askThenRoot(ctx, u, inv.args)
+		}
+	}
+	if !root && !inv.opts.dryRun {
+		return asRoot(inv.args)
 	}
 	return u.Do(ctx)
 }
+
+// askThenRoot asks the agent as the operator, then runs update through sudo
+// with the answer in a file only the operator can read, and removes it after.
+func askThenRoot(ctx context.Context, u *updatepkg.Update, args []string) error {
+	a, err := u.AskAgent(ctx)
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(a)
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "tt-minecraftd-agent-")
+	if err != nil {
+		return err
+	}
+	file := filepath.Join(dir, "answer.json")
+	defer func() {
+		_ = os.Remove(file) // best effort; both are only the operator's
+		_ = os.Remove(dir)
+	}()
+	if err := os.WriteFile(file, b, 0o600); err != nil {
+		return err
+	}
+	return asRootAndWait(append(slices.Clone(args), "--agent-answer="+file))
+}
+
+// asRootAndWait is asRoot for when something is left to do after, so sudo
+// runs as a child. Ctrl-C reaches both, and run's signal context keeps this
+// one waiting. A var so tests don't exec.
+var asRootAndWait = func(args []string) error {
+	sudo, err := exec.LookPath("sudo")
+	if err != nil {
+		return fmt.Errorf("this needs root, and there's no sudo: %w", err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(sudo, append([]string{"--", exe}, args...)...) // #nosec G204 -- this binary, with its own arguments
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	var exit *exec.ExitError
+	if err := cmd.Run(); errors.As(err, &exit) {
+		// The root run said what went wrong.
+		return exitCode(max(exit.ExitCode(), exitError))
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
+// exitCode is an exit code with nothing more to say.
+type exitCode int
+
+func (e exitCode) Error() string { return "exit status " + strconv.Itoa(int(e)) }
 
 // repairSteps gives the checks around the safe settings and plugins. It's a
 // var so tests don't look at the host's real accounts and runtimes.
@@ -440,6 +561,11 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 		}
 		fmt.Fprintf(w, "\n%s (%s)\n  sha256: %s\n  size:   %d bytes\n  date:   %s\n  says:   %s\n",
 			j.Name, state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
+		// A changed jar keeps the source it has.
+		if p := geyser.Project(info.Name, info.About); state == "new" && p != "" {
+			info.Source = geyserAPI.Source(p)
+			fmt.Fprintf(w, "  source: %s\n", info.Source)
+		}
 		answer, ok := ask(answers, w, "Approve it? [y/n] ")
 		switch {
 		case !ok:
@@ -723,7 +849,7 @@ func writeCommandHelp(w io.Writer, c *command, fs *flag.FlagSet) {
 
 func writeFlags(b *strings.Builder, fs *flag.FlagSet) {
 	fs.VisitAll(func(f *flag.Flag) {
-		if f.Name == "h" {
+		if f.Name == "h" || f.Usage == "" {
 			return
 		}
 		arg, usage := flag.UnquoteUsage(f)

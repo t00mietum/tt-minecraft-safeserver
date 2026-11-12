@@ -4,21 +4,28 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/selfupdate"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -60,6 +67,31 @@ func fakePaperMC(t *testing.T) {
 	old := paperAPI
 	paperAPI.Base, paperAPI.Client = srv.URL+"/paper", srv.Client()
 	t.Cleanup(func() { paperAPI = old })
+}
+
+// fakeReleases points selfAPI at a stand-in GitHub with release v9.0.0, and
+// counts the lookups.
+func fakeReleases(t *testing.T) *atomic.Int32 {
+	t.Helper()
+	var hits atomic.Int32
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bin := selfupdate.AssetName(runtime.GOARCH)
+		switch r.URL.Path {
+		case "/repo/releases":
+			hits.Add(1)
+			fmt.Fprintf(w, `[{"tag_name":"v9.0.0","assets":[{"name":%q,"browser_download_url":"%s/bin"},{"name":"SHA256SUMS","browser_download_url":"%s/sums"}]}]`, bin, srv.URL, srv.URL)
+		case "/sums":
+			fmt.Fprintf(w, "%s  %s\n", strings.Repeat("ab", 32), bin)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	old := selfAPI
+	selfAPI.Base, selfAPI.Client = srv.URL+"/repo", srv.Client()
+	t.Cleanup(func() { selfAPI = old })
+	return &hits
 }
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
@@ -301,6 +333,46 @@ func TestRepairApprovePlugins(t *testing.T) {
 	}
 }
 
+// A Geyser jar approved through repair gets GeyserMC's source, as setup's do.
+func TestRepairApproveGeyserSource(t *testing.T) {
+	defer testid.Line(t, "df76r")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	w, err := z.Create("plugin.yml")
+	if err == nil {
+		_, err = w.Write([]byte("name: Geyser-Spigot\nversion: 2.12.1\n"))
+	}
+	if err == nil {
+		err = z.Close()
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "plugins", "Geyser-Spigot.jar"), b.Bytes(), 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, _, done := prepare([]string{"repair", "--approve-plugins", "--set=serverDir=" + dir}, &bytes.Buffer{}, &bytes.Buffer{})
+	if done {
+		t.Fatal("prepare stopped")
+	}
+	var out bytes.Buffer
+	_ = repair(context.Background(), inv, strings.NewReader("y\n"), &out, true) // paper.jar is missing, which isn't this test's
+	src := geyserAPI.Source("geyser")
+	if !strings.Contains(out.String(), "  source: "+src+"\nApprove it?") {
+		t.Errorf("source not shown:\n%s", out.String())
+	}
+	approved, _, err := plugins.ReadApproved(inv.pluginsFile())
+	if err != nil || len(approved) != 1 || approved[0].Source != src {
+		t.Errorf("approved %v, %v; want the source %s", approved, err, src)
+	}
+}
+
 // cmd takes the rest of the line as the console command; console takes none.
 func TestConsoleCmdArgs(t *testing.T) {
 	defer testid.Line(t, "df5z8")
@@ -375,6 +447,7 @@ func TestSetup(t *testing.T) {
 	noDefaultConfig(t)
 	noHostChecks(t)
 	fakePaperMC(t)
+	hits := fakeReleases(t)
 	var again []string
 	old := asRoot
 	asRoot = func(args []string) error { again = args; return nil }
@@ -404,6 +477,9 @@ func TestSetup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
 		t.Error("a dry run wrote server.properties")
 	}
+	if !strings.Contains(out, "Updating:") || hits.Load() != 0 {
+		t.Errorf("setup's update looked for a release %d times:\n%s", hits.Load(), out)
+	}
 }
 
 // update runs itself through sudo unless it's root or a dry run, and a dry
@@ -412,13 +488,14 @@ func TestUpdate(t *testing.T) {
 	defer testid.Line(t, "df671")
 	noDefaultConfig(t)
 	fakePaperMC(t)
+	hits := fakeReleases(t)
 	var again []string
 	old := asRoot
 	asRoot = func(args []string) error { again = args; return nil }
 	t.Cleanup(func() { asRoot = old })
 
 	code, out, _ := runArgs("update", "--help")
-	for _, want := range []string{"--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
+	for _, want := range []string{"--self ", "--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
 		if code != exitOK || !strings.Contains(out, want) {
 			t.Errorf("update --help lacks %q: %q", want, out)
 		}
@@ -442,5 +519,83 @@ func TestUpdate(t *testing.T) {
 	}
 	if target, _ := os.Readlink(filepath.Join(dir, "paper.jar")); target != "paper-26.3-244.jar" {
 		t.Errorf("a dry run moved paper.jar to %q", target)
+	}
+	if !strings.Contains(out, "Move tt-minecraftd from "+version+" to v9.0.0") || !strings.Contains(out, "would download tt-minecraftd v9.0.0 and rename it over /") || hits.Load() != 1 {
+		t.Errorf("dry run, %d lookups: stdout %q", hits.Load(), out)
+	}
+
+	// Only --self needs no server folder.
+	code, out, msg = runArgs("update", "--self", "--dry-run", "--set=serverDir="+filepath.Join(dir, "none"))
+	if code != exitOK || !strings.Contains(out, "to v9.0.0") || strings.Contains(out, "Paper") {
+		t.Errorf("--self: exit %d, stdout %q, stderr %q", code, out, msg)
+	}
+}
+
+// With agent set, update asks it as the operator, hands the answer to the
+// run through sudo in a file only the operator can read, and removes it
+// after. The flag that names the file isn't in the help.
+func TestUpdateAgent(t *testing.T) {
+	defer testid.Line(t, "df76m")
+	if os.Geteuid() == 0 {
+		t.Skip("the agent doesn't run as root")
+	}
+	noDefaultConfig(t)
+	dir := t.TempDir()
+	server := filepath.Join(dir, "server")
+	if err := os.MkdirAll(filepath.Join(server, "plugins"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(server, "plugins", "Thing.jar"), []byte("thing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := plugins.Approve(filepath.Join(dir, "plugins.shcl"), []plugins.Info{{Jar: plugins.Jar{Name: "plugins/Thing.jar"}, SHA256: strings.Repeat("ab", 32)}}); err != nil {
+		t.Fatal(err)
+	}
+	ask := filepath.Join(dir, "ask")
+	if err := os.WriteFile(ask, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"jars\": []}'\n"), 0o700); err != nil { // #nosec G306 -- the test's own agent
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.shcl")
+	if err := os.WriteFile(cfg, []byte("serverDir: "+server+"\nagent: command\nagentCommand: ["+ask+"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var again []string
+	var handed os.FileInfo
+	var answer []byte
+	old := asRootAndWait
+	asRootAndWait = func(args []string) error {
+		again = args
+		file := strings.TrimPrefix(args[len(args)-1], "--agent-answer=")
+		handed, _ = os.Stat(file)
+		answer, _ = os.ReadFile(file) // #nosec G304 -- the test's own temp file
+		return exitCode(3)
+	}
+	t.Cleanup(func() { asRootAndWait = old })
+
+	code, out, msg := runArgs("update", "--plugins", "--config", cfg)
+	if code != 3 || msg != "" || len(again) != 5 || !strings.HasPrefix(again[4], "--agent-answer=") || !strings.Contains(out, "Asking the update agent about 1 jar.") {
+		t.Fatalf("exit %d, ran again with %q\nstdout %q\nstderr %q", code, again, out, msg)
+	}
+	if handed == nil || handed.Mode().Perm() != 0o600 || !strings.Contains(string(answer), `"jar":"plugins/Thing.jar"`) {
+		t.Errorf("handed %v: %s", handed, answer)
+	}
+	file := strings.TrimPrefix(again[4], "--agent-answer=")
+	if _, err := os.Stat(filepath.Dir(file)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the answer's folder is still there: %v", err)
+	}
+
+	// The run through sudo reads it; a dry run stands in for root here.
+	file = filepath.Join(dir, "answer.json")
+	if err := os.WriteFile(file, answer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, msg = runArgs("update", "--plugins", "--dry-run", "--config", cfg, "--agent-answer="+file)
+	if code != exitOK || !strings.Contains(out, "plugins/Thing.jar: no answer from the update agent") {
+		t.Errorf("replay: exit %d\nstdout %q\nstderr %q", code, out, msg)
+	}
+
+	if _, out, _ := runArgs("update", "--help"); strings.Contains(out, "agent-answer") {
+		t.Errorf("help shows the hand-off flag: %q", out)
 	}
 }
