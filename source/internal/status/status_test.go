@@ -210,6 +210,24 @@ func TestStatusNative(t *testing.T) {
 	}
 }
 
+// Mode gives the server's mode from its cgroup, whatever runMode says.
+func TestProbeMode(t *testing.T) {
+	defer testid.Line(t, "df67y")
+	g := newRig(t)
+	if mode, err := g.p.Mode(context.Background()); mode != "" || err != nil {
+		t.Errorf("no server: %q, %v", mode, err)
+	}
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.replies["ps -eo"] = fmt.Sprintf("%s 7000 1 60 /usr/bin/java -Xmx2G -jar paper.jar --nogui\n", me.Uid)
+	g.cgroup("7000", "/system.slice/tt-minecraftd-server.service", 512<<20)
+	if mode, err := g.p.Mode(context.Background()); mode != "native" || err != nil {
+		t.Errorf("native server under runMode %s: %q, %v", g.p.Cfg.RunMode, mode, err)
+	}
+}
+
 // As root, status shows the drop counters, and leaves out the ones the
 // config can't bump.
 func TestStatusFirewall(t *testing.T) {

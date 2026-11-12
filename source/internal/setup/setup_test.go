@@ -283,6 +283,31 @@ func TestRuntimePick(t *testing.T) {
 	}
 }
 
+// A fresh image has no package lists, and install alone finds nothing.
+func TestAptUpdateFirst(t *testing.T) {
+	defer testid.Line(t, "df67t")
+	r := newRig(t, []string{"apt-get"}, "")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	ran := r.ran()
+	upd := slices.Index(ran, "sudo apt-get update")
+	inst := slices.IndexFunc(ran, func(s string) bool { return strings.HasPrefix(s, "sudo apt-get install") })
+	if upd < 0 || inst != upd+1 {
+		t.Errorf("apt-get update at %d, install at %d:\n%s", upd, inst, strings.Join(ran, "\n"))
+	}
+
+	r = newRig(t, []string{"podman", "catatonit"}, "")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if slices.Contains(r.ran(), "sudo apt-get update") {
+		t.Errorf("apt-get update ran with nothing to install")
+	}
+}
+
 func TestAdopt(t *testing.T) {
 	defer testid.Line(t, "df65f")
 	r := newRig(t, []string{"docker"}, "")
@@ -332,6 +357,34 @@ func TestAdopt(t *testing.T) {
 	}
 	if strings.Contains(r.out.String(), "EULA") {
 		t.Error("asked about the EULA when eula.txt already says true")
+	}
+}
+
+// The jars to approve show before Go ahead, so a yes covers jars that were
+// seen. A no approves none.
+func TestJarsListedBeforeAsking(t *testing.T) {
+	defer testid.Line(t, "df67z")
+	r := newRig(t, []string{"docker"}, "n\n")
+	old := filepath.Join(r.dir, "old", "paper")
+	if err := os.MkdirAll(filepath.Join(old, "plugins"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"paper.jar": "jar", "plugins/Thing.jar": "not really a jar", "eula.txt": "eula=true\n"} {
+		if err := os.WriteFile(filepath.Join(old, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.s.Adopt = old
+	if err := r.s.Do(context.Background()); err == nil {
+		t.Fatal("went on after a no")
+	}
+	out := r.out.String()
+	listed, asked := strings.Index(out, "plugins/Thing.jar\n  sha256: "), strings.Index(out, "Go ahead?")
+	if listed < 0 || asked < 0 || listed > asked {
+		t.Errorf("jar listed at %d, asked at %d:\n%s", listed, asked, out)
+	}
+	if _, err := os.Stat(r.s.PluginsFile); err == nil {
+		t.Error("approved list written after a no")
 	}
 }
 
@@ -434,9 +487,12 @@ func TestRefusals(t *testing.T) {
 	r.s.Sets = sets[:1]
 	t.Setenv("SUDO_USER", "")
 	t.Setenv("USER", "")
+	account := config.Account
+	config.Account = func() string { return "" }
 	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "who the operator is") {
 		t.Errorf("no operator: %v", err)
 	}
+	config.Account = account
 	r.s.Sets = sets
 
 	r.s.Adopt = "/srv/a b"

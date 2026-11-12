@@ -77,6 +77,13 @@ func (p *Probe) find(ctx context.Context) (sighting, error) {
 	return s, nil
 }
 
+// Mode is the mode the tool's server runs in, whatever runMode says, or ""
+// when it isn't running.
+func (p *Probe) Mode(ctx context.Context) (string, error) {
+	s, err := p.find(ctx)
+	return s.mode, err
+}
+
 // ours gives the mode of a Paper process this tool started, or "".
 func (p *Probe) ours(pr proc, byPID map[string]proc) string {
 	cg, err := p.ReadFile("/proc/" + pr.pid + "/cgroup")

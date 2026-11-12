@@ -323,6 +323,30 @@ func TestConsoleCmdArgs(t *testing.T) {
 	}
 }
 
+// stop, console, and cmd follow a server that runs natively while runMode
+// names a container, and the other way round. Podman to Docker is Boxed's.
+func TestFollowMode(t *testing.T) {
+	defer testid.Line(t, "df67x")
+	old := serverMode
+	t.Cleanup(func() { serverMode = old })
+	for _, c := range []struct{ runMode, running, want, say string }{
+		{"podman", "native", "native", "runs in native mode, though runMode says podman"},
+		{"native", "podman", "podman", "runs in podman mode, though runMode says native"},
+		{"docker", "podman", "docker", ""},
+		{"native", "native", "native", ""},
+		{"podman", "", "podman", ""},
+	} {
+		serverMode = func(context.Context, *config.Config) string { return c.running }
+		cfg := config.Defaults()
+		cfg.RunMode = c.runMode
+		var out bytes.Buffer
+		follow(context.Background(), &cfg, &out)
+		if cfg.RunMode != c.want || (c.say == "") != (out.Len() == 0) || !strings.Contains(out.String(), c.say) {
+			t.Errorf("%s with the server %q: runMode %s, said %q", c.runMode, c.running, cfg.RunMode, out.String())
+		}
+	}
+}
+
 // repair runs the host checks before the safe settings and after the plugins,
 // and a failed one makes the exit 1.
 func TestRepairOrder(t *testing.T) {

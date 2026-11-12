@@ -169,6 +169,9 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	if name == "update" {
 		return update(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
 	}
+	if name != "start" {
+		follow(ctx, &inv.cfg, stdout)
+	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
 	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
@@ -194,6 +197,28 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		return srv.SendCmd(ctx, inv.opts.line)
 	}
 	return srv.Start(ctx, launch.StartMode{Debug: inv.opts.debug, Foreground: inv.opts.foreground})
+}
+
+// serverMode is where the tool's server runs, from the process table. A var
+// for tests.
+var serverMode = func(ctx context.Context, c *config.Config) string {
+	runner := host.NewExec(false)
+	runner.QuietErr = true
+	mode, _ := status.NewProbe(runner, c, "").Mode(ctx)
+	return mode
+}
+
+// follow points stop, console, and cmd at a server that runs natively when
+// runMode names a container, or the other way round, as after start
+// --native. Without it, stop says it isn't running and hands the trees back
+// under it. Boxed already follows a container to the other runtime.
+func follow(ctx context.Context, c *config.Config, w io.Writer) {
+	mode := serverMode(ctx, c)
+	if mode == "" || (mode == "native") == (c.RunMode == "native") {
+		return
+	}
+	fmt.Fprintf(w, "The server runs in %s mode, though runMode says %s.\n", mode, c.RunMode)
+	c.RunMode = mode
 }
 
 // pluginsFile is the approved jar list, beside the config, so a second

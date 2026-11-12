@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"strings"
 	"time"
 
@@ -159,15 +160,29 @@ func (c *Config) derive() []Warning {
 	return warns
 }
 
-// operator is who gets the trees back after a stop. It's empty when neither
-// variable holds a usable name, as when systemd starts the boot unit.
+// operator is who gets the trees back after a stop. It's empty when no
+// usable name turns up, as when systemd starts the boot unit as root.
 func operator() string {
-	for _, name := range []string{"SUDO_USER", "USER"} {
-		if s, err := checkAccount(os.Getenv(name)); err == nil {
+	for _, name := range []string{os.Getenv("SUDO_USER"), os.Getenv("USER"), Account()} {
+		if s, err := checkAccount(name); err == nil {
 			return s
 		}
 	}
 	return ""
+}
+
+// Account names the account this runs as, for cron and the like, which
+// don't set USER. Root gives "", or the boot unit's stop would hand the
+// trees to root. A var so tests don't depend on who runs them.
+var Account = func() string {
+	if os.Getuid() == 0 {
+		return ""
+	}
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return u.Username
 }
 
 // javaForm prints a size the way it would be typed, such as 4G or 1536M.

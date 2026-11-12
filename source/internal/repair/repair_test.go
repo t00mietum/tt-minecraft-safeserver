@@ -407,10 +407,15 @@ func TestDockerCheck(t *testing.T) {
 	if got := look(t, h, containerCheck); len(got) != 0 {
 		t.Errorf("image, no container: %q", got)
 	}
+	// A normal stop leaves the container, so logs still works.
 	noImage, state = true, "exited"
-	want := []string{"sudo docker pull temurin@sha256:abc", "sudo docker rm tt-minecraftd"}
+	want := []string{"sudo docker pull temurin@sha256:abc"}
 	if got := fixAll(t, h, f, containerCheck); !reflect.DeepEqual(got, want) {
-		t.Errorf("no image, old container: %q", got)
+		t.Errorf("no image, stopped container: %q", got)
+	}
+	noImage = false
+	if got := look(t, h, containerCheck); len(got) != 0 {
+		t.Errorf("stopped container after a stop: %q", got)
 	}
 	noImage, state = false, "running"
 	if got := look(t, h, containerCheck); len(got) != 0 {

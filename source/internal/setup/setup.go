@@ -123,7 +123,7 @@ func (s *Setup) Do(ctx context.Context) error {
 		return err
 	}
 
-	s.plan(cfg, opts, len(jars), exe, build, bedrock)
+	s.plan(cfg, opts, jars, exe, build, bedrock)
 	if !s.confirm("Go ahead? [y/n] ") {
 		return errors.New("nothing changed")
 	}
@@ -316,6 +316,10 @@ func (s *Setup) install(ctx context.Context, c config.Config) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
+	// Lists can be empty on a fresh image, or stale enough to 404.
+	if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Tty: true, Args: []string{"apt-get", "update"}}); err != nil {
+		return err
+	}
 	_, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Tty: true, Args: append([]string{"apt-get", "install", "-y"}, pkgs...)})
 	return err
 }
@@ -390,7 +394,7 @@ func (s *Setup) copyTarget() string {
 	return exe
 }
 
-func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string, build *paper.Build, bedrock []geyser.Build) {
+func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info, exe string, build *paper.Build, bedrock []geyser.Build) {
 	w := s.Out
 	fmt.Fprintf(w, "\nsetup will:\n")
 	if pkgs := s.packages(c); len(pkgs) > 0 {
@@ -410,8 +414,8 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string
 	}
 	fmt.Fprintf(w, "  - Write the safe server settings.\n")
 	s.planBedrock(bedrock)
-	if jars > 0 {
-		fmt.Fprintf(w, "  - Approve the %d plugin %s there, listed with %s hashes below.\n", jars, plural(jars, "jar"), plural(jars, "its", "their"))
+	if n := len(jars); n > 0 {
+		fmt.Fprintf(w, "  - Approve the %d plugin %s there, listed with %s hashes below.\n", n, plural(n, "jar"), plural(n, "its", "their"))
 	}
 	if c.Firewall {
 		fmt.Fprintf(w, "  - Write the firewall rules to %s, and enable and start %s.\n", firewall.RulesFile, firewall.UnitName)
@@ -424,6 +428,17 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string
 	}
 	fmt.Fprintf(w, "  - Write %s, with %s.\n", s.ConfigPath, keyList(opts))
 	fmt.Fprintf(w, "  - Check it all, as repair --check does.\n\n")
+	// Before the question, so the yes covers jars that were seen.
+	for _, j := range jars {
+		about := j.About
+		if about == "" {
+			about = "no plugin.yml"
+		}
+		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", j.Name, j.SHA256, about)
+	}
+	if len(jars) > 0 {
+		fmt.Fprintln(w)
+	}
 }
 
 func (s *Setup) planBedrock(bedrock []geyser.Build) {
@@ -746,18 +761,7 @@ func (s *Setup) safeSettings(c *config.Config, report repair.Report) {
 }
 
 func (s *Setup) approve(jars []plugins.Info) error {
-	if len(jars) == 0 {
-		return nil
-	}
-	fmt.Fprintln(s.Out)
-	for _, j := range jars {
-		about := j.About
-		if about == "" {
-			about = "no plugin.yml"
-		}
-		fmt.Fprintf(s.Out, "%s\n  sha256: %s\n  says:   %s\n", j.Name, j.SHA256, about)
-	}
-	if s.DryRun {
+	if len(jars) == 0 || s.DryRun {
 		return nil
 	}
 	if _, err := s.configDir(); err != nil {

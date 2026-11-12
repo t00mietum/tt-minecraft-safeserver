@@ -312,7 +312,7 @@ Common:  --config PATH, --set KEY=VALUE
 		- Turning it off leaves the rules file in place.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
 		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
-	11. In container mode, the image is there, and an old stopped container gets removed, under either runtime. In Podman mode, `catatonit` is installed. A missing one is reported with the command that adds it.
+	11. In container mode, the image is there, and a stopped container under the runtime `runMode` doesn't name gets removed. One under `runMode`'s runtime stays, so its `logs` works, and `start` removes it. In Podman mode, `catatonit` is installed. A missing one is reported with the command that adds it.
 	12. With a dataset configured, it exists and is mounted.
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
 	14. Any Paper server that this tool didn't start is reported, and never killed.
@@ -505,7 +505,7 @@ cicd/                        build, test, and release scripts
 | `runMode`           | `podman`                          | `podman`, `docker`, or `native`. `setup` picks one
 | `runUser`           | `minecraftd`
 | `runGroup`          | same as `runUser`                 | Stays the group before and after a run
-| `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`
+| `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`, else the account it runs as, unless that's root
 | `serverDir`         | `/srv/tt-minecraftd/server`
 | `ownerTrees`        | `[<serverDir>]`                   | Every tree that changes hands, such as a world on another dataset
 | `zfsDataset`        | none                              | No snapshots when unset
@@ -601,6 +601,7 @@ cicd/                        build, test, and release scripts
 	- There's no `--rm`, so the runtime's `logs` still works after a crash. `start` removes the old container, but only one that has this tool's label.
 
 - `stop`, `console`, `cmd`, and `repair` look for the tool's label in both runtimes. A container started before a `runMode` change still gets found, and a running one wins over a stopped one. Only `runMode`'s runtime has to answer, since Docker's daemon may be down on a host that moved to Podman.
+	- `stop`, `console`, and `cmd` also follow a server that runs natively while `runMode` names a runtime, or the other way round, as after `start --native`. They find it the way `status` does, and say so.
 
 - The image is given by its full name, such as `docker.io/library/eclipse-temurin`, since Podman won't pick a registry for a short one. A name without a registry gets a warning and the default.
 
@@ -754,6 +755,7 @@ cicd/                        build, test, and release scripts
 
 - Outbound, new connections from the service account:
 	- Ones to loopback get dropped. That way the server can't connect to local services such as databases.
+		- Its own game ports are allowed. Geyser sends to its own Bedrock port over loopback, and its STUN lookup gets no answer when those are dropped.
 		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
