@@ -252,7 +252,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Podman, Docker, and native modes
 	- ID: 2026111115090766
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: High
 	- Opened: 20261111-150907
 	- Opened by: t00mietum
@@ -273,6 +273,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) waits on a hand test, and 2026111116104067 (status without sudo) waits on a hand test.
 	- Decisions:
 		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
+	- Test case: its children's: 2026111116104049: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh; 2026111116104058: df5xw; 2026111116104067: df5y7, df5y8, df5y9, df5ya, df64j, df652
+	- 20261111: children 2026111116104049 2026111116104058 2026111116104067 wait on UAT, and the rest are closed
 
 - Run modes: Podman and Docker through sudo
 	- ID: 2026111116104049
