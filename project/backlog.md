@@ -749,6 +749,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- Verified: against the live GeyserMC API, `update --dry-run` on an approved Geyser jar with an old hash planned the move to Geyser 2.12.1 build 1300.
 		- Verified: df672 fails with the file name check, the up-to-date check, or the missing jar check taken out, and passes with them in.
+		- 2026-11-12: df672 failed about 1 run in 10, since its rig approved the jars in map order, so Floodgate was sometimes looked up before Geyser and the failed lookup named Floodgate. The rig now approves them in a fixed order. Update itself follows the approved list's order.
+		- Verified: df672 failed 1 of 10 runs before the fix, and passed 25 runs in a row after it. The gate passes on both temp folders.
 	- Decisions:
 		- A jar is up to date when its approved hash is the source's newest, since GeyserMC's jar names have no version in them. The old version shown is what the jar's own `plugin.yml` says.
 		- A newest build with another file name is skipped with a note, since both jars would load. So is an approved jar that's gone from the tree, so update never adds one back.

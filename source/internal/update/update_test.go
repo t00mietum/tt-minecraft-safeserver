@@ -214,14 +214,19 @@ func pluginRig(t *testing.T, answers string) (*rig, *fakeGeyser) {
 	if err := os.Mkdir(filepath.Join(r.dir, "plugins"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	jars := map[string]string{"Geyser-Spigot.jar": "old", "floodgate-spigot.jar": "new", "Thing.jar": "thing"}
+	// A slice, not a map: update looks them up in the file's order, and the
+	// failed lookup test expects Geyser's error first.
+	jars := []struct{ name, text, src string }{
+		{"Geyser-Spigot.jar", "old", g.Source("geyser")},
+		{"floodgate-spigot.jar", "new", g.Source("floodgate")},
+		{"Thing.jar", "thing", "https://modrinth.example/thing"},
+	}
 	var infos []plugins.Info
-	for name, text := range jars {
-		if err := os.WriteFile(filepath.Join(r.dir, "plugins", name), []byte(text), 0o600); err != nil {
+	for _, j := range jars {
+		if err := os.WriteFile(filepath.Join(r.dir, "plugins", j.name), []byte(j.text), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		src := map[string]string{"Geyser-Spigot.jar": g.Source("geyser"), "floodgate-spigot.jar": g.Source("floodgate"), "Thing.jar": "https://modrinth.example/thing"}[name]
-		infos = append(infos, plugins.Info{Jar: plugins.Jar{Name: "plugins/" + name}, SHA256: sumOf(text), Source: src})
+		infos = append(infos, plugins.Info{Jar: plugins.Jar{Name: "plugins/" + j.name}, SHA256: sumOf(j.text), Source: j.src})
 	}
 	if err := plugins.Approve(r.u.PluginsFile, infos); err != nil {
 		t.Fatal(err)
