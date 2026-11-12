@@ -140,6 +140,28 @@ func TestRules(t *testing.T) {
 	}
 }
 
+// The server's own ports stay open to it on loopback, ahead of the drop,
+// and nothing else on loopback does.
+func TestOwnPortsOnLoopback(t *testing.T) {
+	defer testid.Line(t, "df67w")
+	c := config.Defaults()
+	c.GamePort, c.BedrockPort = 25570, 19140
+	rules := Rules(&c, nil)
+	drop := strings.Index(rules, `oifname "lo" counter name out_local goto refuse`)
+	for _, s := range []string{`oifname "lo" tcp dport 25570 accept`, `oifname "lo" meta l4proto { tcp, udp } th dport 19140 accept`} {
+		if i := strings.Index(rules, s); i < 0 || i > drop {
+			t.Errorf("%q at %d, loopback drop at %d:\n%s", s, i, drop, rules)
+		}
+	}
+	if n := strings.Count(rules, `oifname "lo"`); n != 3 {
+		t.Errorf("%d loopback rules, want 3", n)
+	}
+	c.Bedrock = false
+	if rules := Rules(&c, nil); strings.Contains(rules, "19140") {
+		t.Error("bedrockPort open on loopback with bedrock off")
+	}
+}
+
 func TestResolvers(t *testing.T) {
 	defer testid.Line(t, "df66d")
 	conf := "# by NetworkManager\nsearch lan\nnameserver 127.0.0.53\nnameserver  fe80::1%eth0\nnameserver bogus\nnameserver ::ffff:192.168.1.1\nnameserver 127.0.0.53\noptions edns0\n"

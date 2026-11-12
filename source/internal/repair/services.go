@@ -29,8 +29,9 @@ var containerCheck = Check{
 			})
 		}
 		// A runMode change can leave the old runtime's container behind.
+		// runMode's own stopped one stays for its logs; start removes it.
 		for _, other := range launch.Runtimes {
-			if other != rt && !launch.Installed(other) {
+			if other == rt || !launch.Installed(other) {
 				continue
 			}
 			state, err := launch.ContainerState(ctx, h.Run, other)

@@ -152,6 +152,12 @@ func Rules(c *config.Config, dns []netip.Addr) string {
 	w("\t\tct state established,related accept")
 	w("\t\tmeta l4proto { tcp, udp } th dport 53 ip daddr @dns4 accept")
 	w("\t\tmeta l4proto { tcp, udp } th dport 53 ip6 daddr @dns6 accept")
+	// Geyser's NetherNet sends to its own port over loopback, and STUN gets
+	// no answer when those are dropped.
+	w("\t\toifname \"lo\" tcp dport %d accept", c.GamePort)
+	if c.Bedrock {
+		w("\t\toifname \"lo\" meta l4proto { tcp, udp } th dport %d accept", c.BedrockPort)
+	}
 	w("\t\toifname \"lo\" counter name out_local goto refuse")
 	w("\t\tip daddr @lan4 counter name out_lan goto refuse")
 	w("\t\tip6 daddr @lan6 counter name out_lan goto refuse")

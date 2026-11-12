@@ -26,6 +26,14 @@ func asOperator(t *testing.T, sudoUser, user string) {
 	t.Helper()
 	t.Setenv("SUDO_USER", sudoUser)
 	t.Setenv("USER", user)
+	asAccount(t, "")
+}
+
+func asAccount(t *testing.T, name string) {
+	t.Helper()
+	old := Account
+	Account = func() string { return name }
+	t.Cleanup(func() { Account = old })
 }
 
 // Each default in design.md's table that's written as a value, such as `4G`
@@ -114,6 +122,27 @@ func TestDerivedDefaults(t *testing.T) {
 		c, warns := mustLoad(t, path)
 		if len(warns) != 0 || !tc.check(c) {
 			t.Errorf("%q %q %q: got %+v, warnings %v", tc.sudoUser, tc.user, tc.file, c, warns)
+		}
+	}
+}
+
+// With neither variable set, as under cron or docker exec, the operator is
+// the account running it.
+func TestOperatorFromAccount(t *testing.T) {
+	defer testid.Line(t, "df67v")
+	asOperator(t, "", "")
+	asAccount(t, "dave")
+	if c, _ := mustLoad(t, ""); c.OwnerAfterStop != "dave" {
+		t.Errorf("ownerAfterStop %q, want dave", c.OwnerAfterStop)
+	}
+	asOperator(t, "", "bob")
+	asAccount(t, "dave")
+	if c, _ := mustLoad(t, ""); c.OwnerAfterStop != "bob" {
+		t.Errorf("ownerAfterStop %q, want bob from USER", c.OwnerAfterStop)
+	}
+	if os.Getuid() != 0 {
+		if got := Account(); got == "" {
+			t.Error("Account gave nothing for a non-root uid")
 		}
 	}
 }
