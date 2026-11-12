@@ -33,6 +33,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior: staticcheck runs clean.
 	- Estimated effort: Low
 	- Closed: 20261111-162945
+	- Test case: None, a lint fix in test code. staticcheck ./... is the check.
 	- 2026-11-12: Unused values dropped in d145437. staticcheck runs clean on the module.
 
 - Live server has the whitelist off while it's open to the internet
