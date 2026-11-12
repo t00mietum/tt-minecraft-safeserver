@@ -59,6 +59,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
 		- 2026-11-12: Got the list, 1 Java and 1 Bedrock player, kept in the private notes. The console commands are written up. Waits on them being run on the live server, and on a check of Geyser's `auth-type` there, which decides `fwhitelist` or `whitelist` for the Bedrock player.
+		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
 
 - update
 	- ID: 2026111111065803
