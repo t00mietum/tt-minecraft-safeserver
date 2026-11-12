@@ -81,11 +81,19 @@ func newRig(t *testing.T) *rig {
 	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n"}
 	g.r.Reply = g.reply
 	noRuntimes(t)
+	inGroup(t, groupHere)
 	g.d = &Boxed{
 		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
 		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
+}
+
+// inGroup puts this login where state says in the server's group.
+func inGroup(t *testing.T, state groupState) {
+	was := loginGroup
+	loginGroup = func(string) (groupState, string) { return state, "alice" }
+	t.Cleanup(func() { loginGroup = was })
 }
 
 // noRuntimes has no runtime installed but runMode's, unless a test adds one.

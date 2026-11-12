@@ -83,7 +83,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Commands fail for the operator until a new login after setup
 	- ID: 2026111207565307
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -91,6 +91,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Incorrect behavior [Bug]: Right after setup, in the same login, the operator isn't in the server's group yet. Native `start` started the unit, then failed with "stat .../latest.log: permission denied" while it waited for the server to load. `cmd` failed with "open .../latest.log: permission denied". setup does say the group counts from the next login.
 	- Expected behavior [Bug]: Those commands read what they need through sudo, or say plainly to log in again first.
 	- Reproduced [Bug]: 20261112, in the root host check, with every check run in the login setup ran in.
+	- Actual cause [Bug]:
+		- The tree goes to the server's account and group at start, and native start's wait and `cmd` read `latest.log` through the group. A login from before setup added the operator doesn't have it.
+	- Actual effort: Low
+	- Progress log:
+		- 20261112: Native `start` and `cmd` check the login's groups first. Without the server's group they stop before changing or sending anything, and say to log in again, or give the `gpasswd` line when the account isn't in the group at all. Container `start` warns once the server is up, since only `cmd` and `status` read the tree there.
+		- Verified: df68g fails with the check taken out and passes with it. df68j, in setup's login on the root host check, fails the same way and passes with it, and all 17 root host checks pass.
+	- Decisions:
+		- A plain message, not reads through sudo. design.md has the operator read logs through the group, and root reads in a tree the server owns could follow a link it planted. design.md's Tree ownership says so now.
+		- `start --debug` and root skip the check, since neither reads the tree as the operator. A group that can't be looked up is left to the steps that need it, as before.
+		- `cmd` checks after it finds the server running, so a stopped server still says that first.
+		- Swept: `stop`, `console`, and native `stop`'s countdown go through sudo or tmux as the account, and container `start` reads the log through the runtime. `status` already says why a part can't be read, apart from 2026111118183922.
+	- Actual fix [Bug]: native `start` and `cmd` refuse without the server's group in this login, and say to log in again. Container `start` warns.
+	- Branch: r1112b
+	- Test case: df68g, df68h, df68j
+	- Acceptance signoff: Self-closed: df68j passed in the root host check on b23.
+	- Closed: 20261112-092846
 
 - update --mc-version
 	- ID: 2026111117302963

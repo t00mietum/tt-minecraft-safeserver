@@ -48,6 +48,13 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.refuseOthers(ctx); err != nil {
 		return err
 	}
+	if !mode.Debug {
+		// Checked before anything changes, since the wait for the Done line
+		// reads the log once the tree is the server's.
+		if err := n.groupProblem("the server's log"); err != nil {
+			return err
+		}
+	}
 	if !mode.Foreground {
 		if err := n.sudoUp(ctx); err != nil {
 			return err

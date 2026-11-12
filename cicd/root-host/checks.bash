@@ -99,6 +99,12 @@ fStopWarn() {
 	tt-minecraftd repair --check
 }
 
+fSameLogin() {
+	# The group setup added isn't in this login yet.
+	! tt-minecraftd start --native --dry-run > same.out 2>&1 || return 1
+	has 'log in again' same.out
+}
+
 fRefuseChanged() {
 	local jar
 	jar="${dir}/$(readlink "${dir}/paper.jar")"
@@ -154,6 +160,7 @@ fFirewallOff() {
 cd "${HOME}" || exit 1
 if [[ "${1:-}" != after-login ]]; then
 	check df680 "setup installs from scratch" fNewInstall
+	check df68j "native start in setup's login says to log in again" fSameLogin
 	# The group setup added counts from the next login, as setup says.
 	exec sudo -u op TERM="${TERM:-xterm}" bash "${0}" after-login "${failed}"
 fi

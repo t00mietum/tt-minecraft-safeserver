@@ -214,6 +214,11 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err := d.waitLoaded(ctx, d); err != nil {
 		return err
 	}
+	// The container's log comes through the runtime, but cmd and status
+	// read the tree.
+	if err := d.groupProblem("the server's log for cmd and status"); err != nil {
+		d.say("warning: %s", err)
+	}
 	if !mode.Foreground {
 		return nil
 	}

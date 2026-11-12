@@ -621,6 +621,7 @@ cicd/                        build, test, and release scripts
 - Each tree in `ownerTrees` changes hands with `chown -R`. A missing tree gets a warning.
 	- Before a start, the trees go to `runUser`. After a stop, they go to `ownerAfterStop`.
 	- The group is always `runGroup`, and the operator is in it. So logs and `status` work while the server runs.
+		- A login from before the operator joined the group, as right after setup, doesn't have it yet. Native `start` and `cmd` say to log in again before they change or send anything, and container `start` warns once the server is up.
 
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
 

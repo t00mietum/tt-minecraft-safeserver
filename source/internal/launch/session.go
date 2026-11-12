@@ -93,6 +93,10 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 	if err := k.mustRun(ctx, e); err != nil {
 		return err
 	}
+	// Checked before the line goes out, so it isn't sent with no answer shown.
+	if err := k.groupProblem("the server's log"); err != nil {
+		return err
+	}
 	log := &logFollow{file: server.LogFile(k.Cfg.ServerDir)}
 	defer log.close()
 	if err := log.skip(); err != nil {
