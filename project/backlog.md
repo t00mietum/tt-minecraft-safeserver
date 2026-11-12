@@ -526,6 +526,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
 
+- Connect the service to an AI agent to update the game programs and add-ons
+	- ID: 2026111207010610
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-070106
+	- Opened by: t00mietum
+	- Requirements:
+		- Ability to connect the service to an AI agent, for the purpose of updating the game programs and add-ons, which would otherwise be very brittle if hard-coded.
+		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
+	- Note:
+		- Pre-next-cut.
+
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
