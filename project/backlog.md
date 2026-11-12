@@ -22,6 +22,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- plugins.shcl keys come back lower case after an approve
+	- ID: 2026111118053419
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-180534
+	- Opened by:
+	- Incorrect behavior: plugins.Approve saves with shcl's SaveFile, which writes every key in lower case.
+	- Expected behavior: an approve changes only the jar entries it touches, through the keep-lines save update --image uses.
+	- Estimated effort: Low
+	- Progress log:
+		- 2026-11-12: Found while building update --image. Also shcl friction: SaveFile always writes the canonical form.
+
 - repair sends a missing server folder to setup, which only runs repair again
 	- ID: 2026111117095694
 	- Type: Bug
