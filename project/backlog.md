@@ -216,7 +216,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
 	- Type: Feature
-	- Status: Waiting for testing
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-122642
 	- Opened by: t00mietum
@@ -230,6 +230,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261112: `start` takes the snapshot in both modes right before the trees change hands, and `stop` takes one once the server is down, before they go back. Each one is followed by a prune, which destroys what the schedule drops in one `zfs destroy`.
 		- Verified: df77n to df77r pass, and df77q fails with `stop`'s snapshot taken out. The `zfs list` form that the prune reads checked against zfs 2.3.9.
 		- `setup` offering `zfs allow` is 2026111211050654. Until then the sudo fallback covers it.
+		- 20261112: The root host check takes `--zfs`, which runs setup and then 5 checks on a throwaway file-backed pool, destroyed on the way out: the server's tree on its own dataset, `start`'s snapshot through sudo, `stop`'s after the save and before the hand-back, a prune that drops only the tool's own in one comma-list destroy, and with `zfs allow` the operator taking and pruning without sudo.
+		- Verified: df780 to df784 pass in podman mode, and the pool is gone from the host after. df782 fails with `stop`'s snapshot moved after the hand-back, and df783 with the prune split into one destroy per snapshot.
 	- Decisions:
 		- Each zfs change runs as the operator first, then through sudo. That uses whatever `zfs allow` grants, by user, group, or set, with no parsing of its output. The first try's error stays off the terminal.
 		- The snapshot comes after the "already running" checks, so a refused start leaves none. A failed snapshot refuses the start. At `stop` the trees go back anyway, and the error is shown.
@@ -237,9 +239,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The prune runs after `stop`'s snapshot too, and a failed prune only warns. Days, weeks, and months count only those that have a snapshot, so a server left off for months keeps its history. Weeks are ISO weeks, and the time in the name counts, not the clock.
 		- design.md's ZFS snapshots says all of this now.
 		- Swept: both modes' `start` snapshot before `tree.ToServer`. `Kit.stop` is the one path that hands back after stopping a running server. setup and repair hand off without stopping one.
-	- Needs external testing: on a throwaway file-backed pool as root, never b23's own: `start` and `stop` each take their snapshot, a prune destroys only the tool's own with one comma-list `zfs destroy`, and with `zfs allow` the operator takes them without sudo.
+		- The host check runs in podman mode only. Native mode shares `Kit.snapshot` and `Kit.stop`, and df77n covers its `start` order.
+		- `--zfs` is its own run, not part of every root host run, since its pool lives in the host's kernel while it runs.
 	- Branch: r1112b
-	- Test case: df77n, df77p, df77q, df77r
+	- Test case: df77n, df77p, df77q, df77r, df780, df781, df782, df783, df784
+	- Acceptance signoff: Self-closed: df780 to df784 pass in the root host check with `--zfs`, per the standing close policy.
+	- Closed: 20261112-111928
 
 - Start at boot
 	- ID: 2026111111065816
