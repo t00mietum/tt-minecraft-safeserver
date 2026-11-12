@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"unicode"
@@ -46,4 +47,22 @@ func Clean(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// MainThread is the thread console commands run on, so their answers are
+// logged from it.
+const MainThread = "Server thread"
+
+// logHead is the start of a latest.log line, as in
+// "[12:00:03] [Server thread/INFO]: ". A thread name can hold a slash.
+var logHead = regexp.MustCompile(`^\[[0-9:]+\] \[(.+)/(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\]: `)
+
+// LogThread gives the thread that logged a latest.log line. ok is false for a
+// line without one, such as the second line of a message.
+func LogThread(line string) (thread string, ok bool) {
+	m := logHead.FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }

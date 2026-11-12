@@ -277,15 +277,32 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - cmd sometimes misses its answer right after a start
 	- ID: 2026111207565308
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
 	- Related IDs: 2026111111065750
 	- Incorrect behavior [Bug]: In 2 of 7 root host runs, `cmd list` right after `start` printed no "players online" line, once in each mode. 14 tries by hand, some with the CPUs loaded, didn't repeat it.
 	- Expected behavior [Bug]: `cmd` shows the answer.
+	- Reproduced [Bug]: No. 20261112: a real Paper 26.3-249 start with Geyser logs 2 STUN lines from Geyser's own thread 0.9 to 1.5 s after Done, which is when the root host check runs `cmd`. Paper answered `list` in 60 ms each time.
 	- Possible cause [Bug]: `cmd` stops half a second after the last log line, and any line counts. Right after a start, Geyser and STUN lines come in, and a stall on the server thread could end the wait before the answer.
 	- Note: The root host check prints the log tail when it happens.
+	- Actual cause [Bug]:
+		- `cmd` ended its wait half a second after any new line. Geyser's STUN lines come in from their own thread just after a start, so an answer that took longer than that after them was missed. The stall itself wasn't caught.
+	- Actual effort: Low
+	- Progress log:
+		- 20261112: Only lines from the server thread count for `cmd`'s waits. The rest are still shown. design.md says so.
+		- Verified: df753 fails without the change and passes with it. All 17 root host checks pass with it in 2 runs, df685 and df68c included.
+	- Decisions:
+		- Count lines by the thread in latest.log's line, not by sending a marker command after the line. A marker would put an unknown command in the log, and in the console of anyone attached.
+		- A line with no thread, such as a message's second line, goes with the line before it. A log with no thread names at all counts every line, as before.
+		- When a plugin answers from a thread of its own, `cmd` now waits the full 3 seconds and shows what came in that time. Before, it stopped half a second after the first line.
+		- Swept: `logFollow` is only read by `cmd`; native and container start wait for Paper's Done line by its text.
+	- Actual fix [Bug]: `cmd` waits on the server thread's lines only, and shows the rest.
+	- Branch: r1112b
+	- Test case: df753, df754
+	- Acceptance signoff: Self-closed: df753 passes and the root host check passes, per the standing close policy.
+	- Closed: 20261112-094325
 
 - Podman warns the input isn't a TTY on every start from a script
 	- ID: 2026111207565309

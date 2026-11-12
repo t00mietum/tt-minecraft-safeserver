@@ -212,6 +212,7 @@ Common:  --config PATH, --set KEY=VALUE
 		- attach only takes Ctrl-C as its detach key in a read of its own. Sent with the line, it would reach the server.
 	- Native mode uses `tmux send-keys`.
 	- The lines come from `logs/latest.log`, in both modes. It waits up to 3 seconds for the first one, then until half a second goes by with nothing new, and 10 seconds at most.
+		- Only lines from the server thread count for those waits, since console commands run there. Lines from other threads are shown but don't count, since Geyser's STUN lookup logs from its own thread just after a start, and could end the wait before the answer came.
 	- `cmd stop` and `cmd restart` are refused, since `stop` also hands the trees back, and Paper's `restart` only stops without a restart script.
 
 - RCON is never used. See [Safe server settings](#safe-server-settings).

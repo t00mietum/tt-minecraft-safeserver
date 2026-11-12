@@ -27,7 +27,7 @@ say() { printf '%s\n' "${*}"; }
 has() { grep -q -- "${1}" "${2}" || { say "no '${1}' in ${2}"; return 1; }; }
 counter() { sudo nft -j list counter inet tt_minecraftd "${1}" | python3 -c 'import json,sys; print([c["counter"]["packets"] for c in json.load(sys.stdin)["nftables"] if "counter" in c][0])'; }
 gateway() { ip -4 route show default | awk '{print $3; exit}'; }
-# cmd sometimes misses its answer right after a start; show what the log had.
+# If cmd misses its answer, show what the log had.
 answered() { has 'players online' cmd.out || { say "log:"; sudo tail -15 "${log}"; return 1; }; }
 
 fNewInstall() {

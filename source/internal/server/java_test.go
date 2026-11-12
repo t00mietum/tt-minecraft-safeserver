@@ -40,3 +40,22 @@ func TestRunningPaper(t *testing.T) {
 		t.Errorf("RunningPaper = %q, want %q", got, want)
 	}
 }
+
+// The thread comes from latest.log's own line form, and nothing else.
+func TestLogThread(t *testing.T) {
+	defer testid.Line(t, "df754")
+	for line, want := range map[string]string{
+		"[12:00:03] [Server thread/INFO]: There are 0 of a max of 20 players online: ": MainThread,
+		"[09:37:50] [NetherNet Built-in Signaling-4-1/INFO]: [StunObserver] STUN":      "NetherNet Built-in Signaling-4-1",
+		"[09:37:50] [a/b thread/WARN]: x":                                              "a/b thread",
+		"[12:00:03 INFO]: console form, no thread":                                     "",
+		"\tat a second line":                                      "",
+		"[12:00:03] [Server thread/INFO] no colon":                "",
+		"says [12:00:03] [Server thread/INFO]: later in the line": "",
+	} {
+		got, ok := LogThread(line)
+		if got != want || ok != (want != "") {
+			t.Errorf("LogThread(%q) = %q, %v, want %q", line, got, ok, want)
+		}
+	}
+}
