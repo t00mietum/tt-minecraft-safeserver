@@ -112,6 +112,7 @@ func TestUsageErrors(t *testing.T) {
 		{"stop", "--warn", "soon"},
 		{"watch", "--interval", "0"},
 		{"repair", "--approve-plugins", "--check"},
+		{"repair", "--approve-plugins", "--dry-run"},
 		{"status", "--set", "heapMax"},
 		{"status", "--set", "=6G"},
 		{"status", "--set", "noSuchKey=1"},
@@ -201,24 +202,33 @@ func TestWatch(t *testing.T) {
 	}
 }
 
-// repair fixes the safe settings as root, and --check only reports, without
-// root. Either one exits 1 while something is wrong.
+// repair fixes the safe settings as root, running itself through sudo when
+// it isn't, and --check or --dry-run only reports, without root. Either one
+// exits 1 while something is wrong.
 func TestRepair(t *testing.T) {
 	defer testid.Line(t, "df5ys")
 	noDefaultConfig(t)
 	noHostChecks(t)
+	var again []string
+	old := asRoot
+	asRoot = func(args []string) error { again = args; return nil }
+	t.Cleanup(func() { asRoot = old })
 	dir := t.TempDir()
 	set := "--set=serverDir=" + dir
-	code, _, msg := runArgs("repair", set)
-	if os.Geteuid() != 0 && (code != exitError || !strings.Contains(msg, "needs root")) {
-		t.Errorf("not root: exit %d, stderr %q", code, msg)
+	if os.Geteuid() != 0 {
+		if code, _, msg := runArgs("repair", set); code != exitOK || !reflect.DeepEqual(again, []string{"repair", set}) {
+			t.Errorf("not root: exit %d, ran again with %q, stderr %q", code, again, msg)
+		}
 	}
-	code, out, _ := runArgs("repair", "--check", set)
-	if code != exitError || !strings.Contains(out, "FAILED  server.properties: white-list isn't set") || !strings.Contains(out, "warning: the whitelist is empty") {
-		t.Errorf("--check: exit %d, stdout %q", code, out)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
-		t.Error("--check wrote server.properties")
+	for _, flag := range []string{"--check", "--dry-run"} {
+		again = nil
+		code, out, _ := runArgs("repair", flag, set)
+		if code != exitError || again != nil || !strings.Contains(out, "FAILED  server.properties: white-list isn't set") || !strings.Contains(out, "warning: the whitelist is empty") {
+			t.Errorf("%s: exit %d, ran again with %q, stdout %q", flag, code, again, out)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
+			t.Errorf("%s wrote server.properties", flag)
+		}
 	}
 
 	inv, _, done := prepare([]string{"repair", set}, &bytes.Buffer{}, &bytes.Buffer{})
@@ -229,7 +239,7 @@ func TestRepair(t *testing.T) {
 	if err := repair(context.Background(), inv, strings.NewReader(""), &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
 		t.Errorf("as root: %v, %q", err, b.String())
 	}
-	code, out, _ = runArgs("repair", "--check", set)
+	code, out, _ := runArgs("repair", "--check", set)
 	if code != exitOK || !strings.HasPrefix(out, "OK      safe settings\n") {
 		t.Errorf("after fix: exit %d, stdout %q", code, out)
 	}

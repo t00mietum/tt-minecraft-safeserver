@@ -127,7 +127,7 @@ tt-minecraftd console
 tt-minecraftd cmd     <server command>
 tt-minecraftd setup   [--yes] [--dry-run] [--adopt PATH] [--accept-eula] [setup options]
 tt-minecraftd update  [--yes] [--dry-run] [--self] [--paper] [--plugins] [--image] [--mc-version V]
-tt-minecraftd repair  [--yes] [--dry-run] [--check] [--approve-plugins]
+tt-minecraftd repair  [--dry-run] [--check] [--approve-plugins]
 tt-minecraftd --help | --about | --version
 Common:  --config PATH, --set KEY=VALUE
 ~~~
@@ -288,7 +288,9 @@ Common:  --config PATH, --set KEY=VALUE
 
 ### repair
 
-- Needs root unless `--check` is given. `--check` reports only.
+- Needs root unless `--check` is given, so it runs itself again through sudo when needed, the same as `setup` and `update`. `--check` reports only, and `--dry-run` is the same as `--check`.
+
+- It takes no `--yes`, since its only questions come from `--approve-plugins`, one per jar.
 
 - Each check prints OK, FIXED, or FAILED. The exit code is 1 when anything failed.
 

@@ -71,6 +71,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Tunnels, the server's dropped connection checks, and `joinRateLimit` against server list pings went under Needs more thought in design.md.
 		- 20261111: df5y7 `TestStatusDocker` also expects `tcp *:19132 listening, 0 connections`, and the shared `ss` reply gained that listener. Old: only the UDP line.
 		- Swept: every `bedrockPort` and `udp` use in source and docs; `status` is the only code that names a protocol. The firewall isn't built yet.
+		- 20261111: The Check picks stand: TCP and UDP on `bedrockPort`, and STUN allowed out under `egress` `web`. Both follow Geyser's own defaults, and need no new key.
 	- Actual fix [Bug]: Docs and `status` say TCP and UDP. Geyser's NetherNet port settings are pinned, and `bedrockPort` can't be `gamePort`.
 	- Branch: r1111
 	- Test case: df5yy, df5yz, df5y7
@@ -271,6 +272,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The account steps reuse repair's account and operator checks. `eula.txt` goes through the settings package's link-safe writer.
 		- Firewall (step 9), the boot unit (11), and the NixOS skips come with 2026111111065789, 2026111111065816, and the NixOS module item.
 		- Swept: `loadConfig` has the one caller; `HasCatatonit` serves both repair's check and setup's package pick.
+		- 20261111: The Check picks stand: the config is written last, a `serverDir` with files in it needs `--adopt`, and setup refuses while a server runs.
 	- Branch: r1112
 	- Test case: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n
 
@@ -728,6 +730,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `cmd` takes no `--dry-run`, since design.md lists none.
 		- `OpenRegular` and `Clean` moved from `status` to `server`, for `cmd` to share.
 		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
+		- 20261111: Kept after the Check: Ctrl-C detaches in both modes, `cmd stop` and `cmd restart` are refused, and `cmd` keeps its wait times.
 	- Branch: r1111
 	- Test case: df5z6, df5z7, df5z8
 	- Closed: 20261111-181653
@@ -1013,6 +1016,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- In `plugins.shcl`, a jar is named by its path under `serverDir`. A bad entry is left out, so its jar isn't approved. shcl merges entries with the same path, so a jar listed with 2 hashes is left out too.
 		- shcl's hints are dropped from the warnings. They repeat ours, and "did you mean a list" misleads for a key that takes one value.
 		- Swept: every key in the table has a setter and a test line; both files go through the one `LoadFile`.
+		- 20261111: The Check picks stand: jars named by their path, a key set twice with 2 values using neither, and a list with a bad item dropped whole.
 	- Branch: r1111
 	- Test case: df5wt, df5wv, df5ww, df5wx, df5wy, df5wz, df5x0, df5x1, df5x2, df5x3, df5x4, df5x5
 	- Closed: 20261111-120826
@@ -1040,6 +1044,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The default image is `eclipse-temurin:25-jre`, pinned to its multi-arch digest. `jvmArgs` defaults to Paper's recommended flags.
 		- An option value follows file syntax, so `##` starts a comment there too.
 		- Swept: every default in design.md's table that's written as a value is checked against the code by a test. The derived ones have their own cases.
+		- 20261111: The Check picks stand: `--set KEY=VALUE`, the pinned `eclipse-temurin:25-jre` image, and Paper's recommended `jvmArgs`.
 	- Branch: r1111
 	- Test case: df5x6, df5x7, df5x8, df5x9, df5xa, df5xb
 	- Closed: 20261111-121403
@@ -1066,6 +1071,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- A tree given as a link is followed before `chown -R`, and the depth check runs on both the link and its target.
 		- `--help` lists only the built commands. `start`, `stop`, `status`, and `watch` parse and load the config, then say they aren't built yet, until the next 3 children.
 		- Swept: both flag passes share `commonFlags`; every chown goes through `tree.handOver`.
+		- 20261111: Kept after the Check: `--dry-run` still runs the commands that only look, the rules for a missing config, and `stop` with `ownerAfterStop` empty.
 	- Branch: r1111
 	- Test case: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn
 	- Closed: 20261111-122043
@@ -1097,6 +1103,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `status` now reads the whitelist and ops through the same code.
 		- The empty whitelist warning names `tt-minecraftd cmd whitelist add`, per design.md, though `cmd` comes with its own item.
 		- Swept: both modes call the check through `Kit`; `status` and the warnings share one player reader.
+		- 20261111: Kept after the Check: `proxy-protocol` off, and a missing `server.properties` counted as unsafe. `repair` no longer refuses without root, and runs itself through sudo instead, see 2026111111065763.
 	- Branch: r1111
 	- Test case: its children's: 2026111112554261: df5yv, df5yw, df5yx
 	- Closed: 20261111-130256
@@ -1174,6 +1181,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-11: `repair` runs design.md's checks 1 to 8, 10, 11, 12, and 14 in order, around the safe settings and plugin steps. Each one prints OK, FIXED, or FAILED, and `--check` fixes nothing.
 		- Verified: each new test fails with its check broken, and passes with it in place.
+		- 20261111: Verified: df5ys fails with the old refusal put back, and with `--dry-run` taken out, and passes with both in.
 	- Decisions:
 		- Checks 9 and 13 come with the Firewall and Start at boot items, which list `repair` managing them. There's no rules file or boot unit to check yet.
 		- Checks are a list in `source/internal/repair`, each with a look and an optional fix per finding, per design.md. Every fix is a command through the runner.
@@ -1187,7 +1195,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Other Paper servers are told apart by uid, since both modes run the server under `runUser`'s uid on the host.
 		- `launch.LockedJars` is exported, and `launch.Running` and `server.PaperProcs` added, so `repair` shares them with `start` and `status`.
 		- Swept: `refuseOthers` and `status` still go through `RunningPaper`, which now uses `PaperProcs`; both modes' jar locks use `LockedJars`.
-	- Branch: r1111
+		- 20261111: Without root and without `--check`, `repair` runs itself again through sudo, as `setup` and `update` do. It used to refuse. `--dry-run` is the same as `--check`. design.md listed a `--yes` for it, which is gone, since its only questions are per jar.
+	- Branch: r1111, repair-sudo
 	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
 	- Closed: 20261111-133545
 
