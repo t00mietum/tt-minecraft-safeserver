@@ -91,6 +91,7 @@ var commands = []command{
 	}},
 	{"repair", "Check the setup, and fix what's wrong", func(fs *flag.FlagSet, o *options) {
 		fs.BoolVar(&o.check, "check", false, "Only report, and change nothing. Doesn't need root")
+		fs.BoolVar(&o.check, "dry-run", false, "The same as --check")
 		fs.BoolVar(&o.approve, "approve-plugins", false, "Show each new or changed jar, and ask whether to approve it")
 	}},
 	{"setup", "Install the server, or adopt a server folder", func(fs *flag.FlagSet, o *options) {
@@ -201,8 +202,8 @@ func (inv invocation) pluginsFile() string {
 	return filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl")
 }
 
-// asRoot runs the tool again through sudo with the same arguments, for setup
-// and update. A var so tests don't exec.
+// asRoot runs the tool again through sudo with the same arguments, for setup,
+// update, and repair. A var so tests don't exec.
 var asRoot = func(args []string) error {
 	sudo, err := exec.LookPath("sudo")
 	if err != nil {
@@ -305,10 +306,11 @@ var repairSteps = func(inv invocation) (h *repairpkg.Host, before, after []repai
 }
 
 // repair runs design.md's repair checks that are built so far. Each one prints
-// OK, FIXED, or FAILED. --approve-plugins asks on in.
+// OK, FIXED, or FAILED. --approve-plugins asks on in. Fixing needs root, so
+// like setup it runs itself again through sudo.
 func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
 	if !inv.opts.check && !root {
-		return errors.New("repair needs root to fix things; run it with sudo, or add --check to only report")
+		return asRoot(inv.args)
 	}
 	failed := false
 	report := func(state, text string) {
