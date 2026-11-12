@@ -269,6 +269,9 @@ Common:  --config PATH, --set KEY=VALUE
 	- `--mc-version V` moves to another Minecraft version. It needs a yes even with `--yes`, since worlds can't go back to an older version and plugins may not work on the new one. It takes a ZFS snapshot first.
 
 - `--plugins` updates each plugin with a known source in the approved list, such as Geyser, Floodgate, Modrinth, or Hangar. It shows the old and new versions, checks the hash from the source, and approves the new jar.
+	- A jar is up to date when its approved hash is the source's newest. The old version is what the jar's own `plugin.yml` says.
+	- A newest build with another file name is left for the operator, since both jars would load. So is an approved jar that isn't in the tree any more.
+	- GeyserMC's sources are the ones known so far. A jar with another source is listed as skipped.
 
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
 

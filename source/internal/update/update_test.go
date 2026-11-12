@@ -7,6 +7,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -163,5 +166,129 @@ func TestPaper(t *testing.T) {
 	r.u.Cfg.ServerDir = filepath.Join(r.dir, "nope")
 	if err := r.u.Do(ctx); err == nil || len(r.p.asked) > 0 {
 		t.Errorf("no serverDir: %v, asked %q", err, r.p.asked)
+	}
+}
+
+// fakeGeyser has Geyser 2.1 build 9, and writes "new" for it.
+type fakeGeyser struct {
+	asked     []string
+	installed []string
+	name      string
+	err       error
+}
+
+func (g *fakeGeyser) Latest(_ context.Context, p string) (geyser.Build, error) {
+	g.asked = append(g.asked, p)
+	name := g.name
+	if name == "" {
+		name = map[string]string{"geyser": "Geyser-Spigot.jar", "floodgate": "floodgate-spigot.jar"}[p]
+	}
+	return geyser.Build{Project: p, Version: "2.1", ID: 9, Name: name, SHA256: sumOf("new")}, g.err
+}
+
+func (g *fakeGeyser) Install(_ context.Context, dir string, b geyser.Build) error {
+	g.installed = append(g.installed, b.Name)
+	return os.WriteFile(filepath.Join(dir, "plugins", b.Name), []byte("new"), 0o600)
+}
+
+func (g *fakeGeyser) Source(p string) string { return "https://example.com/" + p + "/latest" }
+
+func sumOf(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+// pluginRig has Geyser approved with its source, Floodgate approved at the
+// newest build, and a plugin with a source update doesn't know.
+func pluginRig(t *testing.T, answers string) (*rig, *fakeGeyser) {
+	t.Helper()
+	r := newRig(t, answers, 244)
+	g := &fakeGeyser{}
+	r.u.Geyser = g
+	r.u.Parts = Parts{Plugins: true}
+	if err := os.Mkdir(filepath.Join(r.dir, "plugins"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	jars := map[string]string{"Geyser-Spigot.jar": "old", "floodgate-spigot.jar": "new", "Thing.jar": "thing"}
+	var infos []plugins.Info
+	for name, text := range jars {
+		if err := os.WriteFile(filepath.Join(r.dir, "plugins", name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		src := map[string]string{"Geyser-Spigot.jar": g.Source("geyser"), "floodgate-spigot.jar": g.Source("floodgate"), "Thing.jar": "https://modrinth.example/thing"}[name]
+		infos = append(infos, plugins.Info{Jar: plugins.Jar{Name: "plugins/" + name}, SHA256: sumOf(text), Source: src})
+	}
+	if err := plugins.Approve(r.u.PluginsFile, infos); err != nil {
+		t.Fatal(err)
+	}
+	return r, g
+}
+
+// --plugins updates what has a known source and a newer build, keeps the
+// source, and leaves the rest.
+func TestPlugins(t *testing.T) {
+	defer testid.Line(t, "df672")
+	ctx := context.Background()
+
+	r, g := pluginRig(t, "y\n")
+	if err := r.u.Do(ctx); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if !reflect.DeepEqual(g.installed, []string{"Geyser-Spigot.jar"}) || len(r.p.asked) > 0 {
+		t.Errorf("installed %q, Paper asked %q", g.installed, r.p.asked)
+	}
+	for _, want := range []string{"Update plugins/Geyser-Spigot.jar from an older build to Geyser 2.1 build 9", "OK      plugins/floodgate-spigot.jar is the newest build", "SKIPPED plugins/Thing.jar: its source isn't one update knows", "FIXED   plugins/Geyser-Spigot.jar approved"} {
+		if !strings.Contains(r.out.String(), want) {
+			t.Errorf("no %q:\n%s", want, r.out)
+		}
+	}
+	list, _, err := plugins.ReadApproved(r.u.PluginsFile)
+	if err != nil || len(list) != 3 {
+		t.Fatalf("approved %+v %v", list, err)
+	}
+	for _, a := range list {
+		if a.Name == "plugins/Geyser-Spigot.jar" && (a.SHA256 != sumOf("new") || a.Source != g.Source("geyser")) {
+			t.Errorf("Geyser's entry %+v", a)
+		}
+	}
+
+	r, g = pluginRig(t, "n\n")
+	if err := r.u.Do(ctx); err == nil || len(g.installed) > 0 {
+		t.Errorf("a no went on: %v, installed %q", err, g.installed)
+	}
+
+	r, g = pluginRig(t, "")
+	r.u.DryRun = true
+	if err := r.u.Do(ctx); err != nil || len(g.installed) > 0 || !strings.Contains(r.out.String(), "would download Geyser-Spigot.jar") {
+		t.Errorf("dry run: %v, installed %q\n%s", err, g.installed, r.out)
+	}
+
+	// A new name would leave 2 Geysers in plugins/.
+	r, g = pluginRig(t, "y\n")
+	g.name = "Geyser-Paper.jar"
+	if err := r.u.Do(ctx); err != nil || len(g.installed) > 0 || !strings.Contains(r.out.String(), "is named Geyser-Paper.jar") {
+		t.Errorf("renamed: %v, installed %q\n%s", err, g.installed, r.out)
+	}
+
+	r, g = pluginRig(t, "y\n")
+	if err := os.Remove(filepath.Join(r.dir, "plugins", "Geyser-Spigot.jar")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.u.Do(ctx); err != nil || len(g.installed) > 0 || !strings.Contains(r.out.String(), "not in the server folder") {
+		t.Errorf("removed: %v, installed %q\n%s", err, g.installed, r.out)
+	}
+
+	r, g = pluginRig(t, "y\n")
+	g.err = errors.New("no network")
+	if err := r.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't get Geyser") || len(g.installed) > 0 {
+		t.Errorf("failed lookup: %v, installed %q", err, g.installed)
+	}
+
+	// With no part named, Paper and the plugins share one plan.
+	r, g = pluginRig(t, "y\n")
+	r.p.newest = 249
+	r.u.Parts = Parts{}
+	if err := r.u.Do(ctx); err != nil || len(g.installed) != 1 || len(r.p.installed) != 1 || strings.Count(r.out.String(), "Go ahead?") != 1 {
+		t.Errorf("both: %v, installed %q and %q\n%s", err, g.installed, r.p.installed, r.out)
 	}
 }

@@ -648,7 +648,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refresh the pinned container image.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
-	- 2026-11-12: Split into 5 children: 2026111117302950 (the command and `--paper`) is done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are queued.
+	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`) and 2026111117302973 (`--plugins`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302985 (`--image`), 2026111117302995 (`--self`), and 2026111117404480 (Modrinth and Hangar sources) are queued.
 
 - update: the command, and --paper
 	- ID: 2026111117302950
@@ -694,13 +694,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --plugins
 	- ID: 2026111117302973
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-173029
 	- Opened by:
 	- Parent ID: 2026111111065803
 	- Requirements:
 		- `--plugins` updates each approved jar with a known source, such as Geyser and Floodgate, shows the old and new versions, checks the source's hash, and approves the new jar.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against the live GeyserMC API, `update --dry-run` on an approved Geyser jar with an old hash planned the move to Geyser 2.12.1 build 1300.
+		- Verified: df672 fails with the file name check, the up-to-date check, or the missing jar check taken out, and passes with them in.
+	- Decisions:
+		- A jar is up to date when its approved hash is the source's newest, since GeyserMC's jar names have no version in them. The old version shown is what the jar's own `plugin.yml` says.
+		- A newest build with another file name is skipped with a note, since both jars would load. So is an approved jar that's gone from the tree, so update never adds one back.
+		- Only GeyserMC's `latest` sources are known. Modrinth and Hangar have no jars with a source yet, so they're 2026111117404480. Other sources are listed as skipped.
+		- Paper and the plugins are looked up first and share one plan and one question.
+		- design.md updated.
+		- Swept: update and setup share `geyser.API`, `plugins.Approve` keeps the source, and `TestUpdate` (df671) checks the new flag.
+	- Branch: r1112
+	- Test case: df672, df671
+	- Closed: 20261111-174008
 
 - update --image
 	- ID: 2026111117302985
@@ -723,6 +737,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Parent ID: 2026111111065803
 	- Requirements:
 		- `--self` gets the latest release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename. On NixOS it only prints what to change.
+
+- update --plugins: Modrinth and Hangar sources
+	- ID: 2026111117404480
+	- Type: Feature
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-174044
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Prereq IDs: 2026111117302973
+	- Requirements:
+		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283

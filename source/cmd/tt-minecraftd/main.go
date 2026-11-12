@@ -63,8 +63,8 @@ type options struct {
 	yes        bool
 	adopt      string
 	acceptEULA bool
-	// paper is update --paper. With no part named, update does them all.
-	paper bool
+	// parts are update's --paper and the like. None named means all.
+	parts updatepkg.Parts
 	// line is cmd's console command.
 	line string
 }
@@ -104,7 +104,8 @@ var commands = []command{
 		fs.BoolVar(&o.acceptEULA, "accept-eula", false, "Accept the Minecraft EULA, "+settings.EULAURL)
 	}},
 	{"update", "Get newer builds. A running server uses them from its next start", func(fs *flag.FlagSet, o *options) {
-		fs.BoolVar(&o.paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
+		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
+		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate")
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan, and change nothing")
 	}},
@@ -245,7 +246,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		Exe:         exe,
 		Accounts:    accounts,
 		Paper:       paperAPI,
-		Geyser:      geyser.API{UserAgent: userAgent},
+		Geyser:      geyserAPI,
 		Repair: func(ctx context.Context, c *config.Config, check bool) error {
 			again := inv
 			again.cfg = *c
@@ -266,8 +267,11 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 
 var userAgent = "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
 
-// paperAPI is a var so tests don't reach PaperMC.
-var paperAPI = paper.API{UserAgent: userAgent}
+// paperAPI and geyserAPI are vars so tests don't reach the real ones.
+var (
+	paperAPI  = paper.API{UserAgent: userAgent}
+	geyserAPI = geyser.API{UserAgent: userAgent}
+)
 
 // update needs root, so it runs itself again through sudo, unless it's a dry
 // run.
@@ -278,11 +282,13 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	u := &updatepkg.Update{
 		Cfg:         &inv.cfg,
 		PluginsFile: inv.pluginsFile(),
+		Parts:       inv.opts.parts,
 		Yes:         inv.opts.yes,
 		DryRun:      inv.opts.dryRun,
 		In:          bufio.NewScanner(in),
 		Out:         w,
 		Paper:       paperAPI,
+		Geyser:      geyserAPI,
 	}
 	return u.Do(ctx)
 }

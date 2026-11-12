@@ -382,7 +382,7 @@ func TestUpdate(t *testing.T) {
 	t.Cleanup(func() { asRoot = old })
 
 	code, out, _ := runArgs("update", "--help")
-	for _, want := range []string{"--paper ", "--yes ", "--dry-run "} {
+	for _, want := range []string{"--paper ", "--plugins ", "--yes ", "--dry-run "} {
 		if code != exitOK || !strings.Contains(out, want) {
 			t.Errorf("update --help lacks %q: %q", want, out)
 		}
