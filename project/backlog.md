@@ -22,6 +22,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Container start says only permission denied before a new login
+	- ID: 2026111209291851
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261112-092918
+	- Opened by:
+	- Progress log:
+		- 2026-11-12: Left open by 2026111207565307. Container start on a tree the server still owns, such as after a crash, by a login without the server's group yet, fails at the safe settings read with a bare permission denied. The login check runs after that step in container mode.
+
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
