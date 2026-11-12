@@ -162,8 +162,8 @@ func TestNewPicksTheKind(t *testing.T) {
 	for kind, says := range map[string]string{
 		"none":      "no agent is set",
 		"command":   "agentCommand isn't set",
-		"openai":    "isn't built yet",
-		"anthropic": "isn't built yet",
+		"openai":    "agentModel isn't set",
+		"anthropic": "agentModel isn't set",
 	} {
 		cfg.Agent = kind
 		if _, err := New(&cfg); err == nil || !strings.Contains(err.Error(), says) {
@@ -174,6 +174,20 @@ func TestNewPicksTheKind(t *testing.T) {
 	a, err := New(&cfg)
 	if err != nil || !reflect.DeepEqual(a, Command{Argv: cfg.AgentCommand}) {
 		t.Errorf("got %+v, %v", a, err)
+	}
+
+	env := map[string]string{"ANTHROPIC_API_KEY": "ak", "OPENAI_API_KEY": "ok"}
+	old := getenv
+	getenv = func(k string) string { return env[k] }
+	t.Cleanup(func() { getenv = old })
+	cfg.Agent, cfg.AgentModel = "anthropic", "claude-sonnet-4-5"
+	if a, err = New(&cfg); err != nil || !reflect.DeepEqual(a, API{Kind: "anthropic", URL: "https://api.anthropic.com/v1", Model: cfg.AgentModel, Key: "ak"}) {
+		t.Errorf("anthropic: %+v, %v", a, err)
+	}
+	env["TT_MINECRAFTD_AGENT_KEY"] = "tk"
+	cfg.Agent, cfg.AgentURL = "openai", "http://127.0.0.1:11434/v1"
+	if a, err = New(&cfg); err != nil || !reflect.DeepEqual(a, API{Kind: "openai", URL: cfg.AgentURL, Model: cfg.AgentModel, Key: "tk"}) {
+		t.Errorf("openai: %+v, %v", a, err)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -65,10 +66,23 @@ func New(cfg *config.Config) (Asker, error) {
 		}
 		return Command{Argv: cfg.AgentCommand}, nil
 	case "openai", "anthropic":
-		return nil, fmt.Errorf("agent %s isn't built yet", cfg.Agent)
+		if cfg.AgentModel == "" {
+			return nil, fmt.Errorf("agent is %s, but agentModel isn't set", cfg.Agent)
+		}
+		api := API{Kind: cfg.Agent, URL: cfg.AgentURL, Model: cfg.AgentModel, Key: getenv("TT_MINECRAFTD_AGENT_KEY")}
+		if api.URL == "" {
+			api.URL = map[string]string{"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1"}[cfg.Agent]
+		}
+		if api.Key == "" {
+			api.Key = getenv(strings.ToUpper(cfg.Agent) + "_API_KEY")
+		}
+		return api, nil
 	}
 	return nil, errors.New("no agent is set")
 }
+
+// getenv is a var so tests don't see the operator's keys.
+var getenv = os.Getenv
 
 const instructions = `You help a Minecraft server's update tool find newer builds of its plugins.
 The JSON at the end names the server's Minecraft version and the approved jars to look at.

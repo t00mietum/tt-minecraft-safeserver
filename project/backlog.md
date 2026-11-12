@@ -275,7 +275,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Pre-next-cut.
 	- Progress log:
 		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
-		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind) is done. 2026111210033649 (OpenAI and Anthropic APIs, with fetch), 2026111210034298 (`update --plugins` asks the agent), and 2026111210034308 (Paper fallback and the `--mc-version` report) are queued.
+		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind) and 2026111210033649 (OpenAI and Anthropic APIs, with fetch) are done. 2026111210034298 (`update --plugins` asks the agent) and 2026111210034308 (Paper fallback and the `--mc-version` report) are queued.
 	- Decisions:
 		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
 		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
@@ -319,7 +319,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Update agent: OpenAI and Anthropic APIs, with fetch
 	- ID: 2026111210033649
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261112-100336
 	- Opened by:
@@ -328,6 +328,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The `openai` and `anthropic` kinds, per design.md's Update agent, with the key from the operator's environment.
 		- The `fetch` tool: GET only, `https` only, no loopback, LAN, or link-local addresses, a size cap per page, and a cap per run.
 	- Estimated effort: Avg
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: df766, df767, df769, df76a, and df76b pass, against stand-in API servers and pages. The gate passes on both temp folders.
+		- Verified: df767, df766, and df76b fail with the public address check, the redirect check, the https check, the fetch cap, the page cleanup, or the root refusal taken out.
+		- 2026-11-12: df761 `TestNewPicksTheKind` expects `openai` and `anthropic` to say `agentModel` isn't set, was "isn't built yet". It also checks the default URLs and where the key comes from.
+		- Verified: df76c against a local Ollama with `qwen2.5:7b-instruct`: the conversation, its answer, and the checks ran end to end in 66 s. That model said Chunky has no build for 1.21.4, which it does, so a small local model may not be enough to rely on.
+	- Decisions:
+		- One `API` type covers both kinds. The base URL includes `/v1`, so `agentURL` for a local Ollama is `http://127.0.0.1:11434/v1`, the same as its OpenAI docs. The defaults are `https://api.openai.com/v1` and `https://api.anthropic.com/v1`.
+		- The key is `TT_MINECRAFTD_AGENT_KEY`, else `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. With none, no key header is sent, for a local server. A 401 or 403 names the variable, and never shows the key.
+		- `fetch` is a function tool for OpenAI and a client tool for Anthropic. A call to any other tool is answered as refused.
+		- `fetch` checks the address each name resolves to just before connecting, so a name can't point it at this host. It refuses loopback, private, link-local, multicast, and the 100.64.0.0/10 shared range, IPv4 inside IPv6 included. Redirects must stay on `https`, 5 at most.
+		- Pages are cut at 64 KiB, since each one stays in the agent's context for the rest of the run. 40 fetches a run, refused ones included, and 30 calls to the API.
+		- HTML is turned into rough text: scripts, styles, and comments go, and links keep their address. Only text, JSON, and XML are read.
+		- The API calls themselves don't go through the public address check, since a local server is on loopback.
+		- Swept: both kinds go through `runTool` and `post`, and `API.Ask` and `Command.Ask` both refuse root.
+	- Branch: r1112b
+	- Test case: df766, df767, df769, df76a, df76b, df761, df76c (skipped without `TT_MINECRAFTD_LIVE_AGENT`)
+	- Closed: 20261112-101356
 
 - update --plugins asks the update agent
 	- ID: 2026111210034298
