@@ -22,124 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- status says no paper.jar when it can't read the folder
-	- ID: 2026111118183922
-	- Type: Bug
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261111-181839
-	- Opened by:
-	- Related IDs: 2026111112163393
-	- Incorrect behavior [Bug]: `status` shows "Version: Paper 26.3 (no paper.jar)" when the operator can't read the server folder, such as when not in the server's group yet, though `paper.jar` is there.
-	- Expected behavior [Bug]: It says the jar can't be read, and why, as the whitelist line does. design.md: a part that can't be read says why.
-	- Reproduced [Bug]: 20261111, beside a server under Podman, with the tree owned by an account and group the operator wasn't in.
-	- Possible cause [Bug]: `Probe.version` takes any error from resolving `paper.jar` as a missing jar.
-
-- plugins.shcl keys come back lower case after an approve
-	- ID: 2026111118053419
-	- Type: Bug
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261111-180534
-	- Opened by:
-	- Incorrect behavior: plugins.Approve saves with shcl's SaveFile, which writes every key in lower case.
-	- Expected behavior: an approve changes only the jar entries it touches, through the keep-lines save update --image uses.
-	- Estimated effort: Low
-	- Progress log:
-		- 2026-11-12: Found while building update --image. Also shcl friction: SaveFile always writes the canonical form.
-
-- repair sends a missing server folder to setup, which only runs repair again
-	- ID: 2026111117095694
-	- Type: Bug
-	- Status: Done
-	- Priority: Low
-	- Opened: 20261111-170956
-	- Opened by:
-	- Related IDs: 2026111117052190
-	- Incorrect behavior [Bug]: With the config there and `serverDir` missing, `repair` says `sudo tt-minecraftd setup` makes one or adopts one with `--adopt`. On an existing install setup only runs `repair`, and refuses `--adopt`.
-	- Expected behavior [Bug]: The message names what works, such as moving the config aside to run setup as a new install, or setting `serverDir`.
-	- Reproduced [Bug]: From the code, not on a host.
-	- Actual cause [Bug]:
-		- The server folder check gave the new-install advice whether or not a config was there.
-	- Actual effort: Low
-	- Progress log:
-		- Verified: df5ze fails on the old message and passes with the fix. The gate passes on both temp folders.
-	- Decisions:
-		- The message changes, and setup stays as it is. With a config there, it says to set `serverDir` in it, or to move it aside and run setup again. With no config, the old message stays, since setup is a new install then.
-		- Setup making an empty `serverDir` on an existing install wouldn't help, since the server needs `paper.jar` and the rest, which only the new-install path sets up.
-		- Swept: `repair`'s other messages that name setup. "no config ... setup writes one" is true, since setup is a new install then. The Geyser one is true since 2026111117052190, and doesn't show with `serverDir` missing. The defaults warning in `main.go` is for a missing config too.
-	- Actual fix [Bug]: with a config there, `repair`'s missing-server-folder message says to set `serverDir`, or to move the config aside and run setup again.
-	- Branch: r1112
-	- Test case: df5ze
-	- Closed: 20261111-171207
-
-- Check Geyser's first config against the next start
-	- ID: 2026111117052206
-	- Type: Task
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261111-170522
-	- Opened by:
-	- Related IDs: 2026111116415196 2026111112554261
-	- Requirements: After a new setup with `bedrock` on, start Paper on a throwaway tree, stop it, and start it again. Check that the config.yml Geyser wrote at its first start passes `start`'s check, with default and non-default `bindIP` and `bedrockPort`. If it doesn't, setup or `start` should set Geyser's keys before the first start.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-11: With no `config.yml`, Geyser 2.12.1 build 1300's first start on Paper 26.3-249 wrote `java.auth-type: online` and ran with it, so the next `start` refused. Its address and port were Geyser's own, `0.0.0.0` and 19132, not `bindIP` and `bedrockPort`.
-		- With `bedrock` on, a missing Geyser `config.yml` is now wrong, and the safe settings fix writes one with only `bedrock.address`, `bedrock.port`, and `java.auth-type`, making `plugins/` and `plugins/Geyser-Spigot/` when missing. Setup's safe settings step writes it before the first start.
-		- Verified: on a throwaway tree, a first start with that file, both with defaults and with `bindIP` 127.0.0.1 and `bedrockPort` 19555, listened where the config says, kept the 3 keys, and filled in Geyser's other settings. `start`'s check passed after the first start and after a second one.
-		- Verified: df67a and the new df5yx lines fail with the change taken out, and pass with it in.
-		- 20261111: df5yx `TestGeyserSkipped` expects 3 missing keys with no `config.yml`, was none. df5yk and df5ym run with `bedrock` off, since they check `server.properties` only.
-	- Decisions:
-		- The fix goes in the safe settings, not in `start`, since `start` only checks and `repair` fixes, as for a missing `server.properties`. Setup and `repair` both get it.
-		- A missing file is wrong whether or not the Geyser jar is there, since setup writes the safe settings before it downloads Geyser. Setup and `repair` report a missing jar on their own.
-		- New folders are mode 0770 and owned like their parent, and the file 0660, per Tree ownership. An existing folder's mode is left alone.
-		- The file holds only the 3 keys, with no `config-version`. Geyser took it as current and added the rest of its layout, including the 3 NetherNet keys with the wanted values.
-		- Swept: `scanGeyser` is the only reader of Geyser's file, shared by `Check` and `Fix`. The Paper YAML files stay fine when missing, since each of their keys defaults to off. Floodgate's config pins no keys.
-	- Branch: r1112
-	- Test case: df67a, df5yx
-	- Closed: 20261111-174957
-
-- repair sends a missing Geyser to setup, which only runs repair again
-	- ID: 2026111117052190
-	- Type: Bug
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261111-170521
-	- Opened by:
-	- Related IDs: 2026111116415196 2026111111065803
-	- Incorrect behavior [Bug]: With `bedrock` turned on after install, `repair` says Geyser or Floodgate is missing and that `sudo tt-minecraftd setup` installs it. On an existing install setup only runs `repair`, so the same message comes back.
-	- Expected behavior [Bug]: The message names a command that installs them, or setup's existing-install path installs the missing ones.
-	- Reproduced [Bug]: From the code, not on a host.
-	- Actual cause [Bug]:
-		- Setup's existing-install path went straight to `repair`, and only the new-install path fetched Geyser and Floodgate.
-	- Actual effort: Low
-	- Progress log:
-		- 2026-11-12: On an existing install with `bedrock` on, setup looks up a missing Geyser or Floodgate, shows it in the plan, downloads and approves it, and then runs `repair`. design.md's setup says so.
-		- Verified: df66b fails on the old setup code and passes with the fix. The gate passes on both temp folders.
-	- Decisions:
-		- Setup gets the jars, rather than repair naming another command, since `update --plugins` only updates jars it already knows, and design.md's setup step 7 already covers the download. `repair`'s message stays as it was, and is now true.
-		- The lookup comes before the question, and a failed one stops setup before `repair`, as on a new install.
-		- A missing `serverDir` skips the lookup, so `repair` reports the tree.
-		- Swept: `bedrockBuilds` and `getBedrock` are shared by both paths, and the plan line moved to `planBedrock`. Of `repair`'s messages that send the operator to setup, the missing `serverDir` one has the same problem, filed as 2026111117095694.
-	- Actual fix [Bug]: setup's existing-install path installs a missing Geyser or Floodgate before `repair`.
-	- Branch: r1112
-	- Test case: df66b
-	- Closed: 20261111-170934
-
-- staticcheck: unused values in repair tests
-	- ID: 2026111116281098
-	- Type: Bug
-	- Status: Done
-	- Priority: Low
-	- Opened: 20261111-162810
-	- Opened by: t00mietum
-	- Incorrect behavior: staticcheck reports SA4006 at `repair_test.go` lines 158 and 313: a value of `f` that's never used.
-	- Expected behavior: staticcheck runs clean.
-	- Estimated effort: Low
-	- Closed: 20261111-162945
-	- Test case: None, a lint fix in test code. staticcheck ./... is the check.
-	- 2026-11-12: Unused values dropped in d145437. staticcheck runs clean on the module.
-
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
@@ -214,40 +96,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: its children's: 2026111112162268: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn; 2026111112163174: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz; 2026111112163284: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6; 2026111112163393: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
 	- 20261111: children 2026111112163284 wait on UAT, and the rest are closed
 
-- Core commands: Docker mode start and stop
-	- ID: 2026111112163174
-	- Type: Feature
-	- Status: Done
-	- Needs hand testing: start and stop a throwaway Paper server in Docker mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, and the jars can't be written.
-	- Priority: High
-	- Opened: 20261111-121631
-	- Opened by: t00mietum
-	- Parent ID: 2026111111065711
-	- Prereq IDs: 2026111112162268
-	- Requirements:
-		- `start` and `stop` in Docker mode, per `design.md`, through the runner, with `--debug`, `--foreground`, and `--warn N`.
-		- Refuse to start when a Paper server is already running, under any account.
-		- `stop` sends the `stop` console command first, and hands the trees back even after a crash.
-		- Test with the fake runner and `--dry-run` only.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: the same `docker run` flags on a small image give a writable `/tmp`, read-only jars and image, and umask 0007. The console's `stop` reached a real container's terminal.
-		- 20261111: Verified on a throwaway Paper 26.3-249 server with Geyser and Floodgate, `eula.txt` written beforehand: `start` loaded it in 18 s. In the container, `paper.jar` and the plugin jars refused writes, a plugin jar couldn't be moved, the tree took writes, and the server ran with umask 0007. `stop --warn 10` said 10, 5, 4, 3, 2, and 1 seconds in the chat, Paper saved the worlds and exited 0, and the trees went back. A second `start` removed the stopped container first.
-		- Stand-in: sudo passed the command straight through, as the operator, who is in the `docker` group, so Docker itself ran as root.
-	- Acceptance signoff: Self-closed: Docker mode start and stop passed on b23 at r1112 b47154b.
-	- Decisions:
-		- `stop` writes to the container's input through the Docker API, as `cmd` will, since `docker attach` refuses input that isn't a terminal. A line ends with a carriage return, which a cooked terminal takes, and a raw one such as Paper's should too.
-		- The countdown says the time left at the start, then at 60, 30, 10, and 5 to 1 seconds.
-		- "Already running" comes from `ps`: any `java -jar paper*.jar`, under any account. That covers the old scripts and this tool's own container.
-		- The server runs under `sh -c 'umask 0007 && exec "$@"'` in the image, since Docker has no umask option. The pid limit is 2048, for Paper's thread pools.
-		- `--debug` runs attached and hands the trees back when the server exits. `--foreground` runs detached, so `console` still works, then waits with `docker wait`.
-		- A start that times out leaves the server running, with an error that says so.
-		- The safe settings, plugin, and firewall steps of `start` come with their own items. ZFS snapshots had none, so 2026111112264283 is filed.
-		- Swept: every container command uses `launch.Container`; `start` and `stop` both hand back through `tree.ToOperator`.
-	- Branch: r1111
-	- Test case: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz
-	- Closed: 20261111-181653
-
 - Core commands: native mode start and stop
 	- ID: 2026111112163284
 	- Type: Feature
@@ -279,91 +127,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every sudo goes through `host.Cmd`; both modes refuse others, count down, and hand back through `Kit`.
 	- Branch: r1111
 	- Test case: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6
-
-- Core commands: status and watch
-	- ID: 2026111112163393
-	- Type: Feature
-	- Status: Done
-		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
-	- Needs hand testing: run `status` and `watch` beside the throwaway Paper server from the Docker and native hand tests. Version, players, memory, ports, and the log tail show, and Ctrl-C ends `watch`.
-	- Priority: High
-	- Opened: 20261111-121633
-	- Opened by: t00mietum
-	- Parent ID: 2026111111065711
-	- Prereq IDs: 2026111112163174
-	- Requirements:
-		- `status` and `watch`, per `design.md`. Parts that need a later item, such as the firewall counters, show as not set up yet.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: against a throwaway container named for the tool, `status` showed it running, its account, its time up, and its memory from the cgroup, then exited once stopped.
-		- 20261111: Verified beside a throwaway Paper 26.3-249 server in Docker mode: `status` showed docker mode, the account, the time up, Paper 26.3 with its jar, 0 of 20 players from the ping, the memory against its cap, the game port over TCP and the Bedrock port over TCP and UDP, the whitelist, ops, approved jars, trees, and the log tail. `watch` redrew it 7 times in 12 s, and Ctrl-C ended it with exit 0 and the server still up.
-	- Acceptance signoff: Self-closed: Docker mode status and watch passed on b23 at r1112 b47154b. Native mode goes with 2026111112163284.
-	- Decisions:
-		- Players and the version come from a server list ping on `bindIP`, or 127.0.0.1 when it's all addresses. The Paper build comes from the jar `paper.jar` links to, so it shows when stopped too.
-		- Memory is the cgroup's `memory.current`: the container's, found through its pid, or the unit's `MemoryCurrent`. Both work without sudo.
-		- Ports come from `ss`, which can't name another account's process without root, so it shows the address that listens and the TCP connection count.
-		- The log is `logs/latest.log` in both modes, since `docker logs` of a terminal holds escape codes. Control characters are dropped from it and from op names.
-		- The server owns the tree, so files that aren't plain files are not read, and a jar that's a pipe or a device counts as changed. design.md updated.
-		- The plugin check is `plugins.CheckJars`, for `start`'s check to reuse. `watch` hashes a jar again only when its size or time changes.
-		- The approved list is read from beside the config, so a second `--config` gets its own. design.md updated.
-		- A part that can't be read says why, and the rest still shows. Exit 0, since `status` ran. A failed command's stderr goes into its line, not over the screen, through `host.Exec.QuietErr`.
-		- No color yet. design.md allows it on a terminal only, and nothing needs it.
-		- 20261111: `TestMissingConfig` (df5xn) no longer expects `status` to say it isn't built. It checks the config path `status` reads beside instead.
-		- Swept: every file read from the tree goes through `openRegular` or `Sums.Sum`; both modes judge "running" through the same calls as `start`, `launch.ContainerState` and `launch.UnitUp`.
-	- Branch: r1111
-	- Test case: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
-	- Closed: 20261111-181653
-
-- console and cmd
-	- ID: 2026111111065750
-	- Type: Feature
-	- Status: Done
-		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
-	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
-	- Priority: High
-	- Opened: 20261111-110657
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
-	- Requirements:
-		- `console` attaches to the server console, with detach keys that can't stop the server by accident.
-		- `cmd` sends one console command and prints what the server says back.
-		- Make both work in Docker and native modes, without RCON.
-	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: against a stand-in container named like the server's, `console` detaches on Ctrl-C with the container still running, and `cmd` prints the line the stand-in logged. Without the detach keys, Ctrl-C ends the container. In tmux, Ctrl-C with the binding detaches and the session lives; without it the session ends.
-		- 20261111: Verified on a throwaway Paper 26.3-249 server, in Docker mode and then rootless Podman: `console` showed Paper's console, a typed `list` got its reply, and Ctrl-C detached with exit 0 and the server still up. `cmd list` printed "There are 0 of a max of 20 players online".
-	- Acceptance signoff: Self-closed: console and cmd passed on b23 at r1112 b47154b, in Docker and Podman modes. Native mode goes with 2026111112163284.
-	- Decisions:
-		- Ctrl-C is the detach key in both modes, so it can't reach the server. Docker's `--detach-keys=ctrl-c`, and in tmux `bind-key -n C-c detach-client` at attach. design.md updated.
-		- `docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach.
-		- `cmd` reads `logs/latest.log` in both modes, from where it ended before the send, rather than `docker logs`, which carries the terminal's echo and escape codes. It waits up to 3 s for a first line, then until 0.5 s go by with nothing, 10 s at most. A new day's log is read from its start.
-		- `cmd stop` and `cmd restart` are refused, pointing at `stop`, which hands the trees back too.
-		- A server that stops while `console` is attached gets its trees handed back, as `start --debug` in native mode did. Both now share one step. It no longer hands back when the unit's state can't be read, since the server may still be up.
-		- `cmd` takes no `--dry-run`, since design.md lists none.
-		- `OpenRegular` and `Clean` moved from `status` to `server`, for `cmd` to share.
-		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
-	- Branch: r1111
-	- Test case: df5z6, df5z7, df5z8
-	- Closed: 20261111-181653
-
-- Move shared code to tt-safeserver
-	- ID: 2026111111303242
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 20261111-113032
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
-	- Requirements:
-		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
-		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
-		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
-		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
-	- Decisions:
-		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
-		- GPL v2 or later.
-	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
 
 - Podman, Docker, and native modes
 	- ID: 2026111115090766
@@ -425,37 +188,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every runtime call in `launch`, `repair`, and `status` names the runtime from the config or the lookup; no `"docker"` literal is left in non-test code. design.md has no Docker-only wording left, apart from the console and `cmd` lines, which the console child changes.
 	- Branch: r1112
 	- Test case: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh
-
-- Run modes: console input through attach
-	- ID: 2026111116104058
-	- Type: Feature
-	- Status: Done
-	- Needs hand testing: on a throwaway Paper server under Podman, then Docker, with the operator out of the `docker` group: `cmd list` prints the player count, `stop --warn 10` counts down in the chat and stops it, and `console` detaches on Ctrl-C with the server still up.
-	- Priority: High
-	- Opened: 20261111-161040
-	- Opened by: t00mietum
-	- Parent ID: 2026111115090766
-	- Prereq IDs: 2026111116104049
-	- Requirements:
-		- `stop` and `cmd` send console lines with `sudo <runtime> attach` on a pseudo-terminal, in place of the Docker API write. See the parent's notes.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: against throwaway busybox containers, rootless Podman 5.4.2 and Docker each got 2 lines in a row, detached, and stayed running.
-		- Verified: Ctrl-C written right after the line went to the stand-in in the same read, which is how attach passes it on to the server. The console now waits until the line has been read.
-		- 20261111: Verified on a throwaway Paper 26.3-249 server, under rootless Podman and under Docker: `cmd list` printed the player count, `stop --warn 10` counted down in the chat and stopped it, and `console` took a typed `list` and detached on Ctrl-C with the server still up.
-		- Stand-in: sudo passed `attach` straight through, as the operator. The parent's 20261111 hand check covers `sudo <runtime> attach` rootful under both runtimes.
-	- Acceptance signoff: Self-closed: console lines through attach passed against Paper's own console on b23 at r1112 b47154b; rootful attach through sudo was checked by hand under the parent.
-	- Decisions:
-		- `launch.AttachConsole` replaces `DockerConsole`. It opens its own pty with `O_NOCTTY`, sets it raw before attach starts, and runs `sudo -n`, so sudo reuses the operator's terminal. As root it runs the runtime directly.
-		- Ctrl-C goes once the pty's input queue is empty, after the line was seen in it or 100 ms went by, since the pty hands bytes on a moment after they're written.
-		- Docker's exit 1 counts as a detach only with "read escape sequence" on stderr. Podman exits 0. An attach that ends before reading the line is an error.
-		- One line may take 15 s at most, attach and detach included. Attach's copy of the console is read and dropped, so it can't block on a full pty.
-		- `Boxed` sets its console once it knows the runtime, so `stop` and `cmd` follow a container found under the other one.
-		- `TestDockerConsole` (df5xw) is now `TestAttachConsole` under the same ID, since the API write is gone. It still checks that the line arrives with a carriage return, that a control character is refused, and the dry run.
-		- Swept: `stop`, `cmd`, and the countdown all send through `Kit.Console`; nothing reads `DOCKER_HOST` or the Docker socket now.
-	- Branch: r1112
-	- Test case: df5xw
-	- Closed: 20261111-181653
 
 - Run modes: status without sudo
 	- ID: 2026111116104067
@@ -542,68 +274,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1112
 	- Test case: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n
 
-- setup: download Paper
-	- ID: 2026111116415186
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-164151
-	- Opened by:
-	- Parent ID: 2026111111065776
-	- Related IDs: 2026111111065803
-	- Requirements:
-		- On a new tree, get the newest stable Paper build from the PaperMC download API, check its SHA-256, and point `paper.jar` at it, the same way `update --paper` does.
-		- Share the code with `update --paper`.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: against the live API, the newest release was 26.3, build 249, and the 55 MB jar it downloaded matched the API's SHA-256, with `paper.jar` linked to it.
-		- Verified: df65q and df65r fail with the stable filter or the hash check taken out, and pass with them in.
-	- Decisions:
-		- The API is PaperMC's Fill v3 at `fill.papermc.io`. The old v2 API is deprecated.
-		- A new tree gets the newest release that has a stable build. Release candidates and versions with only beta builds are skipped.
-		- The lookup comes before the plan, so a failed one stops setup before anything changes. The plan names the version and build.
-		- The jar's size and SHA-256 must match the API's. It's written to a temp name in the tree and renamed, and `paper.jar` is replaced by a new link in one rename, all relative to the folder's handle without following links, since the server account may own the tree.
-		- The build goes on the approved list, since `start` pins the jar `paper.jar` links to. A tree with a `paper.jar` keeps it, and setup approves it with the other jars. design.md updated.
-		- The code is `source/internal/paper`, for `update --paper` to reuse. Keeping the last 2 builds is left to update.
-		- Swept: nothing else downloads yet, and `plugins.Jars` already follows the `paper.jar` link.
-	- Branch: r1112
-	- Test case: df65p, df65q, df65r, df65d, df65f, df65j
-	- Closed: 20261111-165545
-
-- setup: Geyser and Floodgate
-	- ID: 2026111116415196
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-164151
-	- Opened by:
-	- Parent ID: 2026111111065776
-	- Prereq IDs: 2026111116415186
-	- Related IDs: 2026111111065803, 2026111117052190, 2026111117052206
-	- Requirements:
-		- With `bedrock` on, download Geyser and Floodgate, check their hashes, approve them, and set them up per design.md's Bedrock players.
-	- Shares the download and hash check with 2026111116415186, and `update --plugins` reuses it.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-11: With `bedrock` on, setup gets the newest Geyser and Floodgate builds from GeyserMC's download API before the plan, downloads them into `plugins/`, checks each SHA-256, and approves them with their source.
-		- Verified: the live API's latest Geyser 2.12.1 build 1300 and Floodgate 2.2.5 build 141 Spigot jars, fetched from the version and build address, match the API's SHA-256.
-		- Verified: df65x, df65y, df65z, df65d, df65f, and df65r each fail with their check taken out, and pass with it in.
-		- 20261111: df65d `TestNewInstall` expects 3 approved jars, was 1. df65f `TestAdopt` expects 4, was 2, and finds `paper.jar` anywhere in the list. Both now get Geyser and Floodgate too.
-		- 2026-11-12: Geyser's config is now written before its first start, through 2026111117052206. Only Floodgate's is left to its first start.
-	- Decisions:
-		- The download, size cap, and hash check moved from `source/internal/paper` to `source/internal/download`, which `paper` and the new `source/internal/geyser` share. Paper's behavior is the same.
-		- The API is `download.geysermc.org/v2`. Its `latest` answer is read, and the jar is fetched from the address naming that version and build, so the file can't be a newer build than the hash.
-		- GeyserMC gives no size, so the 512 MiB cap is the only size check. The jar's name has to start with its project's name, since `repair` tells the plugins apart by name.
-		- A tree that has a Geyser or Floodgate jar keeps it, and setup approves it with the other jars, as with `paper.jar`.
-		- The approved entry gets the `latest` Spigot download address as its source, as design.md's example has it, for `update --plugins`. `plugins.Info` gained a `Source`.
-		- A missing `plugins/` is made mode 0770, owned like `serverDir`.
-		- Geyser's and Floodgate's configs are left to their first start, per 2026111112554261. Whether Geyser's first config passes the next start is 2026111117052206.
-		- `repair`'s Geyser and Floodgate check now uses `geyser.Installed`, so setup and repair agree on what counts as installed.
-		- Swept: `paper.Install` and `geyser.Install` both go through `download.Client.Into`; `repair` and setup share `geyser.Installed`; the only other `plugins.Approve` callers pass no source.
-	- Branch: r1112
-	- Test case: df65x, df65y, df65z, df65d, df65f, df65r
-	- Closed: 20261111-170548
-
 - Firewall
 	- ID: 2026111111065789
 	- Type: Feature
@@ -624,37 +294,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first and third are done, and the second waits on signoff.
 	- Test case: its children's: 2026111117134046: df66c, df66d, df66e, df66f; 2026111117135246: df66g, df66h, df66j; 2026111117135258: df67g, df67h, df5y7
 	- 20261111: children 2026111117135246 wait on UAT, and the rest are closed
-
-- Firewall: rules file, its unit, and the start check
-	- ID: 2026111117134046
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-171340
-	- Opened by:
-	- Parent ID: 2026111111065789
-	- Requirements:
-		- Render `/etc/tt-minecraftd/firewall.nft` from the config, and `tt-minecraftd-firewall.service` that loads it, per design.md's Firewall.
-		- Tests check the rendered rules for each mix of `allowFrom`, `egress`, and `bedrock`.
-		- With `firewall` on, `start` checks through sudo that the table is loaded, and refuses without it.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-11: `source/internal/firewall` renders `firewall.nft` and the unit. Both modes' `start` refuse without the table, after the plugin check.
-		- Verified: each rendered mix passes `nft -c`. A file loaded for real in a network namespace dropped and counted the account's connection to loopback, and let its DNS to 127.0.0.53 through. df66c fails on a v4 match against a v6 set, and df66f fails with the start check taken out.
-	- Decisions:
-		- The account is matched by name, so the file reads plainly. nft looks it up at load, after `setup` has made it.
-		- The output hook only jumps to the account's rules on a uid match. A packet with no socket, such as IPv6 neighbor discovery, has no uid, so a `!=` match would have let it reach the LAN drop.
-		- `lan` adds CGNAT's 100.64.0.0/10 to the private and link-local ranges, so a tailnet counts as LAN both ways. design.md updated.
-		- The rate limit is per address, with a burst of `joinRateLimit`. IPv6 is per address too, not per /64.
-		- DNS to the resolvers in `/etc/resolv.conf` is allowed first, so a loopback resolver still works. They're read at render time, so repair's check sees a change. design.md updated.
-		- Closed ports are RCON's 25575/tcp and query on `gamePort`/udp. The management server has no fixed default port. design.md updated.
-		- Only outbound drops are logged, at 6 a minute. Inbound ones are counted only, since scanners would fill the log. design.md updated.
-		- The unit is `WantedBy` sysinit and nftables, `PartOf` and `ReloadPropagatedFrom` nftables, so it loads again after nftables starts, restarts, or reloads.
-		- `start` says `repair` loads the table, which comes with 2026111117135246.
-		- Swept: both modes' `Start` call `checkFirewall`; every start test's fake host answers the table list.
-	- Branch: r1112
-	- Test case: df66c, df66d, df66e, df66f
-	- Closed: 20261111-172010
 
 - Firewall: setup and repair manage it
 	- ID: 2026111117135246
@@ -686,31 +325,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1112
 	- Test case: df66g, df66h, df66j
 
-- Firewall: drop counters in status
-	- ID: 2026111117135258
-	- Type: Feature
-	- Status: Done
+- Move shared code to tt-safeserver
+	- ID: 2026111111303242
+	- Type: Task
+	- Status: Stalled
 	- Priority: Avg
-	- Opened: 20261111-171352
-	- Opened by:
-	- Parent ID: 2026111111065789
-	- Prereq IDs: 2026111117134046
+	- Opened: 20261111-113032
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711
 	- Requirements:
-		- `status` shows the firewall's drop counters, inbound and outbound, in place of "not set up yet".
-	- The counters are the named ones in `firewall.nft`: `in_refused`, `in_flood`, `in_closed`, `out_local`, `out_lan`, and `out_web`. Reading them needs root, and `status` doesn't use sudo, so this needs a pick, such as `sudo -n` when it's cached, or "run with sudo to see them".
-	- 2026-11-12: Picked: status shows the counters when run as root, and otherwise one line saying sudo shows them. No sudo -n, so the output doesn't change with sudo's cache.
-	- Actual effort: Low
-	- Progress log:
-		- 2026-11-11: `firewall.Counters` reads the table's counters from `nft -j list counters inet`. As root, `status` shows them on 2 lines, dropped in and dropped out. Otherwise it says sudo shows them. design.md updated.
-		- Verified: df67g and df67h pass, and both fail with the table match taken out. df67h parses nft's own answer, with the rules loaded in a network namespace and with none.
+		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
+		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
+		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
+		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
 	- Decisions:
-		- All inet counters are listed, not the table's, since nft answers that the same way when the table is gone. No counters of ours means the table isn't loaded, and `status` says `repair` loads it.
-		- Packet counts only. `in_refused` is left out with `allowFrom` `any`, and `out_web` with `egress` `open`, since neither can count anything then.
-		- 20261111: df5y7 `TestStatusDocker` expects `Firewall:   on; run with sudo to see the drop counters`. Old: `drop counters not set up yet`.
-		- Swept: `status` was the only place that said "not set up yet"; `firewall.Loaded` is still the only other reader of the table.
-	- Branch: r1112
-	- Test case: df67g, df67h, df5y7
-	- Closed: 20261111-175414
+		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
+		- GPL v2 or later.
+	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
 
 - update
 	- ID: 2026111111065803
@@ -729,35 +360,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
 	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), and 2026111117302985 (`--image`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302995 (`--self`), and 2026111117404480 (Modrinth and Hangar sources) are queued.
 
-- update: the command, and --paper
-	- ID: 2026111117302950
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-173029
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Requirements:
-		- `update` per design.md: needs root through sudo, asks first unless `--yes`, updates every part when none is named, and leaves a running server alone.
-		- `--paper` gets the newest stable build of the current Minecraft version, checks it, approves it, points `paper.jar` at it, and keeps the last 2 builds.
-		- setup on an existing install runs `update` after `repair`.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: against the live API, `update --dry-run` on a tree at Paper 26.3 build 244 planned the move to build 249.
-		- Verified: df66x, df66y, df66z, df670, and df671 each fail with their check taken out, such as the kept build, the approval, or the update after repair, and pass with it in.
-	- Decisions:
-		- The code is `source/internal/update`, and reuses `paper.API` and the approval setup does.
-		- The version and build come from the name `paper.jar` links to. A plain `paper.jar` is refused with how to rename it, since swapping a link over it would delete the only copy. design.md updated.
-		- No `paper.jar`, or a link to a build that's gone, gets one as setup does, which makes repair's missing paper.jar message true.
-		- The 2 builds kept are the new one and the one `paper.jar` linked to. Only plain files in `serverDir` named `paper-VERSION-BUILD.jar` are removed. Their approved entries stay, since they're harmless.
-		- Everything is looked up before the plan, so a failed lookup changes nothing.
-		- With only `--paper` built, `update` with no part named is the same as `--paper`. The other flags come with their children.
-		- On an existing install setup asks once, then runs `repair` and `update` without asking again. Update runs even when a repair check failed, since a missing `paper.jar` is one update fixes, and both errors are returned.
-		- Swept: setup's new-install path and update share `paper.API` and `plugins.Approve`; `asRoot`'s message now fits both callers.
-	- Branch: r1112
-	- Test case: df66x, df66y, df66z, df670, df671
-	- Closed: 20261111-173642
-
 - update --mc-version
 	- ID: 2026111117302963
 	- Type: Feature
@@ -770,61 +372,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- `--mc-version V` moves Paper to another Minecraft version, per design.md: a yes even with `--yes`, and a ZFS snapshot first.
 
-- update --plugins
-	- ID: 2026111117302973
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261111-173029
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Requirements:
-		- `--plugins` updates each approved jar with a known source, such as Geyser and Floodgate, shows the old and new versions, checks the source's hash, and approves the new jar.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: against the live GeyserMC API, `update --dry-run` on an approved Geyser jar with an old hash planned the move to Geyser 2.12.1 build 1300.
-		- Verified: df672 fails with the file name check, the up-to-date check, or the missing jar check taken out, and passes with them in.
-		- 2026-11-12: df672 failed about 1 run in 10, since its rig approved the jars in map order, so Floodgate was sometimes looked up before Geyser and the failed lookup named Floodgate. The rig now approves them in a fixed order. Update itself follows the approved list's order.
-		- Verified: df672 failed 1 of 10 runs before the fix, and passed 25 runs in a row after it. The gate passes on both temp folders.
-	- Decisions:
-		- A jar is up to date when its approved hash is the source's newest, since GeyserMC's jar names have no version in them. The old version shown is what the jar's own `plugin.yml` says.
-		- A newest build with another file name is skipped with a note, since both jars would load. So is an approved jar that's gone from the tree, so update never adds one back.
-		- Only GeyserMC's `latest` sources are known. Modrinth and Hangar have no jars with a source yet, so they're 2026111117404480. Other sources are listed as skipped.
-		- Paper and the plugins are looked up first and share one plan and one question.
-		- design.md updated.
-		- Swept: update and setup share `geyser.API`, `plugins.Approve` keeps the source, and `TestUpdate` (df671) checks the new flag.
-	- Branch: r1112
-	- Test case: df672, df671
-	- Closed: 20261111-174008
-
-- update --image
-	- ID: 2026111117302985
-	- Type: Feature
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261111-173029
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Requirements:
-		- `--image` pulls the newest base image, checks that its `java -version` is new enough for this Paper, and pins its digest in the config.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: df67q fails with the Java check or the per-arch digest skip taken out, and passes with them in.
-		- Verified: with the live PaperMC API and eclipse-temurin:25-jre, under both Podman and Docker without sudo, the pull, the Java check, and the pin all worked, and both runtimes pinned the same digest.
-	- Decisions:
-		- The Java needed comes from the PaperMC API's version info (`java.version.minimum`), for the version the server runs after this update. `paper.API` gained `Java`.
-		- It follows the configured tag and never moves to another. An image with a digest and no tag is skipped. One with neither follows `latest`.
-		- The pull waits for the go-ahead, since it's what finds the digest, so a dry run can't show the new one. A registry lookup was the other way, but it would bypass the runtime's own registry settings.
-		- The pin is the tag's own (multi-arch) digest. Podman also lists the per-arch one, which it gives as `Digest`, and that's left out. Docker gives a short name, so names are compared without `docker.io/library/`.
-		- `java -version` runs as nobody, with no network, read-only, and no caps.
-		- Only the `image` line changes, through shcl's keep-lines save, since a plain save rewrites every key in lower case. shcl quotes the new value.
-		- The old image isn't removed, since a running server may still use it. Native mode skips the part, and says so only when `--image` is named.
-		- design.md's update section has the details.
-		- Swept: `PaperSource` has the one real implementation; the test fakes in update and main got `Java`. setup's own `PaperSource` doesn't need it.
-	- Branch: r1112
-	- Test case: df67p, df67q, df67r, df67s, df671
-	- Closed: 20261111-180421
-
 - update --self
 	- ID: 2026111117302995
 	- Type: Feature
@@ -835,18 +382,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Parent ID: 2026111111065803
 	- Requirements:
 		- `--self` gets the latest release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename. On NixOS it only prints what to change.
-
-- update --plugins: Modrinth and Hangar sources
-	- ID: 2026111117404480
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261111-174044
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Prereq IDs: 2026111117302973
-	- Requirements:
-		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
@@ -951,6 +486,44 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Approve the plugins that are there now.
 		- Retire the old start, stop, and manage scripts after it runs clean.
 
+- status says no paper.jar when it can't read the folder
+	- ID: 2026111118183922
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-181839
+	- Opened by:
+	- Related IDs: 2026111112163393
+	- Incorrect behavior [Bug]: `status` shows "Version: Paper 26.3 (no paper.jar)" when the operator can't read the server folder, such as when not in the server's group yet, though `paper.jar` is there.
+	- Expected behavior [Bug]: It says the jar can't be read, and why, as the whitelist line does. design.md: a part that can't be read says why.
+	- Reproduced [Bug]: 20261111, beside a server under Podman, with the tree owned by an account and group the operator wasn't in.
+	- Possible cause [Bug]: `Probe.version` takes any error from resolving `paper.jar` as a missing jar.
+
+- plugins.shcl keys come back lower case after an approve
+	- ID: 2026111118053419
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-180534
+	- Opened by:
+	- Incorrect behavior: plugins.Approve saves with shcl's SaveFile, which writes every key in lower case.
+	- Expected behavior: an approve changes only the jar entries it touches, through the keep-lines save update --image uses.
+	- Estimated effort: Low
+	- Progress log:
+		- 2026-11-12: Found while building update --image. Also shcl friction: SaveFile always writes the canonical form.
+
+- update --plugins: Modrinth and Hangar sources
+	- ID: 2026111117404480
+	- Type: Feature
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-174044
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Prereq IDs: 2026111117302973
+	- Requirements:
+		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
+
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
@@ -965,6 +538,433 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux.
+
+- repair sends a missing server folder to setup, which only runs repair again
+	- ID: 2026111117095694
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261111-170956
+	- Opened by:
+	- Related IDs: 2026111117052190
+	- Incorrect behavior [Bug]: With the config there and `serverDir` missing, `repair` says `sudo tt-minecraftd setup` makes one or adopts one with `--adopt`. On an existing install setup only runs `repair`, and refuses `--adopt`.
+	- Expected behavior [Bug]: The message names what works, such as moving the config aside to run setup as a new install, or setting `serverDir`.
+	- Reproduced [Bug]: From the code, not on a host.
+	- Actual cause [Bug]:
+		- The server folder check gave the new-install advice whether or not a config was there.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: df5ze fails on the old message and passes with the fix. The gate passes on both temp folders.
+	- Decisions:
+		- The message changes, and setup stays as it is. With a config there, it says to set `serverDir` in it, or to move it aside and run setup again. With no config, the old message stays, since setup is a new install then.
+		- Setup making an empty `serverDir` on an existing install wouldn't help, since the server needs `paper.jar` and the rest, which only the new-install path sets up.
+		- Swept: `repair`'s other messages that name setup. "no config ... setup writes one" is true, since setup is a new install then. The Geyser one is true since 2026111117052190, and doesn't show with `serverDir` missing. The defaults warning in `main.go` is for a missing config too.
+	- Actual fix [Bug]: with a config there, `repair`'s missing-server-folder message says to set `serverDir`, or to move the config aside and run setup again.
+	- Branch: r1112
+	- Test case: df5ze
+	- Closed: 20261111-171207
+
+- Check Geyser's first config against the next start
+	- ID: 2026111117052206
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-170522
+	- Opened by:
+	- Related IDs: 2026111116415196 2026111112554261
+	- Requirements: After a new setup with `bedrock` on, start Paper on a throwaway tree, stop it, and start it again. Check that the config.yml Geyser wrote at its first start passes `start`'s check, with default and non-default `bindIP` and `bedrockPort`. If it doesn't, setup or `start` should set Geyser's keys before the first start.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: With no `config.yml`, Geyser 2.12.1 build 1300's first start on Paper 26.3-249 wrote `java.auth-type: online` and ran with it, so the next `start` refused. Its address and port were Geyser's own, `0.0.0.0` and 19132, not `bindIP` and `bedrockPort`.
+		- With `bedrock` on, a missing Geyser `config.yml` is now wrong, and the safe settings fix writes one with only `bedrock.address`, `bedrock.port`, and `java.auth-type`, making `plugins/` and `plugins/Geyser-Spigot/` when missing. Setup's safe settings step writes it before the first start.
+		- Verified: on a throwaway tree, a first start with that file, both with defaults and with `bindIP` 127.0.0.1 and `bedrockPort` 19555, listened where the config says, kept the 3 keys, and filled in Geyser's other settings. `start`'s check passed after the first start and after a second one.
+		- Verified: df67a and the new df5yx lines fail with the change taken out, and pass with it in.
+		- 20261111: df5yx `TestGeyserSkipped` expects 3 missing keys with no `config.yml`, was none. df5yk and df5ym run with `bedrock` off, since they check `server.properties` only.
+	- Decisions:
+		- The fix goes in the safe settings, not in `start`, since `start` only checks and `repair` fixes, as for a missing `server.properties`. Setup and `repair` both get it.
+		- A missing file is wrong whether or not the Geyser jar is there, since setup writes the safe settings before it downloads Geyser. Setup and `repair` report a missing jar on their own.
+		- New folders are mode 0770 and owned like their parent, and the file 0660, per Tree ownership. An existing folder's mode is left alone.
+		- The file holds only the 3 keys, with no `config-version`. Geyser took it as current and added the rest of its layout, including the 3 NetherNet keys with the wanted values.
+		- Swept: `scanGeyser` is the only reader of Geyser's file, shared by `Check` and `Fix`. The Paper YAML files stay fine when missing, since each of their keys defaults to off. Floodgate's config pins no keys.
+	- Branch: r1112
+	- Test case: df67a, df5yx
+	- Closed: 20261111-174957
+
+- repair sends a missing Geyser to setup, which only runs repair again
+	- ID: 2026111117052190
+	- Type: Bug
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-170521
+	- Opened by:
+	- Related IDs: 2026111116415196 2026111111065803
+	- Incorrect behavior [Bug]: With `bedrock` turned on after install, `repair` says Geyser or Floodgate is missing and that `sudo tt-minecraftd setup` installs it. On an existing install setup only runs `repair`, so the same message comes back.
+	- Expected behavior [Bug]: The message names a command that installs them, or setup's existing-install path installs the missing ones.
+	- Reproduced [Bug]: From the code, not on a host.
+	- Actual cause [Bug]:
+		- Setup's existing-install path went straight to `repair`, and only the new-install path fetched Geyser and Floodgate.
+	- Actual effort: Low
+	- Progress log:
+		- 2026-11-12: On an existing install with `bedrock` on, setup looks up a missing Geyser or Floodgate, shows it in the plan, downloads and approves it, and then runs `repair`. design.md's setup says so.
+		- Verified: df66b fails on the old setup code and passes with the fix. The gate passes on both temp folders.
+	- Decisions:
+		- Setup gets the jars, rather than repair naming another command, since `update --plugins` only updates jars it already knows, and design.md's setup step 7 already covers the download. `repair`'s message stays as it was, and is now true.
+		- The lookup comes before the question, and a failed one stops setup before `repair`, as on a new install.
+		- A missing `serverDir` skips the lookup, so `repair` reports the tree.
+		- Swept: `bedrockBuilds` and `getBedrock` are shared by both paths, and the plan line moved to `planBedrock`. Of `repair`'s messages that send the operator to setup, the missing `serverDir` one has the same problem, filed as 2026111117095694.
+	- Actual fix [Bug]: setup's existing-install path installs a missing Geyser or Floodgate before `repair`.
+	- Branch: r1112
+	- Test case: df66b
+	- Closed: 20261111-170934
+
+- staticcheck: unused values in repair tests
+	- ID: 2026111116281098
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261111-162810
+	- Opened by: t00mietum
+	- Incorrect behavior: staticcheck reports SA4006 at `repair_test.go` lines 158 and 313: a value of `f` that's never used.
+	- Expected behavior: staticcheck runs clean.
+	- Estimated effort: Low
+	- Closed: 20261111-162945
+	- Test case: None, a lint fix in test code. staticcheck ./... is the check.
+	- 2026-11-12: Unused values dropped in d145437. staticcheck runs clean on the module.
+
+- Core commands: Docker mode start and stop
+	- ID: 2026111112163174
+	- Type: Feature
+	- Status: Done
+	- Needs hand testing: start and stop a throwaway Paper server in Docker mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, and the jars can't be written.
+	- Priority: High
+	- Opened: 20261111-121631
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Prereq IDs: 2026111112162268
+	- Requirements:
+		- `start` and `stop` in Docker mode, per `design.md`, through the runner, with `--debug`, `--foreground`, and `--warn N`.
+		- Refuse to start when a Paper server is already running, under any account.
+		- `stop` sends the `stop` console command first, and hands the trees back even after a crash.
+		- Test with the fake runner and `--dry-run` only.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: the same `docker run` flags on a small image give a writable `/tmp`, read-only jars and image, and umask 0007. The console's `stop` reached a real container's terminal.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server with Geyser and Floodgate, `eula.txt` written beforehand: `start` loaded it in 18 s. In the container, `paper.jar` and the plugin jars refused writes, a plugin jar couldn't be moved, the tree took writes, and the server ran with umask 0007. `stop --warn 10` said 10, 5, 4, 3, 2, and 1 seconds in the chat, Paper saved the worlds and exited 0, and the trees went back. A second `start` removed the stopped container first.
+		- Stand-in: sudo passed the command straight through, as the operator, who is in the `docker` group, so Docker itself ran as root.
+	- Acceptance signoff: Self-closed: Docker mode start and stop passed on b23 at r1112 b47154b.
+	- Decisions:
+		- `stop` writes to the container's input through the Docker API, as `cmd` will, since `docker attach` refuses input that isn't a terminal. A line ends with a carriage return, which a cooked terminal takes, and a raw one such as Paper's should too.
+		- The countdown says the time left at the start, then at 60, 30, 10, and 5 to 1 seconds.
+		- "Already running" comes from `ps`: any `java -jar paper*.jar`, under any account. That covers the old scripts and this tool's own container.
+		- The server runs under `sh -c 'umask 0007 && exec "$@"'` in the image, since Docker has no umask option. The pid limit is 2048, for Paper's thread pools.
+		- `--debug` runs attached and hands the trees back when the server exits. `--foreground` runs detached, so `console` still works, then waits with `docker wait`.
+		- A start that times out leaves the server running, with an error that says so.
+		- The safe settings, plugin, and firewall steps of `start` come with their own items. ZFS snapshots had none, so 2026111112264283 is filed.
+		- Swept: every container command uses `launch.Container`; `start` and `stop` both hand back through `tree.ToOperator`.
+	- Branch: r1111
+	- Test case: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz
+	- Closed: 20261111-181653
+
+- Core commands: status and watch
+	- ID: 2026111112163393
+	- Type: Feature
+	- Status: Done
+		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
+	- Needs hand testing: run `status` and `watch` beside the throwaway Paper server from the Docker and native hand tests. Version, players, memory, ports, and the log tail show, and Ctrl-C ends `watch`.
+	- Priority: High
+	- Opened: 20261111-121633
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- `status` and `watch`, per `design.md`. Parts that need a later item, such as the firewall counters, show as not set up yet.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against a throwaway container named for the tool, `status` showed it running, its account, its time up, and its memory from the cgroup, then exited once stopped.
+		- 20261111: Verified beside a throwaway Paper 26.3-249 server in Docker mode: `status` showed docker mode, the account, the time up, Paper 26.3 with its jar, 0 of 20 players from the ping, the memory against its cap, the game port over TCP and the Bedrock port over TCP and UDP, the whitelist, ops, approved jars, trees, and the log tail. `watch` redrew it 7 times in 12 s, and Ctrl-C ended it with exit 0 and the server still up.
+	- Acceptance signoff: Self-closed: Docker mode status and watch passed on b23 at r1112 b47154b. Native mode goes with 2026111112163284.
+	- Decisions:
+		- Players and the version come from a server list ping on `bindIP`, or 127.0.0.1 when it's all addresses. The Paper build comes from the jar `paper.jar` links to, so it shows when stopped too.
+		- Memory is the cgroup's `memory.current`: the container's, found through its pid, or the unit's `MemoryCurrent`. Both work without sudo.
+		- Ports come from `ss`, which can't name another account's process without root, so it shows the address that listens and the TCP connection count.
+		- The log is `logs/latest.log` in both modes, since `docker logs` of a terminal holds escape codes. Control characters are dropped from it and from op names.
+		- The server owns the tree, so files that aren't plain files are not read, and a jar that's a pipe or a device counts as changed. design.md updated.
+		- The plugin check is `plugins.CheckJars`, for `start`'s check to reuse. `watch` hashes a jar again only when its size or time changes.
+		- The approved list is read from beside the config, so a second `--config` gets its own. design.md updated.
+		- A part that can't be read says why, and the rest still shows. Exit 0, since `status` ran. A failed command's stderr goes into its line, not over the screen, through `host.Exec.QuietErr`.
+		- No color yet. design.md allows it on a terminal only, and nothing needs it.
+		- 20261111: `TestMissingConfig` (df5xn) no longer expects `status` to say it isn't built. It checks the config path `status` reads beside instead.
+		- Swept: every file read from the tree goes through `openRegular` or `Sums.Sum`; both modes judge "running" through the same calls as `start`, `launch.ContainerState` and `launch.UnitUp`.
+	- Branch: r1111
+	- Test case: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
+	- Closed: 20261111-181653
+
+- console and cmd
+	- ID: 2026111111065750
+	- Type: Feature
+	- Status: Done
+		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
+	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
+	- Priority: High
+	- Opened: 20261111-110657
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- `console` attaches to the server console, with detach keys that can't stop the server by accident.
+		- `cmd` sends one console command and prints what the server says back.
+		- Make both work in Docker and native modes, without RCON.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against a stand-in container named like the server's, `console` detaches on Ctrl-C with the container still running, and `cmd` prints the line the stand-in logged. Without the detach keys, Ctrl-C ends the container. In tmux, Ctrl-C with the binding detaches and the session lives; without it the session ends.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server, in Docker mode and then rootless Podman: `console` showed Paper's console, a typed `list` got its reply, and Ctrl-C detached with exit 0 and the server still up. `cmd list` printed "There are 0 of a max of 20 players online".
+	- Acceptance signoff: Self-closed: console and cmd passed on b23 at r1112 b47154b, in Docker and Podman modes. Native mode goes with 2026111112163284.
+	- Decisions:
+		- Ctrl-C is the detach key in both modes, so it can't reach the server. Docker's `--detach-keys=ctrl-c`, and in tmux `bind-key -n C-c detach-client` at attach. design.md updated.
+		- `docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach.
+		- `cmd` reads `logs/latest.log` in both modes, from where it ended before the send, rather than `docker logs`, which carries the terminal's echo and escape codes. It waits up to 3 s for a first line, then until 0.5 s go by with nothing, 10 s at most. A new day's log is read from its start.
+		- `cmd stop` and `cmd restart` are refused, pointing at `stop`, which hands the trees back too.
+		- A server that stops while `console` is attached gets its trees handed back, as `start --debug` in native mode did. Both now share one step. It no longer hands back when the unit's state can't be read, since the server may still be up.
+		- `cmd` takes no `--dry-run`, since design.md lists none.
+		- `OpenRegular` and `Clean` moved from `status` to `server`, for `cmd` to share.
+		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
+	- Branch: r1111
+	- Test case: df5z6, df5z7, df5z8
+	- Closed: 20261111-181653
+
+- Run modes: console input through attach
+	- ID: 2026111116104058
+	- Type: Feature
+	- Status: Done
+	- Needs hand testing: on a throwaway Paper server under Podman, then Docker, with the operator out of the `docker` group: `cmd list` prints the player count, `stop --warn 10` counts down in the chat and stops it, and `console` detaches on Ctrl-C with the server still up.
+	- Priority: High
+	- Opened: 20261111-161040
+	- Opened by: t00mietum
+	- Parent ID: 2026111115090766
+	- Prereq IDs: 2026111116104049
+	- Requirements:
+		- `stop` and `cmd` send console lines with `sudo <runtime> attach` on a pseudo-terminal, in place of the Docker API write. See the parent's notes.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against throwaway busybox containers, rootless Podman 5.4.2 and Docker each got 2 lines in a row, detached, and stayed running.
+		- Verified: Ctrl-C written right after the line went to the stand-in in the same read, which is how attach passes it on to the server. The console now waits until the line has been read.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server, under rootless Podman and under Docker: `cmd list` printed the player count, `stop --warn 10` counted down in the chat and stopped it, and `console` took a typed `list` and detached on Ctrl-C with the server still up.
+		- Stand-in: sudo passed `attach` straight through, as the operator. The parent's 20261111 hand check covers `sudo <runtime> attach` rootful under both runtimes.
+	- Acceptance signoff: Self-closed: console lines through attach passed against Paper's own console on b23 at r1112 b47154b; rootful attach through sudo was checked by hand under the parent.
+	- Decisions:
+		- `launch.AttachConsole` replaces `DockerConsole`. It opens its own pty with `O_NOCTTY`, sets it raw before attach starts, and runs `sudo -n`, so sudo reuses the operator's terminal. As root it runs the runtime directly.
+		- Ctrl-C goes once the pty's input queue is empty, after the line was seen in it or 100 ms went by, since the pty hands bytes on a moment after they're written.
+		- Docker's exit 1 counts as a detach only with "read escape sequence" on stderr. Podman exits 0. An attach that ends before reading the line is an error.
+		- One line may take 15 s at most, attach and detach included. Attach's copy of the console is read and dropped, so it can't block on a full pty.
+		- `Boxed` sets its console once it knows the runtime, so `stop` and `cmd` follow a container found under the other one.
+		- `TestDockerConsole` (df5xw) is now `TestAttachConsole` under the same ID, since the API write is gone. It still checks that the line arrives with a carriage return, that a control character is refused, and the dry run.
+		- Swept: `stop`, `cmd`, and the countdown all send through `Kit.Console`; nothing reads `DOCKER_HOST` or the Docker socket now.
+	- Branch: r1112
+	- Test case: df5xw
+	- Closed: 20261111-181653
+
+- setup: download Paper
+	- ID: 2026111116415186
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-164151
+	- Opened by:
+	- Parent ID: 2026111111065776
+	- Related IDs: 2026111111065803
+	- Requirements:
+		- On a new tree, get the newest stable Paper build from the PaperMC download API, check its SHA-256, and point `paper.jar` at it, the same way `update --paper` does.
+		- Share the code with `update --paper`.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against the live API, the newest release was 26.3, build 249, and the 55 MB jar it downloaded matched the API's SHA-256, with `paper.jar` linked to it.
+		- Verified: df65q and df65r fail with the stable filter or the hash check taken out, and pass with them in.
+	- Decisions:
+		- The API is PaperMC's Fill v3 at `fill.papermc.io`. The old v2 API is deprecated.
+		- A new tree gets the newest release that has a stable build. Release candidates and versions with only beta builds are skipped.
+		- The lookup comes before the plan, so a failed one stops setup before anything changes. The plan names the version and build.
+		- The jar's size and SHA-256 must match the API's. It's written to a temp name in the tree and renamed, and `paper.jar` is replaced by a new link in one rename, all relative to the folder's handle without following links, since the server account may own the tree.
+		- The build goes on the approved list, since `start` pins the jar `paper.jar` links to. A tree with a `paper.jar` keeps it, and setup approves it with the other jars. design.md updated.
+		- The code is `source/internal/paper`, for `update --paper` to reuse. Keeping the last 2 builds is left to update.
+		- Swept: nothing else downloads yet, and `plugins.Jars` already follows the `paper.jar` link.
+	- Branch: r1112
+	- Test case: df65p, df65q, df65r, df65d, df65f, df65j
+	- Closed: 20261111-165545
+
+- setup: Geyser and Floodgate
+	- ID: 2026111116415196
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-164151
+	- Opened by:
+	- Parent ID: 2026111111065776
+	- Prereq IDs: 2026111116415186
+	- Related IDs: 2026111111065803, 2026111117052190, 2026111117052206
+	- Requirements:
+		- With `bedrock` on, download Geyser and Floodgate, check their hashes, approve them, and set them up per design.md's Bedrock players.
+	- Shares the download and hash check with 2026111116415186, and `update --plugins` reuses it.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: With `bedrock` on, setup gets the newest Geyser and Floodgate builds from GeyserMC's download API before the plan, downloads them into `plugins/`, checks each SHA-256, and approves them with their source.
+		- Verified: the live API's latest Geyser 2.12.1 build 1300 and Floodgate 2.2.5 build 141 Spigot jars, fetched from the version and build address, match the API's SHA-256.
+		- Verified: df65x, df65y, df65z, df65d, df65f, and df65r each fail with their check taken out, and pass with it in.
+		- 20261111: df65d `TestNewInstall` expects 3 approved jars, was 1. df65f `TestAdopt` expects 4, was 2, and finds `paper.jar` anywhere in the list. Both now get Geyser and Floodgate too.
+		- 2026-11-12: Geyser's config is now written before its first start, through 2026111117052206. Only Floodgate's is left to its first start.
+	- Decisions:
+		- The download, size cap, and hash check moved from `source/internal/paper` to `source/internal/download`, which `paper` and the new `source/internal/geyser` share. Paper's behavior is the same.
+		- The API is `download.geysermc.org/v2`. Its `latest` answer is read, and the jar is fetched from the address naming that version and build, so the file can't be a newer build than the hash.
+		- GeyserMC gives no size, so the 512 MiB cap is the only size check. The jar's name has to start with its project's name, since `repair` tells the plugins apart by name.
+		- A tree that has a Geyser or Floodgate jar keeps it, and setup approves it with the other jars, as with `paper.jar`.
+		- The approved entry gets the `latest` Spigot download address as its source, as design.md's example has it, for `update --plugins`. `plugins.Info` gained a `Source`.
+		- A missing `plugins/` is made mode 0770, owned like `serverDir`.
+		- Geyser's and Floodgate's configs are left to their first start, per 2026111112554261. Whether Geyser's first config passes the next start is 2026111117052206.
+		- `repair`'s Geyser and Floodgate check now uses `geyser.Installed`, so setup and repair agree on what counts as installed.
+		- Swept: `paper.Install` and `geyser.Install` both go through `download.Client.Into`; `repair` and setup share `geyser.Installed`; the only other `plugins.Approve` callers pass no source.
+	- Branch: r1112
+	- Test case: df65x, df65y, df65z, df65d, df65f, df65r
+	- Closed: 20261111-170548
+
+- Firewall: rules file, its unit, and the start check
+	- ID: 2026111117134046
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-171340
+	- Opened by:
+	- Parent ID: 2026111111065789
+	- Requirements:
+		- Render `/etc/tt-minecraftd/firewall.nft` from the config, and `tt-minecraftd-firewall.service` that loads it, per design.md's Firewall.
+		- Tests check the rendered rules for each mix of `allowFrom`, `egress`, and `bedrock`.
+		- With `firewall` on, `start` checks through sudo that the table is loaded, and refuses without it.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: `source/internal/firewall` renders `firewall.nft` and the unit. Both modes' `start` refuse without the table, after the plugin check.
+		- Verified: each rendered mix passes `nft -c`. A file loaded for real in a network namespace dropped and counted the account's connection to loopback, and let its DNS to 127.0.0.53 through. df66c fails on a v4 match against a v6 set, and df66f fails with the start check taken out.
+	- Decisions:
+		- The account is matched by name, so the file reads plainly. nft looks it up at load, after `setup` has made it.
+		- The output hook only jumps to the account's rules on a uid match. A packet with no socket, such as IPv6 neighbor discovery, has no uid, so a `!=` match would have let it reach the LAN drop.
+		- `lan` adds CGNAT's 100.64.0.0/10 to the private and link-local ranges, so a tailnet counts as LAN both ways. design.md updated.
+		- The rate limit is per address, with a burst of `joinRateLimit`. IPv6 is per address too, not per /64.
+		- DNS to the resolvers in `/etc/resolv.conf` is allowed first, so a loopback resolver still works. They're read at render time, so repair's check sees a change. design.md updated.
+		- Closed ports are RCON's 25575/tcp and query on `gamePort`/udp. The management server has no fixed default port. design.md updated.
+		- Only outbound drops are logged, at 6 a minute. Inbound ones are counted only, since scanners would fill the log. design.md updated.
+		- The unit is `WantedBy` sysinit and nftables, `PartOf` and `ReloadPropagatedFrom` nftables, so it loads again after nftables starts, restarts, or reloads.
+		- `start` says `repair` loads the table, which comes with 2026111117135246.
+		- Swept: both modes' `Start` call `checkFirewall`; every start test's fake host answers the table list.
+	- Branch: r1112
+	- Test case: df66c, df66d, df66e, df66f
+	- Closed: 20261111-172010
+
+- Firewall: drop counters in status
+	- ID: 2026111117135258
+	- Type: Feature
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-171352
+	- Opened by:
+	- Parent ID: 2026111111065789
+	- Prereq IDs: 2026111117134046
+	- Requirements:
+		- `status` shows the firewall's drop counters, inbound and outbound, in place of "not set up yet".
+	- The counters are the named ones in `firewall.nft`: `in_refused`, `in_flood`, `in_closed`, `out_local`, `out_lan`, and `out_web`. Reading them needs root, and `status` doesn't use sudo, so this needs a pick, such as `sudo -n` when it's cached, or "run with sudo to see them".
+	- 2026-11-12: Picked: status shows the counters when run as root, and otherwise one line saying sudo shows them. No sudo -n, so the output doesn't change with sudo's cache.
+	- Actual effort: Low
+	- Progress log:
+		- 2026-11-11: `firewall.Counters` reads the table's counters from `nft -j list counters inet`. As root, `status` shows them on 2 lines, dropped in and dropped out. Otherwise it says sudo shows them. design.md updated.
+		- Verified: df67g and df67h pass, and both fail with the table match taken out. df67h parses nft's own answer, with the rules loaded in a network namespace and with none.
+	- Decisions:
+		- All inet counters are listed, not the table's, since nft answers that the same way when the table is gone. No counters of ours means the table isn't loaded, and `status` says `repair` loads it.
+		- Packet counts only. `in_refused` is left out with `allowFrom` `any`, and `out_web` with `egress` `open`, since neither can count anything then.
+		- 20261111: df5y7 `TestStatusDocker` expects `Firewall:   on; run with sudo to see the drop counters`. Old: `drop counters not set up yet`.
+		- Swept: `status` was the only place that said "not set up yet"; `firewall.Loaded` is still the only other reader of the table.
+	- Branch: r1112
+	- Test case: df67g, df67h, df5y7
+	- Closed: 20261111-175414
+
+- update: the command, and --paper
+	- ID: 2026111117302950
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Requirements:
+		- `update` per design.md: needs root through sudo, asks first unless `--yes`, updates every part when none is named, and leaves a running server alone.
+		- `--paper` gets the newest stable build of the current Minecraft version, checks it, approves it, points `paper.jar` at it, and keeps the last 2 builds.
+		- setup on an existing install runs `update` after `repair`.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against the live API, `update --dry-run` on a tree at Paper 26.3 build 244 planned the move to build 249.
+		- Verified: df66x, df66y, df66z, df670, and df671 each fail with their check taken out, such as the kept build, the approval, or the update after repair, and pass with it in.
+	- Decisions:
+		- The code is `source/internal/update`, and reuses `paper.API` and the approval setup does.
+		- The version and build come from the name `paper.jar` links to. A plain `paper.jar` is refused with how to rename it, since swapping a link over it would delete the only copy. design.md updated.
+		- No `paper.jar`, or a link to a build that's gone, gets one as setup does, which makes repair's missing paper.jar message true.
+		- The 2 builds kept are the new one and the one `paper.jar` linked to. Only plain files in `serverDir` named `paper-VERSION-BUILD.jar` are removed. Their approved entries stay, since they're harmless.
+		- Everything is looked up before the plan, so a failed lookup changes nothing.
+		- With only `--paper` built, `update` with no part named is the same as `--paper`. The other flags come with their children.
+		- On an existing install setup asks once, then runs `repair` and `update` without asking again. Update runs even when a repair check failed, since a missing `paper.jar` is one update fixes, and both errors are returned.
+		- Swept: setup's new-install path and update share `paper.API` and `plugins.Approve`; `asRoot`'s message now fits both callers.
+	- Branch: r1112
+	- Test case: df66x, df66y, df66z, df670, df671
+	- Closed: 20261111-173642
+
+- update --plugins
+	- ID: 2026111117302973
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Requirements:
+		- `--plugins` updates each approved jar with a known source, such as Geyser and Floodgate, shows the old and new versions, checks the source's hash, and approves the new jar.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against the live GeyserMC API, `update --dry-run` on an approved Geyser jar with an old hash planned the move to Geyser 2.12.1 build 1300.
+		- Verified: df672 fails with the file name check, the up-to-date check, or the missing jar check taken out, and passes with them in.
+		- 2026-11-12: df672 failed about 1 run in 10, since its rig approved the jars in map order, so Floodgate was sometimes looked up before Geyser and the failed lookup named Floodgate. The rig now approves them in a fixed order. Update itself follows the approved list's order.
+		- Verified: df672 failed 1 of 10 runs before the fix, and passed 25 runs in a row after it. The gate passes on both temp folders.
+	- Decisions:
+		- A jar is up to date when its approved hash is the source's newest, since GeyserMC's jar names have no version in them. The old version shown is what the jar's own `plugin.yml` says.
+		- A newest build with another file name is skipped with a note, since both jars would load. So is an approved jar that's gone from the tree, so update never adds one back.
+		- Only GeyserMC's `latest` sources are known. Modrinth and Hangar have no jars with a source yet, so they're 2026111117404480. Other sources are listed as skipped.
+		- Paper and the plugins are looked up first and share one plan and one question.
+		- design.md updated.
+		- Swept: update and setup share `geyser.API`, `plugins.Approve` keeps the source, and `TestUpdate` (df671) checks the new flag.
+	- Branch: r1112
+	- Test case: df672, df671
+	- Closed: 20261111-174008
+
+- update --image
+	- ID: 2026111117302985
+	- Type: Feature
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Requirements:
+		- `--image` pulls the newest base image, checks that its `java -version` is new enough for this Paper, and pins its digest in the config.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: df67q fails with the Java check or the per-arch digest skip taken out, and passes with them in.
+		- Verified: with the live PaperMC API and eclipse-temurin:25-jre, under both Podman and Docker without sudo, the pull, the Java check, and the pin all worked, and both runtimes pinned the same digest.
+	- Decisions:
+		- The Java needed comes from the PaperMC API's version info (`java.version.minimum`), for the version the server runs after this update. `paper.API` gained `Java`.
+		- It follows the configured tag and never moves to another. An image with a digest and no tag is skipped. One with neither follows `latest`.
+		- The pull waits for the go-ahead, since it's what finds the digest, so a dry run can't show the new one. A registry lookup was the other way, but it would bypass the runtime's own registry settings.
+		- The pin is the tag's own (multi-arch) digest. Podman also lists the per-arch one, which it gives as `Digest`, and that's left out. Docker gives a short name, so names are compared without `docker.io/library/`.
+		- `java -version` runs as nobody, with no network, read-only, and no caps.
+		- Only the `image` line changes, through shcl's keep-lines save, since a plain save rewrites every key in lower case. shcl quotes the new value.
+		- The old image isn't removed, since a running server may still use it. Native mode skips the part, and says so only when `--image` is named.
+		- design.md's update section has the details.
+		- Swept: `PaperSource` has the one real implementation; the test fakes in update and main got `Java`. setup's own `PaperSource` doesn't need it.
+	- Branch: r1112
+	- Test case: df67p, df67q, df67r, df67s, df671
+	- Closed: 20261111-180421
 
 - Native start misses the new latest.log when its inode is reused
 	- ID: 2026111113354106
