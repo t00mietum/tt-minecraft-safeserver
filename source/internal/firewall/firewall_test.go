@@ -187,3 +187,57 @@ func TestLoaded(t *testing.T) {
 		}
 	}
 }
+
+func TestCounters(t *testing.T) {
+	defer testid.Line(t, "df67h")
+	reply := `{"nftables": [{"metainfo": {"version": "1.1.6"}}, {"counter": {"family": "inet", "name": "out_lan", "table": "tt_minecraftd", "handle": 3, "packets": 12, "bytes": 720}}, {"counter": {"family": "inet", "name": "out_lan", "table": "other", "handle": 3, "packets": 5, "bytes": 0}}]}`
+	var fail error
+	r := &host.Fake{Reply: func(host.Cmd) ([]byte, error) { return []byte(reply), fail }}
+	got, err := Counters(context.Background(), r)
+	if err != nil || !reflect.DeepEqual(got, map[string]uint64{"out_lan": 12}) {
+		t.Errorf("got %v, %v", got, err)
+	}
+	if want := []string{"nft -j list counters inet"}; !reflect.DeepEqual(r.Lines(), want) || !r.Ran[0].Look {
+		t.Errorf("ran %q", r.Lines())
+	}
+	fail = errors.New("exit status 1")
+	if _, err := Counters(context.Background(), r); err == nil {
+		t.Error("a failed list counts as an answer")
+	}
+	fail = nil
+
+	// nft's own answer, with the rules loaded and with none.
+	if !nftCheck(t, "") {
+		return
+	}
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.RunUser = me.Username
+	path := filepath.Join(t.TempDir(), "firewall.nft")
+	if err := os.WriteFile(path, []byte(Rules(&cfg, nil)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, load := range []bool{true, false} {
+		script := "/usr/sbin/nft -j list counters inet"
+		if load {
+			script = "/usr/sbin/nft -f " + path + " && " + script
+		}
+		// #nosec G204 -- fixed binary, test file
+		out, err := exec.Command("unshare", "-rn", "sh", "-c", script).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		reply = string(out)
+		got, err := Counters(context.Background(), r)
+		want := map[string]uint64{}
+		if load {
+			want = map[string]uint64{"in_refused": 0, "in_flood": 0, "in_closed": 0, "out_local": 0, "out_lan": 0, "out_web": 0}
+		}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("loaded %v: got %v, %v, from %s", load, got, err, out)
+		}
+	}
+}

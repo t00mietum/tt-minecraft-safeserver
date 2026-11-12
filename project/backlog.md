@@ -574,7 +574,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
 	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
-	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first is done, the second waits on signoff, and the third is queued.
+	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first and third are done, and the second waits on signoff.
 
 - Firewall: rules file, its unit, and the start check
 	- ID: 2026111117134046
@@ -639,7 +639,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall: drop counters in status
 	- ID: 2026111117135258
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-171352
 	- Opened by:
@@ -649,6 +649,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `status` shows the firewall's drop counters, inbound and outbound, in place of "not set up yet".
 	- The counters are the named ones in `firewall.nft`: `in_refused`, `in_flood`, `in_closed`, `out_local`, `out_lan`, and `out_web`. Reading them needs root, and `status` doesn't use sudo, so this needs a pick, such as `sudo -n` when it's cached, or "run with sudo to see them".
 	- 2026-11-12: Picked: status shows the counters when run as root, and otherwise one line saying sudo shows them. No sudo -n, so the output doesn't change with sudo's cache.
+	- Actual effort: Low
+	- Progress log:
+		- 2026-11-11: `firewall.Counters` reads the table's counters from `nft -j list counters inet`. As root, `status` shows them on 2 lines, dropped in and dropped out. Otherwise it says sudo shows them. design.md updated.
+		- Verified: df67g and df67h pass, and both fail with the table match taken out. df67h parses nft's own answer, with the rules loaded in a network namespace and with none.
+	- Decisions:
+		- All inet counters are listed, not the table's, since nft answers that the same way when the table is gone. No counters of ours means the table isn't loaded, and `status` says `repair` loads it.
+		- Packet counts only. `in_refused` is left out with `allowFrom` `any`, and `out_web` with `egress` `open`, since neither can count anything then.
+		- 20261111: df5y7 `TestStatusDocker` expects `Firewall:   on; run with sudo to see the drop counters`. Old: `drop counters not set up yet`.
+		- Swept: `status` was the only place that said "not set up yet"; `firewall.Loaded` is still the only other reader of the table.
+	- Branch: r1112
+	- Test case: df67g, df67h, df5y7
+	- Closed: 20261111-175414
 
 - update
 	- ID: 2026111111065803

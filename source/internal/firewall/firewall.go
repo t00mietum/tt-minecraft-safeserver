@@ -8,6 +8,7 @@ package firewall
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/netip"
@@ -233,4 +234,36 @@ func Loaded(ctx context.Context, r host.Runner) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Counters gives the packets each of the table's named counters has dropped,
+// by name. It's empty when the table isn't loaded. Reading them needs root,
+// and it doesn't use sudo, so the caller checks.
+func Counters(ctx context.Context, r host.Runner) (map[string]uint64, error) {
+	// Listing every inet counter, rather than the table's, has nft answer
+	// the same way when the table is gone.
+	out, err := r.Run(ctx, host.Cmd{Look: true, Args: []string{"nft", "-j", "list", "counters", "inet"}})
+	if err != nil {
+		return nil, fmt.Errorf("can't list the nftables counters: %w", err)
+	}
+	var list struct {
+		Nftables []struct {
+			Counter *struct {
+				Family  string `json:"family"`
+				Table   string `json:"table"`
+				Name    string `json:"name"`
+				Packets uint64 `json:"packets"`
+			} `json:"counter"`
+		} `json:"nftables"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, fmt.Errorf("can't read nft's counter list: %w", err)
+	}
+	counts := map[string]uint64{}
+	for _, o := range list.Nftables {
+		if c := o.Counter; c != nil && c.Family == "inet" && c.Table == Table {
+			counts[c.Name] = c.Packets
+		}
+	}
+	return counts, nil
 }

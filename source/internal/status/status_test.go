@@ -169,7 +169,7 @@ func TestStatusDocker(t *testing.T) {
 		"Ports:      tcp *:25565 listening, 2 connections",
 		"            tcp *:19132 listening, 0 connections",
 		"            udp 0.0.0.0:19132 listening",
-		"Firewall:   drop counters not set up yet",
+		"Firewall:   on; run with sudo to see the drop counters",
 		"Whitelist:  3 players",
 		"Ops:        Steve, Evil[2J",
 		"Plugins:    3 jars, all approved",
@@ -207,6 +207,45 @@ func TestStatusNative(t *testing.T) {
 	)
 	if g.pinged != "192.168.1.9:25565" {
 		t.Errorf("pinged %s, want bindIP", g.pinged)
+	}
+}
+
+// As root, status shows the drop counters, and leaves out the ones the
+// config can't bump.
+func TestStatusFirewall(t *testing.T) {
+	defer testid.Line(t, "df67g")
+	g := newRig(t)
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
+	g.p.Root = true
+	counter := func(table, name string, n int) string {
+		return fmt.Sprintf(`{"counter": {"family": "inet", "name": %q, "table": %q, "handle": 2, "packets": %d, "bytes": %d}}`, name, table, n, n*60)
+	}
+	list := func(c ...string) string {
+		return `{"nftables": [{"metainfo": {"version": "1.1.6", "json_schema_version": 1}}` + strings.Join(append([]string{""}, c...), ", ") + "]}"
+	}
+	g.replies["nft -j"] = list(
+		counter("tt_minecraftd", "in_refused", 31), counter("tt_minecraftd", "in_flood", 2), counter("tt_minecraftd", "in_closed", 7),
+		counter("tt_minecraftd", "out_local", 0), counter("tt_minecraftd", "out_lan", 4), counter("tt_minecraftd", "out_web", 1),
+		counter("filter", "out_lan", 999),
+	)
+	wantLines(t, g.text(t, 0),
+		"Firewall:   dropped in: 31 not in allowFrom, 2 over joinRateLimit, 7 to closed ports",
+		"            dropped out: 0 to loopback, 4 to the LAN, 1 elsewhere",
+	)
+
+	g.p.Cfg.AllowFrom, g.p.Cfg.Egress = []string{"any"}, "open"
+	g.replies["nft -j"] = list(counter("tt_minecraftd", "in_flood", 2), counter("tt_minecraftd", "out_local", 3))
+	wantLines(t, g.text(t, 0),
+		"Firewall:   dropped in: 2 over joinRateLimit, no in_closed counter",
+		"            dropped out: 3 to loopback, no out_lan counter",
+	)
+
+	g.replies["nft -j"] = list(counter("filter", "in_flood", 2))
+	wantLines(t, g.text(t, 0), "Firewall:   table inet tt_minecraftd isn't loaded, so start refuses; repair loads it")
+
+	g.replies["nft -j"] = "Error: oops"
+	if out := g.text(t, 0); !strings.Contains(out, "Firewall:   can't read nft's counter list") {
+		t.Errorf("a bad reply isn't named:\n%s", out)
 	}
 }
 

@@ -184,6 +184,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- Memory use against the cap.
 	- What listens on the game ports, and how many connections each has.
 	- The firewall drop counters. A rising outbound count means something in the server tried to connect where it shouldn't.
+		- Reading them needs root. Run as root, such as with sudo, `status` shows them, and otherwise it says so in one line. It never runs sudo itself, so the output doesn't change with sudo's cache.
 	- The whitelist size and the list of ops.
 	- Whether the plugin jars match the approved list.
 	- Who owns the trees, and whether the boot unit is enabled.

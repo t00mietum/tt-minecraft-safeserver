@@ -17,12 +17,14 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
@@ -44,12 +46,15 @@ type Probe struct {
 	// ReadFile reads /proc and /sys, for the server's mode and memory.
 	ReadFile func(string) ([]byte, error)
 	Ping     func(ctx context.Context, addr string) (server.PingReply, error)
-	sums     plugins.Sums
+	// Root is when status runs as root, which reading the drop counters
+	// needs. It never asks sudo, so the output doesn't change with sudo's cache.
+	Root bool
+	sums plugins.Sums
 }
 
 // NewProbe gives a Probe on the real host.
 func NewProbe(r host.Runner, c *config.Config, pluginsFile string) *Probe {
-	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping}
+	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0}
 }
 
 // Line is one labeled line. A Line with no label goes on under the one above.
@@ -192,11 +197,41 @@ func (p *Probe) ports(ctx context.Context) []Line {
 		}
 		lines[0].Label = "Ports"
 	}
-	fw := "off in the config"
-	if p.Cfg.Firewall {
-		fw = "drop counters not set up yet"
+	return append(lines, p.firewall(ctx)...)
+}
+
+func (p *Probe) firewall(ctx context.Context) []Line {
+	switch {
+	case !p.Cfg.Firewall:
+		return []Line{{"Firewall", "off in the config"}}
+	case !p.Root:
+		return []Line{{"Firewall", "on; run with sudo to see the drop counters"}}
 	}
-	return append(lines, Line{"Firewall", fw})
+	counts, err := firewall.Counters(ctx, p.Run)
+	switch {
+	case err != nil:
+		return []Line{{"Firewall", err.Error()}}
+	case len(counts) == 0:
+		return []Line{{"Firewall", "table inet " + firewall.Table + " isn't loaded, so start refuses; repair loads it"}}
+	}
+	n := func(name, what string) string {
+		if c, ok := counts[name]; ok {
+			return strconv.FormatUint(c, 10) + " " + what
+		}
+		return "no " + name + " counter"
+	}
+	in := []string{n("in_flood", "over joinRateLimit"), n("in_closed", "to closed ports")}
+	if !slices.Contains(p.Cfg.AllowFrom, "any") {
+		in = append([]string{n("in_refused", "not in allowFrom")}, in...)
+	}
+	out := []string{n("out_local", "to loopback"), n("out_lan", "to the LAN")}
+	if p.Cfg.Egress == "web" {
+		out = append(out, n("out_web", "elsewhere"))
+	}
+	return []Line{
+		{"Firewall", "dropped in: " + strings.Join(in, ", ")},
+		{"", "dropped out: " + strings.Join(out, ", ")},
+	}
 }
 
 // portLines reads ss -H -t -u -a -n: netid, state, queues, local, peer.
