@@ -21,12 +21,12 @@ const gib = 1 << 30
 // such as runGroup and memCap, are left empty for Load to fill in last.
 func Defaults() Config {
 	return Config{
-		RunMode:     "docker",
-		RunUser:     "minecraftd",
-		ServerDir:   "/srv/tt-minecraftd/server",
-		DockerImage: "eclipse-temurin:25-jre@sha256:ecdc0adb37bde1a281c4d245a3cd535004b1fc8322d560f5b09463b248c81df0",
-		JavaBin:     "java",
-		HeapMax:     4 * gib,
+		RunMode:   "podman",
+		RunUser:   "minecraftd",
+		ServerDir: "/srv/tt-minecraftd/server",
+		Image:     "docker.io/library/eclipse-temurin:25-jre@sha256:ecdc0adb37bde1a281c4d245a3cd535004b1fc8322d560f5b09463b248c81df0",
+		JavaBin:   "java",
+		HeapMax:   4 * gib,
 		// Paper's recommended flags, from docs.papermc.io/paper/aikars-flags.
 		JvmArgs: []string{
 			"-XX:+UseG1GC",

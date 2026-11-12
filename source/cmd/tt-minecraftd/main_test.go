@@ -90,7 +90,7 @@ func TestUsageErrors(t *testing.T) {
 		{"status", "--set", "heapMax"},
 		{"status", "--set", "=6G"},
 		{"status", "--set", "noSuchKey=1"},
-		{"status", "--set", "runMode=podman"},
+		{"status", "--set", "runMode=lxc"},
 		{"--config"},
 	} {
 		code, _, errOut := runArgs(args...)
@@ -116,13 +116,13 @@ func TestOptionsReachConfig(t *testing.T) {
 		mode, user, group string
 		heap              int64
 	}{
-		{[]string{"start"}, "docker", "minecraftd", "minecraftd", 4 << 30},
+		{[]string{"start"}, "podman", "minecraftd", "minecraftd", 4 << 30},
 		{[]string{"start", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30},
 		{[]string{"start", "--native", "--set", "runMode=docker"}, "docker", "minecraftd", "minecraftd", 4 << 30},
 		{[]string{"start", "--set", "runMode=docker", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30},
-		{[]string{"--set", "heapMax=6G", "start", "--set", "runUser=mc"}, "docker", "mc", "mc", 6 << 30},
-		{[]string{"--config", path, "status"}, "docker", "mcfile", "mcfile", 2 << 30},
-		{[]string{"status", "--config=" + path, "--set", "heapMax=3G"}, "docker", "mcfile", "mcfile", 3 << 30},
+		{[]string{"--set", "heapMax=6G", "start", "--set", "runUser=mc"}, "podman", "mc", "mc", 6 << 30},
+		{[]string{"--config", path, "status"}, "podman", "mcfile", "mcfile", 2 << 30},
+		{[]string{"status", "--config=" + path, "--set", "heapMax=3G"}, "podman", "mcfile", "mcfile", 3 << 30},
 	} {
 		var errOut bytes.Buffer
 		inv, code, done := prepare(c.args, &bytes.Buffer{}, &errOut)
@@ -144,7 +144,7 @@ func TestMissingConfig(t *testing.T) {
 	noDefaultConfig(t)
 	var errOut bytes.Buffer
 	inv, _, done := prepare([]string{"status"}, &bytes.Buffer{}, &errOut)
-	if done || inv.cfg.RunMode != "docker" || !strings.Contains(errOut.String(), "defaults are used") {
+	if done || inv.cfg.RunMode != "podman" || !strings.Contains(errOut.String(), "defaults are used") {
 		t.Errorf("default missing: done %v, mode %q, stderr %q", done, inv.cfg.RunMode, errOut.String())
 	}
 	code, _, msg := runArgs("status", "--config", filepath.Join(t.TempDir(), "nope.shcl"))
@@ -171,7 +171,7 @@ func TestWatch(t *testing.T) {
 	if n := strings.Count(out.String(), "Every 10ms, until Ctrl-C."); n < 2 || strings.Contains(out.String(), "\x1b") {
 		t.Errorf("%d redraws, or a screen code:\n%s", n, out.String())
 	}
-	if !strings.Contains(out.String(), "Server:     not running in docker mode\n") {
+	if !strings.Contains(out.String(), "Server:     not running in podman mode\n") {
 		t.Errorf("no status in:\n%s", out.String())
 	}
 }

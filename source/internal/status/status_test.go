@@ -78,6 +78,7 @@ func newRig(t *testing.T) *rig {
 	write(t, list, "jar: plugins/Geyser-Spigot.jar\n\tsha256: "+sum("geyser")+"\njar: plugins/floodgate.jar\n\tsha256: "+sum("floodgate")+"\njar: paper-26.3-244.jar\n\tsha256: "+sum("")+"\n")
 
 	cfg := config.Defaults()
+	cfg.RunMode = "docker"
 	cfg.ServerDir, cfg.OwnerTrees = dir, []string{dir}
 	cfg.MemCap = 4 << 30
 	g := &rig{r: &host.Fake{}, dir: dir, replies: map[string]string{}}
@@ -144,7 +145,7 @@ func TestStatusDocker(t *testing.T) {
 	defer testid.Line(t, "df5y7")
 	g := newRig(t)
 	g.replies["docker ps"] = "running\n"
-	g.replies["docker inspect"] = "2026-11-11T09:47:30.123456789Z 4242 0:0\n"
+	g.replies["docker inspect"] = "4242 0:0 2026-11-11T09:47:30.123456789Z\n"
 	out := g.text(t, 0)
 	wantLines(t, out,
 		"Server:     running in docker mode, as root, for 2h 12m",
@@ -188,6 +189,19 @@ func TestStatusNative(t *testing.T) {
 	if g.pinged != "192.168.1.9:25565" {
 		t.Errorf("pinged %s, want bindIP", g.pinged)
 	}
+}
+
+// Podman's start time is Go's default format, with spaces in it, and a
+// container without --user has no user.
+func TestStatusPodman(t *testing.T) {
+	defer testid.Line(t, "df64j")
+	g := newRig(t)
+	g.p.Cfg.RunMode = "podman"
+	g.replies["podman ps"] = "running\n"
+	g.replies["podman inspect"] = "4242 0:0 2026-11-11 09:47:30.123456789 +0000 UTC\n"
+	wantLines(t, g.text(t, 0), "Server:     running in podman mode, as root, for 2h 12m", "Memory:     1.0 GiB of 4.0 GiB cap (25%)")
+	g.replies["podman inspect"] = "4242  2026-11-11 01:47:30.123456789 -0800 PST\n"
+	wantLines(t, g.text(t, 0), "Server:     running in podman mode, for 2h 12m")
 }
 
 // Stopped, with an old script's server still up, a changed jar, and the

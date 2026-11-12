@@ -5,6 +5,7 @@ package repair
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"strings"
 
@@ -14,33 +15,59 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
-var dockerCheck = Check{
-	Name:    "Docker image and container",
+var containerCheck = Check{
+	Name:    "container image and old containers",
 	Applies: func(c *config.Config) bool { return c.RunMode != "native" },
 	Look: func(ctx context.Context, h *Host) ([]Finding, error) {
-		image := h.Cfg.DockerImage
+		rt, image := h.Cfg.RunMode, h.Cfg.Image
 		var found []Finding
-		if _, err := h.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"docker", "image", "inspect", "--format", "{{.Id}}", image}}); err != nil {
+		if _, err := h.Run.Run(ctx, host.Cmd{Look: true, Sudo: true, Args: []string{rt, "image", "inspect", "--format", "{{.Id}}", image}}); err != nil {
 			found = append(found, Finding{
-				Problem: "image " + image + " isn't there, or docker can't be asked: " + err.Error(),
+				Problem: "image " + image + " isn't there, or " + rt + " can't be asked: " + err.Error(),
 				Fixed:   "image " + image + " pulled",
-				Fix:     h.fix("docker", "pull", image),
+				Fix:     h.fix(rt, "pull", image),
 			})
 		}
-		state, err := launch.ContainerState(ctx, h.Run)
-		if err != nil {
-			return found, nil // the image finding already says docker can't be asked
-		}
-		if state != "" && state != "running" {
+		// A runMode change can leave the old runtime's container behind.
+		for _, other := range launch.Runtimes {
+			if other != rt && !launch.Installed(other) {
+				continue
+			}
+			state, err := launch.ContainerState(ctx, h.Run, other)
+			if err != nil || state == "" || state == "running" {
+				continue // the image finding already says when runMode's runtime can't be asked
+			}
 			found = append(found, Finding{
-				Problem: "an old container, " + launch.Container + ", is still there, " + state,
-				Fixed:   "old container " + launch.Container + " removed",
-				Fix:     h.fix("docker", "rm", launch.Container),
+				Problem: "an old container, " + launch.Container + ", is still there under " + other + ", " + state,
+				Fixed:   "old container " + launch.Container + " removed from " + other,
+				Fix:     h.fix(other, "rm", launch.Container),
 			})
 		}
 		return found, nil
 	},
 }
+
+// catatonitCheck: Podman's --init runs catatonit, and fails to start the
+// container without it.
+var catatonitCheck = Check{
+	Name:    "catatonit, for Podman's --init",
+	Applies: func(c *config.Config) bool { return c.RunMode == "podman" },
+	Look: func(ctx context.Context, h *Host) ([]Finding, error) {
+		for _, p := range catatonitPaths {
+			if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+				return nil, nil
+			}
+		}
+		if launch.Installed("catatonit") {
+			return nil, nil
+		}
+		return []Finding{{Problem: "catatonit isn't installed, so Podman can't start the container; apt-get install catatonit adds it"}}, nil
+	},
+}
+
+// catatonitPaths are where Podman looks for it, as init_path's default and
+// Debian's package put it. A var so tests can give their own.
+var catatonitPaths = []string{"/usr/libexec/podman/catatonit", "/usr/bin/catatonit"}
 
 var datasetCheck = Check{
 	Name:    "ZFS dataset",

@@ -147,7 +147,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		srv = &launch.Native{Kit: kit}
 	} else {
 		kit.Console = launch.DockerConsole{Socket: launch.DockerSocket(), Container: launch.Container, DryRun: inv.opts.dryRun, Out: stdout}
-		srv = &launch.Docker{Kit: kit, IDs: launch.HostIDs}
+		srv = &launch.Boxed{Kit: kit, IDs: launch.HostIDs, Runtime: inv.cfg.RunMode}
 	}
 	switch name {
 	case "stop":
@@ -167,7 +167,7 @@ func (inv invocation) pluginsFile() string {
 }
 
 // repairSteps gives the checks around the safe settings and plugins. It's a
-// var so tests don't look at the host's real accounts and docker.
+// var so tests don't look at the host's real accounts and runtimes.
 var repairSteps = func(inv invocation) (h *repairpkg.Host, before, after []repairpkg.Check) {
 	runner := host.NewExec(false)
 	runner.QuietErr = true

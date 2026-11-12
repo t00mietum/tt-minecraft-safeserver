@@ -30,9 +30,9 @@ func TestOpenConsole(t *testing.T) {
 	if err := g.d.OpenConsole(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"docker attach --sig-proxy=false --detach-keys=ctrl-c tt-minecraftd"}
+	want := []string{"sudo -v", "sudo docker attach --sig-proxy=false --detach-keys=ctrl-c tt-minecraftd"}
 	out := g.out.String()
-	if got := g.changes(); !reflect.DeepEqual(got, want) || !g.r.Ran[1].Tty ||
+	if got := g.changes(); !reflect.DeepEqual(got, want) || !g.r.Ran[len(g.r.Ran)-2].Tty ||
 		!strings.HasPrefix(out, consoleHello) || !strings.Contains(out, "Detached") {
 		t.Errorf("docker, detached: ran %q, output %q", got, out)
 	}
@@ -55,17 +55,17 @@ func TestOpenConsole(t *testing.T) {
 	}
 
 	g = newRig(t)
-	g.states = []string{"running", "exited"}
+	g.states = []string{"running", "running", "exited"}
 	if err := g.d.OpenConsole(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.changes(); len(got) != 2 || !strings.Contains(got[1], "chown -R -- alice:minecraftd") {
+	if got := g.changes(); len(got) != 3 || !strings.Contains(got[2], "chown -R -- alice:minecraftd") {
 		t.Errorf("docker, stopped from the console: ran %q", got)
 	}
 
 	g = newRig(t)
 	g.states = []string{"exited"}
-	if err := g.d.OpenConsole(context.Background()); err == nil || !strings.Contains(err.Error(), "isn't running") || len(g.changes()) != 0 {
+	if err := g.d.OpenConsole(context.Background()); err == nil || !strings.Contains(err.Error(), "isn't running") || len(g.changes()) != 1 {
 		t.Errorf("docker, not running: err %v, ran %q", err, g.changes())
 	}
 

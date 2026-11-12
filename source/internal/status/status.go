@@ -88,38 +88,42 @@ func (p *Probe) server(ctx context.Context) ([]Line, running) {
 	if p.Cfg.RunMode == "native" {
 		return p.nativeServer(ctx)
 	}
-	return p.dockerServer(ctx)
+	return p.boxedServer(ctx)
 }
 
-func (p *Probe) dockerServer(ctx context.Context) ([]Line, running) {
+func (p *Probe) boxedServer(ctx context.Context) ([]Line, running) {
 	run := running{memory: -1}
-	state, err := launch.ContainerState(ctx, p.Run)
+	rt := p.Cfg.RunMode
+	mode := rt + " mode"
+	state, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: launch.PsArgs(rt)})
 	if err != nil {
-		return []Line{{"Server", "can't ask docker: " + err.Error()}}, run
+		return []Line{{"Server", "can't ask " + rt + ": " + err.Error()}}, run
 	}
-	switch state {
+	switch s := strings.TrimSpace(string(state)); s {
 	case "":
-		return p.notRunning(ctx, "not running in docker mode"), run
+		return p.notRunning(ctx, "not running in "+mode), run
 	case "running":
 	default:
-		return p.notRunning(ctx, "not running in docker mode; the container is "+state), run
+		return p.notRunning(ctx, "not running in "+mode+"; the container is "+s), run
 	}
 	run.up = true
-	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"docker", "inspect", "--format", "{{.State.StartedAt}} {{.State.Pid}} {{.Config.User}}", launch.Container}})
-	fields := strings.Fields(string(out))
-	if err != nil || len(fields) < 2 {
+	// The time goes last, since Podman's has spaces in it.
+	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{rt, "inspect", "--format", "{{.State.Pid}} {{.Config.User}} {{.State.StartedAt}}", launch.Container}})
+	pid, rest, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
+	user, startedAt, _ := strings.Cut(rest, " ")
+	if err != nil || pid == "" {
 		run.memError = "unknown"
-		return []Line{{"Server", "running in docker mode"}}, run
+		return []Line{{"Server", "running in " + mode}}, run
 	}
-	text := "running in docker mode"
-	if len(fields) > 2 {
-		uid, _, _ := strings.Cut(fields[2], ":")
+	text := "running in " + mode
+	if user != "" {
+		uid, _, _ := strings.Cut(user, ":")
 		text += ", as " + userName(uid)
 	}
-	if started, err := time.Parse(time.RFC3339Nano, fields[0]); err == nil {
+	if started, ok := startTime(startedAt); ok {
 		text += ", for " + since(p.Now().Sub(started))
 	}
-	run.memory, run.memError = p.cgroupMemory(fields[1])
+	run.memory, run.memError = p.cgroupMemory(pid)
 	return []Line{{"Server", text}}, run
 }
 
@@ -509,4 +513,15 @@ func groupName(gid string) string {
 		return g.Name
 	}
 	return gid
+}
+
+// startTime reads Docker's RFC 3339 time, or Podman's, which is Go's default
+// time format.
+func startTime(s string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }

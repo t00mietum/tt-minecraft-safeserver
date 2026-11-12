@@ -16,6 +16,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -25,7 +26,7 @@ func testHost(t *testing.T, passwd, group string, reply func(c host.Cmd) ([]byte
 	t.Helper()
 	dir := t.TempDir()
 	h := &Host{
-		Cfg:    &config.Config{RunUser: "minecraftd", RunGroup: "minecraftd", OwnerAfterStop: "alice", ServerDir: filepath.Join(dir, "server")},
+		Cfg:    &config.Config{RunMode: "docker", RunUser: "minecraftd", RunGroup: "minecraftd", OwnerAfterStop: "alice", ServerDir: filepath.Join(dir, "server")},
 		Passwd: filepath.Join(dir, "passwd"),
 		Group:  filepath.Join(dir, "group"),
 	}
@@ -38,6 +39,9 @@ func testHost(t *testing.T, passwd, group string, reply func(c host.Cmd) ([]byte
 	}
 	f := &host.Fake{Reply: reply}
 	h.Run = f
+	was := launch.Installed
+	launch.Installed = func(string) bool { return false }
+	t.Cleanup(func() { launch.Installed = was })
 	return h, f
 }
 
@@ -389,22 +393,67 @@ func TestDockerCheck(t *testing.T) {
 		}
 		return nil, nil
 	})
-	h.Cfg.DockerImage = "temurin@sha256:abc"
-	if got := look(t, h, dockerCheck); len(got) != 0 {
+	h.Cfg.Image = "temurin@sha256:abc"
+	if got := look(t, h, containerCheck); len(got) != 0 {
 		t.Errorf("image, no container: %q", got)
 	}
 	noImage, state = true, "exited"
 	want := []string{"sudo docker pull temurin@sha256:abc", "sudo docker rm tt-minecraftd"}
-	if got := fixAll(t, h, f, dockerCheck); !reflect.DeepEqual(got, want) {
+	if got := fixAll(t, h, f, containerCheck); !reflect.DeepEqual(got, want) {
 		t.Errorf("no image, old container: %q", got)
 	}
 	noImage, state = false, "running"
-	if got := look(t, h, dockerCheck); len(got) != 0 {
+	if got := look(t, h, containerCheck); len(got) != 0 {
 		t.Errorf("running: %q", got)
 	}
 	h.Cfg.RunMode = "native"
-	if dockerCheck.Applies(h.Cfg) {
+	if containerCheck.Applies(h.Cfg) {
 		t.Error("applies in native mode")
+	}
+}
+
+// Podman mode also finds an old container left under Docker, and needs
+// catatonit.
+func TestPodmanChecks(t *testing.T) {
+	defer testid.Line(t, "df64h")
+	states := map[string]string{"podman": "running", "docker": "exited"}
+	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
+		if c.Args[1] == "ps" {
+			return []byte(states[c.Args[0]] + "\n"), nil
+		}
+		return nil, nil
+	})
+	h.Cfg.RunMode, h.Cfg.Image = "podman", "docker.io/library/temurin@sha256:abc"
+	if got := look(t, h, containerCheck); len(got) != 0 {
+		t.Errorf("docker not installed: %q", got)
+	}
+	launch.Installed = func(name string) bool { return name == "docker" }
+	if got := fixAll(t, h, f, containerCheck); !reflect.DeepEqual(got, []string{"sudo docker rm tt-minecraftd"}) {
+		t.Errorf("old docker container: %q", got)
+	}
+	for _, c := range f.Ran {
+		if c.Args[0] == "podman" && !c.Sudo {
+			t.Errorf("podman without sudo: %q", c.Args)
+		}
+	}
+
+	if !catatonitCheck.Applies(h.Cfg) {
+		t.Error("catatonit check left out in podman mode")
+	}
+	was := catatonitPaths
+	t.Cleanup(func() { catatonitPaths = was })
+	dir := t.TempDir()
+	catatonitPaths = []string{filepath.Join(dir, "catatonit")}
+	hasAll(t, "no catatonit", look(t, h, catatonitCheck), "catatonit isn't installed", "apt-get install catatonit")
+	if err := os.WriteFile(catatonitPaths[0], nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, catatonitCheck); len(got) != 0 {
+		t.Errorf("catatonit there: %q", got)
+	}
+	h.Cfg.RunMode = "docker"
+	if catatonitCheck.Applies(h.Cfg) {
+		t.Error("catatonit check in docker mode")
 	}
 }
 
