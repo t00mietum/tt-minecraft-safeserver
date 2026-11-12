@@ -155,12 +155,12 @@ const (
 
 func TestAccountCheck(t *testing.T) {
 	defer testid.Line(t, "df5zc")
-	h, f := testHost(t, goodPasswd, goodGroup, nil)
+	h, _ := testHost(t, goodPasswd, goodGroup, nil)
 	if got := look(t, h, accountCheck); len(got) != 0 {
 		t.Errorf("good account: %q", got)
 	}
 
-	h, f = testHost(t, "root:x:0:0::/root:/bin/bash\n", "root:x:0:\n", nil)
+	h, f := testHost(t, "root:x:0:0::/root:/bin/bash\n", "root:x:0:\n", nil)
 	want := []string{
 		"sudo groupadd --system minecraftd",
 		"sudo useradd --system --gid minecraftd --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin minecraftd",
@@ -310,7 +310,7 @@ func TestOwnershipCheck(t *testing.T) {
 	hasAll(t, "running, open file", look(t, h, ownershipCheck), "has 1 file with modes other than ug+rwX,o-rwx [fix]")
 
 	// Stopped, the trees go back to the operator.
-	h, f = ownHost(t, true, "")
+	h, _ = ownHost(t, true, "")
 	h.Cfg.OwnerAfterStop = "bob"
 	if _, err := ownershipCheck.Look(context.Background(), h); err == nil || !strings.Contains(err.Error(), "account bob doesn't exist") {
 		t.Errorf("no operator account: %v", err)
