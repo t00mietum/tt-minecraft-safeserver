@@ -50,12 +50,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Check Geyser's first config against the next start
 	- ID: 2026111117052206
 	- Type: Task
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-170522
 	- Opened by:
 	- Related IDs: 2026111116415196 2026111112554261
 	- Requirements: After a new setup with `bedrock` on, start Paper on a throwaway tree, stop it, and start it again. Check that the config.yml Geyser wrote at its first start passes `start`'s check, with default and non-default `bindIP` and `bedrockPort`. If it doesn't, setup or `start` should set Geyser's keys before the first start.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: With no `config.yml`, Geyser 2.12.1 build 1300's first start on Paper 26.3-249 wrote `java.auth-type: online` and ran with it, so the next `start` refused. Its address and port were Geyser's own, `0.0.0.0` and 19132, not `bindIP` and `bedrockPort`.
+		- With `bedrock` on, a missing Geyser `config.yml` is now wrong, and the safe settings fix writes one with only `bedrock.address`, `bedrock.port`, and `java.auth-type`, making `plugins/` and `plugins/Geyser-Spigot/` when missing. Setup's safe settings step writes it before the first start.
+		- Verified: on a throwaway tree, a first start with that file, both with defaults and with `bindIP` 127.0.0.1 and `bedrockPort` 19555, listened where the config says, kept the 3 keys, and filled in Geyser's other settings. `start`'s check passed after the first start and after a second one.
+		- Verified: df67a and the new df5yx lines fail with the change taken out, and pass with it in.
+		- 20261111: df5yx `TestGeyserSkipped` expects 3 missing keys with no `config.yml`, was none. df5yk and df5ym run with `bedrock` off, since they check `server.properties` only.
+	- Decisions:
+		- The fix goes in the safe settings, not in `start`, since `start` only checks and `repair` fixes, as for a missing `server.properties`. Setup and `repair` both get it.
+		- A missing file is wrong whether or not the Geyser jar is there, since setup writes the safe settings before it downloads Geyser. Setup and `repair` report a missing jar on their own.
+		- New folders are mode 0770 and owned like their parent, and the file 0660, per Tree ownership. An existing folder's mode is left alone.
+		- The file holds only the 3 keys, with no `config-version`. Geyser took it as current and added the rest of its layout, including the 3 NetherNet keys with the wanted values.
+		- Swept: `scanGeyser` is the only reader of Geyser's file, shared by `Check` and `Fix`. The Paper YAML files stay fine when missing, since each of their keys defaults to off. Floodgate's config pins no keys.
+	- Branch: r1112
+	- Test case: df67a, df5yx
+	- Closed: 20261111-174957
 
 - repair sends a missing Geyser to setup, which only runs repair again
 	- ID: 2026111117052190

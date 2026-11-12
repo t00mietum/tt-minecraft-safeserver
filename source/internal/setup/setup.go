@@ -645,8 +645,8 @@ func (s *Setup) bedrockBuilds(ctx context.Context, c config.Config) ([]geyser.Bu
 }
 
 // getBedrock downloads Geyser and Floodgate, and approves them with their
-// source, for update --plugins. Their configs are left to the plugins' own
-// first start, and the safe settings check Geyser's after it.
+// source, for update --plugins. The safe settings have written Geyser's keys
+// by then; Floodgate's config is left to its first start.
 func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser.Build) error {
 	if len(builds) == 0 {
 		return nil
