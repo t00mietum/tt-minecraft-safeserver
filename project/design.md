@@ -178,7 +178,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 ### status and watch
 
-- `status` runs once, and doesn't need sudo. It shows:
+- `status` runs once, and doesn't need sudo. It finds the server in the process table, and the mode from the server's cgroup, so it finds a container under either runtime, whatever `runMode` says. A stopped container doesn't show, since only the runtime knows of it, and a rootful runtime needs sudo. It shows:
 	- Whether the server runs, in which mode, as which account, and for how long.
 	- The Minecraft and Paper versions, and players online. Those come from a server list ping on localhost, so they don't need RCON or query.
 	- Memory use against the cap.
@@ -189,7 +189,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- Who owns the trees, and whether the boot unit is enabled.
 	- The last lines of the log, cut to the terminal width.
 
-- When the server isn't running, `status` names any other Paper server that is, such as one the old scripts started.
+- `status` names any other Paper server that runs, such as one the old scripts started, or one in a container this tool didn't start.
 
 - A part that can't be read, such as a file the operator's group can't see, says why, and the rest still shows.
 

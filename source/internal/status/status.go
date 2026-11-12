@@ -2,7 +2,8 @@
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
 // Package status gathers what status and watch show. It only looks, and needs
-// no sudo. See design.md, status and watch.
+// no sudo, so it finds the server in the process table. See design.md, status
+// and watch.
 package status
 
 import (
@@ -23,7 +24,6 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
@@ -41,8 +41,7 @@ type Probe struct {
 	Run         host.Runner
 	Cfg         *config.Config
 	PluginsFile string
-	Now         func() time.Time
-	// ReadFile reads /proc and /sys, for the container's memory.
+	// ReadFile reads /proc and /sys, for the server's mode and memory.
 	ReadFile func(string) ([]byte, error)
 	Ping     func(ctx context.Context, addr string) (server.PingReply, error)
 	sums     plugins.Sums
@@ -50,7 +49,7 @@ type Probe struct {
 
 // NewProbe gives a Probe on the real host.
 func NewProbe(r host.Runner, c *config.Config, pluginsFile string) *Probe {
-	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, Now: time.Now, ReadFile: os.ReadFile, Ping: server.Ping}
+	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping}
 }
 
 // Line is one labeled line. A Line with no label goes on under the one above.
@@ -85,46 +84,27 @@ func (p *Probe) Take(ctx context.Context) Report {
 }
 
 func (p *Probe) server(ctx context.Context) ([]Line, running) {
-	if p.Cfg.RunMode == "native" {
-		return p.nativeServer(ctx)
-	}
-	return p.boxedServer(ctx)
-}
-
-func (p *Probe) boxedServer(ctx context.Context) ([]Line, running) {
 	run := running{memory: -1}
-	rt := p.Cfg.RunMode
-	mode := rt + " mode"
-	state, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: launch.PsArgs(rt)})
+	f, err := p.find(ctx)
 	if err != nil {
-		return []Line{{"Server", "can't ask " + rt + ": " + err.Error()}}, run
+		return []Line{{"Server", "can't list processes: " + err.Error()}}, run
 	}
-	switch s := strings.TrimSpace(string(state)); s {
-	case "":
-		return p.notRunning(ctx, "not running in "+mode), run
-	case "running":
-	default:
-		return p.notRunning(ctx, "not running in "+mode+"; the container is "+s), run
+	lines := []Line{{"Server", "not running in " + p.Cfg.RunMode + " mode"}}
+	if f.mode != "" {
+		run.up = true
+		text := "running in " + f.mode + " mode, as " + userName(f.proc.uid) + ", for " + since(f.proc.age)
+		if f.mode != p.Cfg.RunMode {
+			text += "; runMode says " + p.Cfg.RunMode
+		}
+		lines[0].Text = text
+		run.memory, run.memError = p.cgroupMemory(f.proc.pid)
 	}
-	run.up = true
-	// The time goes last, since Podman's has spaces in it.
-	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{rt, "inspect", "--format", "{{.State.Pid}} {{.Config.User}} {{.State.StartedAt}}", launch.Container}})
-	pid, rest, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
-	user, startedAt, _ := strings.Cut(rest, " ")
-	if err != nil || pid == "" {
-		run.memError = "unknown"
-		return []Line{{"Server", "running in " + mode}}, run
+	// start refuses to run beside another one, such as one the old scripts
+	// started.
+	for _, o := range f.others {
+		lines = append(lines, Line{"", "another Paper server is running: pid " + o.pid + ", as " + userName(o.uid)})
 	}
-	text := "running in " + mode
-	if user != "" {
-		uid, _, _ := strings.Cut(user, ":")
-		text += ", as " + userName(uid)
-	}
-	if started, ok := startTime(startedAt); ok {
-		text += ", for " + since(p.Now().Sub(started))
-	}
-	run.memory, run.memError = p.cgroupMemory(pid)
-	return []Line{{"Server", text}}, run
+	return lines, run
 }
 
 // cgroupMemory reads memory.current from the cgroup the process is in.
@@ -148,54 +128,6 @@ func (p *Probe) cgroupMemory(pid string) (int64, string) {
 		}
 	}
 	return -1, "unknown, without cgroup v2"
-}
-
-func (p *Probe) nativeServer(ctx context.Context) ([]Line, running) {
-	run := running{memory: -1, memError: "unknown"}
-	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"systemctl", "show", "--timestamp=unix", "--property=ActiveState,ActiveEnterTimestamp,MemoryCurrent,User", launch.Unit}})
-	if err != nil {
-		return []Line{{"Server", "can't ask systemd: " + err.Error()}}, run
-	}
-	props := map[string]string{}
-	for _, l := range strings.Split(string(out), "\n") {
-		if k, v, ok := strings.Cut(l, "="); ok {
-			props[k] = strings.TrimSpace(v)
-		}
-	}
-	if !launch.UnitUp(props["ActiveState"]) {
-		return p.notRunning(ctx, "not running in native mode"), run
-	}
-	run.up = true
-	text := "running in native mode"
-	if s := props["ActiveState"]; s != "active" {
-		text += " (" + s + ")"
-	}
-	if u := props["User"]; u != "" {
-		text += ", as " + u
-	}
-	if ts, ok := strings.CutPrefix(props["ActiveEnterTimestamp"], "@"); ok {
-		if secs, err := strconv.ParseInt(ts, 10, 64); err == nil && secs > 0 {
-			text += ", for " + since(p.Now().Sub(time.Unix(secs, 0)))
-		}
-	}
-	if n, err := strconv.ParseInt(props["MemoryCurrent"], 10, 64); err == nil {
-		run.memory, run.memError = n, ""
-	}
-	return []Line{{"Server", text}}, run
-}
-
-// notRunning also names any other Paper server, such as one the old scripts
-// started, since start refuses to run beside it.
-func (p *Probe) notRunning(ctx context.Context, text string) []Line {
-	lines := []Line{{"Server", text}}
-	ps, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"ps", "-eo", "user=,pid=,args="}})
-	if err != nil {
-		return lines
-	}
-	for _, found := range server.RunningPaper(ps) {
-		lines = append(lines, Line{"", "another Paper server is running: " + found})
-	}
-	return lines
 }
 
 func (p *Probe) version(ctx context.Context, run running) []Line {
@@ -513,15 +445,4 @@ func groupName(gid string) string {
 		return g.Name
 	}
 	return gid
-}
-
-// startTime reads Docker's RFC 3339 time, or Podman's, which is Go's default
-// time format.
-func startTime(s string) (time.Time, bool) {
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
 }

@@ -23,6 +23,11 @@ import (
 // Container is the name and the label of the one container this tool runs.
 const Container = "tt-minecraftd"
 
+// Wrapper is the shell line the server starts under in a container. The
+// server runs with umask 0007, so new files stay out of reach of others.
+// status also knows the container by it.
+const Wrapper = `umask 0007 && exec "$@"`
+
 // pidsLimit leaves room for Paper's thread pools, which count as pids.
 const pidsLimit = 2048
 
@@ -282,8 +287,7 @@ func (d *Boxed) runArgs(mode StartMode) ([]string, error) {
 			return nil, err
 		}
 	}
-	// The server runs with umask 0007, so new files stay out of reach of others.
-	args = append(args, c.Image, "sh", "-c", `umask 0007 && exec "$@"`, "sh")
+	args = append(args, c.Image, "sh", "-c", Wrapper, "sh")
 	return append(args, server.JavaArgs(c, "java")...), nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -23,7 +24,16 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
-var now = time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+var cid = strings.Repeat("d8f5", 16)
+
+// boxedPs is the process table with the server in a container: the
+// container's init, then the server under it, 2h 12m old.
+func boxedPs(init string) string {
+	return "    0 4241 4200 7921 " + init + ` -- sh -c umask 0007 && exec "$@" sh java -Xms2G -Xmx2G -jar paper.jar --nogui
+    0 4242 4241 7920 java -Xms2G -Xmx2G -Dlog4j2.formatMsgNoLookups=true -jar paper.jar --nogui
+ 1001 5000    1  300 bash
+`
+}
 
 const ssOut = `tcp   LISTEN 0 50  *:25565 *:*
 tcp   ESTAB  0 0   [::ffff:192.168.1.9]:25565 [::ffff:192.168.1.20]:51000
@@ -40,6 +50,7 @@ type rig struct {
 	r       *host.Fake
 	dir     string
 	replies map[string]string
+	files   map[string]string
 	pinged  string
 }
 
@@ -95,14 +106,12 @@ func newRig(t *testing.T) *rig {
 		}
 		return []byte(g.replies[key]), nil
 	}
-	files := map[string]string{
-		"/proc/4242/cgroup": "0::/system.slice/docker-abc.scope\n",
-		"/sys/fs/cgroup/system.slice/docker-abc.scope/memory.current": "1073741824\n",
-	}
+	g.files = map[string]string{}
+	g.cgroup("4242", "/system.slice/docker-"+cid+".scope", 1<<30)
 	g.p = &Probe{
-		Run: g.r, Cfg: &cfg, PluginsFile: list, Now: func() time.Time { return now },
+		Run: g.r, Cfg: &cfg, PluginsFile: list,
 		ReadFile: func(f string) ([]byte, error) {
-			if s, ok := files[f]; ok {
+			if s, ok := g.files[f]; ok {
 				return []byte(s), nil
 			}
 			return nil, fs.ErrNotExist
@@ -121,6 +130,12 @@ func newRig(t *testing.T) *rig {
 	g.replies["ss -H"] = ssOut
 	g.replies["systemctl show tt-minecraftd.service"] = "enabled\n"
 	return g
+}
+
+// cgroup puts a process in a cgroup v2 path, with memory in use.
+func (g *rig) cgroup(pid, path string, memory int64) {
+	g.files["/proc/"+pid+"/cgroup"] = "0::" + path + "\n"
+	g.files["/sys/fs/cgroup"+path+"/memory.current"] = fmt.Sprint(memory) + "\n"
 }
 
 func (g *rig) text(t *testing.T, width int) string {
@@ -144,8 +159,7 @@ func wantLines(t *testing.T, out string, want ...string) {
 func TestStatusDocker(t *testing.T) {
 	defer testid.Line(t, "df5y7")
 	g := newRig(t)
-	g.replies["docker ps"] = "running\n"
-	g.replies["docker inspect"] = "4242 0:0 2026-11-11T09:47:30.123456789Z\n"
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
 	out := g.text(t, 0)
 	wantLines(t, out,
 		"Server:     running in docker mode, as root, for 2h 12m",
@@ -180,10 +194,15 @@ func TestStatusNative(t *testing.T) {
 	g := newRig(t)
 	g.p.Cfg.RunMode = "native"
 	g.p.Cfg.BindIP = "192.168.1.9"
-	g.replies["systemctl show tt-minecraftd-server.service"] = fmt.Sprintf("ActiveState=active\nActiveEnterTimestamp=@%d\nMemoryCurrent=536870912\nUser=minecraftd\n", now.Add(-50*time.Hour).Unix())
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.replies["ps -eo"] = fmt.Sprintf("%s 7000 1 180000 /usr/bin/java -Xmx2G -jar paper.jar --nogui\n", me.Uid)
+	g.cgroup("7000", "/system.slice/tt-minecraftd-server.service", 512<<20)
 	out := g.text(t, 0)
 	wantLines(t, out,
-		"Server:     running in native mode, as minecraftd, for 2d 2h",
+		"Server:     running in native mode, as "+me.Username+", for 2d 2h",
 		"Memory:     512 MiB of 4.0 GiB cap (12%)",
 	)
 	if g.pinged != "192.168.1.9:25565" {
@@ -191,17 +210,54 @@ func TestStatusNative(t *testing.T) {
 	}
 }
 
-// Podman's start time is Go's default format, with spaces in it, and a
-// container without --user has no user.
+// Rootful Podman, which status can't ask without sudo. crun puts the server in
+// a cgroup under the container's scope.
 func TestStatusPodman(t *testing.T) {
 	defer testid.Line(t, "df64j")
 	g := newRig(t)
 	g.p.Cfg.RunMode = "podman"
-	g.replies["podman ps"] = "running\n"
-	g.replies["podman inspect"] = "4242 0:0 2026-11-11 09:47:30.123456789 +0000 UTC\n"
+	g.replies["podman ps"] = "" // as without sudo
+	g.replies["ps -eo"] = boxedPs("/run/podman-init")
+	g.cgroup("4242", "/machine.slice/libpod-"+cid+".scope/container", 1<<30)
 	wantLines(t, g.text(t, 0), "Server:     running in podman mode, as root, for 2h 12m", "Memory:     1.0 GiB of 4.0 GiB cap (25%)")
-	g.replies["podman inspect"] = "4242  2026-11-11 01:47:30.123456789 -0800 PST\n"
-	wantLines(t, g.text(t, 0), "Server:     running in podman mode, for 2h 12m")
+	g.p.Cfg.RunMode = "docker"
+	wantLines(t, g.text(t, 0), "Server:     running in podman mode, as root, for 2h 12m; runMode says docker")
+}
+
+// Only a Paper server in a container that this tool started counts as the
+// server. Any other one is named, since start refuses to run beside it.
+func TestStatusOtherPaper(t *testing.T) {
+	defer testid.Line(t, "df652")
+	g := newRig(t)
+	g.replies["ps -eo"] = "    0 3001 3000 60 /sbin/docker-init -- /start\n    0 3002 3001 60 java -jar paper.jar\n" + boxedPs("/sbin/docker-init")
+	g.cgroup("3002", "/docker/"+cid, 1<<20)
+	g.cgroup("4242", "/user.slice/libpod-conmon-"+cid+".scope", 1<<30)
+	wantLines(t, g.text(t, 0),
+		"Server:     not running in docker mode",
+		"            another Paper server is running: pid 3002, as root",
+		"            another Paper server is running: pid 4242, as root",
+	)
+	g.cgroup("4242", "/docker/"+cid, 1<<30)
+	out := g.text(t, 0)
+	wantLines(t, out, "Server:     running in docker mode, as root, for 2h 12m", "            another Paper server is running: pid 3002, as root")
+	if strings.Contains(out, "pid 4242") {
+		t.Errorf("the server named as another one:\n%s", out)
+	}
+	for cg, want := range map[string]string{
+		"0::/system.slice/docker-" + cid + ".scope\n":                    "docker",
+		"0::/docker.slice/docker-batch.slice/docker-" + cid + ".scope\n": "docker",
+		"12:memory:/docker/" + cid + "\n1:name=systemd:/docker/" + cid:   "docker",
+		"0::/machine.slice/libpod-" + cid + ".scope\n":                   "podman",
+		"0::/machine.slice/libpod-conmon-" + cid + ".scope\n":            "",
+		"0::/system.slice/tt-minecraftd-server.service\n":                "native",
+		"0::/system.slice/tt-minecraftd.service\n":                       "",
+		"0::/user.slice/user-1001.slice/session-2.scope\n":               "",
+		"0::/docker-" + cid[:12] + ".scope\n":                            "",
+	} {
+		if got := cgroupMode([]byte(cg)); got != want {
+			t.Errorf("cgroupMode(%q) = %q, want %q", cg, got, want)
+		}
+	}
 }
 
 // Stopped, with an old script's server still up, a changed jar, and the
@@ -209,8 +265,7 @@ func TestStatusPodman(t *testing.T) {
 func TestStatusStopped(t *testing.T) {
 	defer testid.Line(t, "df5y9")
 	g := newRig(t)
-	g.replies["docker ps"] = "exited\n"
-	g.replies["ps -eo"] = "safeserver 811 /usr/bin/java -Xmx4G -jar paper-26.3-244.jar --nogui\n"
+	g.replies["ps -eo"] = "    0 811 1 99999 /usr/bin/java -Xmx4G -jar paper-26.3-244.jar --nogui\n"
 	g.replies["systemctl show tt-minecraftd.service"] = ""
 	g.p.Cfg.Firewall, g.p.Cfg.Bedrock = false, false
 	write(t, filepath.Join(g.dir, "plugins", "floodgate.jar"), "swapped")
@@ -220,8 +275,8 @@ func TestStatusStopped(t *testing.T) {
 	}
 	out := g.text(t, 0)
 	wantLines(t, out,
-		"Server:     not running in docker mode; the container is exited",
-		"            another Paper server is running: pid 811, as safeserver",
+		"Server:     not running in docker mode",
+		"            another Paper server is running: pid 811, as root",
 		"Version:    paper-26.3-244.jar",
 		"Memory:     none in use; 4.0 GiB cap",
 		"Ports:      tcp *:25565 listening, 2 connections",
@@ -246,7 +301,7 @@ func TestStatusBroken(t *testing.T) {
 	write(t, filepath.Join(g.dir, "whitelist.json"), "{not json")
 	out := g.text(t, 30)
 	wantLines(t, out,
-		"Server:     can't ask docker: ",
+		"Server:     can't list process",
 		"Ports:      can't list sockets",
 		"Whitelist:  can't read it: whi",
 		"Plugins:    no approved list a",

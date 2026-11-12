@@ -270,7 +270,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` and `cmd` write to the container's input through the Docker API socket. Without the `docker` group the operator can't open it, and Podman's socket needs `podman.socket` running. Find a way through sudo.
 	- 20261111: Checked by hand on Podman 5.4.2 and Docker. `attach` fed from a pipe won't do. Docker refuses it. Podman takes the line but never detaches, and Ctrl-C reaches the server as an interrupt. `attach` on a pseudo-terminal works under both, and Ctrl-C detaches it with the server still up. So the plan is to drop the API write and run `sudo <runtime> attach` on a pseudo-terminal.
 	- 20261111: Checked through sudo too, rootful, under both runtimes. The line arrives, Ctrl-C detaches, and the server stays up. sudo reused the password from the operator's terminal. Writing right away worked as well as waiting 2 s.
-	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) waits on a hand test, and 2026111116104067 (status without sudo) is queued.
+	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) waits on a hand test, and 2026111116104067 (status without sudo) waits on a hand test.
 	- Decisions:
 		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
 
@@ -336,7 +336,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Run modes: status without sudo
 	- ID: 2026111116104067
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. Rootful Podman wasn't tried here.
+	- Needs hand testing: beside the throwaway Paper server under rootful Podman, run `status` without sudo. It says the server runs in podman mode, with its account, time up, and memory.
 	- Priority: High
 	- Opened: 20261111-161040
 	- Opened by: t00mietum
@@ -344,6 +346,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq IDs: 2026111116104049
 	- Requirements:
 		- `status` and `watch` tell the modes apart without sudo, such as from the process table, and find a container under either runtime.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: df64j and df652 fail on the old code and pass on the new.
+		- Verified: the built `status`, without sudo, found a stand-in server in a rootful Docker container and in a rootless Podman one, named the mode, and read the memory.
+	- Decisions:
+		- `status` finds the server in `ps`, and its mode from its cgroup: `libpod-<id>.scope` is Podman, `docker-<id>.scope` or `docker/<id>` is Docker, and `tt-minecraftd-server.service` is native. Native mode uses this too, in place of `systemctl show`, so all 3 modes take one path.
+		- A Paper server in a container counts only when its parent, the container's init, runs `launch.Wrapper`. Any other Paper server is named, now also while the server runs.
+		- A mode other than `runMode`'s is shown, with what `runMode` says.
+		- A stopped container no longer shows, since only the runtime knows of it. design.md updated.
+		- The account comes from the uid, since `ps` cuts long names. The time up is the process's age.
+		- 20261111: asserts that changed: df5y9 expects "not running in docker mode", without "the container is exited", and "as root" for the old script's server; df5ya expects "can't list process"; df5y8 expects the test's own account, not minecraftd; df64j checks a `runMode` mismatch in place of a container with no user, since `ps` always gives a uid.
+		- Swept: `Probe` serves only `status` and `watch`; `start` and `repair` still find other servers through `server.PaperProcs`, which now uses the same `server.IsPaper`.
+	- Branch: r1112
+	- Test case: df5y7, df5y8, df5y9, df5ya, df64j, df652
 
 - setup
 	- ID: 2026111111065776
