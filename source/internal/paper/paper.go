@@ -105,6 +105,30 @@ func sortNewest(vs []string) {
 	slices.SortFunc(vs, func(a, b string) int { return slices.Compare(parts(b), parts(a)) })
 }
 
+// Java is the oldest Java major version Paper runs on for one Minecraft
+// version, from the API's version info.
+func (a API) Java(ctx context.Context, version string) (int, error) {
+	if !versionText.MatchString(version) {
+		return 0, fmt.Errorf("%q isn't a Minecraft version", version)
+	}
+	var info struct {
+		Version struct {
+			Java struct {
+				Version struct {
+					Minimum int `json:"minimum"`
+				} `json:"version"`
+			} `json:"java"`
+		} `json:"version"`
+	}
+	if err := a.fetch().JSON(ctx, a.base()+"/versions/"+version, &info); err != nil {
+		return 0, err
+	}
+	if n := info.Version.Java.Version.Minimum; n > 0 {
+		return n, nil
+	}
+	return 0, fmt.Errorf("version %s gives no Java version", version)
+}
+
 // ErrNoStable is a version with no stable build yet.
 var ErrNoStable = errors.New("no stable build")
 

@@ -48,6 +48,8 @@ func fakePaperMC(t *testing.T) {
 		switch r.URL.Path {
 		case "/paper":
 			fmt.Fprint(w, `{"versions":{"26.3":["26.3"]}}`)
+		case "/paper/versions/26.3":
+			fmt.Fprint(w, `{"version":{"id":"26.3","java":{"version":{"minimum":25}}}}`)
 		case "/paper/versions/26.3/builds":
 			fmt.Fprintf(w, `[{"id":249,"channel":"STABLE","downloads":{"server:default":{"name":"paper-26.3-249.jar","checksums":{"sha256":"%s"},"size":3,"url":"https://x/jar"}}}]`, strings.Repeat("ab", 32))
 		default:
@@ -382,7 +384,7 @@ func TestUpdate(t *testing.T) {
 	t.Cleanup(func() { asRoot = old })
 
 	code, out, _ := runArgs("update", "--help")
-	for _, want := range []string{"--paper ", "--plugins ", "--yes ", "--dry-run "} {
+	for _, want := range []string{"--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
 		if code != exitOK || !strings.Contains(out, want) {
 			t.Errorf("update --help lacks %q: %q", want, out)
 		}
@@ -401,7 +403,7 @@ func TestUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, msg := runArgs("update", "--dry-run", "--set=serverDir="+dir)
-	if code != exitOK || !strings.Contains(out, "from build 244 to build 249") || !strings.Contains(out, "would download paper-26.3-249.jar") {
+	if code != exitOK || !strings.Contains(out, "from build 244 to build 249") || !strings.Contains(out, "would download paper-26.3-249.jar") || !strings.Contains(out, "would pull docker.io/library/eclipse-temurin:25-jre,") {
 		t.Errorf("dry run: exit %d, stdout %q, stderr %q", code, out, msg)
 	}
 	if target, _ := os.Readlink(filepath.Join(dir, "paper.jar")); target != "paper-26.3-244.jar" {

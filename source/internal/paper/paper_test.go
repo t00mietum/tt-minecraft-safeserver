@@ -81,6 +81,30 @@ func TestNewestVersion(t *testing.T) {
 	}
 }
 
+func TestJava(t *testing.T) {
+	defer testid.Line(t, "df67p")
+	f := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/paper/versions/26.3":
+			fmt.Fprint(w, `{"version":{"id":"26.3","java":{"version":{"minimum":25},"flags":{"recommended":[]}}},"builds":[249]}`)
+		case "/paper/versions/old":
+			fmt.Fprint(w, `{"version":{"id":"old"},"builds":[1]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(f.Close)
+	api := API{Base: f.URL + "/paper", Client: f.Client(), UserAgent: "tt-minecraftd/test"}
+	if n, err := api.Java(context.Background(), "26.3"); err != nil || n != 25 {
+		t.Errorf("got %d, %v; want 25", n, err)
+	}
+	for version, want := range map[string]string{"old": "no Java version", "../x": "isn't a Minecraft version", "missing": "404"} {
+		if _, err := api.Java(context.Background(), version); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", version, err, want)
+		}
+	}
+}
+
 func TestNewestStable(t *testing.T) {
 	defer testid.Line(t, "df65q")
 	jar := []byte("jar")

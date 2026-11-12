@@ -679,7 +679,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refresh the pinned container image.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
-	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`) and 2026111117302973 (`--plugins`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302985 (`--image`), 2026111117302995 (`--self`), and 2026111117404480 (Modrinth and Hangar sources) are queued.
+	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), and 2026111117302985 (`--image`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302995 (`--self`), and 2026111117404480 (Modrinth and Hangar sources) are queued.
 
 - update: the command, and --paper
 	- ID: 2026111117302950
@@ -750,13 +750,30 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --image
 	- ID: 2026111117302985
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
 	- Parent ID: 2026111111065803
 	- Requirements:
 		- `--image` pulls the newest base image, checks that its `java -version` is new enough for this Paper, and pins its digest in the config.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: df67q fails with the Java check or the per-arch digest skip taken out, and passes with them in.
+		- Verified: with the live PaperMC API and eclipse-temurin:25-jre, under both Podman and Docker without sudo, the pull, the Java check, and the pin all worked, and both runtimes pinned the same digest.
+	- Decisions:
+		- The Java needed comes from the PaperMC API's version info (`java.version.minimum`), for the version the server runs after this update. `paper.API` gained `Java`.
+		- It follows the configured tag and never moves to another. An image with a digest and no tag is skipped. One with neither follows `latest`.
+		- The pull waits for the go-ahead, since it's what finds the digest, so a dry run can't show the new one. A registry lookup was the other way, but it would bypass the runtime's own registry settings.
+		- The pin is the tag's own (multi-arch) digest. Podman also lists the per-arch one, which it gives as `Digest`, and that's left out. Docker gives a short name, so names are compared without `docker.io/library/`.
+		- `java -version` runs as nobody, with no network, read-only, and no caps.
+		- Only the `image` line changes, through shcl's keep-lines save, since a plain save rewrites every key in lower case. shcl quotes the new value.
+		- The old image isn't removed, since a running server may still use it. Native mode skips the part, and says so only when `--image` is named.
+		- design.md's update section has the details.
+		- Swept: `PaperSource` has the one real implementation; the test fakes in update and main got `Java`. setup's own `PaperSource` doesn't need it.
+	- Branch: r1112
+	- Test case: df67p, df67q, df67r, df67s, df671
+	- Closed: 20261111-180421
 
 - update --self
 	- ID: 2026111117302995

@@ -42,6 +42,11 @@ func (p *fakePaper) NewestStable(_ context.Context, v string) (paper.Build, erro
 	return paper.Build{Version: v, ID: p.newest, Name: name, SHA256: strings.Repeat("cd", 32), Size: 3}, p.err
 }
 
+func (p *fakePaper) Java(_ context.Context, v string) (int, error) {
+	p.asked = append(p.asked, "java "+v)
+	return 25, p.err
+}
+
 func (p *fakePaper) Install(_ context.Context, dir string, b paper.Build) error {
 	p.installed = append(p.installed, b.Name)
 	if err := os.WriteFile(filepath.Join(dir, b.Name), []byte("new"), 0o600); err != nil {

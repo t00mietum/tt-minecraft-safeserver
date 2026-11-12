@@ -18,6 +18,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 )
@@ -26,6 +27,7 @@ import (
 type PaperSource interface {
 	NewestVersion(ctx context.Context) (string, error)
 	NewestStable(ctx context.Context, version string) (paper.Build, error)
+	Java(ctx context.Context, version string) (int, error)
 	Install(ctx context.Context, serverDir string, b paper.Build) error
 }
 
@@ -41,11 +43,13 @@ type GeyserSource interface {
 type Parts struct {
 	Paper   bool
 	Plugins bool
+	Image   bool
 }
 
 // Update holds what one run of the command needs.
 type Update struct {
 	Cfg         *config.Config
+	ConfigPath  string
 	PluginsFile string
 	Parts       Parts
 	Yes         bool
@@ -54,6 +58,8 @@ type Update struct {
 	Out         io.Writer
 	Paper       PaperSource
 	Geyser      GeyserSource
+	// Run pulls and tries the image.
+	Run host.Runner
 }
 
 // paperStep is a Paper build to move to, from what paper.jar links to now,
@@ -79,7 +85,7 @@ func (u *Update) Do(ctx context.Context) error {
 	}
 	parts := u.Parts
 	if parts == (Parts{}) {
-		parts = Parts{Paper: true, Plugins: true}
+		parts = Parts{Paper: true, Plugins: true, Image: true}
 	}
 	var plan []string
 	var ps *paperStep
@@ -101,6 +107,15 @@ func (u *Update) Do(ctx context.Context) error {
 			plan = append(plan, s.plan())
 		}
 	}
+	var is *imageStep
+	if parts.Image {
+		if is, err = u.imageLookup(ctx, func() (string, error) { return u.paperVersion(ctx, ps) }); err != nil {
+			return err
+		}
+		if is != nil {
+			plan = append(plan, is.plan(u.ConfigPath))
+		}
+	}
 	if len(plan) == 0 {
 		return nil
 	}
@@ -118,10 +133,35 @@ func (u *Update) Do(ctx context.Context) error {
 			return err
 		}
 	}
+	if is != nil {
+		if err := u.getImage(ctx, *is); err != nil {
+			return err
+		}
+	}
 	if !u.DryRun {
 		fmt.Fprintln(u.Out, "A running server goes on with what it started with, and uses the new builds from its next start.")
 	}
 	return nil
+}
+
+// paperVersion is the Minecraft version the server runs once this update is
+// done.
+func (u *Update) paperVersion(ctx context.Context, ps *paperStep) (string, error) {
+	if ps != nil {
+		return ps.to.Version, nil
+	}
+	cur, err := paper.Current(u.Cfg.ServerDir)
+	switch {
+	case err != nil:
+		return "", err
+	case cur != nil:
+		return cur.Version, nil
+	}
+	version, err := u.Paper.NewestVersion(ctx)
+	if err != nil {
+		return "", fmt.Errorf("can't get Paper: %w", err)
+	}
+	return version, nil
 }
 
 func (u *Update) paperLookup(ctx context.Context) (*paperStep, error) {

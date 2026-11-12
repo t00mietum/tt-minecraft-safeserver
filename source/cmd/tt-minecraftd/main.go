@@ -106,6 +106,7 @@ var commands = []command{
 	{"update", "Get newer builds. A running server uses them from its next start", func(fs *flag.FlagSet, o *options) {
 		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
 		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate")
+		fs.BoolVar(&o.parts.Image, "image", false, "Pull the newest build of the image's tag, check its Java, and pin its digest in the config")
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan, and change nothing")
 	}},
@@ -281,6 +282,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	}
 	u := &updatepkg.Update{
 		Cfg:         &inv.cfg,
+		ConfigPath:  inv.configPath,
 		PluginsFile: inv.pluginsFile(),
 		Parts:       inv.opts.parts,
 		Yes:         inv.opts.yes,
@@ -289,6 +291,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		Out:         w,
 		Paper:       paperAPI,
 		Geyser:      geyserAPI,
+		Run:         host.NewExec(inv.opts.dryRun),
 	}
 	return u.Do(ctx)
 }

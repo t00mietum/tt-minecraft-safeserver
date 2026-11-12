@@ -275,6 +275,12 @@ Common:  --config PATH, --set KEY=VALUE
 	- GeyserMC's sources are the ones known so far. A jar with another source is listed as skipped.
 
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
+	- It follows the tag in `image`, such as `25-jre`. It never moves to another tag. An image pinned by digest with no tag is skipped, since there's nothing to follow.
+	- The Java needed comes from the PaperMC API, for the Minecraft version the server runs once the update is done.
+	- The pull waits for the go-ahead, since that's what finds the new digest. So a dry run shows the pull but not the digest.
+	- The pin is the tag's own digest, the one for every arch, so the config works on another machine too. `java -version` runs in a container with no network, locked down like the server's.
+	- A Java that's too old leaves the config as it was, and names a newer tag to use. Only the `image` line in the config changes; the other lines stay as written.
+	- The old image stays, since a running server may still use it. Native mode has no image, so the part is skipped there.
 
 - A running server is left alone. It uses the new files on its next start.
 
