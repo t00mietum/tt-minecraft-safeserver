@@ -858,13 +858,18 @@ cicd/                        build, test, and release scripts
 ### ZFS snapshots
 
 - With `zfsDataset` set, `start` takes `<YYYYmmDD-HHMMSS>_pre_tt-minecraftd-start`, and `stop` takes `<YYYYmmDD-HHMMSS>_post_tt-minecraftd-stop` after the worlds are saved.
+	- A failed snapshot stops a start before the trees change hands. At `stop` the trees still go back, and the error is shown.
+	- A `stop` that finds the server already down takes none, since nothing changed since the last one.
 
 - Old ones get pruned on a grandfather-father-son schedule. The ones kept are the first, the newest 3, and the last of each of the last 7 days, 4 weeks, and 6 months.
 	- Only snapshots that match the tool's name pattern are touched.
+	- Days, weeks, and months count only the ones that have a snapshot, so a server left off for a while keeps its history. Weeks are ISO weeks, and the time in the name is what counts.
+	- The prune runs after every snapshot, `stop`'s too. A failed prune only warns.
 
 - Snapshots on the same pool aren't a backup. Copying them off of the host, such as with `zfs send`, is up to the host's own backup.
 
 - `setup` offers `zfs allow` for snapshot, destroy, and mount on the dataset, so this works without sudo.
+	- Each change is tried as the operator first, then through sudo, so whatever `zfs allow` grants is used, by user, group, or set.
 
 ### UI
 

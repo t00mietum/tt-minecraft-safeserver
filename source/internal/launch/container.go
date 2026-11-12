@@ -18,6 +18,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
 // Container is the name and the label of the one container this tool runs.
@@ -174,7 +175,6 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err := d.checkFirewall(ctx); err != nil {
 		return err
 	}
-	// The snapshot step comes with its own item.
 	args, err := d.runArgs()
 	if err != nil {
 		return err
@@ -191,6 +191,9 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 		if _, err := d.Run.Run(ctx, d.box(false, "rm", Container)); err != nil {
 			return err
 		}
+	}
+	if err := d.snapshot(ctx, zfs.PreStart); err != nil {
+		return err
 	}
 	warns, err := tree.ToServer(ctx, d.Run, d.Cfg)
 	d.warn(warns)

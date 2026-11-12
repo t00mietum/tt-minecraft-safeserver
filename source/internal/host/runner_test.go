@@ -102,6 +102,17 @@ func TestExecQuietErr(t *testing.T) {
 	}
 }
 
+// Quiet does the same for one command, such as a try with a fallback.
+func TestExecQuietCmd(t *testing.T) {
+	defer testid.Line(t, "df77r")
+	var errOut bytes.Buffer
+	e := &Exec{Err: &errOut}
+	_, err := e.Run(context.Background(), Cmd{Quiet: true, Look: true, Args: []string{"sh", "-c", "echo denied >&2; exit 1"}})
+	if err == nil || !strings.HasSuffix(err.Error(), ": denied") || errOut.Len() != 0 {
+		t.Errorf("err %v, stderr %q", err, errOut.String())
+	}
+}
+
 func TestExecStdin(t *testing.T) {
 	defer testid.Line(t, "df66j")
 	e := &Exec{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}

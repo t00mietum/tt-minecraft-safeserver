@@ -19,6 +19,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
 // Unit is the transient unit the server runs in. tt-minecraftd.service is
@@ -69,7 +70,6 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.checkFirewall(ctx); err != nil {
 		return err
 	}
-	// The snapshot step comes with its own item.
 	jars, err := LockedJars(n.Cfg.ServerDir)
 	if err != nil {
 		return err
@@ -91,6 +91,9 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 		}
 	default:
 		return fmt.Errorf("%s is already %s", Unit, state)
+	}
+	if err := n.snapshot(ctx, zfs.PreStart); err != nil {
+		return err
 	}
 	warns, err := tree.ToServer(ctx, n.Run, n.Cfg)
 	n.warn(warns)
