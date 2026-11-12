@@ -22,6 +22,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- status says no paper.jar when it can't read the folder
+	- ID: 2026111118183922
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-181839
+	- Opened by:
+	- Related IDs: 2026111112163393
+	- Incorrect behavior [Bug]: `status` shows "Version: Paper 26.3 (no paper.jar)" when the operator can't read the server folder, such as when not in the server's group yet, though `paper.jar` is there.
+	- Expected behavior [Bug]: It says the jar can't be read, and why, as the whitelist line does. design.md: a part that can't be read says why.
+	- Reproduced [Bug]: 20261111, beside a server under Podman, with the tree owned by an account and group the operator wasn't in.
+	- Possible cause [Bug]: `Probe.version` takes any error from resolving `paper.jar` as a missing jar.
+
 - plugins.shcl keys come back lower case after an approve
 	- ID: 2026111118053419
 	- Type: Bug
@@ -167,6 +180,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-11: design.md, how-to-connect.md, and `status` give `bedrockPort` as TCP and UDP. `start` checks, and `repair` sets, Geyser's `transport`, `webrtc-port`, and `clone-remote-port`, so NetherNet stays on `bedrockPort`. A `bedrockPort` equal to `gamePort` warns and moves.
 		- Verified: df5yy, df5yz, and the new df5y7 line each fail with the change taken out, and pass with it in.
+		- 20261111: Verified: a throwaway Paper 26.3-249 server with Geyser 2.12.1 and `bedrockPort` 19199, started by `start`, listened on 19199 over TCP and UDP, and `status` listed both. Geyser's log showed built-in signaling on that port, and STUN answers from 3478 and 19302.
+	- Stand-in: none (20261111). A Bedrock join needs a real client, and none runs here.
 	- Decisions:
 		- No plain UDP mode is left in Geyser to pin, so TCP is opened. `nxs` signaling avoids TCP but sends every join through an outside service. One port over both protocols is also what Geyser's own port forwarding guide says.
 		- The 3 pinned keys are fine when missing, since Geyser's defaults for them are right. Signaling `mode` isn't pinned.
@@ -195,15 +210,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` sends the `stop` console command first, with an optional countdown for the players.
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
-	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off) is done, 2026111112163174 (Docker mode) waits on a hand test, and 2026111112163284 (native mode) waits on a hand test, and 2026111112163393 (status and watch) waits on a hand test.
+	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off), 2026111112163174 (Docker mode), and 2026111112163393 (status and watch) are done, and 2026111112163284 (native mode) waits on a hand test.
 	- Test case: its children's: 2026111112162268: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn; 2026111112163174: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz; 2026111112163284: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6; 2026111112163393: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
-	- 20261111: children 2026111112163174 2026111112163284 2026111112163393 wait on UAT, and the rest are closed
+	- 20261111: children 2026111112163284 wait on UAT, and the rest are closed
 
 - Core commands: Docker mode start and stop
 	- ID: 2026111112163174
 	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. The console takes `stop` in a plain terminal; Paper's own console is still to see.
+	- Status: Done
 	- Needs hand testing: start and stop a throwaway Paper server in Docker mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, and the jars can't be written.
 	- Priority: High
 	- Opened: 20261111-121631
@@ -218,6 +232,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: the same `docker run` flags on a small image give a writable `/tmp`, read-only jars and image, and umask 0007. The console's `stop` reached a real container's terminal.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server with Geyser and Floodgate, `eula.txt` written beforehand: `start` loaded it in 18 s. In the container, `paper.jar` and the plugin jars refused writes, a plugin jar couldn't be moved, the tree took writes, and the server ran with umask 0007. `stop --warn 10` said 10, 5, 4, 3, 2, and 1 seconds in the chat, Paper saved the worlds and exited 0, and the trees went back. A second `start` removed the stopped container first.
+		- Stand-in: sudo passed the command straight through, as the operator, who is in the `docker` group, so Docker itself ran as root.
+	- Acceptance signoff: Self-closed: Docker mode start and stop passed on b23 at r1112 b47154b.
 	- Decisions:
 		- `stop` writes to the container's input through the Docker API, as `cmd` will, since `docker attach` refuses input that isn't a terminal. A line ends with a carriage return, which a cooked terminal takes, and a raw one such as Paper's should too.
 		- The countdown says the time left at the start, then at 60, 30, 10, and 5 to 1 seconds.
@@ -229,13 +246,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every container command uses `launch.Container`; `start` and `stop` both hand back through `tree.ToOperator`.
 	- Branch: r1111
 	- Test case: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz
+	- Closed: 20261111-181653
 
 - Core commands: native mode start and stop
 	- ID: 2026111112163284
 	- Type: Feature
 	- Status: Waiting on signoff
 		- Waits on the hand test below. No real unit was started here.
-	- Needs hand testing: start and stop a throwaway Paper server in native mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, the jars can't be written or swapped, and `systemctl show tt-minecraftd-server` lists the sandbox settings.
+	- Needs hand testing: start and stop a throwaway Paper server in native mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, the jars can't be written or swapped, and `systemctl show tt-minecraftd-server` lists the sandbox settings. Beside it, `status` and `watch` show it in native mode, `console` takes a typed command and detaches on Ctrl-C with the server up, and `cmd list` prints the player count.
+	- Stand-in: none (20261111). The unit needs root through `systemd-run`, which can't run unattended here. Docker and Podman passed the same steps on a real Paper server.
 	- Priority: High
 	- Opened: 20261111-121632
 	- Opened by: t00mietum
@@ -264,8 +283,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: status and watch
 	- ID: 2026111112163393
 	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. The ping was checked against a stand-in server only, not a real Paper.
+	- Status: Done
+		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
 	- Needs hand testing: run `status` and `watch` beside the throwaway Paper server from the Docker and native hand tests. Version, players, memory, ports, and the log tail show, and Ctrl-C ends `watch`.
 	- Priority: High
 	- Opened: 20261111-121633
@@ -277,6 +296,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: against a throwaway container named for the tool, `status` showed it running, its account, its time up, and its memory from the cgroup, then exited once stopped.
+		- 20261111: Verified beside a throwaway Paper 26.3-249 server in Docker mode: `status` showed docker mode, the account, the time up, Paper 26.3 with its jar, 0 of 20 players from the ping, the memory against its cap, the game port over TCP and the Bedrock port over TCP and UDP, the whitelist, ops, approved jars, trees, and the log tail. `watch` redrew it 7 times in 12 s, and Ctrl-C ended it with exit 0 and the server still up.
+	- Acceptance signoff: Self-closed: Docker mode status and watch passed on b23 at r1112 b47154b. Native mode goes with 2026111112163284.
 	- Decisions:
 		- Players and the version come from a server list ping on `bindIP`, or 127.0.0.1 when it's all addresses. The Paper build comes from the jar `paper.jar` links to, so it shows when stopped too.
 		- Memory is the cgroup's `memory.current`: the container's, found through its pid, or the unit's `MemoryCurrent`. Both work without sudo.
@@ -291,12 +312,13 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every file read from the tree goes through `openRegular` or `Sums.Sum`; both modes judge "running" through the same calls as `start`, `launch.ContainerState` and `launch.UnitUp`.
 	- Branch: r1111
 	- Test case: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
+	- Closed: 20261111-181653
 
 - console and cmd
 	- ID: 2026111111065750
 	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. Paper's own console wasn't tried.
+	- Status: Done
+		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
 	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
 	- Priority: High
 	- Opened: 20261111-110657
@@ -310,6 +332,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: against a stand-in container named like the server's, `console` detaches on Ctrl-C with the container still running, and `cmd` prints the line the stand-in logged. Without the detach keys, Ctrl-C ends the container. In tmux, Ctrl-C with the binding detaches and the session lives; without it the session ends.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server, in Docker mode and then rootless Podman: `console` showed Paper's console, a typed `list` got its reply, and Ctrl-C detached with exit 0 and the server still up. `cmd list` printed "There are 0 of a max of 20 players online".
+	- Acceptance signoff: Self-closed: console and cmd passed on b23 at r1112 b47154b, in Docker and Podman modes. Native mode goes with 2026111112163284.
 	- Decisions:
 		- Ctrl-C is the detach key in both modes, so it can't reach the server. Docker's `--detach-keys=ctrl-c`, and in tmux `bind-key -n C-c detach-client` at attach. design.md updated.
 		- `docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach.
@@ -321,6 +345,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
 	- Branch: r1111
 	- Test case: df5z6, df5z7, df5z8
+	- Closed: 20261111-181653
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
@@ -361,18 +386,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `stop` and `cmd` write to the container's input through the Docker API socket. Without the `docker` group the operator can't open it, and Podman's socket needs `podman.socket` running. Find a way through sudo.
 	- 20261111: Checked by hand on Podman 5.4.2 and Docker. `attach` fed from a pipe won't do. Docker refuses it. Podman takes the line but never detaches, and Ctrl-C reaches the server as an interrupt. `attach` on a pseudo-terminal works under both, and Ctrl-C detaches it with the server still up. So the plan is to drop the API write and run `sudo <runtime> attach` on a pseudo-terminal.
 	- 20261111: Checked through sudo too, rootful, under both runtimes. The line arrives, Ctrl-C detaches, and the server stays up. sudo reused the password from the operator's terminal. Writing right away worked as well as waiting 2 s.
-	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) waits on a hand test, and 2026111116104067 (status without sudo) waits on a hand test.
+	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) is done, and 2026111116104067 (status without sudo) waits on a hand test.
 	- Decisions:
 		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
 	- Test case: its children's: 2026111116104049: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh; 2026111116104058: df5xw; 2026111116104067: df5y7, df5y8, df5y9, df5ya, df64j, df652
-	- 20261111: children 2026111116104049 2026111116104058 2026111116104067 wait on UAT, and the rest are closed
+	- 20261111: children 2026111116104049 2026111116104067 wait on UAT, and the rest are closed
 
 - Run modes: Podman and Docker through sudo
 	- ID: 2026111116104049
 	- Type: Feature
 	- Status: Waiting on signoff
-		- Waits on the hand test below.
-	- Needs hand testing: under Podman, start a throwaway Paper server and stop it with `stop --warn 10`, with the operator out of the `docker` group. It loads, the jars can't be written, and `sudo podman ps` shows the container. Then set `runMode` to `docker` and check that `stop` finds a container that Podman started.
+		- Waits on the hand test below. Rootless Podman passed the same steps; only rootful Podman through a real sudo is left.
+	- Needs hand testing: under rootful Podman, start a throwaway Paper server and stop it with `stop --warn 10`, with the operator out of the `docker` group. It loads, the jars can't be written, and `sudo podman ps` shows the container. Then set `runMode` to `docker` and check that `stop` finds a container that Podman started.
+	- Stand-in: none (20261111). Rootful Podman and a real sudo can't run unattended here.
 	- Priority: High
 	- Opened: 20261111-161040
 	- Opened by: t00mietum
@@ -384,6 +410,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: Podman 5.4.2 takes every flag `start` passes. Its `ps` filter and `{{.State}}` give the same answers as Docker's, and its start time is Go's default format in local time, which `status` reads.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server under rootless Podman 5.4.2: `start` pulled the image and loaded the server in 24 s, `podman ps` showed the container, and in it the jars refused writes and a plugin jar couldn't be moved. `stop --warn 10` with `runMode` set to `docker` said the container is under podman, counted down, and stopped it.
+		- Stand-in: sudo passed the command straight through, so Podman ran rootless, and the tree changed hands inside Podman's user namespace.
 	- Decisions:
 		- The launcher is `launch.Boxed`, with the runtime as a field that defaults to `runMode`. `stop`, `console`, and `cmd` move it to the runtime that holds the container, and say so.
 		- Only `runMode`'s runtime has to answer. The other is asked only when installed, and an error from it counts as no container. A running container wins over a stopped one, so `stop` never takes an old stopped one for the server.
@@ -401,8 +429,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Run modes: console input through attach
 	- ID: 2026111116104058
 	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. Rootful through sudo wasn't tried here, and neither was Paper's own console.
+	- Status: Done
 	- Needs hand testing: on a throwaway Paper server under Podman, then Docker, with the operator out of the `docker` group: `cmd list` prints the player count, `stop --warn 10` counts down in the chat and stops it, and `console` detaches on Ctrl-C with the server still up.
 	- Priority: High
 	- Opened: 20261111-161040
@@ -415,6 +442,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- Verified: against throwaway busybox containers, rootless Podman 5.4.2 and Docker each got 2 lines in a row, detached, and stayed running.
 		- Verified: Ctrl-C written right after the line went to the stand-in in the same read, which is how attach passes it on to the server. The console now waits until the line has been read.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server, under rootless Podman and under Docker: `cmd list` printed the player count, `stop --warn 10` counted down in the chat and stopped it, and `console` took a typed `list` and detached on Ctrl-C with the server still up.
+		- Stand-in: sudo passed `attach` straight through, as the operator. The parent's 20261111 hand check covers `sudo <runtime> attach` rootful under both runtimes.
+	- Acceptance signoff: Self-closed: console lines through attach passed against Paper's own console on b23 at r1112 b47154b; rootful attach through sudo was checked by hand under the parent.
 	- Decisions:
 		- `launch.AttachConsole` replaces `DockerConsole`. It opens its own pty with `O_NOCTTY`, sets it raw before attach starts, and runs `sudo -n`, so sudo reuses the operator's terminal. As root it runs the runtime directly.
 		- Ctrl-C goes once the pty's input queue is empty, after the line was seen in it or 100 ms went by, since the pty hands bytes on a moment after they're written.
@@ -425,6 +455,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `stop`, `cmd`, and the countdown all send through `Kit.Console`; nothing reads `DOCKER_HOST` or the Docker socket now.
 	- Branch: r1112
 	- Test case: df5xw
+	- Closed: 20261111-181653
 
 - Run modes: status without sudo
 	- ID: 2026111116104067
@@ -432,6 +463,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Status: Waiting on signoff
 		- Waits on the hand test below. Rootful Podman wasn't tried here.
 	- Needs hand testing: beside the throwaway Paper server under rootful Podman, run `status` without sudo. It says the server runs in podman mode, with its account, time up, and memory.
+	- Stand-in: none (20261111). Rootful Podman can't run unattended here. Beside a real Paper server under rootless Podman, `status` said podman mode, with the account's uid, time up, and memory.
 	- Priority: High
 	- Opened: 20261111-161040
 	- Opened by: t00mietum
@@ -479,7 +511,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Waiting on signoff
 		- Waits on the hand test below. No root step ran here.
-	- Needs hand testing: on a throwaway host or VM with Podman, run `setup --dry-run`, then `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `paper.jar` links to a downloaded build, and `repair --check` is clean.
+	- Needs hand testing: on a throwaway host or VM with Podman, run `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `paper.jar` links to a downloaded build, and `repair --check` is clean.
+	- Stand-in: none (20261111). Every step but the dry run needs root, which can't run unattended here.
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
@@ -492,6 +525,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: each new test fails with its step broken, such as the plan not asked or the EULA not asked, and passes with it in place.
+		- 20261111: Verified: `setup --dry-run` for a new install, without sudo, gave the plan with Paper 26.3 build 249, Geyser 2.12.1 build 1300, and Floodgate 2.2.5 build 141 from the live download sites, and the Podman pull. It printed each command and PLAN line, wrote no config, and made no folder.
 	- Decisions:
 		- The config is written last, not first, so a setup that stops partway runs again as a new install. Every earlier step does nothing when it's done already. design.md updated.
 		- The config gets only the keys given, plus `runMode` and `serverDir`, so the rest keep following the defaults.
@@ -628,6 +662,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Status: Waiting on signoff
 		- Waits on the hand test below. No root step ran here.
 	- Needs hand testing: on a throwaway host or VM, `sudo tt-minecraftd setup`, then `repair --check` is clean, `nft list table inet tt_minecraftd` shows the rules, and `sudo systemctl restart nftables` leaves the table loaded. As the service account, `curl http://127.0.0.1` and a connection to a LAN address fail and bump `out_local` and `out_lan`. With `firewall: off`, `sudo tt-minecraftd repair` removes the unit and the table.
+	- Stand-in: none (20261111). Loading an nftables table and enabling a system unit need root, which can't run unattended here.
 	- Priority: High
 	- Opened: 20261111-171352
 	- Opened by:
