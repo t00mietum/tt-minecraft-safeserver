@@ -41,292 +41,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
 
-- Current Geyser needs TCP on the Bedrock port too
-	- ID: 2026111113015461
-	- Type: Bug
-	- Status: Waiting on signoff
-		- Waits on the hand test below. No real Bedrock client has joined over NetherNet yet.
-	- Needs hand testing: join from a phone on the LAN, and from outside with `bedrockPort` forwarded over TCP and UDP, to a throwaway Paper server with Geyser 2.12.1.
-	- Priority: High
-	- Opened: 20261111-130154
-	- Opened by:
-	- Related IDs: 2026111112554261, 2026111111065829
-	- Incorrect behavior [Bug]: design.md, the firewall, `status`, and the router forward advice treat `bedrockPort` as UDP only.
-	- Expected behavior [Bug]: Bedrock players can connect with the Geyser build in use.
-	- Possible cause [Bug]: Geyser 2.12.1 defaults to the NetherNet transport with built-in signaling, which listens on the Bedrock port over TCP as well as UDP. RakNet-only was removed. Its `nxs` signaling mode also calls out to an outside service, which `egress` may need to allow.
-	- Reproduced [Bug]: Confirmed from Geyser's source at build 1299 and its release notes, not on a live server.
-	- Actual cause [Bug]:
-		- Geyser removed RakNet-only on 2026-10-31. `transport` takes `nethernet`, the default, or `both`. Built-in signaling, the default, listens on `bedrock.port` over TCP, and NetherNet's game traffic uses the same port over UDP.
-		- To give players over the internet the public address, Geyser asks STUN servers on UDP 3478 and 19302, which `egress` `web` would block.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-11: design.md, how-to-connect.md, and `status` give `bedrockPort` as TCP and UDP. `start` checks, and `repair` sets, Geyser's `transport`, `webrtc-port`, and `clone-remote-port`, so NetherNet stays on `bedrockPort`. A `bedrockPort` equal to `gamePort` warns and moves.
-		- Verified: df5yy, df5yz, and the new df5y7 line each fail with the change taken out, and pass with it in.
-		- 20261111: Verified: a throwaway Paper 26.3-249 server with Geyser 2.12.1 and `bedrockPort` 19199, started by `start`, listened on 19199 over TCP and UDP, and `status` listed both. Geyser's log showed built-in signaling on that port, and STUN answers from 3478 and 19302.
-	- Stand-in: none (20261111). A Bedrock join needs a real client, and none runs here.
-	- Decisions:
-		- No plain UDP mode is left in Geyser to pin, so TCP is opened. `nxs` signaling avoids TCP but sends every join through an outside service. One port over both protocols is also what Geyser's own port forwarding guide says.
-		- The 3 pinned keys are fine when missing, since Geyser's defaults for them are right. Signaling `mode` isn't pinned.
-		- The firewall item gets a design change: with `bedrock` on and `egress` `web`, outbound UDP to 3478 and 19302 is allowed for STUN. Filed as a Check in questions.md.
-		- Tunnels, the server's dropped connection checks, and `joinRateLimit` against server list pings went under Needs more thought in design.md.
-		- 20261111: df5y7 `TestStatusDocker` also expects `tcp *:19132 listening, 0 connections`, and the shared `ss` reply gained that listener. Old: only the UDP line.
-		- Swept: every `bedrockPort` and `udp` use in source and docs; `status` is the only code that names a protocol. The firewall isn't built yet.
-		- 20261111: The Check picks stand: TCP and UDP on `bedrockPort`, and STUN allowed out under `egress` `web`. Both follow Geyser's own defaults, and need no new key.
-	- Actual fix [Bug]: Docs and `status` say TCP and UDP. Geyser's NetherNet port settings are pinned, and `bedrockPort` can't be `gamePort`.
-	- Branch: r1111
-	- Test case: df5yy, df5yz, df5y7
-
-- Core commands
-	- ID: 2026111111065711
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261111-110657
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065697
-	- Requirements:
-		- Build `start`, `stop`, `status`, and `watch`, per `design.md`, with the same options as `tt-monerod-safeserver`.
-		- Docker mode is the default, and a sandboxed systemd unit is the fallback.
-		- Add `--dry-run` and `--debug`.
-		- Add `--help`, `--about`, and `--version`.
-		- Hand the trees to the service account on start, and back on stop.
-		- `stop` sends the `stop` console command first, with an optional countdown for the players.
-		- Refuse to start when an old copy of the server is running under any account.
-	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
-	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off), 2026111112163174 (Docker mode), and 2026111112163393 (status and watch) are done, and 2026111112163284 (native mode) waits on a hand test.
-	- Test case: its children's: 2026111112162268: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn; 2026111112163174: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz; 2026111112163284: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6; 2026111112163393: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
-	- 20261111: children 2026111112163284 wait on UAT, and the rest are closed
-
-- Core commands: native mode start and stop
-	- ID: 2026111112163284
-	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. No real unit was started here.
-	- Needs hand testing: start and stop a throwaway Paper server in native mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, the jars can't be written or swapped, and `systemctl show tt-minecraftd-server` lists the sandbox settings. Beside it, `status` and `watch` show it in native mode, `console` takes a typed command and detaches on Ctrl-C with the server up, and `cmd list` prints the player count.
-	- Stand-in: none (20261111). The unit needs root through `systemd-run`, which can't run unattended here. Docker and Podman passed the same steps on a real Paper server.
-	- Priority: High
-	- Opened: 20261111-121632
-	- Opened by: t00mietum
-	- Parent ID: 2026111111065711
-	- Prereq IDs: 2026111112163174
-	- Requirements:
-		- `start` and `stop` in native mode: `systemd-run` with the sandbox options, and tmux on a socket under `/run/tt-minecraftd/`, per `design.md`.
-		- `paper.jar` and the plugin jars go to root at start.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: tmux `send-keys -l` drops a `;` that ends the text, and `-H 3b` sends it whole. The unit's settings pass `systemd-analyze verify`.
-	- Decisions:
-		- The unit is `tt-minecraftd-server.service`, since `tt-minecraftd.service` is the boot unit. It's `Type=forking`, since `tmux new-session -d` returns once the session is up. `--collect` drops it after a crash, so the next start can reuse the name.
-		- The jars also get `ReadOnlyPaths`, since the server can write their folder and could swap a root-owned jar. `OOMScoreAdjust=1000`, a swap of 0, and the pid limit match Docker mode. design.md updated.
-		- `$` in the server command goes as `$$`, since systemd expands variables there.
-		- "Is it up" is the unit's `ActiveState`. "Done loading" is a `logs/latest.log` that isn't the one from before the launch.
-		- `stop` past `stopTimeout` runs `systemctl stop`, with `TimeoutStopSec` set to the 30 seconds before SIGKILL.
-		- `--debug` attaches to tmux. A detach leaves the server and its trees as they are; an exit hands them back. `--foreground` checks the unit every 5 seconds.
-		- Console lines go through `tmux send-keys` as the service account, with `sudo -u`, or `runuser` when root. `host.Cmd` has an `As` field for it, which `console` and `cmd` can use too.
-		- Docker and native share the start and stop steps through `launch.Kit`. Docker's tests pass unchanged.
-		- 20261111: `TestMissingConfig` (df5xn) no longer expects `start --native --dry-run` to say it isn't built. `status` still does.
-		- Swept: every sudo goes through `host.Cmd`; both modes refuse others, count down, and hand back through `Kit`.
-	- Branch: r1111
-	- Test case: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6
-
-- Podman, Docker, and native modes
-	- ID: 2026111115090766
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261111-150907
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
-	- Related IDs: 2026111111303242
-	- Requirements:
-		- Add rootful Podman beside Docker and native mode, the same as in `tt-monerod-safeserver`. `runMode` takes `podman`, `docker`, or `native`, and the default is `podman`.
-		- Run both runtimes as root through sudo, with the same flags. The operator doesn't need the `docker` group anymore.
-		- `setup` picks `podman` when it's installed, else `docker`. With neither, it offers Podman and `catatonit` through apt, or native mode. It never installs Docker. `repair` checks for `catatonit`, since Podman's `--init` needs it.
-		- `stop`, `status`, and `repair` look for the tool's label in both runtimes, so a container started before a `runMode` change still gets found.
-		- Rename `dockerImage` to `image`, and give the image's full name with `docker.io/`, since Podman won't pick a registry on its own.
-		- Native mode is for a dedicated VM, or a host with neither runtime. It keeps its systemd sandbox.
-		- Update design.md, `Why Docker` included, and the NixOS module item.
-		- The hand tests for Docker mode, status, and console get run under Podman too.
-		- `stop` and `cmd` write to the container's input through the Docker API socket. Without the `docker` group the operator can't open it, and Podman's socket needs `podman.socket` running. Find a way through sudo.
-	- 20261111: Checked by hand on Podman 5.4.2 and Docker. `attach` fed from a pipe won't do. Docker refuses it. Podman takes the line but never detaches, and Ctrl-C reaches the server as an interrupt. `attach` on a pseudo-terminal works under both, and Ctrl-C detaches it with the server still up. So the plan is to drop the API write and run `sudo <runtime> attach` on a pseudo-terminal.
-	- 20261111: Checked through sudo too, rootful, under both runtimes. The line arrives, Ctrl-C detaches, and the server stays up. sudo reused the password from the operator's terminal. Writing right away worked as well as waiting 2 s.
-	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) is done, and 2026111116104067 (status without sudo) waits on a hand test.
-	- Decisions:
-		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
-	- Test case: its children's: 2026111116104049: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh; 2026111116104058: df5xw; 2026111116104067: df5y7, df5y8, df5y9, df5ya, df64j, df652
-	- 20261111: children 2026111116104049 2026111116104067 wait on UAT, and the rest are closed
-
-- Run modes: Podman and Docker through sudo
-	- ID: 2026111116104049
-	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. Rootless Podman passed the same steps; only rootful Podman through a real sudo is left.
-	- Needs hand testing: under rootful Podman, start a throwaway Paper server and stop it with `stop --warn 10`, with the operator out of the `docker` group. It loads, the jars can't be written, and `sudo podman ps` shows the container. Then set `runMode` to `docker` and check that `stop` finds a container that Podman started.
-	- Stand-in: none (20261111). Rootful Podman and a real sudo can't run unattended here.
-	- Priority: High
-	- Opened: 20261111-161040
-	- Opened by: t00mietum
-	- Parent ID: 2026111115090766
-	- Requirements:
-		- `runMode` takes `podman`, `docker`, or `native`, and the default is `podman`. `dockerImage` becomes `image`, with the registry in its name.
-		- Both runtimes run through sudo with the same flags. `stop` and `repair` find the container in either one.
-		- `repair` checks for `catatonit` in Podman mode. design.md covers the 3 modes, `setup`'s pick included.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: Podman 5.4.2 takes every flag `start` passes. Its `ps` filter and `{{.State}}` give the same answers as Docker's, and its start time is Go's default format in local time, which `status` reads.
-		- 20261111: Verified on a throwaway Paper 26.3-249 server under rootless Podman 5.4.2: `start` pulled the image and loaded the server in 24 s, `podman ps` showed the container, and in it the jars refused writes and a plugin jar couldn't be moved. `stop --warn 10` with `runMode` set to `docker` said the container is under podman, counted down, and stopped it.
-		- Stand-in: sudo passed the command straight through, so Podman ran rootless, and the tree changed hands inside Podman's user namespace.
-	- Decisions:
-		- The launcher is `launch.Boxed`, with the runtime as a field that defaults to `runMode`. `stop`, `console`, and `cmd` move it to the runtime that holds the container, and say so.
-		- Only `runMode`'s runtime has to answer. The other is asked only when installed, and an error from it counts as no container. A running container wins over a stopped one, so `stop` never takes an old stopped one for the server.
-		- A container in the other runtime that's running isn't removed by `repair`; only a stopped one is.
-		- `stop` now gets sudo before it asks whether the server runs, since the runtime needs it. Sudo is asked once per run.
-		- An image name without a registry is a bad value, so it gets a warning and the default.
-		- `repair` reports a missing `catatonit` with the command that adds it, and doesn't install it, since `setup` does that. It looks where Podman does, then on PATH.
-		- `status` still asks `runMode`'s runtime without sudo, so under rootful Podman it says the server isn't running. Child 2026111116104067 fixes that.
-		- `setup`'s runtime pick is written into design.md's setup section, for the setup item to build.
-		- 20261111: asserts that changed with the new default or with sudo: df5xa and df5ww use `lxc` as the bad mode, and df5wt and df5ww read `image`; df5xm and df5xn expect `podman`, not `docker`; df5yg expects "not running in podman mode"; df5xk uses `runMode=lxc`; df5xp, df5xs, df5xv, and df5z6 expect `sudo docker ...` and the extra `sudo -v` and lookup.
-		- Swept: every runtime call in `launch`, `repair`, and `status` names the runtime from the config or the lookup; no `"docker"` literal is left in non-test code. design.md has no Docker-only wording left, apart from the console and `cmd` lines, which the console child changes.
-	- Branch: r1112
-	- Test case: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh
-
-- Run modes: status without sudo
-	- ID: 2026111116104067
-	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. Rootful Podman wasn't tried here.
-	- Needs hand testing: beside the throwaway Paper server under rootful Podman, run `status` without sudo. It says the server runs in podman mode, with its account, time up, and memory.
-	- Stand-in: none (20261111). Rootful Podman can't run unattended here. Beside a real Paper server under rootless Podman, `status` said podman mode, with the account's uid, time up, and memory.
-	- Priority: High
-	- Opened: 20261111-161040
-	- Opened by: t00mietum
-	- Parent ID: 2026111115090766
-	- Prereq IDs: 2026111116104049
-	- Requirements:
-		- `status` and `watch` tell the modes apart without sudo, such as from the process table, and find a container under either runtime.
-	- Actual effort: Low
-	- Progress log:
-		- Verified: df64j and df652 fail on the old code and pass on the new.
-		- Verified: the built `status`, without sudo, found a stand-in server in a rootful Docker container and in a rootless Podman one, named the mode, and read the memory.
-	- Decisions:
-		- `status` finds the server in `ps`, and its mode from its cgroup: `libpod-<id>.scope` is Podman, `docker-<id>.scope` or `docker/<id>` is Docker, and `tt-minecraftd-server.service` is native. Native mode uses this too, in place of `systemctl show`, so all 3 modes take one path.
-		- A Paper server in a container counts only when its parent, the container's init, runs `launch.Wrapper`. Any other Paper server is named, now also while the server runs.
-		- A mode other than `runMode`'s is shown, with what `runMode` says.
-		- A stopped container no longer shows, since only the runtime knows of it. design.md updated.
-		- The account comes from the uid, since `ps` cuts long names. The time up is the process's age.
-		- 20261111: asserts that changed: df5y9 expects "not running in docker mode", without "the container is exited", and "as root" for the old script's server; df5ya expects "can't list process"; df5y8 expects the test's own account, not minecraftd; df64j checks a `runMode` mismatch in place of a container with no user, since `ps` always gives a uid.
-		- Swept: `Probe` serves only `status` and `watch`; `start` and `repair` still find other servers through `server.PaperProcs`, which now uses the same `server.IsPaper`.
-	- Branch: r1112
-	- Test case: df5y7, df5y8, df5y9, df5ya, df64j, df652
-
-- setup
-	- ID: 2026111111065776
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261111-110657
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065763
-	- Requirements:
-		- Install from scratch, per `design.md`.
-		- `--adopt` takes over an existing server folder as it is.
-		- Ask before accepting the Minecraft EULA.
-		- Install and set up Geyser and Floodgate when `bedrock` is on.
-		- On an existing install, run `repair` and then `update`.
-	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
-	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are done. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
-	- Test case: its children's: 2026111116415175: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n; 2026111116415186: df65p, df65q, df65r, df65d, df65f, df65j; 2026111116415196: df65x, df65y, df65z, df65d, df65f, df65r
-	- 20261111: children 2026111116415175 wait on UAT, and the rest are closed
-	- 2026-11-12: The firewall step is in, as step 9, through 2026111117135246.
-
-- setup: install steps and --adopt
-	- ID: 2026111116415175
-	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. No root step ran here.
-	- Needs hand testing: on a throwaway host or VM with Podman, run `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `paper.jar` links to a downloaded build, and `repair --check` is clean.
-	- Stand-in: none (20261111). Every step but the dry run needs root, which can't run unattended here.
-	- Priority: High
-	- Opened: 20261111-164151
-	- Opened by:
-	- Parent ID: 2026111111065776
-	- Requirements:
-		- Runs itself again through sudo, states its plan, and asks first unless `--yes`, per design.md's setup.
-		- Picks the runtime, writes the config, makes the account and group, and makes the server tree or adopts one with `--adopt PATH`.
-		- Asks before writing `eula.txt`, writes the safe settings, approves the jars that are there, pulls the image, copies itself to `/usr/local/bin`, and ends with `repair --check`.
-		- On an existing install, runs `repair`.
-	- Actual effort: Avg
-	- Progress log:
-		- Verified: each new test fails with its step broken, such as the plan not asked or the EULA not asked, and passes with it in place.
-		- 20261111: Verified: `setup --dry-run` for a new install, without sudo, gave the plan with Paper 26.3 build 249, Geyser 2.12.1 build 1300, and Floodgate 2.2.5 build 141 from the live download sites, and the Podman pull. It printed each command and PLAN line, wrote no config, and made no folder.
-	- Decisions:
-		- The config is written last, not first, so a setup that stops partway runs again as a new install. Every earlier step does nothing when it's done already. design.md updated.
-		- The config gets only the keys given, plus `runMode` and `serverDir`, so the rest keep following the defaults.
-		- A config file at the path is what counts as an install. There, setup asks once, then runs `repair`. `update` joins it with 2026111111065803.
-		- `--yes` doesn't accept the EULA; with no answer setup goes on without `eula.txt`. `--yes` takes Podman when neither runtime is there. design.md updated.
-		- A new install refuses a `serverDir` with files in it, and names `--adopt`. An adopted tree is handed to the operator, the same as a stopped server's.
-		- setup refuses while any Paper server runs, so it never changes a tree under a live server.
-		- It stops at a FAILED account or safe settings step, before the tree changes hands or the config is written.
-		- `--dry-run` doesn't go through sudo. It shows the account steps as PLAN, and skips the final `repair --check`, since there's no config yet.
-		- `--adopt` takes only a plain path, of letters, digits, and `._-/`. Anything else goes through `--set serverDir=`, quoted the shcl way.
-		- The account steps reuse repair's account and operator checks. `eula.txt` goes through the settings package's link-safe writer.
-		- Firewall (step 9), the boot unit (11), and the NixOS skips come with 2026111111065789, 2026111111065816, and the NixOS module item.
-		- Swept: `loadConfig` has the one caller; `HasCatatonit` serves both repair's check and setup's package pick.
-		- 20261111: The Check picks stand: the config is written last, a `serverDir` with files in it needs `--adopt`, and setup refuses while a server runs.
-	- Branch: r1112
-	- Test case: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n
-
-- Firewall
-	- ID: 2026111111065789
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261111-110657
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174 2026111113015461
-	- Requirements:
-		- Keep the tool's rules in its own nftables table, loaded by its own systemd unit, per `design.md`.
-		- Limit the game ports to `allowFrom`, with a rate limit per address.
-		- Drop the server's new outbound connections to loopback and the LAN. Allow DNS, and the web unless `egress` is `open`.
-		- `start` refuses to run when the table isn't loaded.
-		- `setup` and `repair` manage it. They never change ufw or firewalld rules.
-	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
-	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
-	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first and third are done, and the second waits on signoff.
-	- Test case: its children's: 2026111117134046: df66c, df66d, df66e, df66f; 2026111117135246: df66g, df66h, df66j; 2026111117135258: df67g, df67h, df5y7
-	- 20261111: children 2026111117135246 wait on UAT, and the rest are closed
-
-- Firewall: setup and repair manage it
-	- ID: 2026111117135246
-	- Type: Feature
-	- Status: Waiting on signoff
-		- Waits on the hand test below. No root step ran here.
-	- Needs hand testing: on a throwaway host or VM, `sudo tt-minecraftd setup`, then `repair --check` is clean, `nft list table inet tt_minecraftd` shows the rules, and `sudo systemctl restart nftables` leaves the table loaded. As the service account, `curl http://127.0.0.1` and a connection to a LAN address fail and bump `out_local` and `out_lan`. With `firewall: off`, `sudo tt-minecraftd repair` removes the unit and the table.
-	- Stand-in: none (20261111). Loading an nftables table and enabling a system unit need root, which can't run unattended here.
-	- Priority: High
-	- Opened: 20261111-171352
-	- Opened by:
-	- Parent ID: 2026111111065789
-	- Prereq IDs: 2026111117134046
-	- Requirements:
-		- `setup` step 9: install nftables through apt when `nft` is missing, write the rules, and enable and start their unit.
-		- `repair` check 9: the rules file matches the config, its unit is enabled, and the table is loaded. With `firewall` off, the unit and the table are removed.
-		- Neither touches ufw or firewalld rules.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-11: `repair`'s check 9 is `repair.FirewallCheck`, between the Bedrock and ufw checks. setup runs it as step 9, after approving jars and before the image pull, and adds nftables to its apt packages when `nft` is missing.
-		- Verified: df66g, df66h, and df66j each fail with their part taken out, and pass with it in. The unit text passes `systemd-analyze verify`, and `install -D -T /dev/stdin` writes into a folder it makes.
-	- Decisions:
-		- Files are written with `install` reading stdin, through the runner, so dry run and tests see the write. `host.Cmd` gained `Stdin` for it. `-D` since `/etc/tt-minecraftd` may not be there yet at step 9.
-		- A new rules file or unit, or a table that's gone, is fixed with `systemctl reload-or-restart`, so a loaded table is swapped in one transaction.
-		- The table is read through `sudo`, under `--check` too, the same as the container check's runtime calls.
-		- A missing `nft` is reported, not installed, by `repair`, like `catatonit`. setup installs it through apt, and stops before the config when that can't happen. design.md updated.
-		- With `firewall` off, `systemctl disable --now` deletes the table through the unit's `ExecStop`. The rules file stays, per design.md.
-		- Swept: `repair.After` is the only check list; setup's existing-install path gets the check through `repair`. ufw and firewalld are still only read.
-	- Branch: r1112
-	- Test case: df66g, df66h, df66j
-
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -361,6 +75,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
 	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), and 2026111117302985 (`--image`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots), 2026111117302995 (`--self`), and 2026111117404480 (Modrinth and Hangar sources) are queued.
+
+- Commands fail for the operator until a new login after setup
+	- ID: 2026111207565307
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111118183922, 2026111116415175
+	- Incorrect behavior [Bug]: Right after setup, in the same login, the operator isn't in the server's group yet. Native `start` started the unit, then failed with "stat .../latest.log: permission denied" while it waited for the server to load. `cmd` failed with "open .../latest.log: permission denied". setup does say the group counts from the next login.
+	- Expected behavior [Bug]: Those commands read what they need through sudo, or say plainly to log in again first.
+	- Reproduced [Bug]: 20261112, in the root host check, with every check run in the login setup ran in.
 
 - update --mc-version
 	- ID: 2026111117302963
@@ -488,6 +214,44 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Approve the plugins that are there now.
 		- Retire the old start, stop, and manage scripts after it runs clean.
 
+- Connect the service to an AI agent to update the game programs and add-ons
+	- ID: 2026111207010610
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-070106
+	- Opened by: t00mietum
+	- Requirements:
+		- Ability to connect the service to an AI agent, for the purpose of updating the game programs and add-ons, which would otherwise be very brittle if hard-coded.
+		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
+	- Note:
+		- Pre-next-cut.
+
+- cmd sometimes misses its answer right after a start
+	- ID: 2026111207565308
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111111065750
+	- Incorrect behavior [Bug]: In 2 of 7 root host runs, `cmd list` right after `start` printed no "players online" line, once in each mode. 14 tries by hand, some with the CPUs loaded, didn't repeat it.
+	- Expected behavior [Bug]: `cmd` shows the answer.
+	- Possible cause [Bug]: `cmd` stops half a second after the last log line, and any line counts. Right after a start, Geyser and STUN lines come in, and a stall on the server thread could end the wait before the answer.
+	- Note: The root host check prints the log tail when it happens.
+
+- Podman warns the input isn't a TTY on every start from a script
+	- ID: 2026111207565309
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 20261112-075653
+	- Opened by:
+	- Incorrect behavior [Bug]: `start` with no terminal, as from a script or the boot unit, prints Podman's "The input device is not a TTY. The --tty and --interactive flags might not work properly".
+	- Expected behavior [Bug]: No warning, since the server's terminal is the container's own.
+	- Reproduced [Bug]: 20261112, in the root host check.
+	- Possible cause [Bug]: Podman checks the caller's stdin for `-i -t`, even with `-d`.
+
 - status says no paper.jar when it can't read the folder
 	- ID: 2026111118183922
 	- Type: Bug
@@ -526,19 +290,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
 
-- Connect the service to an AI agent to update the game programs and add-ons
-	- ID: 2026111207010610
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261112-070106
-	- Opened by: t00mietum
-	- Requirements:
-		- Ability to connect the service to an AI agent, for the purpose of updating the game programs and add-ons, which would otherwise be very brittle if hard-coded.
-		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
-	- Note:
-		- Pre-next-cut.
-
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
@@ -553,6 +304,439 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux.
+
+- setup's apt install fails on a fresh host
+	- ID: 2026111207565300
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111116415175
+	- Incorrect behavior [Bug]: `setup` ran `apt-get install` with no `apt-get update` first. With empty package lists, as on a fresh image, it found no packages and stopped. Stale lists can give a 404.
+	- Expected behavior [Bug]: setup installs Podman, catatonit, and nftables on a fresh Debian.
+	- Reproduced [Bug]: 20261112, in the root host check, on a fresh Debian trixie.
+	- Actual fix [Bug]: `apt-get update` runs before the install, only when there's something to install.
+	- Branch: root-host
+	- Test case: df67t, df680
+	- Closed: 20261112-075653
+
+- Firewall breaks Geyser's STUN lookup
+	- ID: 2026111207565301
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111113015461, 2026111117135246
+	- Incorrect behavior [Bug]: With the firewall on, Geyser's STUN lookup got no answer, so players over the internet would get only the LAN address. `out_local` counted 12 drops at each start.
+	- Expected behavior [Bug]: STUN answers, and nothing of the server's own hits the loopback drop.
+	- Reproduced [Bug]: 20261112, in the root host check. With the server chain open STUN answered, and with only loopback open it answered too.
+	- Actual cause [Bug]: NetherNet sends empty UDP packets from `bedrockPort` to itself over loopback, on 127.0.0.1 and ::1. The loopback drop caught them.
+	- Actual fix [Bug]: The server's own `gamePort` and `bedrockPort` are allowed on loopback, ahead of the drop. Other loopback ports are still dropped. design.md updated.
+	- Branch: root-host
+	- Test case: df67w, df687
+	- Closed: 20261112-075653
+
+- stop hands the trees back under a native server when runMode names a container
+	- ID: 2026111207565302
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111112163284
+	- Incorrect behavior [Bug]: After `start --native` with `runMode` at `podman`, plain `stop` said the server wasn't running, and handed the trees to the operator while it ran. `console` and `cmd` said it wasn't running. It goes the same way with a container server and `runMode` at `native`.
+	- Expected behavior [Bug]: They find the server, as `status` does.
+	- Reproduced [Bug]: 20261112, in the root host check.
+	- Actual fix [Bug]: `stop`, `console`, and `cmd` read the server's mode from the process table, as `status` does, and switch between native and container when it differs from `runMode`, and say so. Podman to Docker is still `Boxed`'s. design.md updated.
+	- Branch: root-host
+	- Test case: df67x, df67y, df68c, df68d
+	- Closed: 20261112-075653
+
+- repair removes the stopped container that keeps the crash log
+	- ID: 2026111207565303
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111111065763
+	- Incorrect behavior [Bug]: After a normal Podman `stop`, `repair --check` failed on "an old container is still there", and `repair` removed it, with the output `logs` would show.
+	- Expected behavior [Bug]: The stopped container stays until the next `start`, since there's no `--rm` so that `logs` works after a crash.
+	- Reproduced [Bug]: 20261112, in the root host check.
+	- Actual cause [Bug]: design.md's repair check 11 had a stopped container removed under either runtime, which works against the no `--rm` reason in Run modes. The repair item followed check 11.
+	- Decisions:
+		- Only a stopped container under the runtime `runMode` doesn't name gets removed, as after a `runMode` change. The crash log reason wasn't weighed when check 11 was written. design.md updated.
+	- Branch: root-host
+	- Test case: df5zh, changed to expect no removal; df689
+	- Closed: 20261112-075653
+
+- setup lists the jars to approve only after Go ahead
+	- ID: 2026111207565304
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111116415175
+	- Incorrect behavior [Bug]: setup's plan said the jars are "listed with their hashes below", but the list came after the Go ahead answer. So the yes approved jars that hadn't been shown.
+	- Expected behavior [Bug]: The list shows before the question, per design.md's setup step 8.
+	- Reproduced [Bug]: 20261112, in the root host check, with `setup --adopt`.
+	- Actual fix [Bug]: The list prints with the plan.
+	- Branch: root-host
+	- Test case: df67z, df68e
+	- Closed: 20261112-075653
+
+- stop leaves the trees with runUser when USER isn't set
+	- ID: 2026111207565305
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 20261112-075653
+	- Opened by:
+	- Incorrect behavior [Bug]: Run by the operator with no `USER` set, such as from cron or `docker exec`, `stop` said `ownerAfterStop` is empty and left the trees with minecraftd.
+	- Expected behavior [Bug]: The trees go back to the account that ran it.
+	- Reproduced [Bug]: 20261112, in the root host check.
+	- Actual fix [Bug]: The operator falls back to the account running the tool, unless that's root, so the boot unit still leaves the trees alone. design.md updated.
+	- Branch: root-host
+	- Test case: df67v
+	- Closed: 20261112-075653
+
+- Hand tests that need root, as a script
+	- ID: 2026111207565306
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-075653
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Run the root steps of the signoff items' hand tests on a throwaway host with systemd and a real sudo, and keep them as a regression check.
+	- Progress log:
+		- 20261112: `cicd/root-host/root-host.bash` builds a Debian trixie container with systemd and sudo, and runs `checks.bash` in it as the operator, against real Paper, Geyser, and Floodgate downloads. 16 checks, about 2.5 minutes.
+		- Verified: it found the 6 bugs filed today, each check that covers one failed before its fix, and all 16 pass on c076344.
+	- Decisions:
+		- Privileged, for systemd, nftables, and Podman inside. The rules stay in the container's own network namespace.
+		- The checks after setup run in a new login, since the group setup adds counts from the next login, as setup says.
+		- Not part of the gate yet. The CI/CD item can run it in the full run.
+	- Branch: root-host
+	- Test case: df680, df681, df682, df683, df684, df685, df686, df687, df688, df689, df68a, df68b, df68c, df68d, df68e, df68f
+	- Closed: 20261112-075653
+
+- Current Geyser needs TCP on the Bedrock port too
+	- ID: 2026111113015461
+	- Type: Bug
+	- Status: Done
+	- Needs hand testing: join from a phone on the LAN, and from outside with `bedrockPort` forwarded over TCP and UDP, to a throwaway Paper server with Geyser 2.12.1.
+	- Priority: High
+	- Opened: 20261111-130154
+	- Opened by:
+	- Related IDs: 2026111112554261, 2026111111065829
+	- Incorrect behavior [Bug]: design.md, the firewall, `status`, and the router forward advice treat `bedrockPort` as UDP only.
+	- Expected behavior [Bug]: Bedrock players can connect with the Geyser build in use.
+	- Possible cause [Bug]: Geyser 2.12.1 defaults to the NetherNet transport with built-in signaling, which listens on the Bedrock port over TCP as well as UDP. RakNet-only was removed. Its `nxs` signaling mode also calls out to an outside service, which `egress` may need to allow.
+	- Reproduced [Bug]: Confirmed from Geyser's source at build 1299 and its release notes, not on a live server.
+	- Actual cause [Bug]:
+		- Geyser removed RakNet-only on 2026-10-31. `transport` takes `nethernet`, the default, or `both`. Built-in signaling, the default, listens on `bedrock.port` over TCP, and NetherNet's game traffic uses the same port over UDP.
+		- To give players over the internet the public address, Geyser asks STUN servers on UDP 3478 and 19302, which `egress` `web` would block.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: design.md, how-to-connect.md, and `status` give `bedrockPort` as TCP and UDP. `start` checks, and `repair` sets, Geyser's `transport`, `webrtc-port`, and `clone-remote-port`, so NetherNet stays on `bedrockPort`. A `bedrockPort` equal to `gamePort` warns and moves.
+		- Verified: df5yy, df5yz, and the new df5y7 line each fail with the change taken out, and pass with it in.
+		- 20261111: Verified: a throwaway Paper 26.3-249 server with Geyser 2.12.1 and `bedrockPort` 19199, started by `start`, listened on 19199 over TCP and UDP, and `status` listed both. Geyser's log showed built-in signaling on that port, and STUN answers from 3478 and 19302.
+		- 20261112: In the root host check, with the firewall on, Geyser's STUN lookup got no answer, since the loopback drop caught NetherNet's packets to its own port. Fixed under 2026111207565301, and STUN now answers with the firewall on.
+	- Stand-in: none (20261111). A Bedrock join needs a real client, and none runs here.
+	- Decisions:
+		- No plain UDP mode is left in Geyser to pin, so TCP is opened. `nxs` signaling avoids TCP but sends every join through an outside service. One port over both protocols is also what Geyser's own port forwarding guide says.
+		- The 3 pinned keys are fine when missing, since Geyser's defaults for them are right. Signaling `mode` isn't pinned.
+		- The firewall item gets a design change: with `bedrock` on and `egress` `web`, outbound UDP to 3478 and 19302 is allowed for STUN. Filed as a Check in questions.md.
+		- Tunnels, the server's dropped connection checks, and `joinRateLimit` against server list pings went under Needs more thought in design.md.
+		- 20261111: df5y7 `TestStatusDocker` also expects `tcp *:19132 listening, 0 connections`, and the shared `ss` reply gained that listener. Old: only the UDP line.
+		- Swept: every `bedrockPort` and `udp` use in source and docs; `status` is the only code that names a protocol. The firewall isn't built yet.
+		- 20261111: The Check picks stand: TCP and UDP on `bedrockPort`, and STUN allowed out under `egress` `web`. Both follow Geyser's own defaults, and need no new key.
+	- Actual fix [Bug]: Docs and `status` say TCP and UDP. Geyser's NetherNet port settings are pinned, and `bedrockPort` can't be `gamePort`.
+	- Branch: r1111
+	- Test case: df5yy, df5yz, df5y7, df67w, df687
+	- Acceptance signoff: Self-closed: the ports, the pinned keys, and the STUN lookup check out with the firewall on. A real Bedrock join is part of design.md's live test on the real server, done in 'Move the first server over'.
+	- Closed: 20261112-075653
+
+- Core commands
+	- ID: 2026111111065711
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-110657
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065697
+	- Requirements:
+		- Build `start`, `stop`, `status`, and `watch`, per `design.md`, with the same options as `tt-monerod-safeserver`.
+		- Docker mode is the default, and a sandboxed systemd unit is the fallback.
+		- Add `--dry-run` and `--debug`.
+		- Add `--help`, `--about`, and `--version`.
+		- Hand the trees to the service account on start, and back on stop.
+		- `stop` sends the `stop` console command first, with an optional countdown for the players.
+		- Refuse to start when an old copy of the server is running under any account.
+	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
+	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off), 2026111112163174 (Docker mode), and 2026111112163393 (status and watch) are done, and 2026111112163284 (native mode) waits on a hand test.
+	- Test case: its children's: 2026111112162268: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn; 2026111112163174: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz; 2026111112163284: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6; 2026111112163393: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
+	- 20261111: children 2026111112163284 wait on UAT, and the rest are closed
+	- 20261112: the children that waited on UAT passed the root host check, and are closed.
+	- Acceptance signoff: Self-closed: all children closed.
+	- Closed: 20261112-075653
+
+- Core commands: native mode start and stop
+	- ID: 2026111112163284
+	- Type: Feature
+	- Status: Done
+	- Needs hand testing: start and stop a throwaway Paper server in native mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, the jars can't be written or swapped, and `systemctl show tt-minecraftd-server` lists the sandbox settings. Beside it, `status` and `watch` show it in native mode, `console` takes a typed command and detaches on Ctrl-C with the server up, and `cmd list` prints the player count.
+	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
+	- Priority: High
+	- Opened: 20261111-121632
+	- Opened by: t00mietum
+	- Parent ID: 2026111111065711
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- `start` and `stop` in native mode: `systemd-run` with the sandbox options, and tmux on a socket under `/run/tt-minecraftd/`, per `design.md`.
+		- `paper.jar` and the plugin jars go to root at start.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: tmux `send-keys -l` drops a `;` that ends the text, and `-H 3b` sends it whole. The unit's settings pass `systemd-analyze verify`.
+		- 20261112: Verified in the root host check: native `start` loaded Paper 26.3-249 in 12 s, and `systemctl show` listed the sandbox settings. The jars were root's, and refused writes and moves in the unit's own mount view. `status` and `watch` showed native mode, `console` took a line and left on Ctrl-C with the server up, `cmd list` answered, and `stop --warn 10` counted down and saved.
+		- Found there: with `runMode` still at `podman`, as after `start --native`, plain `stop`, `console`, and `cmd` didn't find the server, and `stop` handed the trees back under it. Fixed under 2026111207565302.
+	- Decisions:
+		- The unit is `tt-minecraftd-server.service`, since `tt-minecraftd.service` is the boot unit. It's `Type=forking`, since `tmux new-session -d` returns once the session is up. `--collect` drops it after a crash, so the next start can reuse the name.
+		- The jars also get `ReadOnlyPaths`, since the server can write their folder and could swap a root-owned jar. `OOMScoreAdjust=1000`, a swap of 0, and the pid limit match Docker mode. design.md updated.
+		- `$` in the server command goes as `$$`, since systemd expands variables there.
+		- "Is it up" is the unit's `ActiveState`. "Done loading" is a `logs/latest.log` that isn't the one from before the launch.
+		- `stop` past `stopTimeout` runs `systemctl stop`, with `TimeoutStopSec` set to the 30 seconds before SIGKILL.
+		- `--debug` attaches to tmux. A detach leaves the server and its trees as they are; an exit hands them back. `--foreground` checks the unit every 5 seconds.
+		- Console lines go through `tmux send-keys` as the service account, with `sudo -u`, or `runuser` when root. `host.Cmd` has an `As` field for it, which `console` and `cmd` can use too.
+		- Docker and native share the start and stop steps through `launch.Kit`. Docker's tests pass unchanged.
+		- 20261111: `TestMissingConfig` (df5xn) no longer expects `start --native --dry-run` to say it isn't built. `status` still does.
+		- Swept: every sudo goes through `host.Cmd`; both modes refuse others, count down, and hand back through `Kit`.
+	- Branch: r1111
+	- Test case: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6, df68b, df68c, df68d
+	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
+	- Closed: 20261112-075653
+
+- Podman, Docker, and native modes
+	- ID: 2026111115090766
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-150907
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Related IDs: 2026111111303242
+	- Requirements:
+		- Add rootful Podman beside Docker and native mode, the same as in `tt-monerod-safeserver`. `runMode` takes `podman`, `docker`, or `native`, and the default is `podman`.
+		- Run both runtimes as root through sudo, with the same flags. The operator doesn't need the `docker` group anymore.
+		- `setup` picks `podman` when it's installed, else `docker`. With neither, it offers Podman and `catatonit` through apt, or native mode. It never installs Docker. `repair` checks for `catatonit`, since Podman's `--init` needs it.
+		- `stop`, `status`, and `repair` look for the tool's label in both runtimes, so a container started before a `runMode` change still gets found.
+		- Rename `dockerImage` to `image`, and give the image's full name with `docker.io/`, since Podman won't pick a registry on its own.
+		- Native mode is for a dedicated VM, or a host with neither runtime. It keeps its systemd sandbox.
+		- Update design.md, `Why Docker` included, and the NixOS module item.
+		- The hand tests for Docker mode, status, and console get run under Podman too.
+		- `stop` and `cmd` write to the container's input through the Docker API socket. Without the `docker` group the operator can't open it, and Podman's socket needs `podman.socket` running. Find a way through sudo.
+	- 20261111: Checked by hand on Podman 5.4.2 and Docker. `attach` fed from a pipe won't do. Docker refuses it. Podman takes the line but never detaches, and Ctrl-C reaches the server as an interrupt. `attach` on a pseudo-terminal works under both, and Ctrl-C detaches it with the server still up. So the plan is to drop the API write and run `sudo <runtime> attach` on a pseudo-terminal.
+	- 20261111: Checked through sudo too, rootful, under both runtimes. The line arrives, Ctrl-C detaches, and the server stays up. sudo reused the password from the operator's terminal. Writing right away worked as well as waiting 2 s.
+	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) is done, and 2026111116104067 (status without sudo) waits on a hand test.
+	- Decisions:
+		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
+	- Test case: its children's: 2026111116104049: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh; 2026111116104058: df5xw; 2026111116104067: df5y7, df5y8, df5y9, df5ya, df64j, df652
+	- 20261111: children 2026111116104049 2026111116104067 wait on UAT, and the rest are closed
+	- 20261112: the children that waited on UAT passed the root host check, and are closed.
+	- Acceptance signoff: Self-closed: all children closed.
+	- Closed: 20261112-075653
+
+- Run modes: Podman and Docker through sudo
+	- ID: 2026111116104049
+	- Type: Feature
+	- Status: Done
+	- Needs hand testing: under rootful Podman, start a throwaway Paper server and stop it with `stop --warn 10`, with the operator out of the `docker` group. It loads, the jars can't be written, and `sudo podman ps` shows the container. Then set `runMode` to `docker` and check that `stop` finds a container that Podman started.
+	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
+	- Priority: High
+	- Opened: 20261111-161040
+	- Opened by: t00mietum
+	- Parent ID: 2026111115090766
+	- Requirements:
+		- `runMode` takes `podman`, `docker`, or `native`, and the default is `podman`. `dockerImage` becomes `image`, with the registry in its name.
+		- Both runtimes run through sudo with the same flags. `stop` and `repair` find the container in either one.
+		- `repair` checks for `catatonit` in Podman mode. design.md covers the 3 modes, `setup`'s pick included.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: Podman 5.4.2 takes every flag `start` passes. Its `ps` filter and `{{.State}}` give the same answers as Docker's, and its start time is Go's default format in local time, which `status` reads.
+		- 20261111: Verified on a throwaway Paper 26.3-249 server under rootless Podman 5.4.2: `start` pulled the image and loaded the server in 24 s, `podman ps` showed the container, and in it the jars refused writes and a plugin jar couldn't be moved. `stop --warn 10` with `runMode` set to `docker` said the container is under podman, counted down, and stopped it.
+		- Stand-in: sudo passed the command straight through, so Podman ran rootless, and the tree changed hands inside Podman's user namespace.
+		- 20261112: Verified in the root host check, with rootful Podman 5.4.2 through a real sudo and no `docker` group: `start` loaded the server, `sudo podman ps` showed it, the jars refused writes and moves in the container, and `stop --warn 10` counted down, saved, and handed the trees back.
+		- The `runMode` switch to `docker` was checked in the rootless run above. The lookup is the same code, with sudo in front.
+	- Decisions:
+		- The launcher is `launch.Boxed`, with the runtime as a field that defaults to `runMode`. `stop`, `console`, and `cmd` move it to the runtime that holds the container, and say so.
+		- Only `runMode`'s runtime has to answer. The other is asked only when installed, and an error from it counts as no container. A running container wins over a stopped one, so `stop` never takes an old stopped one for the server.
+		- A container in the other runtime that's running isn't removed by `repair`; only a stopped one is.
+		- `stop` now gets sudo before it asks whether the server runs, since the runtime needs it. Sudo is asked once per run.
+		- An image name without a registry is a bad value, so it gets a warning and the default.
+		- `repair` reports a missing `catatonit` with the command that adds it, and doesn't install it, since `setup` does that. It looks where Podman does, then on PATH.
+		- `status` still asks `runMode`'s runtime without sudo, so under rootful Podman it says the server isn't running. Child 2026111116104067 fixes that.
+		- `setup`'s runtime pick is written into design.md's setup section, for the setup item to build.
+		- 20261111: asserts that changed with the new default or with sudo: df5xa and df5ww use `lxc` as the bad mode, and df5wt and df5ww read `image`; df5xm and df5xn expect `podman`, not `docker`; df5yg expects "not running in podman mode"; df5xk uses `runMode=lxc`; df5xp, df5xs, df5xv, and df5z6 expect `sudo docker ...` and the extra `sudo -v` and lookup.
+		- Swept: every runtime call in `launch`, `repair`, and `status` names the runtime from the config or the lookup; no `"docker"` literal is left in non-test code. design.md has no Docker-only wording left, apart from the console and `cmd` lines, which the console child changes.
+	- Branch: r1112
+	- Test case: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh, df682, df683, df689
+	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
+	- Closed: 20261112-075653
+
+- Run modes: status without sudo
+	- ID: 2026111116104067
+	- Type: Feature
+	- Status: Done
+	- Needs hand testing: beside the throwaway Paper server under rootful Podman, run `status` without sudo. It says the server runs in podman mode, with its account, time up, and memory.
+	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
+	- Priority: High
+	- Opened: 20261111-161040
+	- Opened by: t00mietum
+	- Parent ID: 2026111115090766
+	- Prereq IDs: 2026111116104049
+	- Requirements:
+		- `status` and `watch` tell the modes apart without sudo, such as from the process table, and find a container under either runtime.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: df64j and df652 fail on the old code and pass on the new.
+		- Verified: the built `status`, without sudo, found a stand-in server in a rootful Docker container and in a rootless Podman one, named the mode, and read the memory.
+		- 20261112: Verified in the root host check: beside the server under rootful Podman, `status` without sudo said podman mode, as minecraftd, with the time up and memory.
+	- Decisions:
+		- `status` finds the server in `ps`, and its mode from its cgroup: `libpod-<id>.scope` is Podman, `docker-<id>.scope` or `docker/<id>` is Docker, and `tt-minecraftd-server.service` is native. Native mode uses this too, in place of `systemctl show`, so all 3 modes take one path.
+		- A Paper server in a container counts only when its parent, the container's init, runs `launch.Wrapper`. Any other Paper server is named, now also while the server runs.
+		- A mode other than `runMode`'s is shown, with what `runMode` says.
+		- A stopped container no longer shows, since only the runtime knows of it. design.md updated.
+		- The account comes from the uid, since `ps` cuts long names. The time up is the process's age.
+		- 20261111: asserts that changed: df5y9 expects "not running in docker mode", without "the container is exited", and "as root" for the old script's server; df5ya expects "can't list process"; df5y8 expects the test's own account, not minecraftd; df64j checks a `runMode` mismatch in place of a container with no user, since `ps` always gives a uid.
+		- Swept: `Probe` serves only `status` and `watch`; `start` and `repair` still find other servers through `server.PaperProcs`, which now uses the same `server.IsPaper`.
+	- Branch: r1112
+	- Test case: df5y7, df5y8, df5y9, df5ya, df64j, df652, df684
+	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
+	- Closed: 20261112-075653
+
+- setup
+	- ID: 2026111111065776
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-110657
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065763
+	- Requirements:
+		- Install from scratch, per `design.md`.
+		- `--adopt` takes over an existing server folder as it is.
+		- Ask before accepting the Minecraft EULA.
+		- Install and set up Geyser and Floodgate when `bedrock` is on.
+		- On an existing install, run `repair` and then `update`.
+	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
+	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are done. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
+	- Test case: its children's: 2026111116415175: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n; 2026111116415186: df65p, df65q, df65r, df65d, df65f, df65j; 2026111116415196: df65x, df65y, df65z, df65d, df65f, df65r
+	- 20261111: children 2026111116415175 wait on UAT, and the rest are closed
+	- 2026-11-12: The firewall step is in, as step 9, through 2026111117135246.
+	- 20261112: the children that waited on UAT passed the root host check, and are closed.
+	- Acceptance signoff: Self-closed: all children closed.
+	- Closed: 20261112-075653
+
+- setup: install steps and --adopt
+	- ID: 2026111116415175
+	- Type: Feature
+	- Status: Done
+	- Needs hand testing: on a throwaway host or VM with Podman, run `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `paper.jar` links to a downloaded build, and `repair --check` is clean.
+	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
+	- Priority: High
+	- Opened: 20261111-164151
+	- Opened by:
+	- Parent ID: 2026111111065776
+	- Requirements:
+		- Runs itself again through sudo, states its plan, and asks first unless `--yes`, per design.md's setup.
+		- Picks the runtime, writes the config, makes the account and group, and makes the server tree or adopts one with `--adopt PATH`.
+		- Asks before writing `eula.txt`, writes the safe settings, approves the jars that are there, pulls the image, copies itself to `/usr/local/bin`, and ends with `repair --check`.
+		- On an existing install, runs `repair`.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: each new test fails with its step broken, such as the plan not asked or the EULA not asked, and passes with it in place.
+		- 20261111: Verified: `setup --dry-run` for a new install, without sudo, gave the plan with Paper 26.3 build 249, Geyser 2.12.1 build 1300, and Floodgate 2.2.5 build 141 from the live download sites, and the Podman pull. It printed each command and PLAN line, wrote no config, and made no folder.
+		- 20261112: Verified in the root host check: on a fresh Debian, `setup` installed Podman, catatonit, and nftables, made the account, group, and tree, got Paper, Geyser, and Floodgate, asked about the EULA, approved 3 jars, pulled the image, copied itself to `/usr/local/bin`, and wrote the config. `repair --check` passed. `setup --adopt` on a copy of the tree handed it to the operator and wrote `serverDir`, and `repair --check` passed.
+		- Found there: no `apt-get update` before the install, and the jars to approve were listed only after the Go ahead answer. Fixed under 2026111207565300 and 2026111207565304.
+	- Decisions:
+		- The config is written last, not first, so a setup that stops partway runs again as a new install. Every earlier step does nothing when it's done already. design.md updated.
+		- The config gets only the keys given, plus `runMode` and `serverDir`, so the rest keep following the defaults.
+		- A config file at the path is what counts as an install. There, setup asks once, then runs `repair`. `update` joins it with 2026111111065803.
+		- `--yes` doesn't accept the EULA; with no answer setup goes on without `eula.txt`. `--yes` takes Podman when neither runtime is there. design.md updated.
+		- A new install refuses a `serverDir` with files in it, and names `--adopt`. An adopted tree is handed to the operator, the same as a stopped server's.
+		- setup refuses while any Paper server runs, so it never changes a tree under a live server.
+		- It stops at a FAILED account or safe settings step, before the tree changes hands or the config is written.
+		- `--dry-run` doesn't go through sudo. It shows the account steps as PLAN, and skips the final `repair --check`, since there's no config yet.
+		- `--adopt` takes only a plain path, of letters, digits, and `._-/`. Anything else goes through `--set serverDir=`, quoted the shcl way.
+		- The account steps reuse repair's account and operator checks. `eula.txt` goes through the settings package's link-safe writer.
+		- Firewall (step 9), the boot unit (11), and the NixOS skips come with 2026111111065789, 2026111111065816, and the NixOS module item.
+		- Swept: `loadConfig` has the one caller; `HasCatatonit` serves both repair's check and setup's package pick.
+		- 20261111: The Check picks stand: the config is written last, a `serverDir` with files in it needs `--adopt`, and setup refuses while a server runs.
+	- Branch: r1112
+	- Test case: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n, df680, df68e
+	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
+	- Closed: 20261112-075653
+
+- Firewall
+	- ID: 2026111111065789
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261111-110657
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174 2026111113015461
+	- Requirements:
+		- Keep the tool's rules in its own nftables table, loaded by its own systemd unit, per `design.md`.
+		- Limit the game ports to `allowFrom`, with a rate limit per address.
+		- Drop the server's new outbound connections to loopback and the LAN. Allow DNS, and the web unless `egress` is `open`.
+		- `start` refuses to run when the table isn't loaded.
+		- `setup` and `repair` manage it. They never change ufw or firewalld rules.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
+	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
+	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first and third are done, and the second waits on signoff.
+	- Test case: its children's: 2026111117134046: df66c, df66d, df66e, df66f; 2026111117135246: df66g, df66h, df66j; 2026111117135258: df67g, df67h, df5y7
+	- 20261111: children 2026111117135246 wait on UAT, and the rest are closed
+	- 20261112: the children that waited on UAT passed the root host check, and are closed.
+	- Acceptance signoff: Self-closed: all children closed.
+	- Closed: 20261112-075653
+
+- Firewall: setup and repair manage it
+	- ID: 2026111117135246
+	- Type: Feature
+	- Status: Done
+	- Needs hand testing: on a throwaway host or VM, `sudo tt-minecraftd setup`, then `repair --check` is clean, `nft list table inet tt_minecraftd` shows the rules, and `sudo systemctl restart nftables` leaves the table loaded. As the service account, `curl http://127.0.0.1` and a connection to a LAN address fail and bump `out_local` and `out_lan`. With `firewall: off`, `sudo tt-minecraftd repair` removes the unit and the table.
+	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
+	- Priority: High
+	- Opened: 20261111-171352
+	- Opened by:
+	- Parent ID: 2026111111065789
+	- Prereq IDs: 2026111117134046
+	- Requirements:
+		- `setup` step 9: install nftables through apt when `nft` is missing, write the rules, and enable and start their unit.
+		- `repair` check 9: the rules file matches the config, its unit is enabled, and the table is loaded. With `firewall` off, the unit and the table are removed.
+		- Neither touches ufw or firewalld rules.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: `repair`'s check 9 is `repair.FirewallCheck`, between the Bedrock and ufw checks. setup runs it as step 9, after approving jars and before the image pull, and adds nftables to its apt packages when `nft` is missing.
+		- Verified: df66g, df66h, and df66j each fail with their part taken out, and pass with it in. The unit text passes `systemd-analyze verify`, and `install -D -T /dev/stdin` writes into a folder it makes.
+		- 20261112: Verified in the root host check: setup loaded the table and enabled its unit, and `systemctl restart nftables` left it loaded. The service account's connections to loopback, the LAN, and port 22 out were dropped and counted, and HTTPS out worked. With `firewall: off`, `repair` removed the unit and the table.
+		- Found there: the loopback drop broke Geyser's STUN lookup. Fixed under 2026111207565301.
+	- Decisions:
+		- Files are written with `install` reading stdin, through the runner, so dry run and tests see the write. `host.Cmd` gained `Stdin` for it. `-D` since `/etc/tt-minecraftd` may not be there yet at step 9.
+		- A new rules file or unit, or a table that's gone, is fixed with `systemctl reload-or-restart`, so a loaded table is swapped in one transaction.
+		- The table is read through `sudo`, under `--check` too, the same as the container check's runtime calls.
+		- A missing `nft` is reported, not installed, by `repair`, like `catatonit`. setup installs it through apt, and stops before the config when that can't happen. design.md updated.
+		- With `firewall` off, `systemctl disable --now` deletes the table through the unit's `ExecStop`. The rules file stays, per design.md.
+		- Swept: `repair.After` is the only check list; setup's existing-install path gets the check through `repair`. ufw and firewalld are still only read.
+	- Branch: r1112
+	- Test case: df66g, df66h, df66j, df681, df687, df688, df68f
+	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
+	- Closed: 20261112-075653
 
 - repair sends a missing server folder to setup, which only runs repair again
 	- ID: 2026111117095694
