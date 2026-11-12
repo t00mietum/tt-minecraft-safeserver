@@ -378,14 +378,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Install and set up Geyser and Floodgate when `bedrock` is on.
 		- On an existing install, run `repair` and then `update`.
 	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
-	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, and 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are queued. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
+	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) is done, and 2026111116415196 (Geyser and Floodgate) is queued. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
 
 - setup: install steps and --adopt
 	- ID: 2026111116415175
 	- Type: Feature
 	- Status: Waiting on signoff
 		- Waits on the hand test below. No root step ran here.
-	- Needs hand testing: on a throwaway host or VM with Podman, run `setup --dry-run`, then `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `repair --check` is clean apart from `paper.jar`, which comes with 2026111116415186.
+	- Needs hand testing: on a throwaway host or VM with Podman, run `setup --dry-run`, then `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `paper.jar` links to a downloaded build, and `repair --check` is clean.
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
@@ -417,7 +417,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup: download Paper
 	- ID: 2026111116415186
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
@@ -426,6 +426,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- On a new tree, get the newest stable Paper build from the PaperMC download API, check its SHA-256, and point `paper.jar` at it, the same way `update --paper` does.
 		- Share the code with `update --paper`.
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: against the live API, the newest release was 26.3, build 249, and the 55 MB jar it downloaded matched the API's SHA-256, with `paper.jar` linked to it.
+		- Verified: df65q and df65r fail with the stable filter or the hash check taken out, and pass with them in.
+	- Decisions:
+		- The API is PaperMC's Fill v3 at `fill.papermc.io`. The old v2 API is deprecated.
+		- A new tree gets the newest release that has a stable build. Release candidates and versions with only beta builds are skipped.
+		- The lookup comes before the plan, so a failed one stops setup before anything changes. The plan names the version and build.
+		- The jar's size and SHA-256 must match the API's. It's written to a temp name in the tree and renamed, and `paper.jar` is replaced by a new link in one rename, all relative to the folder's handle without following links, since the server account may own the tree.
+		- The build goes on the approved list, since `start` pins the jar `paper.jar` links to. A tree with a `paper.jar` keeps it, and setup approves it with the other jars. design.md updated.
+		- The code is `source/internal/paper`, for `update --paper` to reuse. Keeping the last 2 builds is left to update.
+		- Swept: nothing else downloads yet, and `plugins.Jars` already follows the `paper.jar` link.
+	- Branch: r1112
+	- Test case: df65p, df65q, df65r, df65d, df65f, df65j
+	- Closed: 20261111-165545
 
 - setup: Geyser and Floodgate
 	- ID: 2026111116415196

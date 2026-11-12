@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+
+package paper
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
+)
+
+// fill is a stand-in for the download API. builds maps a version to its
+// build list's JSON, and the jar is served at /jar.
+type fakeFill struct {
+	srv    *httptest.Server
+	builds map[string]string
+	jar    []byte
+}
+
+func newFill(t *testing.T, versions string, builds map[string]string, jar []byte) (*fakeFill, API) {
+	t.Helper()
+	f := &fakeFill{builds: builds, jar: jar}
+	f.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ua := r.Header.Get("User-Agent"); !strings.HasPrefix(ua, "tt-minecraftd") {
+			http.Error(w, "no user agent", http.StatusForbidden)
+			return
+		}
+		switch {
+		case r.URL.Path == "/paper":
+			fmt.Fprint(w, versions)
+		case r.URL.Path == "/jar":
+			_, _ = w.Write(f.jar)
+		case strings.HasPrefix(r.URL.Path, "/paper/versions/") && strings.HasSuffix(r.URL.Path, "/builds"):
+			v := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/paper/versions/"), "/builds")
+			b, ok := f.builds[v]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			fmt.Fprint(w, strings.ReplaceAll(b, "JARURL", f.srv.URL+"/jar"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(f.srv.Close)
+	return f, API{Base: f.srv.URL + "/paper", Client: f.srv.Client()}
+}
+
+func build(id int, channel, name string, jar []byte) string {
+	sum := sha256.Sum256(jar)
+	return fmt.Sprintf(`{"id":%d,"channel":%q,"downloads":{"server:default":{"name":%q,"checksums":{"sha256":%q},"size":%d,"url":"JARURL"}}}`,
+		id, channel, name, hex.EncodeToString(sum[:]), len(jar))
+}
+
+func TestNewestVersion(t *testing.T) {
+	defer testid.Line(t, "df65p")
+	jar := []byte("jar")
+	_, api := newFill(t, `{"project":{"id":"paper"},"versions":{"1.9":["1.9.4"],"26.3":["26.3-rc-3","26.3"],"26.4":["26.4-rc-1"],"1.21":["1.21.11","1.21.10"],"27.1":["27.1"]}}`,
+		map[string]string{
+			"27.1":    "[" + build(3, "BETA", "paper-27.1-3.jar", jar) + "]",
+			"26.3":    "[" + build(249, "STABLE", "paper-26.3-249.jar", jar) + "]",
+			"1.21.11": "[" + build(130, "STABLE", "paper-1.21.11-130.jar", jar) + "]",
+		}, jar)
+	v, err := api.NewestVersion(context.Background())
+	if err != nil || v != "26.3" {
+		t.Errorf("got %q, %v; want 26.3, since 27.1 has only a beta and 26.4 only a release candidate", v, err)
+	}
+	vs := []string{"1.9.4", "1.21.11", "26.3", "1.21", "1.21.2"}
+	sortNewest(vs)
+	if strings.Join(vs, " ") != "26.3 1.21.11 1.21.2 1.21 1.9.4" {
+		t.Errorf("sorted %q", vs)
+	}
+}
+
+func TestNewestStable(t *testing.T) {
+	defer testid.Line(t, "df65q")
+	jar := []byte("jar")
+	_, api := newFill(t, `{}`, map[string]string{
+		"26.3":   "[" + build(250, "BETA", "paper-26.3-250.jar", jar) + "," + build(249, "STABLE", "paper-26.3-249.jar", jar) + "," + build(248, "STABLE", "paper-26.3-248.jar", jar) + "]",
+		"bad":    "[" + build(1, "STABLE", "../paper.jar", jar) + "]",
+		"nosum":  `[{"id":1,"channel":"STABLE","downloads":{"server:default":{"name":"paper-x-1.jar","size":3,"url":"JARURL"}}}]`,
+		"plain":  `[{"id":1,"channel":"STABLE","downloads":{"server:default":{"name":"paper-x-1.jar","checksums":{"sha256":"` + strings.Repeat("a", 64) + `"},"size":3,"url":"http://example.com/x.jar"}}}]`,
+		"nostbl": "[" + build(1, "ALPHA", "paper-x-1.jar", jar) + "]",
+	}, jar)
+	b, err := api.NewestStable(context.Background(), "26.3")
+	if err != nil || b.ID != 249 || b.Name != "paper-26.3-249.jar" || b.Size != 3 {
+		t.Errorf("got %+v, %v", b, err)
+	}
+	for version, want := range map[string]string{"bad": "odd file name", "nosum": "no SHA-256", "plain": "isn't https", "nostbl": "no stable build", "../x": "isn't a Minecraft version", "missing": "404"} {
+		if _, err := api.NewestStable(context.Background(), version); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", version, err, want)
+		}
+	}
+}
+
+func TestInstall(t *testing.T) {
+	defer testid.Line(t, "df65r")
+	jar := []byte("PK not really a jar")
+	f, api := newFill(t, `{}`, map[string]string{"26.3": "[" + build(249, "STABLE", "paper-26.3-249.jar", jar) + "]"}, jar)
+	dir := t.TempDir()
+	// An old paper.jar link gets replaced, not followed.
+	outside := filepath.Join(t.TempDir(), "outside.jar")
+	if err := os.WriteFile(outside, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	b, err := api.NewestStable(context.Background(), "26.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := api.Install(context.Background(), dir, b); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(dir, "paper.jar")); err != nil || target != "paper-26.3-249.jar" {
+		t.Errorf("paper.jar -> %q, %v", target, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "paper-26.3-249.jar")); err != nil || string(got) != string(jar) {
+		t.Errorf("jar %q, %v", got, err)
+	}
+	if got, _ := os.ReadFile(outside); string(got) != "old" {
+		t.Errorf("the old link's target changed: %q", got)
+	}
+
+	// A jar that doesn't match the API's sum is left out, with no temp file.
+	f.jar = []byte("PK not really a jbr")
+	b.Name = "paper-26.3-250.jar"
+	if err := api.Install(context.Background(), dir, b); err == nil || !strings.Contains(err.Error(), "SHA-256 doesn't match") {
+		t.Errorf("bad sum: %v", err)
+	}
+	f.jar = append(jar, 'x')
+	if err := api.Install(context.Background(), dir, b); err == nil || !strings.Contains(err.Error(), "the API said") {
+		t.Errorf("too long: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if strings.Join(names, " ") != "paper-26.3-249.jar paper.jar" {
+		t.Errorf("left in the tree: %q", names)
+	}
+}

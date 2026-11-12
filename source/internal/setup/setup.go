@@ -22,6 +22,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
@@ -55,6 +56,14 @@ type Setup struct {
 	Accounts func(c *config.Config) *repair.Host
 	// Repair runs the repair command on c, with check for --check.
 	Repair func(ctx context.Context, c *config.Config, check bool) error
+	Paper  PaperSource
+}
+
+// PaperSource is where Paper builds come from: paper.API, or a test's.
+type PaperSource interface {
+	NewestVersion(ctx context.Context) (string, error)
+	NewestStable(ctx context.Context, version string) (paper.Build, error)
+	Install(ctx context.Context, serverDir string, b paper.Build) error
 }
 
 // Do runs setup: repair on an existing install, the install steps otherwise.
@@ -89,8 +98,14 @@ func (s *Setup) Do(ctx context.Context) error {
 		return err
 	}
 	exe := s.copyTarget()
+	// Asked before the plan, so a failed lookup stops setup before it changes
+	// anything.
+	build, err := s.paperBuild(ctx, cfg)
+	if err != nil {
+		return err
+	}
 
-	s.plan(cfg, opts, len(jars), exe)
+	s.plan(cfg, opts, len(jars), exe, build)
 	if !s.confirm("Go ahead? [y/n] ") {
 		return errors.New("nothing changed")
 	}
@@ -105,6 +120,9 @@ func (s *Setup) Do(ctx context.Context) error {
 		return stopped
 	}
 	if err := s.makeTree(ctx, &cfg); err != nil {
+		return err
+	}
+	if err := s.getPaper(ctx, cfg, build); err != nil {
 		return err
 	}
 	if err := s.eula(cfg); err != nil {
@@ -317,7 +335,7 @@ func (s *Setup) copyTarget() string {
 	return exe
 }
 
-func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string) {
+func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string, build *paper.Build) {
 	w := s.Out
 	fmt.Fprintf(w, "\nsetup will:\n")
 	if pkgs := s.packages(c); len(pkgs) > 0 {
@@ -328,6 +346,9 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string
 		fmt.Fprintf(w, "  - Take over %s as it is, and hand it to %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
 	} else {
 		fmt.Fprintf(w, "  - Make %s, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
+	}
+	if build != nil {
+		fmt.Fprintf(w, "  - Download Paper %s build %d, check its SHA-256, approve it, and point paper.jar at it.\n", build.Version, build.ID)
 	}
 	if accepted, _ := settings.EULAAccepted(c.ServerDir); !accepted {
 		fmt.Fprintf(w, "  - Ask whether you accept the Minecraft EULA, and write eula.txt only after a yes.\n")
@@ -468,6 +489,46 @@ func (s *Setup) writeConfig(opts []config.Option) error {
 		return err
 	}
 	fmt.Fprintf(s.Out, "%-7s %s written\n", "FIXED", s.ConfigPath)
+	return nil
+}
+
+// paperBuild is the build to download, or nil when there's a paper.jar
+// already, as on an adopted tree.
+func (s *Setup) paperBuild(ctx context.Context, c config.Config) (*paper.Build, error) {
+	if _, err := os.Lstat(filepath.Join(c.ServerDir, "paper.jar")); !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	version, err := s.Paper.NewestVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("can't get Paper: %w", err)
+	}
+	b, err := s.Paper.NewestStable(ctx, version)
+	if err != nil {
+		return nil, fmt.Errorf("can't get Paper: %w", err)
+	}
+	return &b, nil
+}
+
+func (s *Setup) getPaper(ctx context.Context, c config.Config, b *paper.Build) error {
+	switch {
+	case b == nil:
+		return nil
+	case s.DryRun:
+		fmt.Fprintf(s.Out, "would download %s into %s, and point paper.jar at it\n", b.Name, c.ServerDir)
+		return nil
+	}
+	if err := s.Paper.Install(ctx, c.ServerDir, *b); err != nil {
+		return err
+	}
+	fmt.Fprintf(s.Out, "%-7s Paper %s build %d downloaded, and its SHA-256 matches; paper.jar points at %s\n", "FIXED", b.Version, b.ID, b.Name)
+	// start pins the build paper.jar points at, like a plugin.
+	if _, err := s.configDir(); err != nil {
+		return err
+	}
+	if err := plugins.Approve(s.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: b.Name}, SHA256: b.SHA256, Size: b.Size}}); err != nil {
+		return fmt.Errorf("can't write the approved list: %w", err)
+	}
+	fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", b.Name)
 	return nil
 }
 

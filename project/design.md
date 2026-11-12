@@ -229,6 +229,9 @@ Common:  --config PATH, --set KEY=VALUE
 		- A new tree belongs to the operator, the same as a stopped server's. An adopted one is handed to the operator too.
 		- A `serverDir` that has files in it already is refused without `--adopt`.
 	4. Downloads and checks Paper on a new tree, the same way `update` does.
+		- It takes the newest Minecraft release that has a stable build, from PaperMC's download API at `fill.papermc.io`, and checks the jar's size and SHA-256 against it.
+		- The build goes on the approved list, since `start` pins it. A tree that has a `paper.jar` already keeps it.
+		- The lookup happens before the plan is shown, so a failed one stops setup before it changes anything.
 	5. Asks the operator to accept the Minecraft EULA, and writes `eula.txt` only after a yes or `--accept-eula`.
 		- `--yes` doesn't count as that yes. With no answer, setup goes on without `eula.txt`, and says how to add it.
 	6. Writes the safe settings. See [Safe server settings](#safe-server-settings).

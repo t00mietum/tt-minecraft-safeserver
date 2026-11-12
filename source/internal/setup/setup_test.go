@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -33,6 +35,27 @@ type rig struct {
 	ps      string
 	repairs []bool
 	repCfg  config.Config
+	paper   fakePaper
+}
+
+// fakePaper hands out one build, and writes it as a file.
+type fakePaper struct {
+	err       error
+	installed []string
+}
+
+func (p *fakePaper) NewestVersion(context.Context) (string, error) { return "26.3", p.err }
+
+func (p *fakePaper) NewestStable(_ context.Context, v string) (paper.Build, error) {
+	return paper.Build{Version: v, ID: 249, Name: "paper-26.3-249.jar", SHA256: strings.Repeat("ab", 32), Size: 3}, nil
+}
+
+func (p *fakePaper) Install(_ context.Context, dir string, b paper.Build) error {
+	p.installed = append(p.installed, b.Name)
+	if err := os.WriteFile(filepath.Join(dir, b.Name), []byte("jar"), 0o600); err != nil {
+		return err
+	}
+	return os.Symlink(b.Name, filepath.Join(dir, "paper.jar"))
 }
 
 func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
@@ -82,6 +105,7 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		Accounts: func(c *config.Config) *repair.Host {
 			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group}
 		},
+		Paper: &r.paper,
 		Repair: func(_ context.Context, c *config.Config, check bool) error {
 			r.repairs = append(r.repairs, check)
 			r.repCfg = *c
@@ -144,7 +168,14 @@ func TestNewInstall(t *testing.T) {
 	if slices.ContainsFunc(r.ran(), func(s string) bool { return strings.Contains(s, "apt-get") }) {
 		t.Errorf("apt-get ran with podman and catatonit there:\n%s", strings.Join(r.ran(), "\n"))
 	}
-	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "setup will:", "Pull docker.io/", "eula.txt: eula is now true", "server.properties: white-list is now")
+	if !reflect.DeepEqual(r.paper.installed, []string{"paper-26.3-249.jar"}) {
+		t.Errorf("Paper installs: %q", r.paper.installed)
+	}
+	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	if err != nil || len(approved) != 1 || approved[0].Name != "paper-26.3-249.jar" || approved[0].SHA256 != strings.Repeat("ab", 32) {
+		t.Errorf("approved list: %v %v", approved, err)
+	}
+	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "setup will:", "Pull docker.io/", "Download Paper 26.3 build 249", "FIXED   Paper 26.3 build 249 downloaded", "eula.txt: eula is now true", "server.properties: white-list is now")
 	if !reflect.DeepEqual(r.repairs, []bool{true}) {
 		t.Errorf("repair runs: %v, want one --check", r.repairs)
 	}
@@ -224,7 +255,7 @@ func TestAdopt(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(old, "plugins"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	for name, text := range map[string]string{"server.properties": "white-list=false\nmotd=hi\n", "plugins/Thing.jar": "not really a jar", "eula.txt": "eula=true\n"} {
+	for name, text := range map[string]string{"paper.jar": "jar", "server.properties": "white-list=false\nmotd=hi\n", "plugins/Thing.jar": "not really a jar", "eula.txt": "eula=true\n"} {
 		if err := os.WriteFile(filepath.Join(old, name), []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -256,8 +287,11 @@ func TestAdopt(t *testing.T) {
 		t.Errorf("server.properties:\n%s", props)
 	}
 	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
-	if err != nil || len(approved) != 1 {
-		t.Errorf("approved list: %v %v", approved, err)
+	if err != nil || len(approved) != 2 || approved[0].Name != "paper.jar" && approved[1].Name != "paper.jar" {
+		t.Errorf("approved list, which should have the plugin and paper.jar: %v %v", approved, err)
+	}
+	if len(r.paper.installed) > 0 {
+		t.Errorf("Paper downloaded over an adopted paper.jar: %q", r.paper.installed)
 	}
 	if strings.Contains(r.out.String(), "EULA") {
 		t.Error("asked about the EULA when eula.txt already says true")
@@ -345,6 +379,12 @@ func TestRefusals(t *testing.T) {
 	}
 	r.ps = ""
 
+	r.paper.err = errors.New("no network")
+	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "can't get Paper: no network") || strings.Contains(r.out.String(), "setup will:") {
+		t.Errorf("Paper API down: %v", err)
+	}
+	r.paper.err = nil
+
 	// No answer to the plan is a no.
 	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "nothing changed") {
 		t.Errorf("no answer: %v", err)
@@ -383,7 +423,7 @@ func TestDryRun(t *testing.T) {
 			t.Errorf("dry run made %s", p)
 		}
 	}
-	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "would write "+r.s.ConfigPath, "runMode: podman", "PLAN    group minecraftd made", "PLAN    alice added to group minecraftd", "PLAN    repair --check runs last")
+	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "would write "+r.s.ConfigPath, "runMode: podman", "PLAN    group minecraftd made", "PLAN    alice added to group minecraftd", "PLAN    repair --check runs last", "would download paper-26.3-249.jar")
 	if len(r.repairs) > 0 {
 		t.Errorf("repair runs %v", r.repairs)
 	}

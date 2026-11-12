@@ -27,6 +27,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
@@ -231,6 +232,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		Out:         w,
 		Exe:         exe,
 		Accounts:    accounts,
+		Paper:       paper.API{UserAgent: "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"},
 		Repair: func(ctx context.Context, c *config.Config, check bool) error {
 			again := inv
 			again.cfg = *c
