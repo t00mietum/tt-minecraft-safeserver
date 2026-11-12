@@ -43,7 +43,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
-	- Status: Started
+	- Status: Queued
+	- Prereq IDs: 2026111111070787
 	- Severity: Critical
 	- Opened: 20261111-110656
 	- Opened by: t00mietum
@@ -60,6 +61,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
 		- 2026-11-12: Got the list, 1 Java and 1 Bedrock player, kept in the private notes. The console commands are written up. Waits on them being run on the live server, and on a check of Geyser's `auth-type` there, which decides `fwhitelist` or `whitelist` for the Bedrock player.
 		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
+		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
 
 - update
 	- ID: 2026111111065803
@@ -214,6 +216,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- Move the existing server to the new account and tool with `setup --adopt`.
 		- Approve the plugins that are there now.
+		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
 		- Retire the old start, stop, and manage scripts after it runs clean.
 
 - Connect the service to an AI agent to update the game programs and add-ons
