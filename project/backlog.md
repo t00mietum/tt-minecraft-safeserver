@@ -22,25 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- Live server has the whitelist off while it's open to the internet
-	- ID: 2026111111065671
-	- Type: Bug
-	- Status: Waiting for answers
-	- Severity: Critical
-	- Opened: 20261111-110656
-	- Opened by: t00mietum
-	- Incorrect behavior [Bug]:
-		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
-	- Expected behavior [Bug]:
-		- Only whitelisted players can join, Java and Bedrock both.
-	- Possible cause [Bug]:
-		- The old scripts never set it, and nothing checks it.
-	- Note:
-		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
-		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
-	- Progress log:
-		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
-
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -58,6 +39,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
 		- GPL v2 or later.
 	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
+
+- Live server has the whitelist off while it's open to the internet
+	- ID: 2026111111065671
+	- Type: Bug
+	- Status: Started
+	- Severity: Critical
+	- Opened: 20261111-110656
+	- Opened by: t00mietum
+	- Incorrect behavior [Bug]:
+		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
+	- Expected behavior [Bug]:
+		- Only whitelisted players can join, Java and Bedrock both.
+	- Possible cause [Bug]:
+		- The old scripts never set it, and nothing checks it.
+	- Note:
+		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
+		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
+	- Progress log:
+		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
+		- 2026-11-12: Got the list, 1 Java and 1 Bedrock player, kept in the private notes. The console commands are written up. Waits on them being run on the live server, and on a check of Geyser's `auth-type` there, which decides `fwhitelist` or `whitelist` for the Bedrock player.
 
 - update
 	- ID: 2026111111065803
