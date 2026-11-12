@@ -279,6 +279,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
+	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
 
 - First release
 	- ID: 2026111111070774
@@ -290,6 +291,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq IDs: 2026111111065868, 2026111111070761
 	- Requirements:
 		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with -X main.version=<tag>, plus SHA256SUMS. Run update --self against it once it's out.
 
 - Move the first server over
 	- ID: 2026111111070787
