@@ -443,6 +443,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are done. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
 	- Test case: its children's: 2026111116415175: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n; 2026111116415186: df65p, df65q, df65r, df65d, df65f, df65j; 2026111116415196: df65x, df65y, df65z, df65d, df65f, df65r
 	- 20261111: children 2026111116415175 wait on UAT, and the rest are closed
+	- 2026-11-12: The firewall step is in, as step 9, through 2026111117135246.
 
 - setup: install steps and --adopt
 	- ID: 2026111116415175
@@ -630,6 +631,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- `status` shows the firewall's drop counters, inbound and outbound, in place of "not set up yet".
 	- The counters are the named ones in `firewall.nft`: `in_refused`, `in_flood`, `in_closed`, `out_local`, `out_lan`, and `out_web`. Reading them needs root, and `status` doesn't use sudo, so this needs a pick, such as `sudo -n` when it's cached, or "run with sudo to see them".
+	- 2026-11-12: Picked: status shows the counters when run as root, and otherwise one line saying sudo shows them. No sudo -n, so the output doesn't change with sudo's cache.
 
 - update
 	- ID: 2026111111065803
@@ -686,6 +688,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Fix `how-to-connect.md` if they don't.
 	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
 	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
 
 - NixOS module
 	- ID: 2026111111065855
