@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
@@ -31,6 +32,7 @@ type Kit struct {
 	Root        bool
 	DryRun      bool
 	Sleep       func(time.Duration)
+	sudoed      bool
 }
 
 // Running says whether the server runs in the configured mode.
@@ -38,7 +40,7 @@ func Running(ctx context.Context, r host.Runner, c *config.Config) (bool, error)
 	if c.RunMode == "native" {
 		return (&Native{Kit: Kit{Run: r, Cfg: c}}).running(ctx)
 	}
-	state, err := ContainerState(ctx, r)
+	_, state, err := FindContainer(ctx, r, c.RunMode)
 	return state == "running", err
 }
 
@@ -66,11 +68,13 @@ func (k *Kit) warn(warns []string) {
 	}
 }
 
+// sudoUp asks for sudo once, before the first command that needs it.
 func (k *Kit) sudoUp(ctx context.Context) error {
-	if k.Root {
+	if k.Root || k.sudoed {
 		return nil
 	}
 	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Tty: true})
+	k.sudoed = err == nil
 	return err
 }
 
@@ -133,6 +137,22 @@ func (k *Kit) checkPlugins() error {
 	return errors.New("a jar is new or changed; sudo tt-minecraftd repair --approve-plugins shows each one and asks")
 }
 
+// checkFirewall refuses a start without the tool's nftables table, so the
+// server never runs unfenced. See design.md, Firewall.
+func (k *Kit) checkFirewall(ctx context.Context) error {
+	if !k.Cfg.Firewall {
+		return nil
+	}
+	up, err := firewall.Loaded(ctx, k.Run)
+	if err != nil {
+		return err
+	}
+	if !up {
+		return fmt.Errorf("the firewall isn't loaded (nftables table inet %s); sudo tt-minecraftd repair loads it", firewall.Table)
+	}
+	return nil
+}
+
 func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 	k.say("Waiting for the server to load, up to %s.", k.Cfg.StartTimeout)
 	for range int(k.Cfg.StartTimeout / time.Second) {
@@ -164,11 +184,12 @@ func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 // stop runs design.md's stop steps that are built so far. warn is the
 // countdown for the players, in seconds.
 func (k *Kit) stop(ctx context.Context, e engine, warn int) error {
-	up, err := e.running(ctx)
-	if err != nil {
+	// Container mode asks the runtime through sudo.
+	if err := k.sudoUp(ctx); err != nil {
 		return err
 	}
-	if err := k.sudoUp(ctx); err != nil {
+	up, err := e.running(ctx)
+	if err != nil {
 		return err
 	}
 	if !up {

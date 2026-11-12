@@ -29,7 +29,7 @@ type Config struct {
 	ServerDir         string
 	OwnerTrees        []string
 	ZfsDataset        string
-	DockerImage       string
+	Image             string
 	JavaBin           string
 	HeapMin           int64
 	HeapMax           int64
@@ -119,14 +119,14 @@ type setter func(doc *shcl.Document, path string) error
 // setters maps each key, folded the way shcl folds it, to its setter.
 func (c *Config) setters() map[string]setter {
 	byName := map[string]setter{
-		"runMode":           choice(&c.RunMode, "docker", "native"),
+		"runMode":           choice(&c.RunMode, "podman", "docker", "native"),
 		"runUser":           text(&c.RunUser, checkAccount),
 		"runGroup":          text(&c.RunGroup, checkAccount),
 		"ownerAfterStop":    text(&c.OwnerAfterStop, checkAccount),
 		"serverDir":         text(&c.ServerDir, checkTree),
 		"ownerTrees":        list(&c.OwnerTrees, checkTree),
 		"zfsDataset":        text(&c.ZfsDataset, checkDataset),
-		"dockerImage":       text(&c.DockerImage, checkImage),
+		"image":             text(&c.Image, checkImage),
 		"javaBin":           text(&c.JavaBin, checkProgram),
 		"heapMin":           size(&c.HeapMin),
 		"heapMax":           size(&c.HeapMax),
@@ -366,6 +366,11 @@ func checkDataset(s string) (string, error) {
 func checkImage(s string) (string, error) {
 	if strings.HasPrefix(s, "-") || strings.IndexFunc(s, unicode.IsSpace) >= 0 {
 		return "", fmt.Errorf("%q isn't an image name", s)
+	}
+	// Podman won't pick a registry for a short name.
+	reg, _, found := strings.Cut(s, "/")
+	if !found || (reg != "localhost" && !strings.ContainsAny(reg, ".:")) {
+		return "", fmt.Errorf("%q has no registry in its name, such as docker.io/library/", s)
 	}
 	return s, nil
 }

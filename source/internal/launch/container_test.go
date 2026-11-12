@@ -30,7 +30,7 @@ func (f *fakeConsole) Send(_ context.Context, line string) error {
 // rig is a server tree with paper.jar linked to a build, one plugin, and a
 // fake host whose container state follows the states list, one per look.
 type rig struct {
-	d       *Docker
+	d       *Boxed
 	r       *host.Fake
 	console *fakeConsole
 	out     *bytes.Buffer
@@ -39,6 +39,7 @@ type rig struct {
 	ps      string
 	states  []string
 	log     string
+	tables  string
 }
 
 func newRig(t *testing.T) *rig {
@@ -60,6 +61,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	cfg := config.Defaults()
+	cfg.RunMode = "docker"
 	cfg.ServerDir, cfg.OwnerTrees = dir, []string{dir}
 	cfg.RunGroup, cfg.OwnerAfterStop = "minecraftd", "alice"
 	cfg.HeapMin, cfg.MemCap = 1<<30, 6<<30
@@ -76,13 +78,21 @@ func newRig(t *testing.T) *rig {
 	if err := os.WriteFile(list, []byte("jar: paper-26.3-244.jar\n\tsha256: "+empty+"\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+empty+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir}
+	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n"}
 	g.r.Reply = g.reply
-	g.d = &Docker{
+	noRuntimes(t)
+	g.d = &Boxed{
 		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
 		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
+}
+
+// noRuntimes has no runtime installed but runMode's, unless a test adds one.
+func noRuntimes(t *testing.T) {
+	was := Installed
+	Installed = func(string) bool { return false }
+	t.Cleanup(func() { Installed = was })
 }
 
 func (g *rig) reply(c host.Cmd) ([]byte, error) {
@@ -100,6 +110,8 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 		return []byte(s + "\n"), nil
 	case len(c.Args) > 2 && c.Args[1] == "logs":
 		return []byte(g.log), nil
+	case c.Args[0] == "nft":
+		return []byte(g.tables), nil
 	}
 	return nil, nil
 }
@@ -133,15 +145,15 @@ func TestDockerStart(t *testing.T) {
 		"--mount", "type=bind,src=" + g.dir + ",dst=" + g.dir,
 		"--mount", "type=bind,src=" + g.dir + "/paper-26.3-244.jar,dst=" + g.dir + "/paper-26.3-244.jar,readonly",
 		"--mount", "type=bind,src=" + g.dir + "/plugins/Geyser-Spigot.jar,dst=" + g.dir + "/plugins/Geyser-Spigot.jar,readonly",
-		cfg.DockerImage, "sh", "-c", `umask 0007 && exec "$@"`, "sh", "java", "-Xms1G", "-Xmx4G"}
+		cfg.Image, "sh", "-c", `umask 0007 && exec "$@"`, "sh", "java", "-Xms1G", "-Xmx4G"}
 	run = append(run, cfg.JvmArgs...)
 	run = append(run, "-Dlog4j2.formatMsgNoLookups=true", "-jar", "paper.jar", "--nogui")
 	want := []string{
 		"sudo -v",
-		"docker rm tt-minecraftd",
+		"sudo docker rm tt-minecraftd",
 		"sudo chown -R -- minecraftd:minecraftd " + q(g.dir),
 		"sudo chmod -R ug+rwX,o-rwx -- " + q(g.dir),
-		host.Quote(run),
+		"sudo " + host.Quote(run),
 	}
 	if got := g.changes(); !reflect.DeepEqual(got, want) {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -218,7 +230,7 @@ func TestDockerStartModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := g.r.Lines()
-	if lines[len(lines)-2] != "docker wait tt-minecraftd" || strings.Contains(strings.Join(lines, "\n"), "sudo -v") {
+	if lines[len(lines)-2] != "sudo docker wait tt-minecraftd" || strings.Contains(strings.Join(lines, "\n"), "sudo -v") {
 		t.Errorf("foreground ran %q", lines)
 	}
 
@@ -227,7 +239,7 @@ func TestDockerStartModes(t *testing.T) {
 	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
 		t.Fatal(err)
 	}
-	if last := g.r.Lines()[len(g.r.Ran)-1]; !strings.HasPrefix(last, "docker run --detach") || g.slept != 0 {
+	if last := g.r.Lines()[len(g.r.Ran)-1]; !strings.HasPrefix(last, "sudo docker run --detach") || g.slept != 0 {
 		t.Errorf("dry run ended with %q, slept %s", last, g.slept)
 	}
 }
@@ -235,7 +247,7 @@ func TestDockerStartModes(t *testing.T) {
 func TestDockerStop(t *testing.T) {
 	defer testid.Line(t, "df5xt")
 	g := newRig(t)
-	g.states = []string{"running", "running", "exited"}
+	g.states = []string{"running", "running", "running", "exited"}
 	if err := g.d.Stop(context.Background(), 12); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +287,7 @@ func TestDockerStopEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := g.changes()
-	if len(got) != 3 || got[1] != "docker stop --time 30 tt-minecraftd" || g.slept != 3*time.Second {
+	if len(got) != 3 || got[1] != "sudo docker stop --time 30 tt-minecraftd" || g.slept != 3*time.Second {
 		t.Errorf("stuck: ran %q, slept %s", got, g.slept)
 	}
 
@@ -338,6 +350,45 @@ func TestStartChecksSettings(t *testing.T) {
 		}
 		if !strings.Contains(g.out.String(), "warning: the whitelist is empty") {
 			t.Errorf("native %v, empty whitelist: output %q", native, g.out.String())
+		}
+	}
+}
+
+// With firewall on, a start without the table stops after sudo, in either
+// mode, before anything changes. With it off, nft isn't asked.
+func TestStartChecksFirewall(t *testing.T) {
+	defer testid.Line(t, "df66f")
+	for _, native := range []bool{false, true} {
+		g := newNativeRig(t)
+		start := g.d.Start
+		if native {
+			start = g.n.Start
+		}
+		g.tables = "table inet filter\n"
+		err := start(context.Background(), StartMode{})
+		if err == nil || !strings.Contains(err.Error(), "inet tt_minecraftd") || !strings.Contains(err.Error(), "repair") || len(g.changes()) != 1 {
+			t.Errorf("native %v, no table: err %v, ran %q", native, err, g.changes())
+		}
+		var asked bool
+		for _, line := range g.r.Lines() {
+			asked = asked || line == "sudo nft list tables inet"
+		}
+		if !asked {
+			t.Errorf("native %v: ran %q, no nft list", native, g.r.Lines())
+		}
+
+		g = newNativeRig(t)
+		start = g.d.Start
+		if native {
+			start = g.n.Start
+		}
+		g.tables = ""
+		g.d.Cfg.Firewall = false
+		_ = start(context.Background(), StartMode{}) // only what ran matters here
+		for _, c := range g.r.Ran {
+			if c.Args[0] == "nft" {
+				t.Errorf("native %v, firewall off: asked nft", native)
+			}
 		}
 	}
 }
@@ -407,5 +458,126 @@ func TestStartChecksPlugins(t *testing.T) {
 	mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
 	if last := g.r.Lines()[len(g.r.Ran)-1]; !strings.Contains(last, mount) {
 		t.Errorf("no read-only mount for the extension in %q", last)
+	}
+}
+
+// Podman gets the same run command as Docker, through sudo.
+func TestPodmanStart(t *testing.T) {
+	defer testid.Line(t, "df64f")
+	docker := newRig(t)
+	docker.states = []string{"", "running"}
+	docker.log = "Done (1.0s)! For help, type \"help\""
+	if err := docker.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	podman := newRig(t)
+	podman.d.Cfg.RunMode = "podman"
+	podman.d.Cfg.ServerDir, podman.d.Cfg.OwnerTrees = docker.d.Cfg.ServerDir, docker.d.Cfg.OwnerTrees
+	podman.states, podman.log = []string{"", "running"}, docker.log
+	if err := podman.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(podman.r.Ran) != len(docker.r.Ran) {
+		t.Fatalf("podman ran %q\ndocker ran %q", podman.r.Lines(), docker.r.Lines())
+	}
+	boxed := 0
+	for i, c := range podman.r.Ran {
+		d := docker.r.Ran[i]
+		if d.Args[0] != "docker" {
+			if !reflect.DeepEqual(c, d) {
+				t.Errorf("podman ran %q, docker %q", podman.r.Lines()[i], docker.r.Lines()[i])
+			}
+			continue
+		}
+		boxed++
+		if c.Args[0] != "podman" || !c.Sudo || !d.Sudo || !reflect.DeepEqual(c.Args[1:], d.Args[1:]) {
+			t.Errorf("podman ran %q, docker %q", podman.r.Lines()[i], docker.r.Lines()[i])
+		}
+	}
+	if boxed < 3 {
+		t.Errorf("only %d runtime commands: %q", boxed, podman.r.Lines())
+	}
+}
+
+// A container from before a runMode change is found under the other runtime,
+// and stop goes there. Only runMode's runtime has to answer.
+func TestFindContainer(t *testing.T) {
+	defer testid.Line(t, "df64g")
+	states := map[string]string{}
+	fails := map[string]bool{}
+	installed := map[string]bool{}
+	r := &host.Fake{Reply: func(c host.Cmd) ([]byte, error) {
+		if fails[c.Args[0]] {
+			return nil, errors.New(c.Args[0] + ": can't connect")
+		}
+		if c.Args[1] == "ps" {
+			return []byte(states[c.Args[0]] + "\n"), nil
+		}
+		return nil, nil
+	}}
+	was := Installed
+	Installed = func(name string) bool { return installed[name] }
+	t.Cleanup(func() { Installed = was })
+	find := func() string {
+		rt, state, err := FindContainer(context.Background(), r, "podman")
+		if err != nil {
+			return "error"
+		}
+		return rt + " " + state
+	}
+	for _, c := range []struct {
+		podman, docker string
+		dockerIn       bool
+		fail           string
+		want           string
+	}{
+		{"", "", false, "", " "},
+		{"running", "", false, "", "podman running"},
+		{"", "exited", false, "", " "},
+		{"", "exited", true, "", "docker exited"},
+		{"exited", "running", true, "", "docker running"},
+		{"exited", "exited", true, "", "podman exited"},
+		{"exited", "", true, "", "podman exited"},
+		{"", "", true, "docker", " "},
+		{"", "", true, "podman", "error"},
+	} {
+		states["podman"], states["docker"], installed["docker"] = c.podman, c.docker, c.dockerIn
+		fails = map[string]bool{c.fail: true}
+		if got := find(); got != c.want {
+			t.Errorf("%+v: got %q", c, got)
+		}
+	}
+	for _, c := range r.Ran {
+		if !c.Sudo || !c.Look {
+			t.Errorf("not a sudo look: %q", c.Args)
+		}
+	}
+
+	g := newRig(t)
+	g.d.Cfg.RunMode = "podman"
+	installed["docker"] = true
+	Installed = func(name string) bool { return installed[name] }
+	left := 2
+	g.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if c.Args[0] == "docker" && c.Args[1] == "ps" && left > 0 {
+			left--
+			return []byte("running\n"), nil
+		}
+		if c.Args[0] == "docker" && c.Args[1] == "ps" {
+			return []byte("exited\n"), nil
+		}
+		return g.reply(c)
+	}
+	if err := g.d.Stop(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if g.d.Runtime != "docker" || !strings.Contains(g.out.String(), "under docker, not podman") {
+		t.Errorf("stop stayed on %q: %q", g.d.Runtime, g.out.String())
+	}
+	for _, c := range g.r.Ran[2:] {
+		if c.Args[0] == "podman" {
+			t.Errorf("asked podman after finding docker's: %q", g.r.Lines())
+			break
+		}
 	}
 }

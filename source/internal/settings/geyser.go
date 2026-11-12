@@ -6,13 +6,14 @@ package settings
 import (
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 )
 
-// Geyser's config, as the Spigot plugin keeps it. A missing one is left
-// alone: Geyser writes it with its defaults at its first start, which bind
-// all addresses and log in with online mode, and the next start checks it.
+// Geyser's config, as the Spigot plugin keeps it. A missing one is wrong too:
+// Geyser's first start writes its defaults, with online mode logins on 19132,
+// and runs with them. Given only these keys, it keeps them and adds the rest.
 var geyserDirs = []string{"plugins", "Geyser-Spigot"}
 
 const geyserFile = "config.yml"
@@ -68,25 +69,31 @@ func geyserAuthPath(lines []string) []string {
 }
 
 func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
-	d := top
-	for _, name := range geyserDirs {
-		sub, err := d.sub(name)
+	name := strings.Join(append(geyserDirs[:len(geyserDirs):len(geyserDirs)], geyserFile), "/")
+	d, there := top, true
+	for _, sub := range geyserDirs {
+		next, err := d.sub(sub)
+		if isNotExist(err) && fix {
+			next, err = d.mkdir(sub)
+		}
 		if isNotExist(err) {
-			return nil, nil
+			there = false
+			break
 		}
 		if err != nil {
 			return nil, err
 		}
-		defer sub.close()
-		d = sub
+		defer next.close()
+		d = next
 	}
-	name := strings.Join(append(geyserDirs[:len(geyserDirs):len(geyserDirs)], geyserFile), "/")
-	text, st, err := d.read(geyserFile)
-	if isNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
+	var text []byte
+	var st *syscall.Stat_t
+	if there {
+		var err error
+		text, st, err = d.read(geyserFile)
+		if err != nil && !isNotExist(err) {
+			return nil, err
+		}
 	}
 	lines := strings.Split(string(text), "\n")
 	var problems []Problem

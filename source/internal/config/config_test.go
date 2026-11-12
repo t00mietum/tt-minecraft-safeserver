@@ -60,7 +60,7 @@ ownerAfterStop: alice
 serverDir: /srv/mc/server/
 ownerTrees: [/srv/mc/server, /tank/world]
 zfsDataset: tank/minecraft
-dockerImage: eclipse-temurin@sha256:abc123
+image: docker.io/library/eclipse-temurin@sha256:abc123
 javaBin: /usr/lib/jvm/java-25/bin/java
 heapMin: 2G
 heapMax: 6 GiB
@@ -94,7 +94,7 @@ extraArgs: [--nogui]
 		ServerDir:         "/srv/mc/server",
 		OwnerTrees:        []string{"/srv/mc/server", "/tank/world"},
 		ZfsDataset:        "tank/minecraft",
-		DockerImage:       "eclipse-temurin@sha256:abc123",
+		Image:             "docker.io/library/eclipse-temurin@sha256:abc123",
 		JavaBin:           "/usr/lib/jvm/java-25/bin/java",
 		HeapMin:           2 << 30,
 		HeapMax:           6 << 30,
@@ -137,7 +137,7 @@ func TestMissingKeysLeaveDefaults(t *testing.T) {
 func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 	defer testid.Line(t, "df5ww")
 	cases := []struct{ line, says string }{
-		{"runMode: podman", `"podman" isn't one of: docker, native`},
+		{"runMode: lxc", `"lxc" isn't one of: podman, docker, native`},
 		{"runMode: [docker, native]", "takes one value"},
 		{"runMode:", "no value"},
 		{"runUser: -root", "isn't a user or group name"},
@@ -147,7 +147,9 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 		{"ownerTrees: [/srv/mc, /]", "can't be /"},
 		{"zfsDataset: /tank/mc", "isn't a ZFS dataset name"},
 		{"zfsDataset: tank/mc@snap", "isn't a ZFS dataset name"},
-		{"dockerImage: --privileged", "isn't an image name"},
+		{"image: --privileged", "isn't an image name"},
+		{"image: eclipse-temurin:25-jre", "has no registry"},
+		{"image: library/eclipse-temurin", "has no registry"},
 		{"javaBin: bin/java", "isn't a full path or a program name"},
 		{"heapMax: 4X", `"4X" isn't a size`},
 		{"heapMax: 0G", "too small"},

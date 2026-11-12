@@ -143,7 +143,7 @@ func TestBadOptionIsAnError(t *testing.T) {
 	cases := []struct{ key, value, says string }{
 		{"whiteList", "true", `unknown key "whiteList"`},
 		{"heapMax.min", "1G", "unknown key"},
-		{"runMode", "podman", `runMode: "podman" isn't one of`},
+		{"runMode", "lxc", `runMode: "lxc" isn't one of`},
 		{"runMode", "native\nfirewall: off", "takes one line"},
 		{"runMode", "", "no value"},
 		{"gamePort", "[1, 2]", "takes one value"},

@@ -6,8 +6,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +39,27 @@ func noHostChecks(t *testing.T) {
 		return &repairpkg.Host{Cfg: &inv.cfg}, nil, nil
 	}
 	t.Cleanup(func() { repairSteps = old })
+}
+
+// fakePaperMC points paperAPI at a stand-in that has build 249 of 26.3 only.
+func fakePaperMC(t *testing.T) {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/paper":
+			fmt.Fprint(w, `{"versions":{"26.3":["26.3"]}}`)
+		case "/paper/versions/26.3":
+			fmt.Fprint(w, `{"version":{"id":"26.3","java":{"version":{"minimum":25}}}}`)
+		case "/paper/versions/26.3/builds":
+			fmt.Fprintf(w, `[{"id":249,"channel":"STABLE","downloads":{"server:default":{"name":"paper-26.3-249.jar","checksums":{"sha256":"%s"},"size":3,"url":"https://x/jar"}}}]`, strings.Repeat("ab", 32))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	old := paperAPI
+	paperAPI.Base, paperAPI.Client = srv.URL+"/paper", srv.Client()
+	t.Cleanup(func() { paperAPI = old })
 }
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
@@ -90,7 +115,7 @@ func TestUsageErrors(t *testing.T) {
 		{"status", "--set", "heapMax"},
 		{"status", "--set", "=6G"},
 		{"status", "--set", "noSuchKey=1"},
-		{"status", "--set", "runMode=podman"},
+		{"status", "--set", "runMode=lxc"},
 		{"--config"},
 	} {
 		code, _, errOut := runArgs(args...)
@@ -116,13 +141,13 @@ func TestOptionsReachConfig(t *testing.T) {
 		mode, user, group string
 		heap              int64
 	}{
-		{[]string{"start"}, "docker", "minecraftd", "minecraftd", 4 << 30},
+		{[]string{"start"}, "podman", "minecraftd", "minecraftd", 4 << 30},
 		{[]string{"start", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30},
 		{[]string{"start", "--native", "--set", "runMode=docker"}, "docker", "minecraftd", "minecraftd", 4 << 30},
 		{[]string{"start", "--set", "runMode=docker", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30},
-		{[]string{"--set", "heapMax=6G", "start", "--set", "runUser=mc"}, "docker", "mc", "mc", 6 << 30},
-		{[]string{"--config", path, "status"}, "docker", "mcfile", "mcfile", 2 << 30},
-		{[]string{"status", "--config=" + path, "--set", "heapMax=3G"}, "docker", "mcfile", "mcfile", 3 << 30},
+		{[]string{"--set", "heapMax=6G", "start", "--set", "runUser=mc"}, "podman", "mc", "mc", 6 << 30},
+		{[]string{"--config", path, "status"}, "podman", "mcfile", "mcfile", 2 << 30},
+		{[]string{"status", "--config=" + path, "--set", "heapMax=3G"}, "podman", "mcfile", "mcfile", 3 << 30},
 	} {
 		var errOut bytes.Buffer
 		inv, code, done := prepare(c.args, &bytes.Buffer{}, &errOut)
@@ -144,7 +169,7 @@ func TestMissingConfig(t *testing.T) {
 	noDefaultConfig(t)
 	var errOut bytes.Buffer
 	inv, _, done := prepare([]string{"status"}, &bytes.Buffer{}, &errOut)
-	if done || inv.cfg.RunMode != "docker" || !strings.Contains(errOut.String(), "defaults are used") {
+	if done || inv.cfg.RunMode != "podman" || !strings.Contains(errOut.String(), "defaults are used") {
 		t.Errorf("default missing: done %v, mode %q, stderr %q", done, inv.cfg.RunMode, errOut.String())
 	}
 	code, _, msg := runArgs("status", "--config", filepath.Join(t.TempDir(), "nope.shcl"))
@@ -171,7 +196,7 @@ func TestWatch(t *testing.T) {
 	if n := strings.Count(out.String(), "Every 10ms, until Ctrl-C."); n < 2 || strings.Contains(out.String(), "\x1b") {
 		t.Errorf("%d redraws, or a screen code:\n%s", n, out.String())
 	}
-	if !strings.Contains(out.String(), "Server:     not running in docker mode\n") {
+	if !strings.Contains(out.String(), "Server:     not running in podman mode\n") {
 		t.Errorf("no status in:\n%s", out.String())
 	}
 }
@@ -306,5 +331,82 @@ func TestRepairOrder(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if code != exitError || lines[0] != "OK      early" || !strings.HasPrefix(lines[1], "FAILED  server.properties: online-mode") || lines[len(lines)-1] != "FAILED  late is wrong" {
 		t.Errorf("exit %d, stdout:\n%s", code, out)
+	}
+}
+
+// setup runs itself through sudo unless it's root or a dry run, and on an
+// existing install it runs repair.
+func TestSetup(t *testing.T) {
+	defer testid.Line(t, "df65m")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	fakePaperMC(t)
+	var again []string
+	old := asRoot
+	asRoot = func(args []string) error { again = args; return nil }
+	t.Cleanup(func() { asRoot = old })
+
+	code, out, _ := runArgs("setup", "--help")
+	for _, want := range []string{"--yes ", "--dry-run ", "--adopt PATH", "--accept-eula ", "--native "} {
+		if code != exitOK || !strings.Contains(out, want) {
+			t.Errorf("setup --help lacks %q: %q", want, out)
+		}
+	}
+	if os.Geteuid() != 0 {
+		if code, _, msg := runArgs("setup", "--yes", "--adopt", "/srv/x"); code != exitOK || !reflect.DeepEqual(again, []string{"setup", "--yes", "--adopt", "/srv/x"}) {
+			t.Errorf("not root: exit %d, ran again with %q, stderr %q", code, again, msg)
+		}
+	}
+
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "config.shcl")
+	if err := os.WriteFile(conf, []byte("serverDir: "+dir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, msg := runArgs("setup", "--dry-run", "--config", conf)
+	if code != exitError || !strings.Contains(out, "Found an install at "+conf) || !strings.Contains(out, "FAILED  server.properties: white-list isn't set") {
+		t.Errorf("existing install: exit %d, stdout %q, stderr %q", code, out, msg)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
+		t.Error("a dry run wrote server.properties")
+	}
+}
+
+// update runs itself through sudo unless it's root or a dry run, and a dry
+// run shows the plan without downloading.
+func TestUpdate(t *testing.T) {
+	defer testid.Line(t, "df671")
+	noDefaultConfig(t)
+	fakePaperMC(t)
+	var again []string
+	old := asRoot
+	asRoot = func(args []string) error { again = args; return nil }
+	t.Cleanup(func() { asRoot = old })
+
+	code, out, _ := runArgs("update", "--help")
+	for _, want := range []string{"--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
+		if code != exitOK || !strings.Contains(out, want) {
+			t.Errorf("update --help lacks %q: %q", want, out)
+		}
+	}
+	if os.Geteuid() != 0 {
+		if code, _, msg := runArgs("update", "--paper", "--yes"); code != exitOK || !reflect.DeepEqual(again, []string{"update", "--paper", "--yes"}) {
+			t.Errorf("not root: exit %d, ran again with %q, stderr %q", code, again, msg)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.Symlink("paper-26.3-244.jar", filepath.Join(dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "paper-26.3-244.jar"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, msg := runArgs("update", "--dry-run", "--set=serverDir="+dir)
+	if code != exitOK || !strings.Contains(out, "from build 244 to build 249") || !strings.Contains(out, "would download paper-26.3-249.jar") || !strings.Contains(out, "would pull docker.io/library/eclipse-temurin:25-jre,") {
+		t.Errorf("dry run: exit %d, stdout %q, stderr %q", code, out, msg)
+	}
+	if target, _ := os.Readlink(filepath.Join(dir, "paper.jar")); target != "paper-26.3-244.jar" {
+		t.Errorf("a dry run moved paper.jar to %q", target)
 	}
 }

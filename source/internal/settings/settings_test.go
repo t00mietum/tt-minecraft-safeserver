@@ -48,6 +48,7 @@ func keys(problems []Problem) []string {
 func TestPropertiesMissing(t *testing.T) {
 	defer testid.Line(t, "df5yk")
 	cfg, dir := newServer(t)
+	cfg.Bedrock = false // Geyser's file has its own tests
 	problems, err := Check(cfg)
 	if err != nil || len(problems) != len(propertyRules(cfg)) || !problems[0].Missing {
 		t.Fatalf("check: %v, %q", err, keys(problems))
@@ -75,6 +76,7 @@ func TestPropertiesMissing(t *testing.T) {
 func TestPropertiesFix(t *testing.T) {
 	defer testid.Line(t, "df5ym")
 	cfg, dir := newServer(t)
+	cfg.Bedrock = false
 	cfg.BindIP, cfg.GamePort, cfg.HideOnlinePlayers = "::1", 25570, false
 	put(t, dir, propertiesFile, strings.Join([]string{
 		"#Minecraft server properties",
@@ -378,18 +380,26 @@ func TestGeyserLayouts(t *testing.T) {
 	}
 }
 
-// No Geyser config yet, or bedrock off, is fine. A linked Geyser folder isn't.
+// With bedrock off, Geyser's config isn't read. No config yet is wrong, since
+// Geyser's first start would run on its defaults. A linked Geyser folder isn't
+// followed.
 func TestGeyserSkipped(t *testing.T) {
 	defer testid.Line(t, "df5yx")
 	cfg, dir := newServer(t)
+	cfg.Bedrock = false
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
 	}
+	cfg.Bedrock = true
 	if err := os.MkdirAll(filepath.Join(dir, "plugins", "Geyser-Spigot"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if problems, err := Check(cfg); err != nil || len(problems) != 0 {
-		t.Errorf("no config.yml: %v, %q", err, keys(problems))
+	want := []string{geyserConfig + " bedrock.address", geyserConfig + " bedrock.port", geyserConfig + " java.auth-type"}
+	if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems), want) {
+		t.Errorf("no config.yml: %v, %q; want %q", err, keys(problems), want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, geyserConfig)); !os.IsNotExist(err) {
+		t.Errorf("check wrote config.yml: %v", err)
 	}
 	put(t, dir, geyserConfig, geyserNow, 0o640)
 	cfg.Bedrock = false
@@ -449,5 +459,103 @@ func TestGeyserNetherNetPort(t *testing.T) {
 	wantText := strings.Replace(good, "  transport: nethernet\n", "  webrtc-port: 0\n  transport: nethernet\n  clone-remote-port: false\n", 1)
 	if b, _ := os.ReadFile(filepath.Join(dir, geyserConfig)); string(b) != wantText {
 		t.Errorf("config.yml:\n%s\nwant:\n%s", b, wantText)
+	}
+}
+
+func TestEULAFile(t *testing.T) {
+	defer testid.Line(t, "df65n")
+	dir := t.TempDir()
+	if ok, err := EULAAccepted(dir); ok || err != nil {
+		t.Errorf("no eula.txt: %v %v", ok, err)
+	}
+	if err := AcceptEULA(dir); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := EULAAccepted(dir); !ok || err != nil {
+		t.Errorf("after AcceptEULA: %v %v", ok, err)
+	}
+	file := filepath.Join(dir, "eula.txt")
+	if err := os.WriteFile(file, []byte("#kept\neula=FALSE\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(file, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := AcceptEULA(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(file) // #nosec G304 -- the test's own file
+	if err != nil || !strings.Contains(string(b), "#kept") || !strings.Contains(string(b), "eula=true") || strings.Contains(string(b), "FALSE") {
+		t.Errorf("eula.txt now %q, %v", b, err)
+	}
+	if fi, err := os.Stat(file); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Errorf("mode %v %v", fi.Mode(), err)
+	}
+
+	// A link in its place isn't followed.
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.WriteFile(target, []byte("eula=true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, file); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := EULAAccepted(dir); ok || err == nil {
+		t.Errorf("through a link: %v %v", ok, err)
+	}
+	if err := AcceptEULA(dir); err == nil {
+		t.Error("AcceptEULA wrote through a link")
+	}
+}
+
+// Fix writes Geyser's keys before its first start, folders and all. Geyser
+// keeps them and fills in the rest of its layout.
+func TestGeyserFirstStart(t *testing.T) {
+	defer testid.Line(t, "df67a")
+	cfg, dir := newServer(t)
+	cfg.BindIP, cfg.BedrockPort = "192.168.1.123", 19555
+	want := []string{geyserConfig + " bedrock.address", geyserConfig + " bedrock.port", geyserConfig + " java.auth-type"}
+	if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems[len(problems)-3:]), want) {
+		t.Fatalf("check: %v, %q", err, keys(problems))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "plugins")); !os.IsNotExist(err) {
+		t.Fatalf("check made plugins/: %v", err)
+	}
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, geyserConfig))
+	wantText := "bedrock:\n  address: 192.168.1.123\n  port: 19555\njava:\n  auth-type: floodgate\n"
+	if err != nil || string(b) != wantText {
+		t.Errorf("config.yml: %v\n%s\nwant\n%s", err, b, wantText)
+	}
+	for _, p := range []string{"plugins", "plugins/Geyser-Spigot"} {
+		if fi, err := os.Stat(filepath.Join(dir, p)); err != nil || fi.Mode() != os.ModeDir|0o770 {
+			t.Errorf("%s: %v, mode %v; want 0770", p, err, fi.Mode())
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(dir, geyserConfig)); err != nil || fi.Mode().Perm() != 0o660 {
+		t.Errorf("config.yml mode: %v, %v; want 0660", err, fi.Mode())
+	}
+	if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+		t.Errorf("after fix: %v, %q", err, keys(problems))
+	}
+
+	// An empty Geyser folder, such as one left by a removed jar.
+	cfg, dir = newServer(t)
+	if err := os.MkdirAll(filepath.Join(dir, "plugins", "Geyser-Spigot"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, geyserConfig)); !strings.Contains(string(b), "address: 0.0.0.0\n  port: 19132\n") {
+		t.Errorf("config.yml in an empty folder:\n%s", b)
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "plugins", "Geyser-Spigot")); fi.Mode().Perm() != 0o750 {
+		t.Errorf("an existing folder's mode changed to %v", fi.Mode())
 	}
 }

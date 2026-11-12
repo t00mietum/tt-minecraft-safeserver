@@ -60,11 +60,16 @@ func PaperProcs(ps []byte) []Proc {
 	var found []Proc
 	for _, line := range strings.Split(string(ps), "\n") {
 		fields := psLine.FindStringSubmatch(strings.TrimRight(line, "\r"))
-		if fields != nil && paperProcess.MatchString(fields[3]) {
+		if fields != nil && IsPaper(fields[3]) {
 			found = append(found, Proc{User: fields[1], PID: fields[2]})
 		}
 	}
 	return found
+}
+
+// IsPaper tells whether a process's command line runs a Paper jar.
+func IsPaper(args string) bool {
+	return paperProcess.MatchString(args)
 }
 
 // RunningPaper picks the Paper servers out of `ps -eo user=,pid=,args=`.

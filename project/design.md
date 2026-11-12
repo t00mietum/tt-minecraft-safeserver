@@ -41,7 +41,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 	- [Configuration model](#configuration-model)
 	- [Saves and persistence](#saves-and-persistence)
 	- [Privilege model](#privilege-model)
-	- [Why Docker](#why-docker)
+	- [Why a container](#why-a-container)
 	- [Run modes](#run-modes)
 	- [Tree ownership](#tree-ownership)
 	- [Safe server settings](#safe-server-settings)
@@ -63,7 +63,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 
 - `tt-minecraftd` runs a Paper Minecraft Java server on Linux as a dedicated, unprivileged account. It starts and stops the server, shows its status, sends it console commands, sets it up from scratch, updates it, and repairs a broken install.
 
-- The server runs inside a locked-down Docker container by default. Without Docker it runs in a sandboxed systemd unit, under the same account.
+- The server runs inside a locked-down container by default, under Podman or Docker. Without a container, such as in a dedicated VM, it runs in a sandboxed systemd unit, under the same account.
 
 - Before every start it puts the safe settings back in place, such as online mode and the whitelist, and refuses to start when a plugin jar has changed since it was approved.
 
@@ -112,7 +112,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 
 - On NixOS, the system parts are declared in a NixOS module, rather than changed by `setup`. See [NixOS](#nixos).
 
-- The operator has sudo, and is in the `docker` group for Docker mode.
+- The operator has sudo. Container mode needs Podman or Docker, but not the `docker` group.
 
 - Players connect through a router port forward, a tunnel, or the LAN. See [Exposure](#exposure).
 
@@ -138,7 +138,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - `--set KEY=VALUE` overrides one config key for this run, such as `--set heapMax=6G`. It can be given more than once. See [Configuration model](#configuration-model).
 
-- `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `docker ps`, still run, so the plan matches what a real run would do.
+- `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `podman ps`, still run, so the plan matches what a real run would do.
 
 - When the boot unit is enabled, `start` and `stop` run `systemctl start` and `systemctl stop` on it instead. That way systemd and the tool don't disagree about what's running.
 
@@ -178,18 +178,19 @@ Common:  --config PATH, --set KEY=VALUE
 
 ### status and watch
 
-- `status` runs once, and doesn't need sudo. It shows:
+- `status` runs once, and doesn't need sudo. It finds the server in the process table, and the mode from the server's cgroup, so it finds a container under either runtime, whatever `runMode` says. A stopped container doesn't show, since only the runtime knows of it, and a rootful runtime needs sudo. It shows:
 	- Whether the server runs, in which mode, as which account, and for how long.
 	- The Minecraft and Paper versions, and players online. Those come from a server list ping on localhost, so they don't need RCON or query.
 	- Memory use against the cap.
 	- What listens on the game ports, and how many connections each has.
 	- The firewall drop counters. A rising outbound count means something in the server tried to connect where it shouldn't.
+		- Reading them needs root. Run as root, such as with sudo, `status` shows them, and otherwise it says so in one line. It never runs sudo itself, so the output doesn't change with sudo's cache.
 	- The whitelist size and the list of ops.
 	- Whether the plugin jars match the approved list.
 	- Who owns the trees, and whether the boot unit is enabled.
 	- The last lines of the log, cut to the terminal width.
 
-- When the server isn't running, `status` names any other Paper server that is, such as one the old scripts started.
+- `status` names any other Paper server that runs, such as one the old scripts started, or one in a container this tool didn't start.
 
 - A part that can't be read, such as a file the operator's group can't see, says why, and the rest still shows.
 
@@ -200,12 +201,14 @@ Common:  --config PATH, --set KEY=VALUE
 ### console and cmd
 
 - `console` attaches to the server console. Ctrl-C there would stop the server, so in both modes it detaches instead, and the server keeps running. It says so first.
-	- Docker mode uses `docker attach` with `--sig-proxy=false` and `ctrl-c` as the detach keys.
+	- Container mode uses `sudo <runtime> attach` with `--sig-proxy=false` and `ctrl-c` as the detach keys.
 	- Native mode attaches to the service account's tmux session, with Ctrl-C bound to `detach-client`. The binding lasts until the server stops.
 	- When the server stops while attached, such as after `stop` typed there, the trees go back to the operator, as with `stop`.
 
 - `cmd` sends one console command and prints the log lines that follow it, such as `tt-minecraftd cmd whitelist add Steve`.
-	- Docker mode writes to the container's input with the Docker API.
+	- Container mode runs `sudo -n <runtime> attach` on a pseudo-terminal of its own, in raw mode. It types the line with a carriage return, and once attach has read it, sends Ctrl-C to detach. `stop` sends its lines the same way.
+		- attach refuses a pipe under Docker, and never detaches from one under Podman. The Docker API socket would need the `docker` group.
+		- attach only takes Ctrl-C as its detach key in a read of its own. Sent with the line, it would reach the server.
 	- Native mode uses `tmux send-keys`.
 	- The lines come from `logs/latest.log`, in both modes. It waits up to 3 seconds for the first one, then until half a second goes by with nothing new, and 10 seconds at most.
 	- `cmd stop` and `cmd restart` are refused, since `stop` also hands the trees back, and Paper's `restart` only stops without a restart script.
@@ -215,25 +218,42 @@ Common:  --config PATH, --set KEY=VALUE
 ### setup
 
 - Needs root, so it runs itself again through sudo when needed. It states its plan and asks before it changes anything, unless `--yes` is given.
+	- `--dry-run` doesn't need root, since it changes nothing.
+	- It refuses while a Paper server runs, under any account.
 
 - On a new install it:
 	1. Writes the config, from defaults and the setup options.
+		- The file gets only the keys given on the command line, plus `runMode` and `serverDir` from the picks below. The rest keep following the defaults.
+		- It's written last, after step 12, so a setup that stops partway runs again as a new install.
 	2. Creates the service account and its group, and adds the operator to the group.
 	3. Creates the server tree, or with `--adopt PATH` uses an existing server folder as it is.
+		- A new tree belongs to the operator, the same as a stopped server's. An adopted one is handed to the operator too.
+		- A `serverDir` that has files in it already is refused without `--adopt`.
 	4. Downloads and checks Paper on a new tree, the same way `update` does.
+		- It takes the newest Minecraft release that has a stable build, from PaperMC's download API at `fill.papermc.io`, and checks the jar's size and SHA-256 against it.
+		- The build goes on the approved list, since `start` pins it. A tree that has a `paper.jar` already keeps it.
+		- The lookup happens before the plan is shown, so a failed one stops setup before it changes anything.
 	5. Asks the operator to accept the Minecraft EULA, and writes `eula.txt` only after a yes or `--accept-eula`.
+		- `--yes` doesn't count as that yes. With no answer, setup goes on without `eula.txt`, and says how to add it.
 	6. Writes the safe settings. See [Safe server settings](#safe-server-settings).
 	7. With `bedrock` on, downloads Geyser and Floodgate and sets them up. See [Bedrock players](#bedrock-players).
+		- It takes each one's newest build for Paper from GeyserMC's download API at `download.geysermc.org`, and checks the jar's SHA-256 against it. They go in `plugins/`, which setup makes when it's missing.
+		- Each jar goes on the approved list with its source, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 approves it.
+		- Step 6 writes Geyser's `config.yml` with only the safe keys, before its first start. Geyser keeps them and adds the rest of its settings. Floodgate's config is left to its first start, and `repair` sets the Floodgate key's mode after that.
+		- The lookup happens before the plan is shown, along with Paper's.
 	8. Approves the plugin jars that are there, after listing each one with its hash.
 	9. With `firewall` on, installs nftables through apt when `nft` is missing, writes the rules, and starts their unit. See [Firewall](#firewall).
-	10. Pulls the pinned container image in Docker mode.
+		- That's `repair`'s firewall check, with its fixes. When it fails, such as with no apt to get nftables from, setup stops before it writes the config.
+	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else.
 	13. Ends with `repair --check`.
 
-- When it finds an install already, it runs `repair` and then `update`.
+- When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
+	- Before `repair`, with `bedrock` on, it downloads and approves Geyser or Floodgate when one is missing, as in step 7, since `repair` only reports them.
 
-- It never installs Docker. Without Docker, it offers native mode.
+- It sets `runMode` to `podman` when Podman is installed, and to `docker` when only Docker is. With neither, it offers to install Podman and `catatonit` through apt, or to use native mode. It never installs Docker.
+	- A `runMode` given with `--set` or `--native` skips the pick. `--yes` takes Podman.
 
 - On NixOS it skips steps 2, 9, 11, and 12. It checks those parts instead, and prints the module settings for whatever is missing.
 
@@ -244,11 +264,23 @@ Common:  --config PATH, --set KEY=VALUE
 - `--self` gets the latest `tt-minecraft-safeserver` release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename.
 
 - `--paper` asks the PaperMC download API for the newest stable build of the current Minecraft version. It downloads the jar, checks its SHA-256 sum against the API, puts it beside the old ones, and points `paper.jar` at it. The last 2 builds stay on disk.
+	- The current version and build come from the name `paper.jar` links to, such as `paper-26.3-249.jar`. A `paper.jar` that's a plain file is refused, with how to rename it.
+	- With no `paper.jar`, or a link to a build that's gone, it gets one the way `setup` does.
+	- The new build goes on the approved list. Other builds in `serverDir` are removed, except the one it replaced.
 	- `--mc-version V` moves to another Minecraft version. It needs a yes even with `--yes`, since worlds can't go back to an older version and plugins may not work on the new one. It takes a ZFS snapshot first.
 
 - `--plugins` updates each plugin with a known source in the approved list, such as Geyser, Floodgate, Modrinth, or Hangar. It shows the old and new versions, checks the hash from the source, and approves the new jar.
+	- A jar is up to date when its approved hash is the source's newest. The old version is what the jar's own `plugin.yml` says.
+	- A newest build with another file name is left for the operator, since both jars would load. So is an approved jar that isn't in the tree any more.
+	- GeyserMC's sources are the ones known so far. A jar with another source is listed as skipped.
 
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
+	- It follows the tag in `image`, such as `25-jre`. It never moves to another tag. An image pinned by digest with no tag is skipped, since there's nothing to follow.
+	- The Java needed comes from the PaperMC API, for the Minecraft version the server runs once the update is done.
+	- The pull waits for the go-ahead, since that's what finds the new digest. So a dry run shows the pull but not the digest.
+	- The pin is the tag's own digest, the one for every arch, so the config works on another machine too. `java -version` runs in a container with no network, locked down like the server's.
+	- A Java that's too old leaves the config as it was, and names a newer tag to use. Only the `image` line in the config changes; the other lines stay as written.
+	- The old image stays, since a running server may still use it. Native mode has no image, so the part is skipped there.
 
 - A running server is left alone. It uses the new files on its next start.
 
@@ -274,9 +306,11 @@ Common:  --config PATH, --set KEY=VALUE
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.
 	9. With `firewall` on, the rules file matches the config, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
+		- A missing `nft` is reported with the command that adds it, the same as `catatonit`. A new rules file is loaded with `systemctl reload-or-restart`, so a running table is swapped in one go.
+		- Turning it off leaves the rules file in place.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
 		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
-	11. In Docker mode, the image is there, and an old stopped container gets removed.
+	11. In container mode, the image is there, and an old stopped container gets removed, under either runtime. In Podman mode, `catatonit` is installed. A missing one is reported with the command that adds it.
 	12. With a dataset configured, it exists and is mounted.
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
 	14. Any Paper server that this tool didn't start is reported, and never killed.
@@ -293,7 +327,7 @@ source/internal/host/        command runner, sudo, dry run
 source/internal/server/      Java argument list, server list ping, log reading
 source/internal/props/       server.properties and the YAML files, read and fix
 source/internal/plugins/     jar hashes and the approved list
-source/internal/launch/      Docker and native modes, console
+source/internal/launch/      container and native modes, console
 source/internal/tree/        ownership hand-off
 source/internal/zfs/         snapshots and pruning
 source/internal/firewall/    nftables rules and their unit
@@ -335,21 +369,32 @@ cicd/                        build, test, and release scripts
 ## Direction decisions
 
 - Go was chosen over Bash and PowerShell.
-	- `setup`, `update`, and `repair` need HTTPS, JSON, YAML, hashes, and the Docker API. Bash would need curl, jq, and yq, and it gets hard to test past a few hundred lines.
+	- `setup`, `update`, and `repair` need HTTPS, JSON, YAML, hashes, and the container runtime. Bash would need curl, jq, and yq, and it gets hard to test past a few hundred lines.
 	- PowerShell isn't installed on most Linux servers.
 	- Go builds one static binary, and its standard library has nearly all of that. `tt-monerod-safeserver` is in Go too, so code can move between them.
 
-- Docker mode is the default, and a sandboxed systemd unit is the fallback.
-	- A plugin runs with the same access as the server. In a container it can only see the server tree. [Why Docker](#why-docker) has more.
+- There are 3 run modes: Podman, Docker, and native. A container is the default, the same as in `tt-monerod-safeserver`.
+	- A plugin runs with the same access as the server. In a container it can only see the server tree. [Why a container](#why-a-container) has more.
+	- Native mode is for a dedicated VM, where the VM already keeps the server away from everything else, or a host with neither runtime.
 	- Native mode uses systemd's sandbox options rather than a bare tmux session as in `tt-monerod-safeserver`. They give most of what the container does for little extra code.
+
+- Podman is preferred over Docker, and both are supported.
+	- Podman has no daemon running as root all the time.
+	- It's in Debian main and in NixOS, with security updates from the distro, so `setup` can install it through apt.
+	- Docker is there because many hosts already have it. The flags are the same for both.
+
+- Both runtimes run as root through sudo, rather than rootless or through the `docker` group.
+	- The `docker` group is as good as root on that host, with no password. Sudo asks for one and logs it.
+	- `start` already needs sudo for the ownership hand-off, so it doesn't add a prompt.
+	- The uids in the container are the host's own, so the ownership hand-off and the firewall's uid match work unchanged. Rootless Podman would map them to a range of other uids.
 
 - The container runs a stock Eclipse Temurin JRE image that's pinned by its digest.
 	- Java needs more from the image than `monerod` does, so mounting the host's Java into a slim image wasn't an option.
 	- A custom image would need its own build and update path.
 
 - The container uses host networking.
-	- Bedrock LAN discovery uses UDP broadcast, which doesn't cross Docker's bridge.
-	- Ports published on Docker's bridge skip the host's input firewall rules, ufw's included. With host networking, the tool's own table and any ufw rules apply as written.
+	- Bedrock LAN discovery uses UDP broadcast, which doesn't cross a container bridge.
+	- Ports published on a container bridge skip the host's input firewall rules, ufw's included. With host networking, the tool's own table and any ufw rules apply as written.
 
 - The console is the only way in. RCON, query, and the management server stay off.
 	- RCON sends its password in plain text, and it listens on the same address as the game.
@@ -369,7 +414,7 @@ cicd/                        build, test, and release scripts
 - Start at boot uses a systemd unit that runs `tt-minecraftd start --foreground` as root, rather than a unit that runs Java directly.
 	- The checks, snapshots, and ownership hand-off then work the same way at boot as by hand.
 
-- On NixOS, a NixOS module declares the account, Docker, the config file, the firewall unit, and the boot unit.
+- On NixOS, a NixOS module declares the account, Podman or Docker, the config file, the firewall unit, and the boot unit.
 	- NixOS has its own `services.minecraft-server` module. It runs vanilla, without plugins, the container, or the checks.
 
 - A bad line in the config gets a warning and its default, rather than stopping the load.
@@ -428,7 +473,7 @@ cicd/                        build, test, and release scripts
 	- The shcl Go module, `github.com/yottacore/shcl/source/go/v3`, at its latest published release, beta or not.
 	- A YAML package, for `paper-global.yml`, `spigot.yml`, and the Geyser and Floodgate configs.
 
-- At run time it calls `docker` or `systemd-run` and `tmux`, `sudo`, `systemctl`, and `ss`. It also calls `zfs` when snapshots are on, `nft` when the firewall is on, and `apt-get` in `setup` on Debian. `repair` calls `ufw` or `firewall-cmd` to read their rules, when one is active.
+- At run time it calls `podman` or `docker` through sudo, or `systemd-run` and `tmux`, plus `sudo`, `systemctl`, and `ss`. It also calls `zfs` when snapshots are on, `nft` when the firewall is on, and `apt-get` in `setup` on Debian. `repair` calls `ufw` or `firewall-cmd` to read their rules, when one is active.
 
 ### Configuration model
 
@@ -447,7 +492,7 @@ cicd/                        build, test, and release scripts
 	- A list with one bad item is a bad value, so none of it is used.
 	- A `heapMin` over `heapMax` gets a warning, and `heapMax` is used for both. A `memCap` that isn't over `heapMax` gets a warning, and its default.
 
-- Key names and the words such as `docker` and `lan` don't care about case.
+- Key names and the words such as `podman` and `lan` don't care about case.
 
 - Sizes take Java's form, such as `4G`, or shcl's, such as `4 GiB`. Either way a G is 1024 M, the same as Java. Timeouts take seconds, or a time such as `5m`.
 
@@ -455,14 +500,14 @@ cicd/                        build, test, and release scripts
 
 | Key                 | Default                           | Notes
 | :---                | :---                              | :---
-| `runMode`           | `docker`                          | `docker` or `native`
+| `runMode`           | `podman`                          | `podman`, `docker`, or `native`. `setup` picks one
 | `runUser`           | `minecraftd`
 | `runGroup`          | same as `runUser`                 | Stays the group before and after a run
 | `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`
 | `serverDir`         | `/srv/tt-minecraftd/server`
 | `ownerTrees`        | `[<serverDir>]`                   | Every tree that changes hands, such as a world on another dataset
 | `zfsDataset`        | none                              | No snapshots when unset
-| `dockerImage`       | Temurin 25 JRE, by digest         | `update --image` changes it
+| `image`             | Temurin 25 JRE, by digest         | The full name, from `docker.io/`, since Podman won't pick a registry. `update --image` changes it
 | `javaBin`           | `java` on PATH                    | Native mode only
 | `heapMin`           | `1G`                              | Or `heapMax`, when that's less
 | `heapMax`           | `4G`
@@ -486,7 +531,7 @@ cicd/                        build, test, and release scripts
 
 ### Saves and persistence
 
-- The tool doesn't store any state of its own, apart from the approved plugin list. Whether the server runs comes from Docker or systemd. Ownership comes from the the files.
+- The tool doesn't store any state of its own, apart from the approved plugin list. Whether the server runs comes from the container runtime or systemd. Ownership comes from the the files.
 
 - Server tree layout, as Paper makes it:
 
@@ -509,7 +554,7 @@ cicd/                        build, test, and release scripts
 | Read the firewall table                 | operator through sudo
 | ZFS snapshot and prune                  | operator through `zfs allow`, else sudo
 | Change tree ownership                   | operator through sudo
-| `docker run`, `attach`, and `stop`      | operator, in the `docker` group
+| Container run, attach, stop, and logs   | operator through sudo
 | `systemd-run` and tmux in native mode   | operator through sudo
 | `setup`, `update`, and `repair`         | root
 | `start --foreground` from the boot unit | root, from systemd
@@ -517,7 +562,7 @@ cicd/                        build, test, and release scripts
 
 - All sudo happens in the foreground, right after one `sudo -v`. Sudo never runs inside a detached session.
 
-### Why Docker
+### Why a container
 
 - A Minecraft server parses packets from anyone who can connect to it, and it runs every plugin with its own access. Plugins have had malware in them before, and the server and its plugins have had bugs that let a player run code.
 
@@ -526,7 +571,7 @@ cicd/                        build, test, and release scripts
 	- See every process on the host, with its command line.
 	- Use as much memory and as many processes as the kernel allows.
 
-- In Docker mode the container takes most of that away:
+- A container takes most of that away, under Podman or Docker:
 	- It sees the server trees, and the image's files as read-only. The rest of the host's files aren't mounted.
 	- `paper.jar` and every plugin and Geyser extension jar are mounted read-only on top of the tree, so the server can't change them while it runs.
 	- It has its own process list, so it can't see or signal host processes.
@@ -535,28 +580,34 @@ cicd/                        build, test, and release scripts
 
 - It helps day to day, too:
 	- The image is pinned by its digest, so every start uses the same Java whatever the host has installed.
-	- A stopped container still has its output, so `docker logs` shows why the server died.
+	- A stopped container still has its output, so the runtime's `logs` shows why the server died.
 
 - What it doesn't do:
 	- With host networking, the server could still connect to the LAN and to local services. The [Firewall](#firewall) rules block that.
 	- The container shares the host's kernel, so a kernel bug could still let code out. It's less isolation than a VM.
-	- Being in the `docker` group is as good as root on that host. The operator has sudo already, so that doesn't add a new risk.
+	- The runtime runs as root, through sudo. A bug in the runtime itself is a root bug.
 
 ### Run modes
 
-- Docker mode runs the container under the service account's uid and gid, with:
+- Container mode runs `podman` or `docker` through sudo, and the container under the service account's uid and gid. Both get the same flags:
 	- `--read-only`, and a tmpfs on `/tmp`. The tmpfs allows exec, since Netty and other libraries extract native code there and load it.
 	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work.
 	- `paper.jar` and each plugin and Geyser extension jar mounted read-only over their own paths.
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
-	- `-i -t`, so the console works with `docker attach`.
-	- There's no `--rm`, so `docker logs` still works after a crash. `start` removes the old container, but only one that has this tool's label.
+	- `-i -t`, so the console works with the runtime's `attach`.
+	- There's no `--rm`, so the runtime's `logs` still works after a crash. `start` removes the old container, but only one that has this tool's label.
+
+- `stop`, `console`, `cmd`, and `repair` look for the tool's label in both runtimes. A container started before a `runMode` change still gets found, and a running one wins over a stopped one. Only `runMode`'s runtime has to answer, since Docker's daemon may be down on a host that moved to Podman.
+
+- The image is given by its full name, such as `docker.io/library/eclipse-temurin`, since Podman won't pick a registry for a short one. A name without a registry gets a warning and the default.
+
+- Podman's `--init` needs `catatonit`, so `setup` installs it with Podman and `repair` checks for it.
 
 - Native mode runs Java in a tmux session, under a transient systemd unit that `systemd-run` starts. The unit runs as the service account, with:
 	- `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, and `NoNewPrivileges=yes`.
 	- Write access only to the trees in `ownerTrees`.
-	- An empty capability set, `MemoryMax`, and `TasksMax`. Swap is 0, the same as Docker mode, and so are `umask 0007` and `OOMScoreAdjust=1000`.
+	- An empty capability set, `MemoryMax`, and `TasksMax`. Swap is 0, the same as container mode, and so are `umask 0007` and `OOMScoreAdjust=1000`.
 	- `paper.jar` and each plugin and Geyser extension jar read-only. They go to root too, but the server can write their folder, so without that it could swap one out.
 	- The tmux server on a socket under `/run/tt-minecraftd/`. It never uses the operator's tmux server.
 	- The unit is `tt-minecraftd-server.service`, since `tt-minecraftd.service` is the boot unit's name.
@@ -570,7 +621,7 @@ cicd/                        build, test, and release scripts
 
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
 
-- In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in Docker mode.
+- In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in container mode.
 
 - A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
 
@@ -605,7 +656,7 @@ cicd/                        build, test, and release scripts
 
 - A missing `server.properties` counts as wrong, since Minecraft's own defaults have the whitelist off, and `repair` writes one. A YAML file or key that's missing is fine, since each of those defaults to off.
 
-- Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is fine, since Geyser writes it at its first start, listening on all addresses and logging Bedrock players in with online mode, and the next start checks it. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. The last 3 keys are the exception: Geyser's defaults for them are already right, so a missing one is fine. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
+- Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is wrong, since Geyser's first start would write its own defaults and run with them, on port 19132 and with online mode logins. setup and `repair` write one with only the first 3 Geyser keys above, and make its folders when they're missing. Geyser keeps those keys and fills in the rest at its first start. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. The last 3 keys are the exception: Geyser's defaults for them are already right, so a missing one is fine. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
 
 - The server account can write the tree. So a settings file that's a link, or isn't a plain file, is refused, and `repair` puts a new file in place of the old one rather than writing into it.
 
@@ -667,6 +718,7 @@ cicd/                        build, test, and release scripts
 
 - `allowFrom` says who may connect to the game ports. The firewall enforces it.
 	- `lan` is the private address ranges, IPv4 and IPv6.
+		- That's 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, the link-local ranges, `fc00::/7`, and also CGNAT's 100.64.0.0/10, where tailnets live.
 	- `any` allows everyone.
 	- Addresses and ranges can be mixed with `lan`.
 
@@ -683,6 +735,7 @@ cicd/                        build, test, and release scripts
 - With `firewall` on, the tool puts its rules in its own nftables table, `inet tt_minecraftd`, so they apply to IPv4 and IPv6.
 
 - `setup` and `repair` write the rules to `/etc/tt-minecraftd/firewall.nft`, from the config. `tt-minecraftd-firewall.service` loads that file at boot.
+	- It matches the service account by name, so nft looks it up as it loads the file.
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
 	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
 
@@ -692,19 +745,23 @@ cicd/                        build, test, and release scripts
 	- Ones from loopback are always allowed. A tunnel agent connects that way.
 	- Ones from an address that's not in `allowFrom` get dropped.
 	- Past `joinRateLimit` a minute from one address, the rest get dropped. That slows down bot join floods.
+		- A burst of `joinRateLimit` is allowed too, so a minute's worth can come at once.
 
 - Inbound, new connections from anywhere but loopback get dropped on the RCON, query, and management ports, even though the server should never open them.
+	- Those are RCON's default port 25575 over TCP, and `gamePort` over UDP for query. The management server has no fixed default port, so it's left to the safe settings.
 
 - Outbound, new connections from the service account:
 	- Ones to loopback get dropped. That way the server can't connect to local services such as databases.
+		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
 		- With `bedrock` on, UDP to ports 3478 and 19302 is allowed too, for Geyser's STUN lookup. Without it, players over the internet get only the server's LAN address, and can't connect.
 		- NetherNet's connection checks from the server to a player's own addresses count as new connections, and get dropped unless they're replies. The player's checks to the server still set up the connection.
 	- With `egress` set to `open`, ones to the internet are allowed on any port.
 	- Everything that gets dropped gets counted too, and logged at a limited rate. `status` shows the counts.
+		- Inbound drops are counted but not logged, since scanners would fill the log.
 	- Replies to connections that came in still go out.
-	- It works the same in both modes, since a host-network container's sockets belong to the service account's uid.
+	- It works the same in every mode, since a host-network container's sockets belong to the service account's uid.
 
 - The table only drops traffic. A drop in another table still applies, so ufw or firewalld also has to let players in. `repair` checks for that rule, and prints the command when it's missing. The tool never changes another firewall's rules.
 
@@ -713,7 +770,7 @@ cicd/                        build, test, and release scripts
 - With `startAtBoot` on, `setup` and `repair` install `tt-minecraftd.service` and enable it.
 	- `ExecStart` runs `tt-minecraftd start --foreground`, and `ExecStop` runs `tt-minecraftd stop`.
 	- `TimeoutStopSec` is a little longer than `stopTimeout`, so systemd doesn't kill the server first.
-	- It starts after `network-online.target`, and after `docker.service` in Docker mode.
+	- It starts after `network-online.target`. In Docker mode it also waits for `docker.service`. Podman has no service to wait for.
 	- With `firewall` on, it requires `tt-minecraftd-firewall.service`, so the server never starts at boot without the rules.
 
 - With `startAtBoot` off, `repair` disables and removes the unit.
@@ -722,7 +779,7 @@ cicd/                        build, test, and release scripts
 
 - The repo has a flake with a NixOS module. It declares:
 	- The service account and group.
-	- Docker, in Docker mode.
+	- Podman or Docker, in container mode.
 	- `/etc/tt-minecraftd/config.shcl`, written from module options.
 	- The firewall unit and its rules, and the ports in NixOS's own firewall.
 	- The boot unit.
@@ -765,7 +822,7 @@ cicd/                        build, test, and release scripts
 
 - The service account doesn't have sudo, a login shell, a home, or any other groups.
 
-- In Docker mode the server can't see anything outside its trees and the image. In native mode systemd's sandbox limits it to its trees too, with the rest of the system read-only.
+- In a container the server can't see anything outside its trees and the image. In native mode systemd's sandbox limits it to its trees too, with the rest of the system read-only.
 
 - The config doesn't have any secrets in it. The Floodgate key is the one secret in the server tree, with mode 0660.
 

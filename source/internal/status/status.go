@@ -2,7 +2,8 @@
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
 // Package status gathers what status and watch show. It only looks, and needs
-// no sudo. See design.md, status and watch.
+// no sudo, so it finds the server in the process table. See design.md, status
+// and watch.
 package status
 
 import (
@@ -16,14 +17,15 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
@@ -41,16 +43,18 @@ type Probe struct {
 	Run         host.Runner
 	Cfg         *config.Config
 	PluginsFile string
-	Now         func() time.Time
-	// ReadFile reads /proc and /sys, for the container's memory.
+	// ReadFile reads /proc and /sys, for the server's mode and memory.
 	ReadFile func(string) ([]byte, error)
 	Ping     func(ctx context.Context, addr string) (server.PingReply, error)
-	sums     plugins.Sums
+	// Root is when status runs as root, which reading the drop counters
+	// needs. It never asks sudo, so the output doesn't change with sudo's cache.
+	Root bool
+	sums plugins.Sums
 }
 
 // NewProbe gives a Probe on the real host.
 func NewProbe(r host.Runner, c *config.Config, pluginsFile string) *Probe {
-	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, Now: time.Now, ReadFile: os.ReadFile, Ping: server.Ping}
+	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0}
 }
 
 // Line is one labeled line. A Line with no label goes on under the one above.
@@ -85,42 +89,27 @@ func (p *Probe) Take(ctx context.Context) Report {
 }
 
 func (p *Probe) server(ctx context.Context) ([]Line, running) {
-	if p.Cfg.RunMode == "native" {
-		return p.nativeServer(ctx)
-	}
-	return p.dockerServer(ctx)
-}
-
-func (p *Probe) dockerServer(ctx context.Context) ([]Line, running) {
 	run := running{memory: -1}
-	state, err := launch.ContainerState(ctx, p.Run)
+	f, err := p.find(ctx)
 	if err != nil {
-		return []Line{{"Server", "can't ask docker: " + err.Error()}}, run
+		return []Line{{"Server", "can't list processes: " + err.Error()}}, run
 	}
-	switch state {
-	case "":
-		return p.notRunning(ctx, "not running in docker mode"), run
-	case "running":
-	default:
-		return p.notRunning(ctx, "not running in docker mode; the container is "+state), run
+	lines := []Line{{"Server", "not running in " + p.Cfg.RunMode + " mode"}}
+	if f.mode != "" {
+		run.up = true
+		text := "running in " + f.mode + " mode, as " + userName(f.proc.uid) + ", for " + since(f.proc.age)
+		if f.mode != p.Cfg.RunMode {
+			text += "; runMode says " + p.Cfg.RunMode
+		}
+		lines[0].Text = text
+		run.memory, run.memError = p.cgroupMemory(f.proc.pid)
 	}
-	run.up = true
-	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"docker", "inspect", "--format", "{{.State.StartedAt}} {{.State.Pid}} {{.Config.User}}", launch.Container}})
-	fields := strings.Fields(string(out))
-	if err != nil || len(fields) < 2 {
-		run.memError = "unknown"
-		return []Line{{"Server", "running in docker mode"}}, run
+	// start refuses to run beside another one, such as one the old scripts
+	// started.
+	for _, o := range f.others {
+		lines = append(lines, Line{"", "another Paper server is running: pid " + o.pid + ", as " + userName(o.uid)})
 	}
-	text := "running in docker mode"
-	if len(fields) > 2 {
-		uid, _, _ := strings.Cut(fields[2], ":")
-		text += ", as " + userName(uid)
-	}
-	if started, err := time.Parse(time.RFC3339Nano, fields[0]); err == nil {
-		text += ", for " + since(p.Now().Sub(started))
-	}
-	run.memory, run.memError = p.cgroupMemory(fields[1])
-	return []Line{{"Server", text}}, run
+	return lines, run
 }
 
 // cgroupMemory reads memory.current from the cgroup the process is in.
@@ -144,54 +133,6 @@ func (p *Probe) cgroupMemory(pid string) (int64, string) {
 		}
 	}
 	return -1, "unknown, without cgroup v2"
-}
-
-func (p *Probe) nativeServer(ctx context.Context) ([]Line, running) {
-	run := running{memory: -1, memError: "unknown"}
-	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"systemctl", "show", "--timestamp=unix", "--property=ActiveState,ActiveEnterTimestamp,MemoryCurrent,User", launch.Unit}})
-	if err != nil {
-		return []Line{{"Server", "can't ask systemd: " + err.Error()}}, run
-	}
-	props := map[string]string{}
-	for _, l := range strings.Split(string(out), "\n") {
-		if k, v, ok := strings.Cut(l, "="); ok {
-			props[k] = strings.TrimSpace(v)
-		}
-	}
-	if !launch.UnitUp(props["ActiveState"]) {
-		return p.notRunning(ctx, "not running in native mode"), run
-	}
-	run.up = true
-	text := "running in native mode"
-	if s := props["ActiveState"]; s != "active" {
-		text += " (" + s + ")"
-	}
-	if u := props["User"]; u != "" {
-		text += ", as " + u
-	}
-	if ts, ok := strings.CutPrefix(props["ActiveEnterTimestamp"], "@"); ok {
-		if secs, err := strconv.ParseInt(ts, 10, 64); err == nil && secs > 0 {
-			text += ", for " + since(p.Now().Sub(time.Unix(secs, 0)))
-		}
-	}
-	if n, err := strconv.ParseInt(props["MemoryCurrent"], 10, 64); err == nil {
-		run.memory, run.memError = n, ""
-	}
-	return []Line{{"Server", text}}, run
-}
-
-// notRunning also names any other Paper server, such as one the old scripts
-// started, since start refuses to run beside it.
-func (p *Probe) notRunning(ctx context.Context, text string) []Line {
-	lines := []Line{{"Server", text}}
-	ps, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"ps", "-eo", "user=,pid=,args="}})
-	if err != nil {
-		return lines
-	}
-	for _, found := range server.RunningPaper(ps) {
-		lines = append(lines, Line{"", "another Paper server is running: " + found})
-	}
-	return lines
 }
 
 func (p *Probe) version(ctx context.Context, run running) []Line {
@@ -256,11 +197,41 @@ func (p *Probe) ports(ctx context.Context) []Line {
 		}
 		lines[0].Label = "Ports"
 	}
-	fw := "off in the config"
-	if p.Cfg.Firewall {
-		fw = "drop counters not set up yet"
+	return append(lines, p.firewall(ctx)...)
+}
+
+func (p *Probe) firewall(ctx context.Context) []Line {
+	switch {
+	case !p.Cfg.Firewall:
+		return []Line{{"Firewall", "off in the config"}}
+	case !p.Root:
+		return []Line{{"Firewall", "on; run with sudo to see the drop counters"}}
 	}
-	return append(lines, Line{"Firewall", fw})
+	counts, err := firewall.Counters(ctx, p.Run)
+	switch {
+	case err != nil:
+		return []Line{{"Firewall", err.Error()}}
+	case len(counts) == 0:
+		return []Line{{"Firewall", "table inet " + firewall.Table + " isn't loaded, so start refuses; repair loads it"}}
+	}
+	n := func(name, what string) string {
+		if c, ok := counts[name]; ok {
+			return strconv.FormatUint(c, 10) + " " + what
+		}
+		return "no " + name + " counter"
+	}
+	in := []string{n("in_flood", "over joinRateLimit"), n("in_closed", "to closed ports")}
+	if !slices.Contains(p.Cfg.AllowFrom, "any") {
+		in = append([]string{n("in_refused", "not in allowFrom")}, in...)
+	}
+	out := []string{n("out_local", "to loopback"), n("out_lan", "to the LAN")}
+	if p.Cfg.Egress == "web" {
+		out = append(out, n("out_web", "elsewhere"))
+	}
+	return []Line{
+		{"Firewall", "dropped in: " + strings.Join(in, ", ")},
+		{"", "dropped out: " + strings.Join(out, ", ")},
+	}
 }
 
 // portLines reads ss -H -t -u -a -n: netid, state, queues, local, peer.

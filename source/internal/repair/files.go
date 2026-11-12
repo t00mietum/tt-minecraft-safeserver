@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
@@ -58,6 +59,10 @@ var serverTreeCheck = Check{
 	Look: func(_ context.Context, h *Host) ([]Finding, error) {
 		dir := h.Cfg.ServerDir
 		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			// With a config there, setup only runs repair again.
+			if _, err := os.Stat(h.ConfigPath); err == nil {
+				return []Finding{{Problem: "server folder " + dir + " is missing; set serverDir in " + h.ConfigPath + " to the server folder, or move " + h.ConfigPath + " aside and run sudo tt-minecraftd setup again, which makes a new one or adopts one with --adopt"}}, nil
+			}
 			return []Finding{{Problem: "server folder " + dir + " is missing; sudo tt-minecraftd setup makes one, or adopts one with --adopt"}}, nil
 		}
 		if _, err := os.Stat(filepath.Join(dir, "paper.jar")); err != nil {
@@ -193,26 +198,14 @@ var bedrockCheck = Check{
 	Applies: func(c *config.Config) bool { return c.Bedrock },
 	Look: func(_ context.Context, h *Host) ([]Finding, error) {
 		dir := filepath.Join(h.Cfg.ServerDir, "plugins")
-		entries, err := os.ReadDir(dir)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		has, err := geyser.Installed(h.Cfg.ServerDir)
+		if err != nil {
 			return nil, err
 		}
-		has := map[string]bool{}
-		for _, e := range entries {
-			name := strings.ToLower(e.Name())
-			if !strings.HasSuffix(name, ".jar") {
-				continue
-			}
-			for _, p := range []string{"geyser", "floodgate"} {
-				if strings.HasPrefix(name, p) {
-					has[p] = true
-				}
-			}
-		}
 		var found []Finding
-		for _, p := range []struct{ key, name string }{{"geyser", "Geyser"}, {"floodgate", "Floodgate"}} {
-			if !has[p.key] {
-				found = append(found, Finding{Problem: "bedrock is on, but " + p.name + " isn't in " + dir + "; sudo tt-minecraftd setup installs it"})
+		for _, p := range geyser.Projects {
+			if !has[p] {
+				found = append(found, Finding{Problem: "bedrock is on, but " + geyser.Title(p) + " isn't in " + dir + "; sudo tt-minecraftd setup installs it"})
 			}
 		}
 

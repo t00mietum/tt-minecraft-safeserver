@@ -50,6 +50,33 @@ func (d dir) sub(name string) (dir, error) {
 	return dir{fd, d.name(name)}, nil
 }
 
+// mkdir makes a folder under d, owned like d, and ug+rwx per design.md's Tree
+// ownership, and opens it.
+func (d dir) mkdir(name string) (dir, error) {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(d.fd, &st); err != nil {
+		return dir{}, &fs.PathError{Op: "stat", Path: d.path, Err: err}
+	}
+	if err := syscall.Mkdirat(d.fd, name, 0o700); err != nil {
+		return dir{}, &fs.PathError{Op: "mkdir", Path: d.name(name), Err: err}
+	}
+	sub, err := d.sub(name)
+	if err != nil {
+		return dir{}, err
+	}
+	if os.Geteuid() == 0 {
+		if err := syscall.Fchown(sub.fd, int(st.Uid), int(st.Gid)); err != nil {
+			sub.close()
+			return dir{}, &fs.PathError{Op: "chown", Path: sub.path, Err: err}
+		}
+	}
+	if err := syscall.Fchmod(sub.fd, 0o770); err != nil {
+		sub.close()
+		return dir{}, &fs.PathError{Op: "chmod", Path: sub.path, Err: err}
+	}
+	return sub, nil
+}
+
 // read gives a regular file's text and its owner and mode.
 func (d dir) read(name string) ([]byte, *syscall.Stat_t, error) {
 	// O_NONBLOCK, so a pipe left in its place doesn't hang the open.
