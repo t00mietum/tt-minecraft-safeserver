@@ -287,7 +287,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Pre-next-cut.
 	- Progress log:
 		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
-		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind) and 2026111210033649 (OpenAI and Anthropic APIs, with fetch) are done. 2026111210034298 (`update --plugins` asks the agent) and 2026111210034308 (Paper fallback and the `--mc-version` report) are queued.
+		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is queued.
 	- Decisions:
 		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
 		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
