@@ -264,8 +264,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Connect the service to an AI agent to update the game programs and add-ons
 	- ID: 2026111207010610
 	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
+	- Status: Started
+	- Priority: High
 	- Opened: 20261112-070106
 	- Opened by: t00mietum
 	- Requirements:
@@ -273,6 +273,73 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
 	- Note:
 		- Pre-next-cut.
+	- Progress log:
+		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
+		- 2026-11-12: Split into 4 children: 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), 2026111210034298 (`update --plugins` asks the agent), and 2026111210034308 (Paper fallback and the `--mc-version` report).
+	- Decisions:
+		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
+		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
+		- Kinds: `openai` (cloud hosts and local servers), `anthropic`, and `command` (subscription CLIs), since those cover nearly every agent.
+		- It runs as the operator, before `update` runs itself through sudo. A run that starts as root skips it with a note.
+		- The API key comes from the operator's environment, never the config, which everyone can read.
+		- `--yes` doesn't cover a jar the agent found, the same as `--mc-version`.
+		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
+
+- Update agent: config keys, answer format, and the command kind
+	- ID: 2026111210033639
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261112-100336
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Requirements:
+		- The `agent`, `agentURL`, `agentModel`, `agentCommand`, and `agentHosts` keys, per design.md's Update agent.
+		- A package that builds the question from the jars, runs `agentCommand` as the operator in an empty temp folder with the question on stdin, and reads the JSON answer.
+		- Each suggestion is checked against the approved list, `https`, and `agentHosts`.
+	- Estimated effort: Avg
+
+- Update agent: OpenAI and Anthropic APIs, with fetch
+	- ID: 2026111210033649
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261112-100336
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Requirements:
+		- The `openai` and `anthropic` kinds, per design.md's Update agent, with the key from the operator's environment.
+		- The `fetch` tool: GET only, `https` only, no loopback, LAN, or link-local addresses, a size cap per page, and a cap per run.
+	- Estimated effort: Avg
+
+- update --plugins asks the update agent
+	- ID: 2026111210034298
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261112-100342
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Prereq IDs: 2026111210033639
+	- Requirements:
+		- `update --plugins` asks the agent about approved jars with no known source, or whose lookup failed, as the operator before sudo, per design.md's Update agent.
+		- Each jar is downloaded and checked: size, hash, the hash page, and the same plugin name. Each needs its own yes, and `--yes` doesn't count.
+		- README says how to connect an agent, with example `agentCommand` lines for the common CLIs.
+	- Estimated effort: Avg
+
+- Update agent: Paper fallback and the --mc-version report
+	- ID: 2026111210034308
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-100343
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Prereq IDs: 2026111210034298 2026111117302963
+	- Requirements:
+		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
+		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
+	- Estimated effort: Avg
 
 - cmd sometimes misses its answer right after a start
 	- ID: 2026111207565308

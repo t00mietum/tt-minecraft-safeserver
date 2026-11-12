@@ -46,6 +46,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 	- [Tree ownership](#tree-ownership)
 	- [Safe server settings](#safe-server-settings)
 	- [Plugin pinning](#plugin-pinning)
+	- [Update agent](#update-agent)
 	- [Bedrock players](#bedrock-players)
 	- [Exposure](#exposure)
 	- [Firewall](#firewall)
@@ -275,6 +276,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- A jar is up to date when its approved hash is the source's newest. The old version is what the jar's own `plugin.yml` says.
 	- A newest build with another file name is left for the operator, since both jars would load. So is an approved jar that isn't in the tree any more.
 	- GeyserMC's sources are the ones known so far. A jar with another source is listed as skipped.
+	- With `agent` set, it also asks an AI agent about each approved jar that has no known source, or whose source's lookup failed. Each jar the agent finds needs its own yes, even with `--yes`. See [Update agent](#update-agent).
 
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
 	- It follows the tag in `image`, such as `25-jre`. It never moves to another tag. An image pinned by digest with no tag is skipped, since there's nothing to follow.
@@ -440,6 +442,12 @@ cicd/                        build, test, and release scripts
 	- The module waits for the second tool, because 2 tools that use an interface test its design better than 2 documents do.
 	- The module is GPL v2 or later, the same as both tools.
 
+- An AI agent finds new builds of plugins that have no known source, rather than code for each site that hosts them. It only suggests. The tool checks each jar, and a person approves it.
+	- Plugins come from SpigotMC, GitHub releases, CI servers, and authors' own sites, as well as Hangar and Modrinth. Code for each one breaks whenever the site changes, and there are too many to cover.
+	- Known sources stay as code, and stay first. Their APIs give hashes the tool can check without trusting anyone.
+	- The agent reads pages anyone can write, so a page could talk it into suggesting a bad jar. So it never runs as root, can't write a file, and can't add a plugin, and every jar it finds still needs a person's yes.
+	- Cloud APIs, local models, and subscription CLIs are all supported, since 2 API formats and a plain command cover nearly all of them.
+
 - Tailscale and other VPNs were looked at for remote players, and left out as the main way in.
 	- Consoles can't run them, and phones allow only one VPN at a time.
 	- Every player would need to install and sign in to an app.
@@ -477,7 +485,7 @@ cicd/                        build, test, and release scripts
 	- The shcl Go module, `github.com/yottacore/shcl/source/go/v3`, at its latest published release, beta or not.
 	- A YAML package, for `paper-global.yml`, `spigot.yml`, and the Geyser and Floodgate configs.
 
-- At run time it calls `podman` or `docker` through sudo, or `systemd-run` and `tmux`, plus `sudo`, `systemctl`, and `ss`. It also calls `zfs` when snapshots are on, `nft` when the firewall is on, and `apt-get` in `setup` on Debian. `repair` calls `ufw` or `firewall-cmd` to read their rules, when one is active.
+- At run time it calls `podman` or `docker` through sudo, or `systemd-run` and `tmux`, plus `sudo`, `systemctl`, and `ss`. It also calls `zfs` when snapshots are on, `nft` when the firewall is on, and `apt-get` in `setup` on Debian. `repair` calls `ufw` or `firewall-cmd` to read their rules, when one is active. `update` runs `agentCommand` as the operator, when `agent` is `command`.
 
 ### Configuration model
 
@@ -532,6 +540,11 @@ cicd/                        build, test, and release scripts
 | `firewall`          | `true`                            | See [Firewall](#firewall)
 | `startAtBoot`       | `false`
 | `extraArgs`         | none                              | Added to the Paper command as given
+| `agent`             | `none`                            | `openai`, `anthropic`, `command`, or `none`. See [Update agent](#update-agent)
+| `agentURL`          | the kind's own                    | Such as `http://127.0.0.1:11434/v1` for a local Ollama
+| `agentModel`        | none                              | Needed for `openai` and `anthropic`
+| `agentCommand`      | none                              | For `command`, the program and its arguments, as a list
+| `agentHosts`        | the main plugin hosts             | Where the agent's jars and hashes may come from
 
 ### Saves and persistence
 
@@ -561,6 +574,7 @@ cicd/                        build, test, and release scripts
 | Container run, attach, stop, and logs   | operator through sudo
 | `systemd-run` and tmux in native mode   | operator through sudo
 | `setup`, `update`, and `repair`         | root
+| Asking the update agent                 | operator, before `update` runs itself through sudo
 | `start --foreground` from the boot unit | root, from systemd
 | The server                              | the service account
 
@@ -702,6 +716,45 @@ cicd/                        build, test, and release scripts
 
 - Plugins should come from known sources, such as Hangar, Modrinth, GeyserMC, or the author's own site. The tool can't judge a jar, but it does make sure a jar doesn't change without a person looking at it.
 
+### Update agent
+
+- An AI agent can help `update --plugins` find new builds. It's off until `agent` is set.
+	- Known sources come first: PaperMC for Paper, GeyserMC for Geyser and Floodgate, and any added later. The agent is asked about the approved jars they don't cover, and about one whose known source's lookup failed, such as after an API change.
+	- Before `--mc-version`, it also reports which approved plugins have a build for the new version, and which don't. Its report is shown, and changes nothing.
+	- When PaperMC's lookup fails, the agent can find the Paper build instead, with the same checks below.
+
+- Kinds of agent:
+	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio.
+	- `anthropic`: Anthropic's messages API.
+	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Claude Code, Codex, and Gemini CLI, and wrappers such as `llm`.
+	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
+
+- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.
+
+- What it's told: the Minecraft version, the Paper build, and for each jar it's asked about, its path under `serverDir`, its name and version from `plugin.yml`, its SHA-256, and its source if it has one. Nothing else from the host, such as the config, addresses, or player names.
+
+- What it may do:
+	- Read web pages and APIs over HTTPS, through the one tool `update` gives the API kinds, `fetch`. It only sends GET, only follows `https`, refuses loopback, LAN, and link-local addresses, caps each page's size, and gives back text. A run has a cap on its fetches too.
+	- A `command` agent uses its own web tools instead. Its flags should allow web reads and nothing else, such as no shell and no file writes.
+
+- What it can't do:
+	- Run as root. It's asked as the operator, before `update` runs itself through sudo, and its answer goes to the root run in a file only the operator can read. A run that starts as root skips it with a note.
+	- Change anything. Its answer is data: for each jar, a version, a download address, the hash the source publishes and the page it's on, and notes, as JSON. A `command` agent runs in an empty temp folder.
+	- Add a plugin, remove one, or touch the config, the server's settings, or the firewall. It can only suggest a new build of a jar that's already approved.
+	- Get past `egress`. That limits the service account, and the agent runs as the operator, so neither one changes the other.
+
+- Each jar it finds is checked like any other download, and then a person approves it:
+	- The download address and the hash page are `https`, on a host in `agentHosts`. The default is the main plugin hosts: Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from another host is listed as skipped, with the host, so the operator can add it.
+	- The jar's size is capped, and its SHA-256 or SHA-512 has to match the hash the agent gave. The tool fetches the hash page itself, and that hash has to be in it. A source that publishes no hash is allowed, and the jar is shown with a warning.
+	- The new jar's `plugin.yml`, `paper-plugin.yml`, or `extension.yml` has to name the same plugin as the old one.
+	- The plan shows each jar's host, old and new versions, and hash, plus the agent's notes, such as config changes. The agent's text has its control characters dropped.
+	- Each jar needs its own yes, and `--yes` doesn't count, the same as `--mc-version`. When the answers run out, the rest are skipped.
+	- An approved jar goes on the list like any other, with no `source`, since the agent's address isn't one the tool knows how to follow.
+
+- A `--dry-run` asks the agent too, and shows its suggestions as not checked, since it downloads nothing.
+
+- An answer that can't be read is reported, and so is each jar that fails a check. The rest of the plan still goes ahead after the usual question. `--set agent=none` skips the agent for one run.
+
 ### Bedrock players
 
 - Geyser lets Bedrock clients join the Java server. Floodgate lets them join with only their Xbox account, so they don't need a Java account too.
@@ -828,6 +881,7 @@ cicd/                        build, test, and release scripts
 | Join floods                              | Per-address rate limit in the firewall, and Paper's own throttle
 | DDoS, and the home address being public  | A tunnel hides the home address. The host can't stop a big flood
 | Proxy bypass                             | Proxy settings forced off, since proxies aren't supported
+| A web page tricks the update agent       | It runs as the operator with web reads only. Its jars are hash checked, must be the same plugin from a listed host, and each needs a yes
 
 - The service account doesn't have sudo, a login shell, a home, or any other groups.
 
@@ -838,6 +892,8 @@ cicd/                        build, test, and release scripts
 - With the firewall on, the server can't open connections to the LAN or to local services, and a try gets counted.
 
 - Every download is checked before use. Paper and plugins need a matching hash from their download API. Tool releases need a matching SHA-256 sum.
+
+- The update agent's API key stays in the operator's environment. The tool doesn't store it, and the agent is never told anything from the config.
 
 ### Testing
 
