@@ -739,6 +739,7 @@ cicd/                        build, test, and release scripts
 
 - What it can't do:
 	- Run as root. It's asked as the operator, before `update` runs itself through sudo, and its answer goes to the root run in a file only the operator can read. A run that starts as root skips it with a note.
+		- The file is in a temp folder of its own, named to the root run by a flag left out of the help, and removed when the root run ends. The root run checks the answer again, and uses it only for jars both runs asked about with the same hash.
 	- Change anything. Its answer is data: for each jar, a version, a download address, the hash the source publishes and the page it's on, and notes, as JSON. A `command` agent runs in an empty temp folder.
 	- Add a plugin, remove one, or touch the config, the server's settings, or the firewall. It can only suggest a new build of a jar that's already approved.
 	- Get past `egress`. That limits the service account, and the agent runs as the operator, so neither one changes the other.
@@ -749,7 +750,8 @@ cicd/                        build, test, and release scripts
 	- The new jar's `plugin.yml`, `paper-plugin.yml`, or `extension.yml` has to name the same plugin as the old one.
 	- The plan shows each jar's host, old and new versions, and hash, plus the agent's notes, such as config changes. The agent's text has its control characters dropped.
 	- Each jar needs its own yes, and `--yes` doesn't count, the same as `--mc-version`. When the answers run out, the rest are skipped.
-	- An approved jar goes on the list like any other, with no `source`, since the agent's address isn't one the tool knows how to follow.
+	- The new jar takes the old one's file name, so the approved list keeps one entry for it.
+	- An approved jar goes on the list like any other, with no `source`, since the agent's address isn't one the tool knows how to follow. A jar whose known source failed keeps that source.
 
 - A `--dry-run` asks the agent too, and shows its suggestions as not checked, since it downloads nothing.
 

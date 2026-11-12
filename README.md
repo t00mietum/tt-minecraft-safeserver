@@ -65,6 +65,7 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 - [Why](#why)
 - [How to connect](#how-to-connect)
 - [Features](#features)
+- [Update agent](#update-agent)
 - [Installing](#installing)
 - [Building from source](#building-from-source)
 - [Copyright and license](#copyright-and-license)
@@ -78,6 +79,55 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to-connect.md](how-to-connect.md).
 
 ## Features
+
+## Update agent
+
+`update --plugins` knows where to get Paper, Geyser, and Floodgate. For your other plugins it can ask an AI agent where the newer builds are. The agent only suggests. `tt-minecraftd` downloads and checks each jar it finds, and you say yes to each one yourself, even with `--yes`. It's off until `agent` is set in `/etc/tt-minecraftd/config.shcl`. [design.md](project/design.md#update-agent) has the details.
+
+- Run `tt-minecraftd update` as yourself, not with sudo. It asks the agent as you, then runs itself through sudo. Started as root, it skips the agent and says so.
+
+- An API key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.
+
+- Jars and hash pages may only come from the hosts in `agentHosts`. The default has Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from somewhere else is listed as skipped, with its host, so you can add it.
+
+- OpenAI, or any server with the same chat API:
+
+	~~~text
+	agent: openai
+	agentModel: gpt-5-mini
+	~~~
+
+- OpenRouter:
+
+	~~~text
+	agent: openai
+	agentURL: https://openrouter.ai/api/v1
+	agentModel: openai/gpt-5-mini
+	~~~
+
+- A local Ollama. A small model may not find builds reliably, so check what it says.
+
+	~~~text
+	agent: openai
+	agentURL: http://127.0.0.1:11434/v1
+	agentModel: qwen2.5:7b-instruct
+	~~~
+
+- Anthropic's API: `agent: anthropic`, with `agentModel` set to one of its model names.
+
+- A subscription CLI, which reads the question on stdin and prints its answer. Give it web reads and nothing else, such as no shell and no file writes. These flags change between versions, so check them against your CLI's own docs.
+
+	~~~text
+	agent: command
+	agentCommand: [codex, --search, exec, --sandbox, read-only, --skip-git-repo-check, --ephemeral, -]
+	~~~
+
+	~~~text
+	agent: command
+	agentCommand: [gemini, --approval-mode, plan, --output-format, text]
+	~~~
+
+- `--set agent=none` skips the agent for one run, and `update --plugins --dry-run` shows what it suggests without downloading anything.
 
 ## Installing
 

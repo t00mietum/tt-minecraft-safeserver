@@ -6,7 +6,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -442,5 +445,74 @@ func TestUpdate(t *testing.T) {
 	}
 	if target, _ := os.Readlink(filepath.Join(dir, "paper.jar")); target != "paper-26.3-244.jar" {
 		t.Errorf("a dry run moved paper.jar to %q", target)
+	}
+}
+
+// With agent set, update asks it as the operator, hands the answer to the
+// run through sudo in a file only the operator can read, and removes it
+// after. The flag that names the file isn't in the help.
+func TestUpdateAgent(t *testing.T) {
+	defer testid.Line(t, "df76m")
+	if os.Geteuid() == 0 {
+		t.Skip("the agent doesn't run as root")
+	}
+	noDefaultConfig(t)
+	dir := t.TempDir()
+	server := filepath.Join(dir, "server")
+	if err := os.MkdirAll(filepath.Join(server, "plugins"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(server, "plugins", "Thing.jar"), []byte("thing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := plugins.Approve(filepath.Join(dir, "plugins.shcl"), []plugins.Info{{Jar: plugins.Jar{Name: "plugins/Thing.jar"}, SHA256: strings.Repeat("ab", 32)}}); err != nil {
+		t.Fatal(err)
+	}
+	ask := filepath.Join(dir, "ask")
+	if err := os.WriteFile(ask, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"jars\": []}'\n"), 0o700); err != nil { // #nosec G306 -- the test's own agent
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.shcl")
+	if err := os.WriteFile(cfg, []byte("serverDir: "+server+"\nagent: command\nagentCommand: ["+ask+"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var again []string
+	var handed os.FileInfo
+	var answer []byte
+	old := asRootAndWait
+	asRootAndWait = func(args []string) error {
+		again = args
+		file := strings.TrimPrefix(args[len(args)-1], "--agent-answer=")
+		handed, _ = os.Stat(file)
+		answer, _ = os.ReadFile(file) // #nosec G304 -- the test's own temp file
+		return exitCode(3)
+	}
+	t.Cleanup(func() { asRootAndWait = old })
+
+	code, out, msg := runArgs("update", "--plugins", "--config", cfg)
+	if code != 3 || msg != "" || len(again) != 5 || !strings.HasPrefix(again[4], "--agent-answer=") || !strings.Contains(out, "Asking the update agent about 1 jar.") {
+		t.Fatalf("exit %d, ran again with %q\nstdout %q\nstderr %q", code, again, out, msg)
+	}
+	if handed == nil || handed.Mode().Perm() != 0o600 || !strings.Contains(string(answer), `"jar":"plugins/Thing.jar"`) {
+		t.Errorf("handed %v: %s", handed, answer)
+	}
+	file := strings.TrimPrefix(again[4], "--agent-answer=")
+	if _, err := os.Stat(filepath.Dir(file)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the answer's folder is still there: %v", err)
+	}
+
+	// The run through sudo reads it; a dry run stands in for root here.
+	file = filepath.Join(dir, "answer.json")
+	if err := os.WriteFile(file, answer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, msg = runArgs("update", "--plugins", "--dry-run", "--config", cfg, "--agent-answer="+file)
+	if code != exitOK || !strings.Contains(out, "plugins/Thing.jar: no answer from the update agent") {
+		t.Errorf("replay: exit %d\nstdout %q\nstderr %q", code, out, msg)
+	}
+
+	if _, out, _ := runArgs("update", "--help"); strings.Contains(out, "agent-answer") {
+		t.Errorf("help shows the hand-off flag: %q", out)
 	}
 }

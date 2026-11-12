@@ -121,10 +121,14 @@ func pageText(s string) string {
 	return strings.TrimSpace(blankLines.ReplaceAllString(s, "\n"))
 }
 
-func publicClient() *http.Client {
+func publicClient() *http.Client { return PublicClient(30 * time.Second) }
+
+// PublicClient only reaches public addresses, over https, with up to 5
+// redirects. update fetches the agent's jars and hash pages with it.
+func PublicClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{Timeout: 15 * time.Second, Control: publicOnly}
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: timeout,
 		Transport: &http.Transport{
 			DialContext:         dialer.DialContext,
 			TLSHandshakeTimeout: 15 * time.Second,

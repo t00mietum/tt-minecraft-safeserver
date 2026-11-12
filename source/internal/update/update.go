@@ -16,7 +16,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
@@ -60,6 +62,16 @@ type Update struct {
 	Geyser      GeyserSource
 	// Run pulls and tries the image.
 	Run host.Runner
+	// Agent answers about the jars no known source covers, per design.md's
+	// Update agent: Live in the operator's run, or a Replay of its answer in
+	// the root one. Nil leaves those jars as they are.
+	Agent func(ctx context.Context, q agent.Question) (agent.Answer, error)
+	// AgentNote says why Agent is nil though agent is set, such as a run
+	// that started as root.
+	AgentNote string
+	// Fetch gets the agent's jars and hash pages. Its zero value reaches
+	// public addresses only.
+	Fetch download.Client
 }
 
 // paperStep is a Paper build to move to, from what paper.jar links to now,
@@ -99,12 +111,18 @@ func (u *Update) Do(ctx context.Context) error {
 		}
 	}
 	var steps []pluginStep
+	var found []agentStep
 	if parts.Plugins {
-		if steps, err = u.pluginLookup(ctx); err != nil {
+		var asks []plugins.Approved
+		if steps, asks, err = u.pluginLookup(ctx); err != nil {
 			return err
 		}
 		for _, s := range steps {
 			plan = append(plan, s.plan())
+		}
+		found = u.agentLookup(ctx, asks)
+		for _, s := range found {
+			plan = append(plan, s.plan(u.DryRun))
 		}
 	}
 	var is *imageStep
@@ -130,6 +148,11 @@ func (u *Update) Do(ctx context.Context) error {
 	}
 	for _, s := range steps {
 		if err := u.getPlugin(ctx, s); err != nil {
+			return err
+		}
+	}
+	for _, s := range found {
+		if err := u.getAgentJar(ctx, s); err != nil {
 			return err
 		}
 	}
@@ -227,36 +250,49 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 }
 
 // pluginLookup finds the approved plugins that have a newer build at their
-// source. Only GeyserMC's sources are known so far.
-func (u *Update) pluginLookup(ctx context.Context) ([]pluginStep, error) {
+// source. Only GeyserMC's sources are known so far. asks are the jars for the
+// update agent: ones with no known source, or whose lookup failed.
+func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []plugins.Approved, err error) {
 	approved, warns, err := plugins.ReadApproved(u.PluginsFile)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, w := range warns {
 		fmt.Fprintf(u.Out, "warning: %s\n", w)
 	}
-	var steps []pluginStep
+	agentOn := u.Agent != nil || u.AgentNote != ""
 	for _, a := range approved {
-		if a.Source == "" {
-			continue
-		}
+		file := filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(a.Name))
+		_, statErr := os.Lstat(file)
+		gone := errors.Is(statErr, fs.ErrNotExist)
 		project := u.geyserProject(a.Source)
-		if project == "" {
+		switch {
+		case paper.IsBuild(a.Name):
+			// --paper's, from PaperMC.
+			continue
+		case a.Source == "" && !agentOn:
+			continue
+		case project == "" && !agentOn:
 			fmt.Fprintf(u.Out, "%-7s %s: its source isn't one update knows yet, so it stays as it is\n", "SKIPPED", a.Name)
 			continue
-		}
-		file := filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(a.Name))
-		if _, err := os.Lstat(file); errors.Is(err, fs.ErrNotExist) {
+		case gone:
 			fmt.Fprintf(u.Out, "%-7s %s: approved, but not in the server folder, so it stays out\n", "SKIPPED", a.Name)
+			continue
+		case project == "":
+			asks = append(asks, a)
 			continue
 		}
 		b, err := u.Geyser.Latest(ctx, project)
+		if err != nil && u.Agent != nil {
+			fmt.Fprintf(u.Out, "warning: can't get %s: %v, so the update agent is asked about %s\n", geyser.Title(project), err, a.Name)
+			asks = append(asks, a)
+			continue
+		}
 		if err != nil {
-			return nil, fmt.Errorf("can't get %s: %w", geyser.Title(project), err)
+			return nil, nil, fmt.Errorf("can't get %s: %w", geyser.Title(project), err)
 		}
 		what := fmt.Sprintf("%s %s build %d", geyser.Title(project), b.Version, b.ID)
 		switch {
@@ -268,13 +304,17 @@ func (u *Update) pluginLookup(ctx context.Context) ([]pluginStep, error) {
 			fmt.Fprintf(u.Out, "%-7s %s: the newest build, %s, is named %s; replace it by hand\n", "SKIPPED", a.Name, what, b.Name)
 			continue
 		}
-		old := "an older build"
-		if info, err := plugins.Describe(plugins.Jar{Name: a.Name, File: file}); err == nil && info.About != "" {
-			old = info.About
-		}
-		steps = append(steps, pluginStep{jar: a, old: old, to: b})
+		steps = append(steps, pluginStep{jar: a, old: oldAbout(file), to: b})
 	}
-	return steps, nil
+	return steps, asks, nil
+}
+
+// oldAbout is what the jar on disk says it is.
+func oldAbout(file string) string {
+	if info, err := plugins.Describe(plugins.Jar{File: file}); err == nil && info.About != "" {
+		return info.About
+	}
+	return "an older build"
 }
 
 // geyserProject is the GeyserMC project a source is for, or "".

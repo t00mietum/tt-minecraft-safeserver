@@ -67,9 +67,24 @@ func Describe(j Jar) (Info, error) {
 // has none of the files, gives "". The jar could say anything, so this is
 // only a hint for the person approving it.
 func about(r io.ReaderAt, size int64) string {
+	name, version := claims(r, size)
+	return strings.TrimSpace(name + " " + version)
+}
+
+// Claims gives the plugin name and version an open jar says it is, from the
+// same files as About, or "" for both.
+func Claims(f *os.File) (name, version string) {
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		return "", ""
+	}
+	return claims(f, fi.Size())
+}
+
+func claims(r io.ReaderAt, size int64) (name, version string) {
 	z, err := zip.NewReader(r, size)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	for _, want := range []string{"paper-plugin.yml", "plugin.yml", "extension.yml"} {
 		for _, f := range z.File {
@@ -78,17 +93,17 @@ func about(r io.ReaderAt, size int64) string {
 			}
 			rc, err := f.Open()
 			if err != nil {
-				return ""
+				return "", ""
 			}
-			name, version := yamlNameVersion(io.LimitReader(rc, 64<<10))
+			name, version = yamlNameVersion(io.LimitReader(rc, 64<<10))
 			_ = rc.Close() // only read from
 			if name == "" {
-				return ""
+				return "", ""
 			}
-			return strings.TrimSpace(name + " " + version)
+			return name, version
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // yamlNameVersion takes the top-level name and version keys, which is all

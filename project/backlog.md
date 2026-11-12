@@ -22,6 +22,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- setup --adopt approves Geyser and Floodgate with no source
+	- ID: 2026111210364791
+	- Type: Bug
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-103647
+	- Opened by:
+	- Related IDs: 2026111116415196 2026111210034298
+	- Incorrect behavior [Bug]: An adopted tree's Geyser and Floodgate jars go on the approved list with no source, so update --plugins never updates them from GeyserMC. With agent set, the update agent is asked about them instead.
+	- Expected behavior [Bug]: setup approves them with GeyserMC's source, as on a new install, or update --plugins knows them by name.
+	- Reproduced [Bug]: On the root host, after setup --adopt, update --plugins asked the agent about plugins/Geyser-Spigot.jar and plugins/floodgate-spigot.jar.
+
 - Container start says only permission denied before a new login
 	- ID: 2026111209291851
 	- Type: Bug
@@ -350,7 +362,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --plugins asks the update agent
 	- ID: 2026111210034298
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261112-100342
 	- Opened by:
@@ -361,6 +373,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Each jar is downloaded and checked: size, hash, the hash page, and the same plugin name. Each needs its own yes, and `--yes` doesn't count.
 		- README says how to connect an agent, with example `agentCommand` lines for the common CLIs.
 	- Estimated effort: Avg
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-12: `update` asks the agent as the operator, writes its answer to a file only the operator can read, runs itself through sudo with that file, and removes it after. The root run checks the answer again. A dry run asks and shows the plan as not checked; a run started as root skips it with a note.
+		- 2026-11-12: Each jar the agent found has its hash checked on the hash page first, then is downloaded beside the old one, checked for size, hash, and plugin name, and needs its own yes. A failed check is reported and the rest go on.
+		- 2026-11-12: README's Update agent section has example configs for the API kinds and `agentCommand` lines for Codex and Gemini CLI. design.md notes the hand-off file and the kept file name.
+		- Verified: df76h, df76j, df76k, and df76m pass, and so does the gate on both temp folders. Each fails with its check taken out: the hash page, the hash, the plugin name, the own yes, the replay's hash match, the failed lookup going to the agent, the temp folder removal, and the hidden flag.
+		- Verified: root host check df76n passes with the other 18: `update` as the operator asks a command agent, the answer reaches the run through real sudo, the temp folder is gone after, and a run started as root says it skipped the agent.
+		- 2026-11-12: df76n first found the agent asked about Paper's own approved build. Paper's builds are now left to `--paper`; df76h fails without that.
+	- Decisions:
+		- The hand-off file sits in its own temp folder, named by a hidden `--agent-answer`. sudo runs as a child rather than replacing the process, so the operator's run can remove the file after; the root run's exit code passes through.
+		- The root run uses an answer only for jars both runs asked about with the same hash, and runs `agent.Check` on it again.
+		- A known source's failed lookup goes to the agent with a warning, rather than stopping update, when the agent is on. With it off, it still stops update.
+		- The new jar takes the old one's file name, so the approved list keeps one entry. A jar whose known source failed keeps that source.
+		- Jars and hash pages are fetched through the agent package's public-address client. The hash page is searched as is, up to 4 MiB, ignoring case.
+		- `download.Stage` writes the temp file and gives both hashes, and `Into` now uses it, so the checks aren't written twice. `plugins.Claims` gives the name a jar says it has.
+		- README's CLI flags were checked against `codex` 0.163.0 and `gemini` 0.59.0's help, not run against a subscription. README says to check them against the CLI's docs.
+		- Swept: `Into`'s callers in `paper` and `geyser` pass their tests; `about` and `Claims` share one reader; `update`'s other callers (setup's Update step) run as root and get the note.
+	- Branch: r1112b
+	- Test case: df76h, df76j, df76k, df76m, df76n (root host)
+	- Closed: 20261112-103705
 
 - Update agent: Paper fallback and the --mc-version report
 	- ID: 2026111210034308

@@ -159,6 +159,26 @@ fFirewallOff() {
 	! sudo nft list table inet tt_minecraftd > /dev/null 2>&1 && ! systemctl is-enabled tt-minecraftd-firewall.service
 }
 
+fAgentHandOff() {
+	# A jar with no source, and an agent that has nothing for it.
+	printf 'thing' > /srv/mc/adopted/plugins/Thing.jar || return 1
+	printf 'y\n' | tt-minecraftd repair --approve-plugins > approve.out || { cat approve.out; return 1; }
+	cat > ask <<-'EOF'
+		#!/bin/sh
+		cat > /dev/null
+		echo '{"jars": []}'
+	EOF
+	chmod 700 ask
+	printf 'agent: command\nagentCommand: [%s/ask]\n' "${HOME}" | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
+	tt-minecraftd update --plugins --yes < /dev/null | tee agent.out || return 1
+	has 'Asking the update agent about' agent.out && has 'plugins/Thing.jar: no answer from the update agent' agent.out || return 1
+	# Paper's builds are --paper's.
+	! grep -q 'paper-.*update agent' agent.out || return 1
+	! compgen -G '/tmp/tt-minecraftd-agent-*' || { say "the answer file is left over"; return 1; }
+	sudo tt-minecraftd update --plugins --dry-run < /dev/null | tee agent-root.out
+	has "isn't asked when update starts as root" agent-root.out
+}
+
 cd "${HOME}" || exit 1
 if [[ "${1:-}" != after-login ]]; then
 	check df680 "setup installs from scratch" fNewInstall
@@ -182,4 +202,5 @@ check df68c "status, cmd, and console follow a native server" fNativeFollow
 check df68d "stop follows a native server" fNativeStop
 check df68e "setup --adopt a copy of the tree" fAdopt
 check df68f "firewall off removes the unit and table" fFirewallOff
+check df76n "update asks the agent as the operator, and hands its answer through sudo" fAgentHandOff
 exit "${failed}"
