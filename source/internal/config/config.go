@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -50,6 +51,11 @@ type Config struct {
 	Firewall          bool
 	StartAtBoot       bool
 	ExtraArgs         []string
+	Agent             string
+	AgentURL          string
+	AgentModel        string
+	AgentCommand      []string
+	AgentHosts        []string
 }
 
 // Read lays the settings in an shcl file over c. A key that's unknown, set
@@ -147,6 +153,11 @@ func (c *Config) setters() map[string]setter {
 		"firewall":          flag(&c.Firewall),
 		"startAtBoot":       flag(&c.StartAtBoot),
 		"extraArgs":         list(&c.ExtraArgs, nil),
+		"agent":             choice(&c.Agent, "none", "openai", "anthropic", "command"),
+		"agentURL":          text(&c.AgentURL, checkAgentURL),
+		"agentModel":        text(&c.AgentModel, checkModel),
+		"agentCommand":      argv(&c.AgentCommand),
+		"agentHosts":        list(&c.AgentHosts, checkHost),
 	}
 	folded := make(map[string]setter, len(byName))
 	for name, set := range byName {
@@ -335,6 +346,7 @@ func list(dst *[]string, check func(string) (string, error)) setter {
 var (
 	accountName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,31}$`)
 	datasetName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]*(/[A-Za-z0-9_.:-]+)*$`)
+	hostName    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 )
 
 func checkAccount(s string) (string, error) {
@@ -408,4 +420,70 @@ func checkAllow(s string) (string, error) {
 		return addr, nil
 	}
 	return "", fmt.Errorf("%q isn't lan, any, an address, or a range", s)
+}
+
+// argv is a program and its arguments, run as given, without a shell.
+func argv(dst *[]string) setter {
+	return func(doc *shcl.Document, path string) error {
+		var items []string
+		if err := list(&items, nil)(doc, path); err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return errors.New("takes a program and its arguments, such as [llm, -m, gpt-5]")
+		}
+		if _, err := checkProgram(items[0]); err != nil {
+			return err
+		}
+		*dst = items
+		return nil
+	}
+}
+
+// checkAgentURL keeps keys out of the config, which everyone can read, and
+// plain http on this host.
+func checkAgentURL(s string) (string, error) {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || u.Opaque != "" {
+		return "", fmt.Errorf("%q isn't a web address", s)
+	}
+	if u.User != nil {
+		return "", errors.New("can't hold a user or key, since everyone can read the config")
+	}
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if !loopback(u.Hostname()) {
+			return "", fmt.Errorf("%q: plain http only goes to a loopback address", s)
+		}
+	default:
+		return "", fmt.Errorf("%q isn't https", s)
+	}
+	return strings.TrimRight(s, "/"), nil
+}
+
+// loopback says whether host is localhost or a loopback address.
+func loopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
+}
+
+func checkModel(s string) (string, error) {
+	if len(s) > 200 || strings.HasPrefix(s, "-") || strings.IndexFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) >= 0 {
+		return "", fmt.Errorf("%q isn't a model name", s)
+	}
+	return s, nil
+}
+
+func checkHost(s string) (string, error) {
+	lower := strings.ToLower(s)
+	if !hostName.MatchString(lower) {
+		return "", fmt.Errorf("%q isn't a host name, such as cdn.modrinth.com", s)
+	}
+	return lower, nil
 }

@@ -81,6 +81,11 @@ stopTimeout: 90
 firewall: off
 startAtBoot: yes
 extraArgs: [--nogui]
+agent: Command
+agentURL: http://127.0.0.1:11434/v1/
+agentModel: qwen3:32b
+agentCommand: [/usr/local/bin/llm, -m, gpt-5]
+agentHosts: [CDN.Modrinth.com, ci.example.org]
 `
 	var c Config
 	if warns := mustRead(t, text, &c); len(warns) != 0 {
@@ -115,6 +120,11 @@ extraArgs: [--nogui]
 		Firewall:          false,
 		StartAtBoot:       true,
 		ExtraArgs:         []string{"--nogui"},
+		Agent:             "command",
+		AgentURL:          "http://127.0.0.1:11434/v1",
+		AgentModel:        "qwen3:32b",
+		AgentCommand:      []string{"/usr/local/bin/llm", "-m", "gpt-5"},
+		AgentHosts:        []string{"cdn.modrinth.com", "ci.example.org"},
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Errorf("got  %+v\nwant %+v", c, want)
@@ -169,6 +179,18 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 		{"startTimeout: -5", "isn't a number of seconds"},
 		{"startTimeout: 0", "too short"},
 		{"stopTimeout: soon", "isn't a number of seconds"},
+		{"agent: chatgpt", "isn't one of: none, openai, anthropic, command"},
+		{"agentURL: http://192.168.1.5:11434/v1", "plain http only goes to a loopback address"},
+		{"agentURL: http://localhost.example.com/v1", "plain http only goes to a loopback address"},
+		{"agentURL: https://me:sk-123@api.example.com", "can't hold a user or key"},
+		{"agentURL: ftp://api.example.com", "isn't https"},
+		{"agentURL: api.openai.com/v1", "isn't a web address"},
+		{"agentModel: \"gpt 5\"", "isn't a model name"},
+		{"agentModel: --help", "isn't a model name"},
+		{"agentCommand: []", "takes a program and its arguments"},
+		{"agentCommand: [bin/llm, -m]", "isn't a full path or a program name"},
+		{"agentHosts: [cdn.modrinth.com, https://github.com]", "isn't a host name"},
+		{"agentHosts: localhost", "isn't a host name"},
 	}
 	for _, tc := range cases {
 		c := before()

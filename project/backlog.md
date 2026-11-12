@@ -275,7 +275,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Pre-next-cut.
 	- Progress log:
 		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
-		- 2026-11-12: Split into 4 children: 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), 2026111210034298 (`update --plugins` asks the agent), and 2026111210034308 (Paper fallback and the `--mc-version` report).
+		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind) is done. 2026111210033649 (OpenAI and Anthropic APIs, with fetch), 2026111210034298 (`update --plugins` asks the agent), and 2026111210034308 (Paper fallback and the `--mc-version` report) are queued.
 	- Decisions:
 		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
 		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
@@ -288,7 +288,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Update agent: config keys, answer format, and the command kind
 	- ID: 2026111210033639
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261112-100336
 	- Opened by:
@@ -298,6 +298,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- A package that builds the question from the jars, runs `agentCommand` as the operator in an empty temp folder with the question on stdin, and reads the JSON answer.
 		- Each suggestion is checked against the approved list, `https`, and `agentHosts`.
 	- Estimated effort: Avg
+	- Actual effort: Avg
+	- Progress log:
+		- Verified: df75x to df765 pass, and so do the config tests with the new keys. The gate passes on both temp folders.
+		- Verified: df75z, df764, and df760 fail with the host check, the root refusal, or the text cleaning taken out.
+		- 2026-11-12: df763's size cap failed at first, since the reply buffer was embedded and the copy went past the cap through its `ReadFrom`. Fixed before the commit.
+	- Decisions:
+		- The code is `source/internal/agent`. `Suggest` builds the question, asks, reads the JSON, and checks it. The download and hash page checks are 2026111210034298's.
+		- The answer is found inside prose or a code fence, since CLIs often wrap it. Unknown fields are ignored.
+		- A suggestion is refused when it names a jar not asked about or one twice, has no version, or its download or hash page isn't `https` on a host in `agentHosts`, on the usual port, with no user name. A hash must be 64 or 128 hex digits. With no hash, the hash page is dropped.
+		- The agent's text loses its control and direction characters, and is cut to a length per field.
+		- `command` refuses to run as root, runs in an empty temp folder in its own process group, gets 15 minutes, and its reply is capped at 1 MiB.
+		- `agentURL` can't hold a user or key, and takes plain `http` only to localhost or a loopback address. `agentHosts` takes host names, lower-cased. Its default lists the Hangar, Modrinth, GitHub, GeyserMC, and PaperMC hosts, with their API and CDN names.
+		- The keys do nothing until 2026111210034298 uses them. `openai` and `anthropic` say they aren't built yet, until 2026111210033649.
+		- Swept: design.md's settings table matches the config's keys (df5x2) and the `agent` default (df5x6).
+	- Branch: r1112b
+	- Test case: df75x, df75y, df75z, df760, df761, df762, df763, df764, df765, df5wt, df5ww, df5x2, df5x6
+	- Closed: 20261112-100929
 
 - Update agent: OpenAI and Anthropic APIs, with fetch
 	- ID: 2026111210033649
