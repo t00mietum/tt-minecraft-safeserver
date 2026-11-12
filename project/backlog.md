@@ -556,7 +556,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
 	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
-	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first is done, and the other 2 are queued.
+	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first is done, the second waits on signoff, and the third is queued.
 
 - Firewall: rules file, its unit, and the start check
 	- ID: 2026111117134046
@@ -592,7 +592,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall: setup and repair manage it
 	- ID: 2026111117135246
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on the hand test below. No root step ran here.
+	- Needs hand testing: on a throwaway host or VM, `sudo tt-minecraftd setup`, then `repair --check` is clean, `nft list table inet tt_minecraftd` shows the rules, and `sudo systemctl restart nftables` leaves the table loaded. As the service account, `curl http://127.0.0.1` and a connection to a LAN address fail and bump `out_local` and `out_lan`. With `firewall: off`, `sudo tt-minecraftd repair` removes the unit and the table.
 	- Priority: High
 	- Opened: 20261111-171352
 	- Opened by:
@@ -602,6 +604,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `setup` step 9: install nftables through apt when `nft` is missing, write the rules, and enable and start their unit.
 		- `repair` check 9: the rules file matches the config, its unit is enabled, and the table is loaded. With `firewall` off, the unit and the table are removed.
 		- Neither touches ufw or firewalld rules.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-11: `repair`'s check 9 is `repair.FirewallCheck`, between the Bedrock and ufw checks. setup runs it as step 9, after approving jars and before the image pull, and adds nftables to its apt packages when `nft` is missing.
+		- Verified: df66g, df66h, and df66j each fail with their part taken out, and pass with it in. The unit text passes `systemd-analyze verify`, and `install -D -T /dev/stdin` writes into a folder it makes.
+	- Decisions:
+		- Files are written with `install` reading stdin, through the runner, so dry run and tests see the write. `host.Cmd` gained `Stdin` for it. `-D` since `/etc/tt-minecraftd` may not be there yet at step 9.
+		- A new rules file or unit, or a table that's gone, is fixed with `systemctl reload-or-restart`, so a loaded table is swapped in one transaction.
+		- The table is read through `sudo`, under `--check` too, the same as the container check's runtime calls.
+		- A missing `nft` is reported, not installed, by `repair`, like `catatonit`. setup installs it through apt, and stops before the config when that can't happen. design.md updated.
+		- With `firewall` off, `systemctl disable --now` deletes the table through the unit's `ExecStop`. The rules file stays, per design.md.
+		- Swept: `repair.After` is the only check list; setup's existing-install path gets the check through `repair`. ufw and firewalld are still only read.
+	- Branch: r1112
+	- Test case: df66g, df66h, df66j
 
 - Firewall: drop counters in status
 	- ID: 2026111117135258
@@ -614,6 +629,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq IDs: 2026111117134046
 	- Requirements:
 		- `status` shows the firewall's drop counters, inbound and outbound, in place of "not set up yet".
+	- The counters are the named ones in `firewall.nft`: `in_refused`, `in_flood`, `in_closed`, `out_local`, `out_lan`, and `out_web`. Reading them needs root, and `status` doesn't use sudo, so this needs a pick, such as `sudo -n` when it's cached, or "run with sudo to see them".
 
 - update
 	- ID: 2026111111065803

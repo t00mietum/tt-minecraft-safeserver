@@ -23,6 +23,11 @@ type Host struct {
 	Passwd, Group string
 	// Root is whether repair runs as root, which some reads need.
 	Root bool
+	// RulesFile, UnitFile, and ResolvConf are the firewall's files. Empty
+	// means the real ones.
+	RulesFile, UnitFile, ResolvConf string
+	// NftThere, when set, stands in for HasNft.
+	NftThere func() bool
 }
 
 // NewHost gives a Host on the real account files.
@@ -84,7 +89,7 @@ func Run(ctx context.Context, h *Host, checks []Check, checkOnly bool, report Re
 // and After the ones that follow them. See design.md, repair.
 var (
 	Before = []Check{configCheck, accountCheck, operatorCheck, serverTreeCheck, ownershipCheck}
-	After  = []Check{bedrockCheck, hostFirewallCheck, containerCheck, catatonitCheck, datasetCheck, othersCheck}
+	After  = []Check{bedrockCheck, FirewallCheck, hostFirewallCheck, containerCheck, catatonitCheck, datasetCheck, othersCheck}
 	// AccountCheck and OperatorCheck are setup's second step.
 	AccountCheck, OperatorCheck = accountCheck, operatorCheck
 )

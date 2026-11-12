@@ -101,3 +101,17 @@ func TestExecQuietErr(t *testing.T) {
 		t.Errorf("without QuietErr: err %v, stderr %q", err, errOut.String())
 	}
 }
+
+func TestExecStdin(t *testing.T) {
+	defer testid.Line(t, "df66j")
+	e := &Exec{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}
+	out, err := e.Run(context.Background(), Cmd{Args: []string{"cat"}, Stdin: []byte("table inet x\n")})
+	if err != nil || string(out) != "table inet x\n" {
+		t.Errorf("got %q, %v", out, err)
+	}
+	var printed strings.Builder
+	e = &Exec{DryRun: true, Out: &printed}
+	if _, err := e.Run(context.Background(), Cmd{Args: []string{"install", "-T", "/dev/stdin", "/etc/x"}, Stdin: []byte("y")}); err != nil || printed.String() != "would run: install -T /dev/stdin /etc/x\n" {
+		t.Errorf("dry run printed %q, %v", printed.String(), err)
+	}
+}

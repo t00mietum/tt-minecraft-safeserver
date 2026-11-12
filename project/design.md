@@ -242,6 +242,7 @@ Common:  --config PATH, --set KEY=VALUE
 		- The lookup happens before the plan is shown, along with Paper's.
 	8. Approves the plugin jars that are there, after listing each one with its hash.
 	9. With `firewall` on, installs nftables through apt when `nft` is missing, writes the rules, and starts their unit. See [Firewall](#firewall).
+		- That's `repair`'s firewall check, with its fixes. When it fails, such as with no apt to get nftables from, setup stops before it writes the config.
 	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else.
@@ -292,6 +293,8 @@ Common:  --config PATH, --set KEY=VALUE
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.
 	9. With `firewall` on, the rules file matches the config, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
+		- A missing `nft` is reported with the command that adds it, the same as `catatonit`. A new rules file is loaded with `systemctl reload-or-restart`, so a running table is swapped in one go.
+		- Turning it off leaves the rules file in place.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
 		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
 	11. In container mode, the image is there, and an old stopped container gets removed, under either runtime. In Podman mode, `catatonit` is installed. A missing one is reported with the command that adds it.

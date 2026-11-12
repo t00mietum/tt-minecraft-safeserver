@@ -38,6 +38,8 @@ type rig struct {
 	repCfg  config.Config
 	paper   fakePaper
 	geyser  fakeGeyser
+	// nft is whether nftables is installed.
+	nft bool
 }
 
 // fakePaper hands out one build, and writes it as a file.
@@ -89,7 +91,9 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 	r := &rig{out: &bytes.Buffer{}, dir: dir, server: filepath.Join(dir, "srv", "server")}
 	passwd := filepath.Join(dir, "passwd")
 	group := filepath.Join(dir, "group")
-	for file, text := range map[string]string{passwd: "alice:x:1000:1000::/home/alice:/bin/bash\n", group: "alice:x:1000:\n"} {
+	resolv := filepath.Join(dir, "resolv.conf")
+	r.nft = true
+	for file, text := range map[string]string{passwd: "alice:x:1000:1000::/home/alice:/bin/bash\n", group: "alice:x:1000:\n", resolv: "nameserver 192.168.1.1\n"} {
 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -98,6 +102,8 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		switch {
 		case c.Args[0] == "ps":
 			return []byte(r.ps), nil
+		case c.Args[0] == "apt-get":
+			r.nft = r.nft || slices.Contains(c.Args, "nftables")
 		case c.Args[0] == "install" && c.Args[1] == "-d":
 			return nil, os.MkdirAll(c.Args[len(c.Args)-1], 0o750)
 		case c.Args[0] == "groupadd":
@@ -128,7 +134,8 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		Out:         r.out,
 		Exe:         filepath.Join(dir, "tt-minecraftd"),
 		Accounts: func(c *config.Config) *repair.Host {
-			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group}
+			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group,
+				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv}
 		},
 		Paper:  &r.paper,
 		Geyser: &r.geyser,
@@ -138,10 +145,11 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 			return nil
 		},
 	}
-	was, wasCat := launch.Installed, hasCatatonit
+	was, wasCat, wasNft := launch.Installed, hasCatatonit, hasNft
 	launch.Installed = func(name string) bool { return slices.Contains(tools, name) }
 	hasCatatonit = func() bool { return slices.Contains(tools, "catatonit") }
-	t.Cleanup(func() { launch.Installed, hasCatatonit = was, wasCat })
+	hasNft = func() bool { return r.nft }
+	t.Cleanup(func() { launch.Installed, hasCatatonit, hasNft = was, wasCat, wasNft })
 	return r
 }
 
@@ -586,4 +594,59 @@ func TestExistingBedrock(t *testing.T) {
 	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "can't get Geyser") || len(r.repairs) > 0 {
 		t.Errorf("failed lookup: %v, repairs %v", err, r.repairs)
 	}
+}
+
+// Step 9 installs nftables when it's missing, writes the rules and the unit,
+// and starts it, before the image pull. Without nft, setup stops there.
+func TestFirewall(t *testing.T) {
+	defer testid.Line(t, "df66h")
+	r := newRig(t, []string{"podman", "catatonit", "apt-get"}, "")
+	r.nft = false
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	rules := filepath.Join(r.dir, "firewall.nft")
+	ran := r.ran()
+	hasAll(t, "commands", ran,
+		"sudo apt-get install -y nftables",
+		"sudo install -D -m 0644 -o root -g root -T /dev/stdin "+rules,
+		"sudo systemctl enable tt-minecraftd-firewall.service",
+		"sudo systemctl reload-or-restart tt-minecraftd-firewall.service",
+	)
+	loaded := slices.Index(ran, "sudo systemctl reload-or-restart tt-minecraftd-firewall.service")
+	pull := slices.IndexFunc(ran, func(s string) bool { return strings.Contains(s, " pull ") })
+	if loaded < 0 || pull < loaded {
+		t.Errorf("rules loaded at %d, image pulled at %d", loaded, pull)
+	}
+	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "Write the firewall rules to /etc/tt-minecraftd/firewall.nft", "FIXED   firewall rules loaded")
+
+	r = newRig(t, []string{"podman", "catatonit"}, "")
+	r.nft = false
+	r.s.Yes, r.s.AcceptEULA = true, true
+	err := r.s.Do(context.Background())
+	if err == nil || !strings.Contains(r.out.String(), "FAILED  nftables isn't installed") {
+		t.Errorf("no nft, no apt: err %v\n%s", err, r.out)
+	}
+	if _, err := os.Stat(r.s.ConfigPath); err == nil {
+		t.Error("config written after the firewall step failed")
+	}
+
+	r = newRig(t, []string{"podman", "catatonit", "apt-get"}, "", "firewall=off")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if slices.ContainsFunc(r.ran(), func(s string) bool { return strings.Contains(s, "nft") }) || strings.Contains(r.out.String(), "firewall rules") {
+		t.Errorf("firewall off:\n%s\n%s", strings.Join(r.ran(), "\n"), r.out)
+	}
+
+	r = newRig(t, []string{"podman", "catatonit", "apt-get"}, "")
+	r.nft = false
+	r.s.DryRun = true
+	r.f.Reply = func(host.Cmd) ([]byte, error) { return nil, nil }
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	hasAll(t, "dry run", strings.Split(r.out.String(), "\n"), "PLAN    firewall rules written to /etc/tt-minecraftd/firewall.nft")
 }

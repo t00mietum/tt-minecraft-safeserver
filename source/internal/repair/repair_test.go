@@ -32,6 +32,7 @@ func testHost(t *testing.T, passwd, group string, reply func(c host.Cmd) ([]byte
 	}
 	h.Cfg.OwnerTrees = []string{h.Cfg.ServerDir}
 	h.ConfigPath = filepath.Join(dir, "config.shcl")
+	h.RulesFile, h.UnitFile, h.ResolvConf = filepath.Join(dir, "firewall.nft"), filepath.Join(dir, "fw.service"), filepath.Join(dir, "resolv.conf")
 	for file, text := range map[string]string{h.Passwd: passwd, h.Group: group} {
 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
 			t.Fatal(err)

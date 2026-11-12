@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
@@ -152,6 +153,10 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.approve(jars); err != nil {
 		return err
 	}
+	s.firewall(ctx, &cfg, report)
+	if failed {
+		return stopped
+	}
 	if cfg.RunMode != "native" {
 		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{cfg.RunMode, "pull", cfg.Image}}); err != nil {
 			return err
@@ -245,6 +250,9 @@ func (s *Setup) options(ctx context.Context) ([]config.Option, error) {
 // hasCatatonit is a var so tests don't depend on the host's.
 var hasCatatonit = repair.HasCatatonit
 
+// hasNft is a var for the same reason.
+var hasNft = repair.HasNft
+
 var plainPath = regexp.MustCompile(`^/[A-Za-z0-9_./-]*$`)
 
 func given(opts []config.Option, key string) bool {
@@ -276,15 +284,16 @@ func (s *Setup) pickRuntime(context.Context) (string, error) {
 
 // packages are what install puts in through apt, for the Podman pick.
 func (s *Setup) packages(c config.Config) []string {
-	if c.RunMode != "podman" {
-		return nil
-	}
 	var pkgs []string
-	if !launch.Installed("podman") {
+	if c.RunMode == "podman" && !launch.Installed("podman") {
 		pkgs = append(pkgs, "podman")
 	}
-	if !hasCatatonit() {
+	if c.RunMode == "podman" && !hasCatatonit() {
 		pkgs = append(pkgs, "catatonit")
+	}
+	// Without apt, the firewall step says what's missing.
+	if c.Firewall && !hasNft() && launch.Installed("apt-get") {
+		pkgs = append(pkgs, "nftables")
 	}
 	return pkgs
 }
@@ -390,6 +399,9 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string
 	s.planBedrock(bedrock)
 	if jars > 0 {
 		fmt.Fprintf(w, "  - Approve the %d plugin %s there, listed with %s hashes below.\n", jars, plural(jars, "jar"), plural(jars, "its", "their"))
+	}
+	if c.Firewall {
+		fmt.Fprintf(w, "  - Write the firewall rules to %s, and enable and start %s.\n", firewall.RulesFile, firewall.UnitName)
 	}
 	if c.RunMode != "native" {
 		fmt.Fprintf(w, "  - Pull %s with %s.\n", c.Image, c.RunMode)
@@ -535,6 +547,23 @@ func (s *Setup) writeConfig(opts []config.Option) error {
 	}
 	fmt.Fprintf(s.Out, "%-7s %s written\n", "FIXED", s.ConfigPath)
 	return nil
+}
+
+// firewall is step 9, repair's firewall check with its fixes. A dry run may
+// not have nft yet, since apt only printed its install.
+func (s *Setup) firewall(ctx context.Context, c *config.Config, report repair.Report) {
+	if !c.Firewall {
+		return
+	}
+	if s.DryRun && !hasNft() {
+		report("PLAN", "firewall rules written to "+firewall.RulesFile+", and "+firewall.UnitName+" enabled and started")
+		return
+	}
+	h := s.Accounts(c)
+	if h.NftThere == nil {
+		h.NftThere = hasNft
+	}
+	repair.Run(ctx, h, []repair.Check{repair.FirewallCheck}, false, report)
 }
 
 // paperBuild is the build to download, or nil when there's a paper.jar

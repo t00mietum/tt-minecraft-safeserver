@@ -5,6 +5,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -27,6 +28,8 @@ type Cmd struct {
 	Look bool
 	// Tty hands it the terminal, for sudo's password prompt or a console.
 	Tty bool
+	// Stdin is fed to it, such as a file for install to put in place.
+	Stdin []byte
 }
 
 // Runner runs outside commands. Tests use Fake.
@@ -77,6 +80,9 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 			return nil, fmt.Errorf("%s: %w", Quote(argv), err)
 		}
 		return nil, nil
+	}
+	if c.Stdin != nil {
+		cmd.Stdin = bytes.NewReader(c.Stdin)
 	}
 	var errText strings.Builder
 	if e.QuietErr {
