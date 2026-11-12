@@ -22,6 +22,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- repair sends a missing server folder to setup, which only runs repair again
+	- ID: 2026111117095694
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-170956
+	- Opened by:
+	- Related IDs: 2026111117052190
+	- Incorrect behavior [Bug]: With the config there and `serverDir` missing, `repair` says `sudo tt-minecraftd setup` makes one or adopts one with `--adopt`. On an existing install setup only runs `repair`, and refuses `--adopt`.
+	- Expected behavior [Bug]: The message names what works, such as moving the config aside to run setup as a new install, or setting `serverDir`.
+	- Reproduced [Bug]: From the code, not on a host.
+
 - Check Geyser's first config against the next start
 	- ID: 2026111117052206
 	- Type: Task
@@ -35,7 +47,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair sends a missing Geyser to setup, which only runs repair again
 	- ID: 2026111117052190
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-170521
 	- Opened by:
@@ -43,6 +55,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Incorrect behavior [Bug]: With `bedrock` turned on after install, `repair` says Geyser or Floodgate is missing and that `sudo tt-minecraftd setup` installs it. On an existing install setup only runs `repair`, so the same message comes back.
 	- Expected behavior [Bug]: The message names a command that installs them, or setup's existing-install path installs the missing ones.
 	- Reproduced [Bug]: From the code, not on a host.
+	- Actual cause [Bug]:
+		- Setup's existing-install path went straight to `repair`, and only the new-install path fetched Geyser and Floodgate.
+	- Actual effort: Low
+	- Progress log:
+		- 2026-11-12: On an existing install with `bedrock` on, setup looks up a missing Geyser or Floodgate, shows it in the plan, downloads and approves it, and then runs `repair`. design.md's setup says so.
+		- Verified: df66b fails on the old setup code and passes with the fix. The gate passes on both temp folders.
+	- Decisions:
+		- Setup gets the jars, rather than repair naming another command, since `update --plugins` only updates jars it already knows, and design.md's setup step 7 already covers the download. `repair`'s message stays as it was, and is now true.
+		- The lookup comes before the question, and a failed one stops setup before `repair`, as on a new install.
+		- A missing `serverDir` skips the lookup, so `repair` reports the tree.
+		- Swept: `bedrockBuilds` and `getBedrock` are shared by both paths, and the plan line moved to `planBedrock`. Of `repair`'s messages that send the operator to setup, the missing `serverDir` one has the same problem, filed as 2026111117095694.
+	- Actual fix [Bug]: setup's existing-install path installs a missing Geyser or Floodgate before `repair`.
+	- Branch: r1112
+	- Test case: df66b
+	- Closed: 20261111-170934
 
 - staticcheck: unused values in repair tests
 	- ID: 2026111116281098

@@ -248,6 +248,7 @@ Common:  --config PATH, --set KEY=VALUE
 	13. Ends with `repair --check`.
 
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
+	- Before `repair`, with `bedrock` on, it downloads and approves Geyser or Floodgate when one is missing, as in step 7, since `repair` only reports them.
 
 - It sets `runMode` to `podman` when Podman is installed, and to `docker` when only Docker is. With neither, it offers to install Podman and `catatonit` through apt, or to use native mode. It never installs Docker.
 	- A `runMode` given with `--set` or `--native` skips the pick. `--yes` takes Podman.

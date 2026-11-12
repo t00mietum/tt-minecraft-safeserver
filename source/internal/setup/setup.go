@@ -174,21 +174,37 @@ func (s *Setup) Do(ctx context.Context) error {
 	return s.Repair(ctx, &cfg, true)
 }
 
-// existing runs repair on an install that's already there. update comes after
-// it once update is built.
+// existing runs repair on an install that's already there, after getting a
+// Geyser or Floodgate that's missing, since repair only reports those. update
+// comes after it once update is built.
 func (s *Setup) existing(ctx context.Context) error {
 	if s.Adopt != "" {
 		return fmt.Errorf("%s is there already, so this isn't a new install; set serverDir in it to move to another server folder", s.ConfigPath)
 	}
 	cfg := s.Loaded
-	fmt.Fprintf(s.Out, "\nFound an install at %s, so setup runs repair on it.\n\n", s.ConfigPath)
-	if s.DryRun {
-		return s.Repair(ctx, cfg, true)
+	var bedrock []geyser.Build
+	// A missing tree is repair's to report.
+	if _, err := os.Stat(cfg.ServerDir); err == nil {
+		if bedrock, err = s.bedrockBuilds(ctx, *cfg); err != nil {
+			return err
+		}
 	}
-	if !s.confirm("Run repair? [y/n] ") {
+	prompt := "Run repair? [y/n] "
+	if len(bedrock) == 0 {
+		fmt.Fprintf(s.Out, "\nFound an install at %s, so setup runs repair on it.\n\n", s.ConfigPath)
+	} else {
+		fmt.Fprintf(s.Out, "\nFound an install at %s, so setup will:\n", s.ConfigPath)
+		s.planBedrock(bedrock)
+		fmt.Fprintf(s.Out, "  - Run repair on it.\n\n")
+		prompt = "Go ahead? [y/n] "
+	}
+	if !s.confirm(prompt) {
 		return errors.New("nothing changed")
 	}
-	return s.Repair(ctx, cfg, false)
+	if err := s.getBedrock(ctx, *cfg, bedrock); err != nil {
+		return err
+	}
+	return s.Repair(ctx, cfg, s.DryRun)
 }
 
 func (s *Setup) refuseRunning(ctx context.Context) error {
@@ -371,13 +387,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string
 		fmt.Fprintf(w, "  - Ask whether you accept the Minecraft EULA, and write eula.txt only after a yes.\n")
 	}
 	fmt.Fprintf(w, "  - Write the safe server settings.\n")
-	if len(bedrock) > 0 {
-		names := make([]string, len(bedrock))
-		for i, b := range bedrock {
-			names[i] = fmt.Sprintf("%s %s build %d", geyser.Title(b.Project), b.Version, b.ID)
-		}
-		fmt.Fprintf(w, "  - Download %s into plugins/, check %s SHA-256, and approve %s.\n", strings.Join(names, " and "), plural(len(bedrock), "its", "their"), plural(len(bedrock), "it", "them"))
-	}
+	s.planBedrock(bedrock)
 	if jars > 0 {
 		fmt.Fprintf(w, "  - Approve the %d plugin %s there, listed with %s hashes below.\n", jars, plural(jars, "jar"), plural(jars, "its", "their"))
 	}
@@ -389,6 +399,17 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars int, exe string
 	}
 	fmt.Fprintf(w, "  - Write %s, with %s.\n", s.ConfigPath, keyList(opts))
 	fmt.Fprintf(w, "  - Check it all, as repair --check does.\n\n")
+}
+
+func (s *Setup) planBedrock(bedrock []geyser.Build) {
+	if len(bedrock) == 0 {
+		return
+	}
+	names := make([]string, len(bedrock))
+	for i, b := range bedrock {
+		names[i] = fmt.Sprintf("%s %s build %d", geyser.Title(b.Project), b.Version, b.ID)
+	}
+	fmt.Fprintf(s.Out, "  - Download %s into plugins/, check %s SHA-256, and approve %s.\n", strings.Join(names, " and "), plural(len(bedrock), "its", "their"), plural(len(bedrock), "it", "them"))
 }
 
 func keyList(opts []config.Option) string {

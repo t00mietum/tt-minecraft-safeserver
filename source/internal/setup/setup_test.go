@@ -526,3 +526,64 @@ func TestBedrock(t *testing.T) {
 		t.Errorf("a failed lookup went on:\n%s\n%s", strings.Join(r.ran(), "\n"), r.out)
 	}
 }
+
+// repair only reports a missing Geyser or Floodgate, and says setup gets it.
+func TestExistingBedrock(t *testing.T) {
+	defer testid.Line(t, "df66b")
+	existing := func(answers string, jars ...string) *rig {
+		r := newRig(t, nil, answers)
+		if err := os.MkdirAll(filepath.Dir(r.s.ConfigPath), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(r.s.ConfigPath, []byte("runMode: podman\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(r.server, "plugins"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		for _, j := range jars {
+			if err := os.WriteFile(filepath.Join(r.server, "plugins", j), []byte("mine"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r.s.Loaded = &config.Config{RunMode: "podman", ServerDir: r.server, Bedrock: true}
+		return r
+	}
+
+	r := existing("y\n", "Geyser-Spigot.jar")
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if !reflect.DeepEqual(r.geyser.installed, []string{"floodgate-spigot.jar"}) || !reflect.DeepEqual(r.repairs, []bool{false}) {
+		t.Errorf("Floodgate missing: installed %q, repairs %v\n%s", r.geyser.installed, r.repairs, r.out)
+	}
+	if !strings.Contains(r.out.String(), "Download Floodgate 2.0 build 7") {
+		t.Errorf("no plan:\n%s", r.out)
+	}
+	list, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	if err != nil || len(list) != 1 || list[0].Name != "plugins/floodgate-spigot.jar" || list[0].Source == "" {
+		t.Errorf("approved %+v %v", list, err)
+	}
+
+	r = existing("n\n")
+	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "nothing changed") || len(r.geyser.installed) > 0 || len(r.repairs) > 0 {
+		t.Errorf("a no went on: %v, installed %q, repairs %v", err, r.geyser.installed, r.repairs)
+	}
+
+	r = existing("")
+	r.s.DryRun = true
+	if err := r.s.Do(context.Background()); err != nil || len(r.geyser.installed) > 0 || !reflect.DeepEqual(r.repairs, []bool{true}) {
+		t.Errorf("dry run: %v, installed %q, repairs %v", err, r.geyser.installed, r.repairs)
+	}
+
+	r = existing("y\n", "Geyser-Spigot.jar", "floodgate-spigot.jar")
+	if err := r.s.Do(context.Background()); err != nil || len(r.geyser.asked) > 0 || !strings.Contains(r.out.String(), "Run repair?") {
+		t.Errorf("both there: %v, asked %q\n%s", err, r.geyser.asked, r.out)
+	}
+
+	r = existing("y\n")
+	r.geyser.err = errors.New("no answer")
+	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "can't get Geyser") || len(r.repairs) > 0 {
+		t.Errorf("failed lookup: %v, repairs %v", err, r.repairs)
+	}
+}
