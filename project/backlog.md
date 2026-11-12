@@ -356,6 +356,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Ask before accepting the Minecraft EULA.
 		- Install and set up Geyser and Floodgate when `bedrock` is on.
 		- On an existing install, run `repair` and then `update`.
+	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
 
 - Firewall
 	- ID: 2026111111065789
@@ -441,6 +442,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- Add a flake with a NixOS module for the account, Docker, the config file, the firewall unit, and the boot unit.
 		- On NixOS, `setup`, `repair`, and `update` check the system parts and print module settings, rather than change them.
+	- 2026-11-12: Run modes now take Podman (default), Docker, or native, so the Docker lines here mean Podman or Docker.
 
 - CI/CD pipeline
 	- ID: 2026111111065868
