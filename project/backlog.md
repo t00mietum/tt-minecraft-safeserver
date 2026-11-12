@@ -217,6 +217,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Move the existing server to the new account and tool with `setup --adopt`.
 		- Approve the plugins that are there now.
 		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
+		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
 
 - Connect the service to an AI agent to update the game programs and add-ons
@@ -373,6 +374,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual cause [Bug]: design.md's repair check 11 had a stopped container removed under either runtime, which works against the no `--rm` reason in Run modes. The repair item followed check 11.
 	- Decisions:
 		- Only a stopped container under the runtime `runMode` doesn't name gets removed, as after a `runMode` change. The crash log reason wasn't weighed when check 11 was written. design.md updated.
+		- 20261112: OKed by t00mietum, over going back to removing it under either runtime.
 	- Branch: root-host
 	- Test case: df5zh, changed to expect no removal; df689
 	- Closed: 20261112-075653
@@ -433,7 +435,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111113015461
 	- Type: Bug
 	- Status: Done
-	- Needs hand testing: join from a phone on the LAN, and from outside with `bedrockPort` forwarded over TCP and UDP, to a throwaway Paper server with Geyser 2.12.1.
 	- Priority: High
 	- Opened: 20261111-130154
 	- Opened by:
@@ -463,7 +464,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual fix [Bug]: Docs and `status` say TCP and UDP. Geyser's NetherNet port settings are pinned, and `bedrockPort` can't be `gamePort`.
 	- Branch: r1111
 	- Test case: df5yy, df5yz, df5y7, df67w, df687
-	- Acceptance signoff: Self-closed: the ports, the pinned keys, and the STUN lookup check out with the firewall on. A real Bedrock join is part of design.md's live test on the real server, done in 'Move the first server over'.
+	- Acceptance signoff: Self-closed: the ports, the pinned keys, and the STUN lookup check out with the firewall on. A real Bedrock join is part of design.md's live test on the real server, done in 'Move the first server over'. OKed by t00mietum 20261112.
 	- Closed: 20261112-075653
 
 - Core commands
