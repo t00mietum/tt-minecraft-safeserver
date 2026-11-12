@@ -254,7 +254,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Update design.md, `Why Docker` included, and the NixOS module item.
 		- The hand tests for Docker mode, status, and console get run under Podman too.
 		- `stop` and `cmd` write to the container's input through the Docker API socket. Without the `docker` group the operator can't open it, and Podman's socket needs `podman.socket` running. Find a way through sudo.
-	- 20261111: Checked by hand on Podman 5.4.2 and Docker. `attach` fed from a pipe won't do. Docker refuses it. Podman takes the line but never detaches, and Ctrl-C reaches the server as an interrupt. `attach` on a pseudo-terminal works under both, and Ctrl-C detaches it with the server still up. So the plan is to drop the API write and run `sudo <runtime> attach` on a pseudo-terminal. It still needs a test through sudo.
+	- 20261111: Checked by hand on Podman 5.4.2 and Docker. `attach` fed from a pipe won't do. Docker refuses it. Podman takes the line but never detaches, and Ctrl-C reaches the server as an interrupt. `attach` on a pseudo-terminal works under both, and Ctrl-C detaches it with the server still up. So the plan is to drop the API write and run `sudo <runtime> attach` on a pseudo-terminal.
+	- 20261111: Checked through sudo too, rootful, under both runtimes. The line arrives, Ctrl-C detaches, and the server stays up. sudo reused the password from the operator's terminal. Writing right away worked as well as waiting 2 s.
 	- Decisions:
 		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
 
