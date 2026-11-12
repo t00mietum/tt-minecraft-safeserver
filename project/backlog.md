@@ -542,6 +542,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Verified: the live API's latest Geyser 2.12.1 build 1300 and Floodgate 2.2.5 build 141 Spigot jars, fetched from the version and build address, match the API's SHA-256.
 		- Verified: df65x, df65y, df65z, df65d, df65f, and df65r each fail with their check taken out, and pass with it in.
 		- 20261111: df65d `TestNewInstall` expects 3 approved jars, was 1. df65f `TestAdopt` expects 4, was 2, and finds `paper.jar` anywhere in the list. Both now get Geyser and Floodgate too.
+		- 2026-11-12: Geyser's config is now written before its first start, through 2026111117052206. Only Floodgate's is left to its first start.
 	- Decisions:
 		- The download, size cap, and hash check moved from `source/internal/paper` to `source/internal/download`, which `paper` and the new `source/internal/geyser` share. Paper's behavior is the same.
 		- The API is `download.geysermc.org/v2`. Its `latest` answer is read, and the jar is fetched from the address naming that version and build, so the file can't be a newer build than the hash.
