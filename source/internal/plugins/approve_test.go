@@ -140,7 +140,7 @@ func TestApprove(t *testing.T) {
 		t.Errorf("new list reads %+v, %v, %v", jars, warns, err)
 	}
 
-	text := "## approved by hand\njar: plugins/Geyser-Spigot.jar\n\tsha256: " + sumA + "  # 2.12.0\n\tsource: https://download.geysermc.org/x\n"
+	text := "## approved by hand\nNoteToSelf: Keep\njar: plugins/Geyser-Spigot.jar\n\tsha256: " + sumA + "  # 2.12.0\n\tsource: https://download.geysermc.org/x\n"
 	if err := os.WriteFile(list, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestApprove(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(list)
-	if !strings.HasPrefix(string(got), "## approved by hand\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+sumB) || !strings.Contains(string(got), "geysermc.org/x") {
+	if !strings.HasPrefix(string(got), "## approved by hand\nNoteToSelf: Keep\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+sumB) || !strings.Contains(string(got), "geysermc.org/x") {
 		t.Errorf("comments or source lost:\n%s", got)
 	}
 	if fi, err := os.Stat(list); err != nil || fi.Mode().Perm() != 0o640 {

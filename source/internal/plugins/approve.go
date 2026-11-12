@@ -128,14 +128,14 @@ func clean(s string) string {
 
 // Approve writes the hashes of jars into the approved list, adding the ones
 // it doesn't have, and a jar's source when it has one. Other entries,
-// comments, and sources stay as they were. A new file is made readable by
+// comments, sources, and the operator's own lines stay byte for byte. A new file is made readable by
 // all, so status works without sudo.
 func Approve(file string, jars []Info) error {
-	doc, st := shcl.LoadFile(file)
+	doc, st, err := shcl.LoadFileKeepLines(file, shcl.Standard)
 	fresh := st == shcl.FileNotFound
 	switch {
-	case fresh:
-		doc = shcl.New()
+	case err != nil:
+		return err
 	case st == shcl.FileUnreadable:
 		return fmt.Errorf("can't read %s", file)
 	}
@@ -155,7 +155,7 @@ func Approve(file string, jars []Info) error {
 			return fmt.Errorf("%s: can't add %s's source: %s", file, j.Name, s)
 		}
 	}
-	if err := doc.SaveFile(file); err != nil {
+	if _, err := doc.SaveFileKeepLines(file); err != nil {
 		return err
 	}
 	if fresh {

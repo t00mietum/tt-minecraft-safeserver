@@ -363,7 +363,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - plugins.shcl keys come back lower case after an approve
 	- ID: 2026111118053419
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261111-180534
 	- Opened by:
@@ -372,6 +372,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Low
 	- Progress log:
 		- 2026-11-12: Found while building update --image. Also shcl friction: SaveFile always writes the canonical form.
+		- 20261112: Approve loads and saves with the keep-lines calls, so the operator's other lines stay byte for byte. Verified: df5z2 now has a mixed-case key in its list, and fails on the old save and passes on the new.
+	- Actual effort: Low
+	- Decisions:
+		- Same calls as `update --image`. A changed value may still come back quoted.
+		- Swept: `Approve` is the only `SaveFile` in `plugins`; `update --image` already used keep-lines.
+	- Branch: r1112b
+	- Test case: df5z2
+	- Acceptance signoff: Self-closed: df5z2 passes, per the standing close policy.
+	- Closed: 20261112-135900
 
 - update --plugins: Modrinth and Hangar sources
 	- ID: 2026111117404480
