@@ -59,6 +59,10 @@ var serverTreeCheck = Check{
 	Look: func(_ context.Context, h *Host) ([]Finding, error) {
 		dir := h.Cfg.ServerDir
 		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			// With a config there, setup only runs repair again.
+			if _, err := os.Stat(h.ConfigPath); err == nil {
+				return []Finding{{Problem: "server folder " + dir + " is missing; set serverDir in " + h.ConfigPath + " to the server folder, or move " + h.ConfigPath + " aside and run sudo tt-minecraftd setup again, which makes a new one or adopts one with --adopt"}}, nil
+			}
 			return []Finding{{Problem: "server folder " + dir + " is missing; sudo tt-minecraftd setup makes one, or adopts one with --adopt"}}, nil
 		}
 		if _, err := os.Stat(filepath.Join(dir, "paper.jar")); err != nil {

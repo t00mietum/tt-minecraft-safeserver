@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair sends a missing server folder to setup, which only runs repair again
 	- ID: 2026111117095694
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261111-170956
 	- Opened by:
@@ -33,6 +33,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Incorrect behavior [Bug]: With the config there and `serverDir` missing, `repair` says `sudo tt-minecraftd setup` makes one or adopts one with `--adopt`. On an existing install setup only runs `repair`, and refuses `--adopt`.
 	- Expected behavior [Bug]: The message names what works, such as moving the config aside to run setup as a new install, or setting `serverDir`.
 	- Reproduced [Bug]: From the code, not on a host.
+	- Actual cause [Bug]:
+		- The server folder check gave the new-install advice whether or not a config was there.
+	- Actual effort: Low
+	- Progress log:
+		- Verified: df5ze fails on the old message and passes with the fix. The gate passes on both temp folders.
+	- Decisions:
+		- The message changes, and setup stays as it is. With a config there, it says to set `serverDir` in it, or to move it aside and run setup again. With no config, the old message stays, since setup is a new install then.
+		- Setup making an empty `serverDir` on an existing install wouldn't help, since the server needs `paper.jar` and the rest, which only the new-install path sets up.
+		- Swept: `repair`'s other messages that name setup. "no config ... setup writes one" is true, since setup is a new install then. The Geyser one is true since 2026111117052190, and doesn't show with `serverDir` missing. The defaults warning in `main.go` is for a missing config too.
+	- Actual fix [Bug]: with a config there, `repair`'s missing-server-folder message says to set `serverDir`, or to move the config aside and run setup again.
+	- Branch: r1112
+	- Test case: df5ze
+	- Closed: 20261111-171207
 
 - Check Geyser's first config against the next start
 	- ID: 2026111117052206

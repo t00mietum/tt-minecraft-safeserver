@@ -221,7 +221,16 @@ func TestServerTreeCheck(t *testing.T) {
 	defer testid.Line(t, "df5ze")
 	h, _ := testHost(t, "", "", nil)
 	dir := h.Cfg.ServerDir
-	hasAll(t, "no folder", look(t, h, serverTreeCheck), "server folder "+dir+" is missing")
+	hasAll(t, "no folder", look(t, h, serverTreeCheck), "server folder "+dir+" is missing", "sudo tt-minecraftd setup makes one")
+	// With a config there, setup only runs repair, so it can't be the answer.
+	if err := os.WriteFile(h.ConfigPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := look(t, h, serverTreeCheck)
+	hasAll(t, "no folder, config there", got, "server folder "+dir+" is missing", "serverDir in "+h.ConfigPath, "move "+h.ConfigPath+" aside")
+	if strings.Contains(strings.Join(got, "\n"), "setup makes one") {
+		t.Errorf("no folder, config there: still sends to setup alone: %q", got)
+	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
