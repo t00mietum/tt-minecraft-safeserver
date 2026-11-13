@@ -573,6 +573,32 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
+// --mc-version is in the help, and one that can't work is refused before
+// sudo asks for a password.
+func TestUpdateMCVersion(t *testing.T) {
+	defer testid.Line(t, "df78n")
+	noDefaultConfig(t)
+	var again []string
+	old := asRoot
+	asRoot = func(args []string) error { again = args; return nil }
+	t.Cleanup(func() { asRoot = old })
+
+	if code, out, _ := runArgs("update", "--help"); code != exitOK || !strings.Contains(out, "--mc-version V") {
+		t.Errorf("update --help: %q", out)
+	}
+	for _, args := range [][]string{{"update", "--image", "--mc-version", "26.4"}, {"update", "--mc-version", "26.4;x"}} {
+		if code, _, msg := runArgs(args...); code == exitOK || again != nil || !strings.Contains(msg, "--mc-version") {
+			t.Errorf("%q: exit %d, ran again with %q, stderr %q", args, code, again, msg)
+		}
+	}
+	if os.Geteuid() != 0 {
+		args := []string{"update", "--mc-version", "26.4", "--yes"}
+		if code, _, msg := runArgs(args...); code != exitOK || !reflect.DeepEqual(again, args) {
+			t.Errorf("not root: exit %d, ran again with %q, stderr %q", code, again, msg)
+		}
+	}
+}
+
 // With agent set, update asks it as the operator, hands the answer to the
 // run through sudo in a file only the operator can read, and removes it
 // after. The flag that names the file isn't in the help.

@@ -178,7 +178,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refresh the pinned container image.
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
-	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) and 2026111117404480 (Modrinth and Hangar sources) are queued.
+	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) is done too. 2026111117404480 (Modrinth and Hangar sources) is queued.
 
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143
@@ -360,7 +360,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --mc-version
 	- ID: 2026111117302963
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
@@ -368,6 +368,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq IDs: 2026111112264283
 	- Requirements:
 		- `--mc-version V` moves Paper to another Minecraft version, per design.md: a yes even with `--yes`, and a ZFS snapshot first.
+	- Actual effort: Avg
+	- Progress log:
+		- 20261113: `update --mc-version V` moves Paper to the newest stable build of V. A move asks once, even with `--yes`, then snapshots `zfsDataset` before anything changes. A version older than the one `paper.jar` is on is refused.
+		- Verified: df78j, df78k, df78m, and df78n pass, and so does the quick gate on both temp folders, plus race tests on the 4 packages. Each fails with its check taken out: `--yes` covering the move, the snapshot, the refusal of an older version, the new kind in the prune's pattern, the check before sudo, and a pre-release sorting before its release.
+	- Decisions:
+		- `--mc-version` goes with `--paper`, so it needs that part or no part named. With no part named, the image check reads Java for the new version.
+		- For a move, one question replaces "Go ahead?", and `--yes` doesn't skip it. A dry run asks nothing.
+		- The version `paper.jar` is on already is a plain `--paper`. No `paper.jar` counts as a move, since its worlds' version isn't known.
+		- A version older than `paper.jar`'s is refused. Going back is a rollback to the snapshot.
+		- With no `zfsDataset` it warns to back up the server folder, rather than refusing, so a server off ZFS can still move.
+		- The snapshot is `<time>_pre_tt-minecraftd-mc-version`, taken in the root run the same way as `start`'s. A failed one stops the update with nothing changed. A failed prune only warns.
+		- The build it replaced stays, as with any `--paper`, so the old version's jar is there for a rollback.
+		- design.md's update and ZFS snapshots say this now. The choices are a `Check:` entry in questions.md.
+		- Swept: `paperVersion` (the image's Java check) follows the new version; setup's Update step passes no `--mc-version`; `zfs.Take` and `Doomed` both go through the one `ours` pattern.
+	- Branch: nov13-2026111117302963
+	- Test case: df78j, df78k, df78m, df78n
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
+	- Closed: 20261113-131000
 
 - Start at boot
 	- ID: 2026111111065816

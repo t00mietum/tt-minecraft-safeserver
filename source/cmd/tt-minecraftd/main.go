@@ -77,6 +77,8 @@ type options struct {
 	// agentAnswer is the file update's operator run left the agent's answer
 	// in, for its run through sudo.
 	agentAnswer string
+	// mcVersion is update's --mc-version.
+	mcVersion string
 }
 
 type command struct {
@@ -119,6 +121,7 @@ var commands = []command{
 		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
 		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
 		fs.BoolVar(&o.parts.Image, "image", false, "Pull the newest build of the image's tag, check its Java, and pin its digest in the config")
+		fs.StringVar(&o.mcVersion, "mc-version", "", "Move Paper to Minecraft version `V`. Asks even with --yes, and takes a ZFS snapshot first")
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan, and change nothing")
 		fs.StringVar(&o.agentAnswer, "agent-answer", "", "")
@@ -363,6 +366,12 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		NixOS:       selfupdate.FromNix(exe),
 		Run:         hostRunner(inv.opts.dryRun),
 		Fetch:       download.Client{UserAgent: userAgent},
+		MCVersion:   inv.opts.mcVersion,
+		Root:        root,
+	}
+	// Before sudo asks for a password.
+	if err := u.Check(); err != nil {
+		return err
 	}
 	parts := inv.opts.parts
 	agentOn := inv.cfg.Agent != "" && inv.cfg.Agent != "none" && (parts == updatepkg.Parts{} || parts.Plugins)

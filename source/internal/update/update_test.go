@@ -16,9 +16,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -300,5 +302,97 @@ func TestPlugins(t *testing.T) {
 	r.u.Parts = Parts{}
 	if err := r.u.Do(ctx); err != nil || len(g.installed) != 1 || len(r.p.installed) != 1 || strings.Count(r.out.String(), "Go ahead?") != 1 {
 		t.Errorf("both: %v, installed %q and %q\n%s", err, g.installed, r.p.installed, r.out)
+	}
+}
+
+// --mc-version asks even with --yes, snapshots before anything changes, and
+// won't go back to an older version.
+func TestMCVersion(t *testing.T) {
+	defer testid.Line(t, "df78m")
+	ctx := context.Background()
+	snap := "zfs snapshot -- tank/mc@20261112-110000_pre_tt-minecraftd-mc-version"
+	move := func(answers, dataset string) (*rig, *host.Fake) {
+		r := newRig(t, answers, 12)
+		f := &host.Fake{}
+		r.u.Run, r.u.Yes, r.u.MCVersion = f, true, "26.4"
+		r.u.Cfg.ZfsDataset = dataset
+		r.u.Now = func() time.Time { return time.Date(2026, 11, 12, 11, 0, 0, 0, time.Local) }
+		return r, f
+	}
+
+	r, f := move("n\n", "tank/mc")
+	if err := r.u.Do(ctx); err == nil || len(r.p.installed) > 0 || len(f.Ran) > 0 || !strings.Contains(r.out.String(), "Go ahead, and move to 26.4?") {
+		t.Errorf("--yes covered it: %v, installed %q, ran %q\n%s", err, r.p.installed, f.Lines(), r.out)
+	}
+
+	r, f = move("y\n", "tank/mc")
+	var installedAtSnap = -1
+	f.Reply = func(c host.Cmd) ([]byte, error) {
+		if c.Args[1] == "snapshot" {
+			installedAtSnap = len(r.p.installed)
+		}
+		return nil, nil
+	}
+	if err := r.u.Do(ctx); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if lines := f.Lines(); len(lines) == 0 || lines[0] != snap || installedAtSnap != 0 || !reflect.DeepEqual(r.p.installed, []string{"paper-26.4-12.jar"}) {
+		t.Errorf("ran %q, %d installed at the snapshot, installed %q", lines, installedAtSnap, r.p.installed)
+	}
+	if !reflect.DeepEqual(r.files(), []string{"paper-26.3-244.jar", "paper-26.4-12.jar", "paper.jar"}) || !strings.Contains(r.out.String(), "  - Take a ZFS snapshot of tank/mc first.\n  - Move Paper from Minecraft 26.3 build 244 to Minecraft 26.4 build 12") {
+		t.Errorf("left %q\n%s", r.files(), r.out)
+	}
+
+	r, f = move("y\n", "tank/mc")
+	f.Reply = func(c host.Cmd) ([]byte, error) {
+		if c.Args[1] == "snapshot" {
+			return nil, errors.New("out of space")
+		}
+		return nil, nil
+	}
+	if err := r.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't snapshot tank/mc") || len(r.p.installed) > 0 {
+		t.Errorf("failed snapshot: %v, installed %q", err, r.p.installed)
+	}
+
+	r, f = move("y\n", "")
+	if err := r.u.Do(ctx); err != nil || len(f.Ran) > 0 || len(r.p.installed) != 1 || !strings.Contains(r.out.String(), "zfsDataset isn't set") {
+		t.Errorf("no dataset: %v, ran %q, installed %q\n%s", err, f.Lines(), r.p.installed, r.out)
+	}
+
+	r, _ = move("", "tank/mc")
+	r.u.DryRun = true
+	if err := r.u.Do(ctx); err != nil || len(r.p.installed) > 0 || strings.Contains(r.out.String(), "Go ahead") || !strings.Contains(r.out.String(), "would download paper-26.4-12.jar") {
+		t.Errorf("dry run: %v, installed %q\n%s", err, r.p.installed, r.out)
+	}
+
+	r, f = move("y\n", "tank/mc")
+	r.u.MCVersion = "1.21.11"
+	if err := r.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't go back to 1.21.11") || len(r.p.asked) > 0 || len(f.Ran) > 0 {
+		t.Errorf("older: %v, asked %q, ran %q", err, r.p.asked, f.Lines())
+	}
+
+	// The version it's on already is a plain --paper.
+	r, f = move("", "tank/mc")
+	r.u.MCVersion = "26.3"
+	r.p.newest = 249
+	if err := r.u.Do(ctx); err != nil || len(f.Ran) > 0 || !reflect.DeepEqual(r.p.installed, []string{"paper-26.3-249.jar"}) || strings.Contains(r.out.String(), "move to") {
+		t.Errorf("same version: %v, ran %q, installed %q\n%s", err, f.Lines(), r.p.installed, r.out)
+	}
+
+	r, _ = move("y\n", "tank/mc")
+	r.p.err = paper.ErrNoStable
+	if err := r.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't get Paper for Minecraft 26.4") {
+		t.Errorf("no build: %v", err)
+	}
+
+	for _, c := range []struct {
+		parts   Parts
+		version string
+	}{{Parts{Plugins: true}, "26.4"}, {Parts{Paper: true}, "26.4/../x"}} {
+		r, _ = move("y\n", "tank/mc")
+		r.u.Parts, r.u.MCVersion = c.parts, c.version
+		if err := r.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "--mc-version") || len(r.p.asked) > 0 {
+			t.Errorf("%+v %q: %v, asked %q", c.parts, c.version, err, r.p.asked)
+		}
 	}
 }

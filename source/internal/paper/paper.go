@@ -105,6 +105,33 @@ func sortNewest(vs []string) {
 	slices.SortFunc(vs, func(a, b string) int { return slices.Compare(parts(b), parts(a)) })
 }
 
+// IsVersion tells whether v can be a Minecraft version, as the API names
+// them.
+func IsVersion(v string) bool { return versionText.MatchString(v) }
+
+// leadingNumbers is the release part of a version, such as 26.3 in 26.3-rc-3.
+var leadingNumbers = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*`)
+
+// Older tells whether Minecraft version a comes before b, such as 1.21.11
+// before 26.3, or 26.3-rc-3 before 26.3.
+func Older(a, b string) bool {
+	nums := func(v string) (n []int, pre bool) {
+		lead := leadingNumbers.FindString(v)
+		for _, p := range strings.Split(lead, ".") {
+			if x, err := strconv.Atoi(p); err == nil {
+				n = append(n, x)
+			}
+		}
+		return n, lead != v
+	}
+	na, preA := nums(a)
+	nb, preB := nums(b)
+	if c := slices.Compare(na, nb); c != 0 {
+		return c < 0
+	}
+	return preA && !preB
+}
+
 // Java is the oldest Java major version Paper runs on for one Minecraft
 // version, from the API's version info.
 func (a API) Java(ctx context.Context, version string) (int, error) {
