@@ -257,9 +257,14 @@ var asRoot = func(args []string) error {
 	return syscall.Exec(sudo, append([]string{"sudo", "--", exe}, args...), os.Environ()) // #nosec G204 -- this binary, with its own arguments
 }
 
+// hostRunner runs setup's and update's commands. A var so tests don't reach
+// the host.
+var hostRunner = func(dryRun bool) host.Runner { return host.NewExec(dryRun) }
+
 // setupSteps gives setup its runner and the Host its account checks look at.
-func setupSteps(inv invocation) (host.Runner, func(c *config.Config) *repairpkg.Host) {
-	runner := host.NewExec(inv.opts.dryRun)
+// A var for tests.
+var setupSteps = func(inv invocation) (host.Runner, func(c *config.Config) *repairpkg.Host) {
+	runner := hostRunner(inv.opts.dryRun)
 	return runner, func(c *config.Config) *repairpkg.Host {
 		return repairpkg.NewHost(runner, c, inv.configPath)
 	}
@@ -356,7 +361,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		Exe:         exe,
 		Version:     version,
 		NixOS:       selfupdate.FromNix(exe),
-		Run:         host.NewExec(inv.opts.dryRun),
+		Run:         hostRunner(inv.opts.dryRun),
 		Fetch:       download.Client{UserAgent: userAgent},
 	}
 	parts := inv.opts.parts

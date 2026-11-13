@@ -66,6 +66,12 @@ FUZZ_TIME="30s"
 FUZZ_TIME_QUICK="10s"
 FUZZ_TIME_LONG="5m"
 
+## Soak: rounds of the main actions before the first heap and goroutine sample, and again before
+## the second. The tests skip outside the soak step.
+SOAK_ENV="TT_MINECRAFTD_SOAK"   ## soak.Env in source/internal/soak
+SOAK_ROUNDS="100"
+SOAK_ROUNDS_LONG="1000"
+
 ## The areas --backlog-run-quick takes are the folders under source/internal, plus cli for the command.
 CLI_AREA_DIR="source/cmd/tt-minecraftd"
 
@@ -132,3 +138,4 @@ fLowPriority(){
 ##	History:
 ##		- 2026-11-12: Created.
 ##		- 2026-11-13: Fuzz times. shellcheck, markdownlint and Node pinned for the image.
+##		- 2026-11-13: Soak rounds.

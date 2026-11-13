@@ -22,6 +22,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- TestSetup and TestUpdate reach the host's own runner and account files
+	- ID: 2026111312221899
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 20261113-122218
+	- Opened by:
+	- Related IDs: 2026111311485831
+	- Incorrect behavior: The setup and update tests in the command use the real runner and the real `/etc/passwd` and `/etc/group`, and `launch.Installed` asks the host's PATH. Their dry runs ran no commands here, but a change to either path could reach the host.
+	- Expected behavior: They use `hostRunner` and `setupSteps` stand-ins, as the command's soak test does.
+
 - Player names and log lines shown to the operator keep text-direction characters
 	- ID: 2026111311594944
 	- Type: Bug
@@ -166,7 +177,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Reproducible builds are checked, so README can say so.
 		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
 		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
-		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz and the lint tools are done; the other 4 are Queued.
+		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, and soak are done; the other 3 are Queued.
 	- Branch: nov13
 	- Test case: n/a: pipeline step.
 
@@ -198,7 +209,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: add a soak test
 	- ID: 2026111311485831
 	- Type: Task
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -206,6 +217,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Related IDs: 2026111111065868
 	- Progress log:
 		- Loop the main actions headless, and compare the heap and goroutine counts at rounds N and 2N. It runs in the default run, at a quarter of the cores.
+		- 2026-11-13: A soak step runs each soak test in the default, long, full and merge runs, after fuzzing. One test loops start, console, cmd and stop against a stand-in host. The other loops --version, --help, repair --check, update and setup dry runs, and a usage error through the command line, plus a status probe kept between rounds as watch keeps it. Each takes the live heap after a GC and the goroutine count after round N and round 2N, and fails when either grew past its slack.
+		- 100 rounds a half in the default run, about 30 s in all, and 1000 in long. The plain tests skip both.
+		- Verified: the step passed in the container. A planted heap leak in the command line's entry and a planted goroutine per cmd each turned it red. A run where the rounds didn't reach the tests failed rather than passing on skips. The backlog quick run passed.
+		- Swept: every main action the CLI has is in one of the 2 loops. watch's own ticker loop isn't, since its probe is what changes per pass.
+		- 2026-11-13: The command's soak ran setup and update on the real runner and account files. Both now take stand-ins, through new `hostRunner` and `setupSteps` vars, and both soaks run with an empty PATH and `launch.Installed` false, so nothing on the host can run. The soak fails unless setup and update took the stand-in runner each round.
+		- Verified: with update put back on the real runner, the soak failed on its first round. The step passed again in the container, and the backlog quick run passed.
+		- Swept: every `host.NewExec` and `exec` call the 2 loops can reach. The status probe and the launch rig already used stand-ins, repair's host checks go through `noHostChecks`, and the usage error stops before any runner. setup can still check whether the `nft` and `catatonit` files exist, which only reads.
+		- The older setup and update tests do the same as the soak did, filed as 2026111312221899.
+	- Decisions:
+		- The soak counts as a leak check. --no-leakcheck takes it out, and --leakcheck adds it to the quick and backlog quick runs, as it does race tests. --no-soak skips it alone.
+		- It loops in the test process against stand-ins rather than a real server, since a heap and goroutine count only mean something inside one process, and a real start needs root and about 20 s.
+		- Slack is 1 MiB or a tenth of the heap, and 2 goroutines. At 100 rounds that catches about 10 KB or one goroutine kept per round.
+	- Branch: nov13-2026111311485831
+	- Test case: df78d TestLeak checks that the soak catches a kept goroutine or heap and passes a warmed cache. df78e and df78f are the 2 soaks, TestSoak in launch and in the command.
+	- Closed: 20261113-121709
+	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
 
 - CICD gaps: run CodeQL from a pinned local CLI
 	- ID: 2026111311485847

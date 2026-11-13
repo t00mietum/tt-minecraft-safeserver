@@ -9,21 +9,22 @@
 
 ##	- Purpose: Local CI/CD pipeline for tt-minecraft-safeserver. Project settings live in config.bash.
 ##	- Steps (fail-fast, any error aborts before the next step):
-##	   remote sync, format, lint, tests, race tests, fuzzing, vulnerability scan, release builds,
-##	   packages, tests on linux/arm64, root host checks, root host ZFS checks, dogfood, publish
+##	   remote sync, format, lint, tests, race tests, fuzzing, soak, vulnerability scan, release
+##	   builds, packages, tests on linux/arm64, root host checks, root host ZFS checks, dogfood, publish
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  Options:
 ##	   -q, --quiet         quiet + unattended (no prompt)
 ##	   -m, --message MSG   commit message for the publish stage (also --msg, and -m=MSG)
 ##	   (no flags)          the default run: every step above
-##	   --quick             what fits in about 10 minutes: no race tests, vulnerability scan, packages
-##	                       or root host checks, a short fuzz, and at most 60s waiting for the arm64
-##	                       box. Ends with dogfood and publish.
-##	   --long              everything, with a longer fuzz. Otherwise the same as no flags.
+##	   --quick             what fits in about 10 minutes: no race tests, soak, vulnerability scan,
+##	                       packages or root host checks, a short fuzz, and at most 60s waiting for
+##	                       the arm64 box. Ends with dogfood and publish.
+##	   --long              everything, with a longer fuzz and soak. Otherwise the same as no flags.
 ##	       --slow          alias for --long
-##	   --leakcheck         add every leak check to the run, race tests included
-##	   --no-leakcheck      take every leak check out: race tests, and the goroutine check in the tests
+##	   --leakcheck         add every leak check to the run, race tests and soak included
+##	   --no-leakcheck      take every leak check out: race tests, soak, and the goroutine check in
+##	                       the tests
 ##	   --backlog-run-quick [AREA...]
 ##	                       what a backlog worker runs before it commits, in one call of about 4 minutes:
 ##	                       format check, lint and tests, or only the areas named. Areas are the
@@ -37,7 +38,7 @@
 ##	   --no-container      run on this box rather than in the build container
 ##	   --no-remote         skip other hosts and VMs: the arm64 tests
 ##	   --no-sync           skip the remote sync
-##	   --no-<step>         skip one step: format, lint, test, race, fuzz, vuln, build, package,
+##	   --no-<step>         skip one step: format, lint, test, race, fuzz, soak, vuln, build, package,
 ##	                       arm64, roothost, rootzfs, dogfood, publish
 ##	   --keep-temp         keep the run's temp folder and containers, and say where they are
 ##	   --list              print the steps and test IDs the other options would run, and run nothing
@@ -58,6 +59,9 @@
 ##	  --quick, FUZZ_TIME_LONG in --long), from a copy of the tree, so a failing input lands in the
 ##	  run folder. Its file is printed; copy it to the package's testdata/fuzz to keep it as a test.
 ##	  CICD_FUZZ_TIME overrides the time in every run.
+##	- The soak step runs each TestSoak, which loops the main actions headless and fails when the live
+##	  heap or the goroutines grow between round N and round 2N. N is SOAK_ROUNDS in config.bash
+##	  (SOAK_ROUNDS_LONG in --long), or CICD_SOAK_ROUNDS. It uses a quarter of the cores.
 ##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
 ##	  A merge gate or full run that includes them goes past one 10-minute call, so start it detached.
 
@@ -106,10 +110,10 @@ fUsage(){ fEcho_Clean "$*" >&2; exit 2; }
 
 declare -A stepTitle=(
 	[sync]="Remote sync" [format]="Format" [lint]="Lint" [test]="Tests" [race]="Race tests" [fuzz]="Fuzzing"
-	[vuln]="Vulnerability scan" [build]="Release builds" [package]="Packages" [arm64]="Tests on linux/arm64"
+	[soak]="Soak" [vuln]="Vulnerability scan" [build]="Release builds" [package]="Packages" [arm64]="Tests on linux/arm64"
 	[roothost]="Root host checks" [rootzfs]="Root host ZFS checks" [dogfood]="Dogfood" [publish]="Publish"
 )
-allSteps=(sync format lint test race fuzz vuln build package arm64 roothost rootzfs dogfood publish)
+allSteps=(sync format lint test race fuzz soak vuln build package arm64 roothost rootzfs dogfood publish)
 stepList=(); stepTotal=0; stepName=""; stepWhere=""; stepSkip=""
 declare -A stepOff=() stepResult=()
 fStepTime(){
@@ -141,7 +145,7 @@ while (($#)); do case "$1" in
 		leakOpt="$1"; shift ;;
 	--no-container)     noContainer=1; shift ;;
 	--no-remote)        noRemote=1; shift ;;
-	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-fuzz|--no-vuln|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
+	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-fuzz|--no-soak|--no-vuln|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
 		stepOff["${1#--no-}"]="skipped by $1"; shift ;;
 	--message=*|--msg=*|-m=*) message="${1#*=}"; shift ;;
 	-m|--message|--msg) message="${2-}"; shift; (($#)) && shift ;;
@@ -184,15 +188,17 @@ pkgs=("./...")
 
 ## Which steps this mode runs, and why the rest don't.
 declare -A modeSteps=(
-	[default]="sync format lint test race fuzz vuln build package arm64 roothost rootzfs dogfood publish"
-	[long]="sync format lint test race fuzz vuln build package arm64 roothost rootzfs dogfood publish"
+	[default]="sync format lint test race fuzz soak vuln build package arm64 roothost rootzfs dogfood publish"
+	[long]="sync format lint test race fuzz soak vuln build package arm64 roothost rootzfs dogfood publish"
 	[quick]="sync format lint test fuzz build arm64 dogfood publish"
 	[gate]="format lint test"
-	[full]="format lint test race fuzz vuln build package arm64 roothost rootzfs"
-	[merge]="format lint test race fuzz vuln build package arm64 roothost rootzfs"
+	[full]="format lint test race fuzz soak vuln build package arm64 roothost rootzfs"
+	[merge]="format lint test race fuzz soak vuln build package arm64 roothost rootzfs"
 )
-[[ "${leakOpt}" != --leakcheck ]] || modeSteps[${mode}]="${modeSteps[${mode}]/race/} race"
-[[ "${leakOpt}" != --no-leakcheck ]] || stepOff[race]="skipped by --no-leakcheck"
+if [[ "${leakOpt}" == --leakcheck ]]; then
+	for s in race soak; do [[ " ${modeSteps[${mode}]} " == *" ${s} "* ]] || modeSteps[${mode}]+=" ${s}"; done
+fi
+[[ "${leakOpt}" != --no-leakcheck ]] || { stepOff[race]="skipped by --no-leakcheck"; stepOff[soak]="skipped by --no-leakcheck"; }
 ((! noRemote)) || stepOff[arm64]="skipped by --no-remote"
 for s in "${allSteps[@]}"; do
 	if [[ -n "${stepOff[${s}]:-}" ]]; then continue
@@ -535,6 +541,27 @@ fStepFuzz(){
 	fEcho_Clean "fuzzing: ${n} target(s), nothing found"
 }
 
+## Each TestSoak, with the rounds set: the tests skip without them.
+fStepSoak(){
+	local log="${runTmp}/soak.log" rounds="${SOAK_ROUNDS}" rc=0 n
+	[[ "${mode}" != long ]] || rounds="${SOAK_ROUNDS_LONG}"
+	rounds="${CICD_SOAK_ROUNDS:-${rounds}}"
+	[[ "${rounds}" =~ ^[1-9][0-9]*$ ]] || fDie "soak rounds '${rounds}' isn't a count"
+	fEcho_Clean "rounds ${rounds} and $((rounds * 2)), ${HEAVY_JOBS} worker(s)"
+	fGo soak HEAVY=1 "${SOAK_ENV}=${rounds}" -- go test -count=1 -p "${HEAVY_JOBS}" -v -run '^TestSoak$' "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
+	## A test's numbers, then its PASS or FAIL line: go test prints each package's output in one piece.
+	grep -E '^((PASS|FAIL|SKIP) [0-9a-z]{5} |[[:space:]]+soak_test\.go:[0-9]+: )' "${log}" | sed -E 's/^[[:space:]]*/  /' || true
+	if ((rc)); then
+		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|(PASS|FAIL|SKIP) [0-9a-z]{5} |[[:space:]]+soak_test\.go:)' "${log}" | tail -n 40 || true
+		fDie "soak test failed"
+	fi
+	## A skip here means the rounds never reached the test, so it checked nothing.
+	! grep -qE '^SKIP [0-9a-z]{5} ' "${log}" || fDie "a soak test skipped: ${SOAK_ENV} didn't reach it"
+	n="$(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true)"
+	((n)) || { fSkip "no soak tests in ${pkgs[*]}"; return 0; }
+	fEcho_Clean "soak: ${n} test(s), nothing grew"
+}
+
 relDir=""
 fStepBuild(){
 	local t os arch out epoch rel sum1 sum2
@@ -702,9 +729,9 @@ fCpuPlan
 if ((noRemote)); then fEcho_Clean "Other hosts .........: skipped by --no-remote"
 elif [[ " ${stepList[*]} " != *" arm64 "* ]]; then fEcho_Clean "Other hosts .........: none in this run"
 else fEcho_Clean "Other hosts .........: ${ARM64_HOST} (linux/arm64 tests), through ${VM_STATE_TOOL}"; fi
-if [[ "${leakOpt}" == --leakcheck ]]; then fEcho_Clean "Leak checks .........: every one (--leakcheck): race tests, goroutine check"
+if [[ "${leakOpt}" == --leakcheck ]]; then fEcho_Clean "Leak checks .........: every one (--leakcheck): race tests, soak, goroutine check"
 elif [[ "${leakOpt}" == --no-leakcheck ]]; then fEcho_Clean "Leak checks .........: none (--no-leakcheck)"
-else fEcho_Clean "Leak checks .........: goroutine check in every test run; race tests where the run has them"; fi
+else fEcho_Clean "Leak checks .........: goroutine check in every test run; race tests and soak where the run has them"; fi
 fEcho_Clean "Steps ...............: ${stepList[*]}"
 offNote=""
 for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || offNote+="${s} (${stepOff[${s}]}), "; done
@@ -734,7 +761,7 @@ if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/nul
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
 fi
 
-needCtr=0; for s in lint test race fuzz vuln build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+needCtr=0; for s in lint test race fuzz soak vuln build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
 ((! needCtr)) || fCtrSetup
 
 for s in "${stepList[@]}"; do
@@ -746,6 +773,7 @@ for s in "${stepList[@]}"; do
 		test)     fStepTest ;;
 		race)     fStepRace ;;
 		fuzz)     fStepFuzz ;;
+		soak)     fStepSoak ;;
 		vuln)     fStepVuln ;;
 		build)    fStepBuild ;;
 		package)  fStepPackage ;;
@@ -770,3 +798,4 @@ fEcho_Clean
 ##		- 2026-11-13: arm64 step: the linux/arm64 tests run on the arm64 test box, under the host lock.
 ##		- 2026-11-13: fuzz step: each Fuzz target for a budget, from a copy of the tree.
 ##		- 2026-11-13: shellcheck and markdownlint run in the image, at pinned versions.
+##		- 2026-11-13: soak step: the main actions over and over, heap and goroutines at round N against 2N.
