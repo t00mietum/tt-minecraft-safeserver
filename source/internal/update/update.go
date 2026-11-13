@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
@@ -23,6 +24,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
 // PaperSource is where Paper builds come from: paper.API, or a test's.
@@ -79,6 +81,12 @@ type Update struct {
 	// Fetch gets the agent's jars and hash pages. Its zero value reaches
 	// public addresses only.
 	Fetch download.Client
+	// MCVersion is --mc-version's, the Minecraft version to move Paper to.
+	MCVersion string
+	// Root skips the zfs try without sudo.
+	Root bool
+	// Now is when the --mc-version snapshot is taken; nil is the clock.
+	Now func() time.Time
 }
 
 // paperStep is a Paper build to move to, from what paper.jar links to now,
@@ -86,6 +94,9 @@ type Update struct {
 type paperStep struct {
 	from *paper.Linked
 	to   paper.Build
+	// move is --mc-version's: to another Minecraft version, or from one
+	// that isn't known.
+	move bool
 }
 
 // pluginStep is a newer build of an approved plugin with a known source.
@@ -99,6 +110,9 @@ type pluginStep struct {
 // Do looks everything up first, so a failed lookup changes nothing, then shows
 // the plan and asks.
 func (u *Update) Do(ctx context.Context) error {
+	if err := u.Check(); err != nil {
+		return err
+	}
 	parts := u.Parts
 	if parts == (Parts{}) {
 		parts = Parts{Self: true, Paper: true, Plugins: true, Image: true}
@@ -114,6 +128,9 @@ func (u *Update) Do(ctx context.Context) error {
 	if parts.Paper {
 		if ps, err = u.paperLookup(ctx); err != nil {
 			return err
+		}
+		if ps != nil && ps.move && u.Cfg.ZfsDataset != "" {
+			plan = append(plan, fmt.Sprintf("Take a ZFS snapshot of %s first.", u.Cfg.ZfsDataset))
 		}
 		if ps != nil {
 			plan = append(plan, ps.plan())
@@ -156,8 +173,25 @@ func (u *Update) Do(ctx context.Context) error {
 		return nil
 	}
 	fmt.Fprintf(u.Out, "\nupdate will:\n  - %s\n\n", strings.Join(plan, "\n  - "))
-	if !u.Yes && !u.DryRun && !u.ask("Go ahead? [y/n] ") {
+	move := ps != nil && ps.move
+	if move && u.Cfg.ZfsDataset == "" {
+		fmt.Fprintf(u.Out, "warning: zfsDataset isn't set, so there's no snapshot to go back to. Back up %s first.\n", u.Cfg.ServerDir)
+	}
+	switch {
+	case u.DryRun:
+	case move:
+		// --yes doesn't cover it, per design.md's update.
+		fmt.Fprintf(u.Out, "Worlds can't go back to an older version once the server starts on Minecraft %s, and plugins may not work on it.\n", ps.to.Version)
+		if !u.ask(fmt.Sprintf("Go ahead, and move to %s? [y/n] ", ps.to.Version)) {
+			return errors.New("nothing changed")
+		}
+	case !u.Yes && !u.ask("Go ahead? [y/n] "):
 		return errors.New("nothing changed")
+	}
+	if move {
+		if err := u.snapshot(ctx); err != nil {
+			return err
+		}
 	}
 	if ps != nil {
 		if err := u.getPaper(ctx, *ps); err != nil {
@@ -211,26 +245,75 @@ func (u *Update) paperVersion(ctx context.Context, ps *paperStep) (string, error
 	return version, nil
 }
 
+// Check refuses an --mc-version that can't work, before anything runs.
+func (u *Update) Check() error {
+	switch {
+	case u.MCVersion == "":
+		return nil
+	case !paper.IsVersion(u.MCVersion):
+		return fmt.Errorf("--mc-version: %q isn't a Minecraft version", u.MCVersion)
+	case u.Parts != (Parts{}) && !u.Parts.Paper:
+		return errors.New("--mc-version moves Paper, so it needs --paper, or no part named")
+	}
+	return nil
+}
+
 func (u *Update) paperLookup(ctx context.Context) (*paperStep, error) {
 	cur, err := paper.Current(u.Cfg.ServerDir)
 	if err != nil {
 		return nil, err
 	}
 	var version string
-	if cur != nil {
+	switch {
+	case u.MCVersion != "":
+		version = u.MCVersion
+		if cur != nil && paper.Older(version, cur.Version) {
+			return nil, fmt.Errorf("paper.jar is on Minecraft %s, and worlds can't go back to %s. To undo a move, roll back the snapshot or backup taken before it", cur.Version, version)
+		}
+	case cur != nil:
 		version = cur.Version
-	} else if version, err = u.Paper.NewestVersion(ctx); err != nil {
-		return nil, fmt.Errorf("can't get Paper: %w", err)
+	default:
+		if version, err = u.Paper.NewestVersion(ctx); err != nil {
+			return nil, fmt.Errorf("can't get Paper: %w", err)
+		}
 	}
 	b, err := u.Paper.NewestStable(ctx, version)
+	if err != nil && u.MCVersion != "" {
+		return nil, fmt.Errorf("can't get Paper for Minecraft %s: %w", version, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("can't get Paper: %w", err)
 	}
-	if cur != nil && !cur.Gone && b.ID <= cur.ID {
+	move := u.MCVersion != "" && (cur == nil || cur.Version != version)
+	if !move && cur != nil && !cur.Gone && b.ID <= cur.ID {
 		fmt.Fprintf(u.Out, "%-7s Paper %s build %d is the newest stable build\n", "OK", cur.Version, cur.ID)
 		return nil, nil
 	}
-	return &paperStep{from: cur, to: b}, nil
+	return &paperStep{from: cur, to: b, move: move}, nil
+}
+
+// snapshot is --mc-version's, of zfsDataset when it's set. A failed one
+// stops the move before anything changes.
+func (u *Update) snapshot(ctx context.Context) error {
+	if u.Cfg.ZfsDataset == "" {
+		return nil
+	}
+	now := time.Now
+	if u.Now != nil {
+		now = u.Now
+	}
+	s := zfs.Snapper{Run: u.Run, Dataset: u.Cfg.ZfsDataset, Root: u.Root}
+	warns, err := s.Take(ctx, zfs.PreMove, now())
+	for _, w := range warns {
+		fmt.Fprintf(u.Out, "warning: %s\n", w)
+	}
+	if err != nil {
+		return fmt.Errorf("%w, so nothing changed", err)
+	}
+	if !u.DryRun {
+		fmt.Fprintf(u.Out, "%-7s ZFS snapshot of %s taken\n", "OK", u.Cfg.ZfsDataset)
+	}
+	return nil
 }
 
 func (s paperStep) plan() string {
@@ -240,6 +323,8 @@ func (s paperStep) plan() string {
 		return fmt.Sprintf("Download Paper %s build %d, %s.", s.to.Version, s.to.ID, how)
 	case s.from.Gone:
 		return fmt.Sprintf("Download Paper %s build %d, since paper.jar links to %s, which is gone. Then %s.", s.to.Version, s.to.ID, s.from.Target, how)
+	case s.move:
+		return fmt.Sprintf("Move Paper from Minecraft %s build %d to Minecraft %s build %d: download it, %s. The last 2 builds stay.", s.from.Version, s.from.ID, s.to.Version, s.to.ID, how)
 	}
 	return fmt.Sprintf("Move Paper %s from build %d to build %d: download it, %s. The last 2 builds stay.", s.to.Version, s.from.ID, s.to.ID, how)
 }

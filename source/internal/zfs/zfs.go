@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package zfs takes the start and stop snapshots and prunes old ones. See
-// design.md, ZFS snapshots.
+// Package zfs takes the start, stop, and update --mc-version snapshots, and
+// prunes old ones. See design.md, ZFS snapshots.
 package zfs
 
 import (
@@ -20,12 +20,14 @@ import (
 const (
 	PreStart = "pre_tt-minecraftd-start"
 	PostStop = "post_tt-minecraftd-stop"
+	// PreMove is update --mc-version's, before Paper moves.
+	PreMove = "pre_tt-minecraftd-mc-version"
 )
 
 const stampLayout = "20060102-150405"
 
 // ours is the tool's name pattern. Nothing else on the dataset is touched.
-var ours = regexp.MustCompile(`^(\d{8}-\d{6})_(` + PreStart + `|` + PostStop + `)$`)
+var ours = regexp.MustCompile(`^(\d{8}-\d{6})_(` + PreStart + `|` + PostStop + `|` + PreMove + `)$`)
 
 // The schedule: the first, the newest few, and the last of each of the most
 // recent days, weeks and months that have one.

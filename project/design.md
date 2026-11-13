@@ -142,6 +142,10 @@ Common:  --config PATH, --set KEY=VALUE
 - `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `podman ps`, still run, so the plan matches what a real run would do.
 
 - When the boot unit is enabled, `start` and `stop` run `systemctl start` and `systemctl stop` on it instead. That way systemd and the tool don't disagree about what's running.
+	- That's only for the config the unit runs, so a second config given with `--config` starts and stops by itself.
+	- `start` still checks the safe settings, the jars, and the firewall first, so a refusal shows on the terminal and not only in the journal. It doesn't wait for the server to load. `status` shows when it's up.
+	- `start --debug` and `start --foreground` are refused, since systemd runs the server.
+	- `stop --warn N` counts down first. After `systemctl stop`, the trees go back to the operator. A server that's still up after it, such as one started before the unit was enabled, gets the `stop` console command as usual.
 
 ### start
 
@@ -275,6 +279,10 @@ Common:  --config PATH, --set KEY=VALUE
 	- With no `paper.jar`, or a link to a build that's gone, it gets one the way `setup` does.
 	- The new build goes on the approved list. Other builds in `serverDir` are removed, except the one it replaced.
 	- `--mc-version V` moves to another Minecraft version. It needs a yes even with `--yes`, since worlds can't go back to an older version and plugins may not work on the new one. It takes a ZFS snapshot first.
+		- It goes with `--paper`, so it needs that part or no part named. The version `paper.jar` is on already is a plain `--paper`.
+		- It asks once, with or without `--yes`, and the question says what can't be undone.
+		- The snapshot comes after the yes and before anything changes, and a failed one stops the update. With no `zfsDataset`, it warns to back up the server folder first.
+		- It won't move to a version older than the one `paper.jar` is on. Going back is a rollback to the snapshot.
 
 - `--plugins` updates each plugin with a known source in the approved list, such as Geyser, Floodgate, Modrinth, or Hangar. It shows the old and new versions, checks the hash from the source, and approves the new jar.
 	- A jar is up to date when its approved hash is the source's newest. The old version is what the jar's own `plugin.yml` says.
@@ -842,7 +850,13 @@ cicd/                        build, test, and release scripts
 	- It starts after `network-online.target`. In Docker mode it also waits for `docker.service`. Podman has no service to wait for.
 	- With `firewall` on, it requires `tt-minecraftd-firewall.service`, so the server never starts at boot without the rules.
 
+	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some for the snapshot after.
+	- The unit runs the tool from `/usr/local/bin`, where `setup` puts it, with `--config` when the config isn't the default one.
+	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
+	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.
+
 - With `startAtBoot` off, `repair` disables and removes the unit.
+	- It doesn't stop a server the unit runs. That server keeps going until the next `stop`.
 
 ### NixOS
 
@@ -860,6 +874,7 @@ cicd/                        build, test, and release scripts
 - With `zfsDataset` set, `start` takes `<YYYYmmDD-HHMMSS>_pre_tt-minecraftd-start`, and `stop` takes `<YYYYmmDD-HHMMSS>_post_tt-minecraftd-stop` after the worlds are saved.
 	- A failed snapshot stops a start before the trees change hands. At `stop` the trees still go back, and the error is shown.
 	- A `stop` that finds the server already down takes none, since nothing changed since the last one.
+	- `update --mc-version` takes `<YYYYmmDD-HHMMSS>_pre_tt-minecraftd-mc-version` before Paper moves. The prune counts it with the others.
 
 - Old ones get pruned on a grandfather-father-son schedule. The ones kept are the first, the newest 3, and the last of each of the last 7 days, 4 weeks, and 6 months.
 	- Only snapshots that match the tool's name pattern are touched.

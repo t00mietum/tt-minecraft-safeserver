@@ -166,3 +166,21 @@ func TestTake(t *testing.T) {
 		t.Error("an unknown kind was taken")
 	}
 }
+
+// update --mc-version's snapshot is one of the tool's own, so the schedule
+// prunes it like the others.
+func TestPreMove(t *testing.T) {
+	defer testid.Line(t, "df78j")
+	r := fakeZfs("", nil)
+	s := Snapper{Run: r, Dataset: "tank/mc"}
+	if _, err := s.Take(context.Background(), PreMove, time.Date(2026, 11, 12, 11, 0, 0, 0, time.Local)); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Lines(); len(got) == 0 || got[0] != "zfs snapshot -- tank/mc@20261112-110000_pre_tt-minecraftd-mc-version" {
+		t.Errorf("ran %q", got)
+	}
+	old := "20261021-120000_" + PreMove
+	if gone := Doomed(append(daily("20261020", "20261111"), old)); !slices.Contains(gone, old) {
+		t.Errorf("%s kept: %q", old, gone)
+	}
+}

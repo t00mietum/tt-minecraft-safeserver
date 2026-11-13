@@ -56,8 +56,9 @@ func (a AttachConsole) Send(ctx context.Context, line string) error {
 	if err != nil {
 		return fmt.Errorf("console: %w", err)
 	}
-	defer master.Close()
-	defer slave.Close()
+	// A pty buffers nothing that a failed close could lose.
+	defer func() { _ = master.Close() }()
+	defer func() { _ = slave.Close() }()
 	// Raw before attach starts, so the line discipline can't eat Ctrl-C.
 	if err := makeRaw(slave); err != nil {
 		return fmt.Errorf("console: %w", err)

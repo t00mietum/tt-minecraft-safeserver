@@ -245,3 +245,29 @@ func TestPrune(t *testing.T) {
 		t.Errorf("left %q", left)
 	}
 }
+
+// Older orders versions by their numbers, with a pre-release before its
+// release, so update --mc-version can refuse a move back.
+func TestOlder(t *testing.T) {
+	defer testid.Line(t, "df78k")
+	for _, c := range []struct {
+		a, b  string
+		older bool
+	}{
+		{"1.21.11", "26.3", true},
+		{"26.3", "1.21.11", false},
+		{"1.21.4", "1.21.11", true},
+		{"26.3", "26.3.1", true},
+		{"26.3-rc-3", "26.3", true},
+		{"26.3", "26.3-rc-3", false},
+		{"26.3", "26.3", false},
+		{"26.2", "26.3-pre-1", true},
+	} {
+		if got := Older(c.a, c.b); got != c.older {
+			t.Errorf("Older(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+	if IsVersion("26.3/../x") || !IsVersion("26.3-rc-3") {
+		t.Error("IsVersion")
+	}
+}

@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	agentpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
@@ -77,6 +78,8 @@ type options struct {
 	// agentAnswer is the file update's operator run left the agent's answer
 	// in, for its run through sudo.
 	agentAnswer string
+	// mcVersion is update's --mc-version.
+	mcVersion string
 }
 
 type command struct {
@@ -119,6 +122,7 @@ var commands = []command{
 		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
 		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
 		fs.BoolVar(&o.parts.Image, "image", false, "Pull the newest build of the image's tag, check its Java, and pin its digest in the config")
+		fs.StringVar(&o.mcVersion, "mc-version", "", "Move Paper to Minecraft version `V`. Asks even with --yes, and takes a ZFS snapshot first")
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan, and change nothing")
 		fs.StringVar(&o.agentAnswer, "agent-answer", "", "")
@@ -191,6 +195,16 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
 	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
+	if name == "start" || name == "stop" {
+		served, err := bootServes(ctx, inv.configPath)
+		switch {
+		case err != nil:
+			return err
+		case served && (inv.opts.debug || inv.opts.foreground):
+			return fmt.Errorf("the boot unit %s is enabled, so start goes through systemctl, which can't run --debug or --foreground; turn startAtBoot off and run repair first", boot.UnitName)
+		}
+		kit.Boot = served
+	}
 	var srv interface {
 		Start(ctx context.Context, mode launch.StartMode) error
 		Stop(ctx context.Context, warn int) error
@@ -222,6 +236,18 @@ var serverMode = func(ctx context.Context, c *config.Config) string {
 	runner.QuietErr = true
 	mode, _ := status.NewProbe(runner, c, "").Mode(ctx)
 	return mode
+}
+
+// bootServes says whether the boot unit is enabled for this config, from
+// outside the unit. Its own start --foreground and stop do the real work. A
+// var so tests don't read the host's units.
+var bootServes = func(ctx context.Context, configPath string) (bool, error) {
+	if boot.InsideNow() {
+		return false, nil
+	}
+	runner := host.NewExec(false)
+	runner.QuietErr = true
+	return boot.Serves(ctx, runner, "", configPath)
 }
 
 // follow points stop, console, and cmd at a server that runs natively when
@@ -257,9 +283,14 @@ var asRoot = func(args []string) error {
 	return syscall.Exec(sudo, append([]string{"sudo", "--", exe}, args...), os.Environ()) // #nosec G204 -- this binary, with its own arguments
 }
 
+// hostRunner runs setup's and update's commands. A var so tests don't reach
+// the host.
+var hostRunner = func(dryRun bool) host.Runner { return host.NewExec(dryRun) }
+
 // setupSteps gives setup its runner and the Host its account checks look at.
-func setupSteps(inv invocation) (host.Runner, func(c *config.Config) *repairpkg.Host) {
-	runner := host.NewExec(inv.opts.dryRun)
+// A var for tests.
+var setupSteps = func(inv invocation) (host.Runner, func(c *config.Config) *repairpkg.Host) {
+	runner := hostRunner(inv.opts.dryRun)
 	return runner, func(c *config.Config) *repairpkg.Host {
 		return repairpkg.NewHost(runner, c, inv.configPath)
 	}
@@ -356,8 +387,14 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		Exe:         exe,
 		Version:     version,
 		NixOS:       selfupdate.FromNix(exe),
-		Run:         host.NewExec(inv.opts.dryRun),
+		Run:         hostRunner(inv.opts.dryRun),
 		Fetch:       download.Client{UserAgent: userAgent},
+		MCVersion:   inv.opts.mcVersion,
+		Root:        root,
+	}
+	// Before sudo asks for a password.
+	if err := u.Check(); err != nil {
+		return err
 	}
 	parts := inv.opts.parts
 	agentOn := inv.cfg.Agent != "" && inv.cfg.Agent != "none" && (parts == updatepkg.Parts{} || parts.Plugins)

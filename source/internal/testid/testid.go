@@ -10,8 +10,8 @@ import (
 )
 
 // Line prints "PASS <id> <test>", or FAIL or SKIP. Defer it first thing in a
-// test, so it runs last and sees a failure, a skip or a panic.
-func Line(t *testing.T, id string) {
+// test or fuzz target, so it runs last and sees a failure, a skip or a panic.
+func Line(t testing.TB, id string) {
 	r := recover()
 	status := "PASS"
 	if r != nil || t.Failed() {

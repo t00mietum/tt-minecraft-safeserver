@@ -49,6 +49,9 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.refuseOthers(ctx); err != nil {
 		return err
 	}
+	if n.Boot {
+		return n.startUnit(ctx)
+	}
 	if !mode.Debug {
 		// Checked before anything changes, since the wait for the Done line
 		// reads the log once the tree is the server's.

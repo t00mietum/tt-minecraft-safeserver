@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
@@ -32,8 +33,8 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
 
-// BinPath is where setup puts the tool.
-const BinPath = "/usr/local/bin/tt-minecraftd"
+// BinPath is where setup puts the tool, which the boot unit runs.
+const BinPath = boot.Bin
 
 // Setup holds one run's options. Accounts and Repair let tests stay off the
 // host's real accounts and checks.
@@ -163,6 +164,12 @@ func (s *Setup) Do(ctx context.Context) error {
 	if cfg.RunMode != "native" {
 		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{cfg.RunMode, "pull", cfg.Image}}); err != nil {
 			return err
+		}
+	}
+	if cfg.StartAtBoot {
+		repair.Run(ctx, s.Accounts(&cfg), []repair.Check{repair.BootCheck}, false, report)
+		if failed {
+			return stopped
 		}
 	}
 	if exe != "" {
@@ -430,6 +437,9 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 	}
 	if c.RunMode != "native" {
 		fmt.Fprintf(w, "  - Pull %s with %s.\n", c.Image, c.RunMode)
+	}
+	if c.StartAtBoot {
+		fmt.Fprintf(w, "  - Install and enable %s, which starts the server at boot.\n", boot.UnitName)
 	}
 	if exe != "" {
 		fmt.Fprintf(w, "  - Copy %s to %s.\n", exe, BinPath)

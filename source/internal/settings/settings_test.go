@@ -262,6 +262,18 @@ func TestWarnings(t *testing.T) {
 	}
 }
 
+// A name the server account wrote can't flip the text direction of a warning.
+func TestWarningsDirection(t *testing.T) {
+	defer testid.Line(t, "df78g")
+	_, dir := newServer(t)
+	put(t, dir, "whitelist.json", `[{"name": "Alex"}]`, 0o640)
+	put(t, dir, "ops.json", `[{"name": "Mal\u202eyrot\u2066 x\u2069"}]`, 0o640)
+	want := []string{"op Malyrot x isn't on the whitelist"}
+	if w := Warnings(dir); !reflect.DeepEqual(w, want) {
+		t.Errorf("%q\nwant %q", w, want)
+	}
+}
+
 const geyserConfig = "plugins/Geyser-Spigot/config.yml"
 
 // Trimmed from the layout Geyser 2.12.1 writes.

@@ -161,6 +161,9 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err := d.refuseOthers(ctx); err != nil {
 		return err
 	}
+	if d.Boot {
+		return d.startUnit(ctx)
+	}
 	if !mode.Foreground {
 		if err := d.sudoUp(ctx); err != nil {
 			return err

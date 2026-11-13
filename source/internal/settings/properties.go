@@ -124,6 +124,8 @@ func escape(s string) string {
 			b.WriteString(`\n`)
 		case c == '\r':
 			b.WriteString(`\r`)
+		case c == '\f':
+			b.WriteString(`\f`)
 		default:
 			b.WriteRune(c)
 		}
@@ -155,6 +157,11 @@ func (p *properties) set(key, value string) {
 		}
 	}
 	if !found {
+		// A last line that ends in a backslash would take the new one as its
+		// continuation, so a blank line goes between.
+		if n := len(p.lines); n > 0 && continues(strings.TrimSuffix(p.lines[n-1].text, "\r")) {
+			p.lines = append(p.lines, propLine{})
+		}
 		p.lines = append(p.lines, line)
 	}
 }

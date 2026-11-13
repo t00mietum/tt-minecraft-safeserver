@@ -23,6 +23,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/selfupdate"
@@ -46,6 +47,37 @@ func noHostChecks(t *testing.T) {
 		return &repairpkg.Host{Cfg: &inv.cfg}, nil, nil
 	}
 	t.Cleanup(func() { repairSteps = old })
+}
+
+// noHostRunner gives setup and update a stand-in runner, and setup's account
+// checks stand-in passwd and group files with minecraftd in them. PATH is
+// empty and launch.Installed false, so nothing on the host can run. The count
+// goes up each time setup or update takes the runner.
+func noHostRunner(t *testing.T) (*host.Fake, *int) {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+	fake, took := &host.Fake{}, new(int)
+	oldRunner, oldSteps, oldInstalled := hostRunner, setupSteps, launch.Installed
+	t.Cleanup(func() { hostRunner, setupSteps, launch.Installed = oldRunner, oldSteps, oldInstalled })
+	hostRunner = func(bool) host.Runner { *took++; return fake }
+	launch.Installed = func(string) bool { return false }
+	etc := t.TempDir()
+	passwd, group := filepath.Join(etc, "passwd"), filepath.Join(etc, "group")
+	if err := os.WriteFile(passwd, []byte("minecraftd:x:990:991::/nonexistent:/usr/sbin/nologin\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(group, []byte("minecraftd:x:991:\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setupSteps = func(inv invocation) (host.Runner, func(c *config.Config) *repairpkg.Host) {
+		*took++
+		return fake, func(c *config.Config) *repairpkg.Host {
+			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
+				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), BootFile: filepath.Join(etc, "boot.service"),
+				NftThere: func() bool { return false }}
+		}
+	}
+	return fake, took
 }
 
 // fakePaperMC points paperAPI at a stand-in that has build 249 of 26.3 only.
@@ -448,6 +480,7 @@ func TestSetup(t *testing.T) {
 	noHostChecks(t)
 	fakePaperMC(t)
 	hits := fakeReleases(t)
+	_, took := noHostRunner(t)
 	var again []string
 	old := asRoot
 	asRoot = func(args []string) error { again = args; return nil }
@@ -480,6 +513,10 @@ func TestSetup(t *testing.T) {
 	if !strings.Contains(out, "Updating:") || hits.Load() != 0 {
 		t.Errorf("setup's update looked for a release %d times:\n%s", hits.Load(), out)
 	}
+	// setup, and its own update.
+	if *took != 2 {
+		t.Errorf("setup took the stand-in runner %d times, not 2", *took)
+	}
 }
 
 // update runs itself through sudo unless it's root or a dry run, and a dry
@@ -489,6 +526,7 @@ func TestUpdate(t *testing.T) {
 	noDefaultConfig(t)
 	fakePaperMC(t)
 	hits := fakeReleases(t)
+	_, took := noHostRunner(t)
 	var again []string
 	old := asRoot
 	asRoot = func(args []string) error { again = args; return nil }
@@ -513,6 +551,7 @@ func TestUpdate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "paper-26.3-244.jar"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	*took = 0 // the not-root run above took it too
 	code, out, msg := runArgs("update", "--dry-run", "--set=serverDir="+dir)
 	if code != exitOK || !strings.Contains(out, "from build 244 to build 249") || !strings.Contains(out, "would download paper-26.3-249.jar") || !strings.Contains(out, "would pull docker.io/library/eclipse-temurin:25-jre,") {
 		t.Errorf("dry run: exit %d, stdout %q, stderr %q", code, out, msg)
@@ -529,6 +568,35 @@ func TestUpdate(t *testing.T) {
 	if code != exitOK || !strings.Contains(out, "to v9.0.0") || strings.Contains(out, "Paper") {
 		t.Errorf("--self: exit %d, stdout %q, stderr %q", code, out, msg)
 	}
+	if *took != 2 {
+		t.Errorf("update took the stand-in runner %d times, not 2", *took)
+	}
+}
+
+// --mc-version is in the help, and one that can't work is refused before
+// sudo asks for a password.
+func TestUpdateMCVersion(t *testing.T) {
+	defer testid.Line(t, "df78n")
+	noDefaultConfig(t)
+	var again []string
+	old := asRoot
+	asRoot = func(args []string) error { again = args; return nil }
+	t.Cleanup(func() { asRoot = old })
+
+	if code, out, _ := runArgs("update", "--help"); code != exitOK || !strings.Contains(out, "--mc-version V") {
+		t.Errorf("update --help: %q", out)
+	}
+	for _, args := range [][]string{{"update", "--image", "--mc-version", "26.4"}, {"update", "--mc-version", "26.4;x"}} {
+		if code, _, msg := runArgs(args...); code == exitOK || again != nil || !strings.Contains(msg, "--mc-version") {
+			t.Errorf("%q: exit %d, ran again with %q, stderr %q", args, code, again, msg)
+		}
+	}
+	if os.Geteuid() != 0 {
+		args := []string{"update", "--mc-version", "26.4", "--yes"}
+		if code, _, msg := runArgs(args...); code != exitOK || !reflect.DeepEqual(again, args) {
+			t.Errorf("not root: exit %d, ran again with %q, stderr %q", code, again, msg)
+		}
+	}
 }
 
 // With agent set, update asks it as the operator, hands the answer to the
@@ -540,6 +608,7 @@ func TestUpdateAgent(t *testing.T) {
 		t.Skip("the agent doesn't run as root")
 	}
 	noDefaultConfig(t)
+	_, took := noHostRunner(t)
 	dir := t.TempDir()
 	server := filepath.Join(dir, "server")
 	if err := os.MkdirAll(filepath.Join(server, "plugins"), 0o750); err != nil {
@@ -552,7 +621,7 @@ func TestUpdateAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	ask := filepath.Join(dir, "ask")
-	if err := os.WriteFile(ask, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"jars\": []}'\n"), 0o700); err != nil { // #nosec G306 -- the test's own agent
+	if err := os.WriteFile(ask, []byte("#!/bin/sh\nwhile read -r _; do :; done\necho '{\"jars\": []}'\n"), 0o700); err != nil { // #nosec G306 -- the test's own agent
 		t.Fatal(err)
 	}
 	cfg := filepath.Join(dir, "config.shcl")
@@ -595,6 +664,10 @@ func TestUpdateAgent(t *testing.T) {
 		t.Errorf("replay: exit %d\nstdout %q\nstderr %q", code, out, msg)
 	}
 
+	if *took != 2 {
+		t.Errorf("update took the stand-in runner %d times, not 2", *took)
+	}
+
 	if _, out, _ := runArgs("update", "--help"); strings.Contains(out, "agent-answer") {
 		t.Errorf("help shows the hand-off flag: %q", out)
 	}
@@ -630,5 +703,29 @@ func TestVersionLine(t *testing.T) {
 	}
 	if got, want := versionLine(time.Time{}, false, false), "tt-minecraftd "+version+" build unknown"; got != want {
 		t.Errorf("no commit time: %q, want %q", got, want)
+	}
+}
+
+// With the boot unit enabled for the config, start can't take --debug or
+// --foreground, since systemctl runs it, and the unit is asked about that
+// config.
+func TestBootUnitRefuses(t *testing.T) {
+	defer testid.Line(t, "df78w")
+	noDefaultConfig(t)
+	old := bootServes
+	t.Cleanup(func() { bootServes = old })
+	var asked []string
+	bootServes = func(_ context.Context, path string) (bool, error) {
+		asked = append(asked, path)
+		return true, nil
+	}
+	for _, flag := range []string{"--debug", "--foreground"} {
+		code, _, errOut := runArgs("start", flag, "--set=serverDir="+t.TempDir())
+		if code != exitError || !strings.Contains(errOut, "the boot unit tt-minecraftd.service is enabled") {
+			t.Errorf("start %s: exit %d, %q", flag, code, errOut)
+		}
+	}
+	if len(asked) != 2 || asked[0] != defaultConfig {
+		t.Errorf("asked about %q, want %s", asked, defaultConfig)
 	}
 }

@@ -30,10 +30,20 @@ STATICCHECK_VERSION="v0.7.0"
 GOVULNCHECK_VERSION="v1.5.0"
 GOSEC_VERSION="v2.30.0"
 NFPM_VERSION="v2.47.0"
-## Host tools that aren't in the image. Recorded and compared, never installed.
+## shellcheck and markdownlint, in the image too. Node is only there for markdownlint, whose version
+## and dependencies are pinned in container/markdownlint/package-lock.json. The shellcheck sums are
+## of the release files as first downloaded, since the project doesn't publish any.
+NODE_VERSION="22.23.2"
+NODE_SHA256_AMD64="b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a"
+NODE_SHA256_ARM64="013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30"
+SHELLCHECK_VERSION="v0.11.0"
+SHELLCHECK_SHA256_AMD64="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+SHELLCHECK_SHA256_ARM64="12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588"
+MARKDOWNLINT_VERSION="$(sed -n 's/^ *"markdownlint-cli": "\(.*\)".*/\1/p' "${BASH_SOURCE[0]%/*}/container/markdownlint/package.json")"
+## Without the container, the host's copies are used, and compared with these.
 TOOL_VERSIONS=(
-	"shellcheck=0.11.0"
-	"markdownlint=0.49.1"
+	"shellcheck=${SHELLCHECK_VERSION#v}"
+	"markdownlint=${MARKDOWNLINT_VERSION}"
 )
 
 ## Same flags at every build site, so a release can be rebuilt to its published checksum.
@@ -42,6 +52,32 @@ GO_LDFLAGS_COMMON="-s -w -buildid="
 ## What the Linux releases are built for. The binary names are what update --self reads, so
 ## they say amd64; the packages use each format's own arch names.
 RELEASE_TARGETS=("linux/amd64" "linux/arm64")
+
+## Other hosts: linux/arm64 is the only other target, since the tool is Linux only. The arm64 step
+## runs the test binaries on that box, held through the shared host lock's wrap in VM_STATE_TOOL,
+## which also puts a VM back the way it was found. A box or tool that isn't there skips the step.
+ARM64_HOST="${CICD_ARM64_HOST:-vmDebARM64}"              ## the name the host lock knows it by
+ARM64_SSH="${CICD_ARM64_SSH:-tester@${ARM64_HOST}}"     ## ssh target, a plain test account
+VM_STATE_TOOL="${CICD_VM_STATE:-vm-state}"              ## on PATH, or a full path
+ARM64_LOCK_WAIT="${CICD_ARM64_LOCK_WAIT:-600}"          ## seconds to wait for the box before skipping
+
+## Fuzzing: how long each Fuzz target runs. The seeds run with the plain tests either way.
+FUZZ_TIME="30s"
+FUZZ_TIME_QUICK="10s"
+FUZZ_TIME_LONG="5m"
+
+## CodeQL: the Go bundle, which pins the CLI and its query packs together. It's kept in a docker
+## volume, or under ~/.cache with --no-container, and checked against the sum before it's unpacked.
+## Linux amd64 only, since there's no arm64 build. The sum is the release asset's digest on GitHub.
+CODEQL_VERSION="2.27.4"
+CODEQL_SHA256="d79b33f86ec8b20af73d3456041349a2780c1081ee8c0eca624b9a25c5cb2e15"
+CODEQL_SUITE="codeql/go-queries:codeql-suites/go-security-and-quality.qls"
+
+## Soak: rounds of the main actions before the first heap and goroutine sample, and again before
+## the second. The tests skip outside the soak step.
+SOAK_ENV="TT_MINECRAFTD_SOAK"   ## soak.Env in source/internal/soak
+SOAK_ROUNDS="100"
+SOAK_ROUNDS_LONG="1000"
 
 ## The areas --backlog-run-quick takes are the folders under source/internal, plus cli for the command.
 CLI_AREA_DIR="source/cmd/tt-minecraftd"
@@ -68,6 +104,9 @@ LINT_LOG_DIR="cicd/artifacts/lint"
 ## Release builds and packages, one folder per version.
 RELEASE_DIR="cicd/artifacts/release"
 RELEASE_KEEP=5
+## The demo gif: each render, GFS-rotated, and the copy README shows, which only a release run updates.
+DEMO_DIR="cicd/artifacts/demo"
+DEMO_GIF="assets/demo.gif"
 
 ## Dogfood: this is the only server, so the build goes to its final place, where setup puts it.
 ## Root's folder, so the step installs with sudo when it can without a password.
@@ -108,3 +147,7 @@ fLowPriority(){
 
 ##	History:
 ##		- 2026-11-12: Created.
+##		- 2026-11-13: Fuzz times. shellcheck, markdownlint and Node pinned for the image.
+##		- 2026-11-13: Soak rounds.
+##		- 2026-11-13: CodeQL bundle pin.
+##		- 2026-11-13: Demo gif paths.
