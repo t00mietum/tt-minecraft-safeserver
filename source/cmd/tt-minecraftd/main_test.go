@@ -73,7 +73,7 @@ func noHostRunner(t *testing.T) (*host.Fake, *int) {
 		*took++
 		return fake, func(c *config.Config) *repairpkg.Host {
 			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"),
+				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), BootFile: filepath.Join(etc, "boot.service"),
 				NftThere: func() bool { return false }}
 		}
 	}
@@ -703,5 +703,29 @@ func TestVersionLine(t *testing.T) {
 	}
 	if got, want := versionLine(time.Time{}, false, false), "tt-minecraftd "+version+" build unknown"; got != want {
 		t.Errorf("no commit time: %q, want %q", got, want)
+	}
+}
+
+// With the boot unit enabled for the config, start can't take --debug or
+// --foreground, since systemctl runs it, and the unit is asked about that
+// config.
+func TestBootUnitRefuses(t *testing.T) {
+	defer testid.Line(t, "df78w")
+	noDefaultConfig(t)
+	old := bootServes
+	t.Cleanup(func() { bootServes = old })
+	var asked []string
+	bootServes = func(_ context.Context, path string) (bool, error) {
+		asked = append(asked, path)
+		return true, nil
+	}
+	for _, flag := range []string{"--debug", "--foreground"} {
+		code, _, errOut := runArgs("start", flag, "--set=serverDir="+t.TempDir())
+		if code != exitError || !strings.Contains(errOut, "the boot unit tt-minecraftd.service is enabled") {
+			t.Errorf("start %s: exit %d, %q", flag, code, errOut)
+		}
+	}
+	if len(asked) != 2 || asked[0] != defaultConfig {
+		t.Errorf("asked about %q, want %s", asked, defaultConfig)
 	}
 }

@@ -390,7 +390,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Start at boot
 	- ID: 2026111111065816
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -399,6 +399,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Add `startAtBoot` to the config, and a systemd unit that runs `start --foreground`, per `design.md`.
 		- `start` and `stop` go through `systemctl` when the unit is enabled.
 		- `setup` and `repair` install or remove the unit to match the config.
+	- Needs local test suite run?: the root host check (`cicd/root-host/root-host.bash`, plain, without `--zfs`) for df78x: `repair` enables the unit, `start` and `stop` go through it in Podman mode, the server loads and saves, and `startAtBoot` off removes the unit.
+	- Actual effort: Avg
+	- Test case: df78p, df78q, df78r, df78s, df78t, df78v, df78w, and the root host check df78x
+	- Branch: nov13-2026111111065816
+	- 20261113: The boot unit is `source/internal/boot`. `repair` check 13 (`repair.BootCheck`) writes and enables it, or disables and removes it, and setup runs it as step 11, after the image pull. `start` and `stop` go through `systemctl` when it is enabled for their config.
+	- Verified: each new test fails with its part taken out, and passes with it in. The unit passes `systemd-analyze verify`, apart from the firewall unit missing here.
+	- Not run yet: the real systemd and sudo path, which is the root host check df78x.
+	- Decisions:
+		- The unit runs `/usr/local/bin/tt-minecraftd`, with `--config` when the config is not the default, quoted for systemd. `Type=simple`, `WantedBy=multi-user.target`, and `TimeoutStopSec` is `stopTimeout` plus 45 s. design.md updated.
+		- Start and stop go through `systemctl` only when the unit is enabled and its ExecStart names this config. Inside the unit, found by cgroup, they do the work. design.md updated.
+		- Through the unit, `start` runs the settings, jar, and firewall checks first and does not wait for loading. `--debug` and `--foreground` are refused. `stop` counts down, runs `systemctl stop`, then hands the trees back; a server still up after it gets the console `stop`. design.md updated, and a Check entry in questions.md.
+		- setup and repair enable the unit and never start it. With `startAtBoot` off, repair runs `systemctl disable`, not `--now`, so a running server keeps going. design.md updated.
+		- Docker mode adds `Wants=` and `After=docker.service`. With the firewall on it has `Requires=` and `After=` on the firewall unit.
+		- Swept: both modes check `Boot` right after refusing other servers, and stop is shared in `Kit.stop`. setup on an existing install gets check 13 through `repair.After`. `status.BootUnit` and `setup.BinPath` now come from `boot`. Main tests stub `bootServes` in TestMain.
 
 - Bedrock LAN discovery
 	- ID: 2026111111065829

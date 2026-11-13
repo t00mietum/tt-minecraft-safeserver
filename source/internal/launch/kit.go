@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
@@ -34,7 +35,10 @@ type Kit struct {
 	DryRun      bool
 	Sleep       func(time.Duration)
 	// Now names the snapshots. Nil is time.Now.
-	Now    func() time.Time
+	Now func() time.Time
+	// Boot is set when the boot unit is enabled for this config, so start and
+	// stop go through systemctl. Inside the unit it's never set.
+	Boot   bool
 	sudoed bool
 }
 
@@ -231,6 +235,22 @@ func (k *Kit) stop(ctx context.Context, e engine, warn int) error {
 	if err := k.countDown(ctx, warn); err != nil {
 		return err
 	}
+	if k.Boot {
+		// The unit's ExecStop is stop, which saves and snapshots as root.
+		if _, err := k.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"systemctl", "stop", boot.UnitName}}); err != nil {
+			return err
+		}
+		if k.DryRun {
+			return k.handBack(ctx)
+		}
+		if up, err = e.running(ctx); err != nil {
+			return err
+		}
+		if !up {
+			return k.handBack(ctx)
+		}
+		// Not the unit's server, such as one started before it was enabled.
+	}
 	if err := k.Console.Send(ctx, "stop"); err != nil {
 		return err
 	}
@@ -241,6 +261,31 @@ func (k *Kit) stop(ctx context.Context, e engine, warn int) error {
 	}
 	// The trees go back even without the snapshot.
 	return errors.Join(k.snapshot(ctx, zfs.PostStop), k.handBack(ctx))
+}
+
+// startUnit is start when the boot unit is enabled. The checks that can
+// refuse a start run here too, so a refusal shows here and not only in the
+// journal.
+func (k *Kit) startUnit(ctx context.Context) error {
+	if err := k.sudoUp(ctx); err != nil {
+		return err
+	}
+	if err := k.checkSettings(); err != nil {
+		return err
+	}
+	if err := k.checkPlugins(); err != nil {
+		return err
+	}
+	if err := k.checkFirewall(ctx); err != nil {
+		return err
+	}
+	if _, err := k.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"systemctl", "start", boot.UnitName}}); err != nil {
+		return err
+	}
+	if !k.DryRun {
+		k.say("The boot unit is enabled, so %s starts the server. status shows when it's up, and journalctl -u %s how it went.", boot.UnitName, boot.UnitName)
+	}
+	return nil
 }
 
 // countDown tells the players at the start, then at each mark below it.

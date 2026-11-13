@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	agentpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
@@ -194,6 +195,16 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
 	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
+	if name == "start" || name == "stop" {
+		served, err := bootServes(ctx, inv.configPath)
+		switch {
+		case err != nil:
+			return err
+		case served && (inv.opts.debug || inv.opts.foreground):
+			return fmt.Errorf("the boot unit %s is enabled, so start goes through systemctl, which can't run --debug or --foreground; turn startAtBoot off and run repair first", boot.UnitName)
+		}
+		kit.Boot = served
+	}
 	var srv interface {
 		Start(ctx context.Context, mode launch.StartMode) error
 		Stop(ctx context.Context, warn int) error
@@ -225,6 +236,18 @@ var serverMode = func(ctx context.Context, c *config.Config) string {
 	runner.QuietErr = true
 	mode, _ := status.NewProbe(runner, c, "").Mode(ctx)
 	return mode
+}
+
+// bootServes says whether the boot unit is enabled for this config, from
+// outside the unit. Its own start --foreground and stop do the real work. A
+// var so tests don't read the host's units.
+var bootServes = func(ctx context.Context, configPath string) (bool, error) {
+	if boot.InsideNow() {
+		return false, nil
+	}
+	runner := host.NewExec(false)
+	runner.QuietErr = true
+	return boot.Serves(ctx, runner, "", configPath)
 }
 
 // follow points stop, console, and cmd at a server that runs natively when

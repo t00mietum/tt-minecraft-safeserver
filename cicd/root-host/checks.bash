@@ -142,6 +142,36 @@ fNativeStop() {
 	! systemctl is-active tt-minecraftd-server && [[ "$(stat -c %U "${dir}/world")" == op ]]
 }
 
+fBoot() {
+	echo 'startAtBoot: true' | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
+	tt-minecraftd repair | tee boot-on.out | grep -E '^(FIXED|FAILED)'
+	has 'tt-minecraftd.service enabled' boot-on.out && systemctl is-enabled tt-minecraftd.service || return 1
+	# repair never starts it.
+	! systemctl is-active tt-minecraftd.service || return 1
+	touch boot.mark
+	tt-minecraftd start < /dev/null | tee boot-start.out || return 1
+	has 'starts the server' boot-start.out || return 1
+	# Paper starts a new latest.log.
+	for _ in $(seq 120); do
+		sudo find "${log}" -newer boot.mark | grep -q . && sudo grep -q 'Done (.*)! For help' "${log}" && break
+		sleep 1
+	done
+	if ! systemctl is-active tt-minecraftd.service || ! sudo podman ps --format '{{.Names}}' | grep -qx tt-minecraftd; then
+		sudo journalctl -u tt-minecraftd.service | tail -20
+		return 1
+	fi
+	tt-minecraftd status | grep -q 'running in podman mode' || return 1
+	tt-minecraftd stop --warn 2 | tee boot-stop.out || return 1
+	sudo grep -q 'Saving chunks' "${log}" || { say "no save in the log"; return 1; }
+	if systemctl is-active tt-minecraftd.service || [[ "$(stat -c %U "${dir}/world")" != op ]]; then
+		sudo journalctl -u tt-minecraftd.service | tail -20
+		return 1
+	fi
+	sudo sed -i '/^startAtBoot:/d' /etc/tt-minecraftd/config.shcl
+	tt-minecraftd repair | tee boot-off.out | grep -E '^(FIXED|FAILED)'
+	has 'disabled and removed' boot-off.out && [[ ! -e /etc/systemd/system/tt-minecraftd.service ]]
+}
+
 fAdopt() {
 	sudo mv /etc/tt-minecraftd/config.shcl /etc/tt-minecraftd/plugins.shcl "${HOME}/" || return 1
 	sudo mkdir -p /srv/mc && sudo cp -a "${dir}" /srv/mc/adopted && sudo chown -R root:root /srv/mc/adopted || return 1
@@ -309,6 +339,7 @@ check df68a "start refuses a changed jar" fRefuseChanged
 check df68b "native start, sandbox, and locked jars" fNativeStart
 check df68c "status, cmd, and console follow a native server" fNativeFollow
 check df68d "stop follows a native server" fNativeStop
+check df78x "startAtBoot: repair enables the unit, and start and stop go through it" fBoot
 check df68e "setup --adopt a copy of the tree" fAdopt
 check df68f "firewall off removes the unit and table" fFirewallOff
 check df76n "update asks the agent as the operator, and hands its answer through sudo" fAgentHandOff

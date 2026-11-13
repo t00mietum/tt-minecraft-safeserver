@@ -142,6 +142,10 @@ Common:  --config PATH, --set KEY=VALUE
 - `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `podman ps`, still run, so the plan matches what a real run would do.
 
 - When the boot unit is enabled, `start` and `stop` run `systemctl start` and `systemctl stop` on it instead. That way systemd and the tool don't disagree about what's running.
+	- That's only for the config the unit runs, so a second config given with `--config` starts and stops by itself.
+	- `start` still checks the safe settings, the jars, and the firewall first, so a refusal shows on the terminal and not only in the journal. It doesn't wait for the server to load. `status` shows when it's up.
+	- `start --debug` and `start --foreground` are refused, since systemd runs the server.
+	- `stop --warn N` counts down first. After `systemctl stop`, the trees go back to the operator. A server that's still up after it, such as one started before the unit was enabled, gets the `stop` console command as usual.
 
 ### start
 
@@ -846,7 +850,13 @@ cicd/                        build, test, and release scripts
 	- It starts after `network-online.target`. In Docker mode it also waits for `docker.service`. Podman has no service to wait for.
 	- With `firewall` on, it requires `tt-minecraftd-firewall.service`, so the server never starts at boot without the rules.
 
+	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some for the snapshot after.
+	- The unit runs the tool from `/usr/local/bin`, where `setup` puts it, with `--config` when the config isn't the default one.
+	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
+	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.
+
 - With `startAtBoot` off, `repair` disables and removes the unit.
+	- It doesn't stop a server the unit runs. That server keeps going until the next `stop`.
 
 ### NixOS
 

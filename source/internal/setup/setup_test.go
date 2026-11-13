@@ -136,7 +136,7 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		Exe:         filepath.Join(dir, "tt-minecraftd"),
 		Accounts: func(c *config.Config) *repair.Host {
 			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv}
+				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, BootFile: filepath.Join(dir, "boot.service")}
 		},
 		Paper:  &r.paper,
 		Geyser: &r.geyser,
@@ -816,4 +816,33 @@ func TestFirewall(t *testing.T) {
 		t.Fatalf("%v\n%s", err, r.out)
 	}
 	hasAll(t, "dry run", strings.Split(r.out.String(), "\n"), "PLAN    firewall rules written to /etc/tt-minecraftd/firewall.nft")
+}
+
+// Step 11 installs and enables the boot unit with startAtBoot on, after the
+// image pull, and doesn't start it. Off, there's no unit.
+func TestBootUnit(t *testing.T) {
+	defer testid.Line(t, "df78v")
+	r := newRig(t, []string{"podman", "catatonit"}, "", "startAtBoot=true")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	ran := r.ran()
+	unit := filepath.Join(r.dir, "boot.service")
+	hasAll(t, "commands", ran, "sudo install -D -m 0644 -o root -g root -T /dev/stdin "+unit, "sudo systemctl enable tt-minecraftd.service")
+	enable := slices.Index(ran, "sudo systemctl enable tt-minecraftd.service")
+	pull := slices.IndexFunc(ran, func(s string) bool { return strings.Contains(s, " pull ") })
+	if pull < 0 || enable < pull || slices.Contains(ran, "sudo systemctl start tt-minecraftd.service") {
+		t.Errorf("pulled at %d, unit enabled at %d:\n%s", pull, enable, strings.Join(ran, "\n"))
+	}
+	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "Install and enable tt-minecraftd.service", "FIXED   tt-minecraftd.service enabled")
+
+	r = newRig(t, []string{"podman", "catatonit"}, "")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if strings.Contains(strings.Join(r.ran(), "\n"), "tt-minecraftd.service") || strings.Contains(r.out.String(), "tt-minecraftd.service") {
+		t.Errorf("startAtBoot off:\n%s\n%s", strings.Join(r.ran(), "\n"), r.out)
+	}
 }

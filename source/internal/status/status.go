@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
@@ -33,7 +34,7 @@ import (
 )
 
 // BootUnit is the unit that runs start --foreground at boot.
-const BootUnit = "tt-minecraftd.service"
+const BootUnit = boot.UnitName
 
 // logLines is how much of latest.log status shows.
 const logLines = 10
