@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -708,7 +707,7 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		writeAbout(stdout)
 		return inv, exitOK, true
 	case showVersion:
-		fmt.Fprintf(stdout, "tt-minecraftd %s (build %s)\n", version, build())
+		fmt.Fprintf(stdout, "%s\nCopyright © 2026 t00mietum. GPL v2 or later.\n", currentVersionLine())
 		return inv, exitOK, true
 	case top.NArg() == 0:
 		writeHelp(stderr)
@@ -795,31 +794,6 @@ func loadConfig(o options, setup bool, stderr io.Writer) (config.Config, []confi
 	return cfg, warns, err
 }
 
-// build is the commit the binary was built from, when go build recorded one.
-func build() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
-	}
-	rev, dirty := "", false
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			rev = s.Value
-		case "vcs.modified":
-			dirty = s.Value == "true"
-		}
-	}
-	if rev == "" {
-		return "unknown"
-	}
-	rev = rev[:min(12, len(rev))]
-	if dirty {
-		rev += "-dirty"
-	}
-	return rev
-}
-
 func writeHelp(w io.Writer) {
 	var b strings.Builder
 	b.WriteString("\nUsage:\n  tt-minecraftd <command> [options]\n  tt-minecraftd --help | --about | --version\n\nCommands:\n")
@@ -858,7 +832,8 @@ func writeFlags(b *strings.Builder, fs *flag.FlagSet) {
 }
 
 func writeAbout(w io.Writer) {
-	fmt.Fprint(w, `
+	fmt.Fprint(w, "\n", currentVersionLine(), `
+
 tt-minecraftd runs a Paper Minecraft server for friends, locked down. The
 server runs in a container, or in a systemd sandbox, as its own account. Every
 start checks the safe settings and the plugin jars first.

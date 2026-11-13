@@ -22,6 +22,238 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Move shared code to tt-safeserver
+	- ID: 2026111111303242
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 20261111-113032
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711
+	- Requirements:
+		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
+		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
+		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
+		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
+	- Decisions:
+		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
+		- GPL v2 or later.
+	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
+
+- Connect the service to an AI agent to update the game programs and add-ons
+	- ID: 2026111207010610
+	- Type: Feature
+	- Status: Started
+	- Priority: High
+	- Opened: 20261112-070106
+	- Opened by: t00mietum
+	- Requirements:
+		- Ability to connect the service to an AI agent, for the purpose of updating the game programs and add-ons, which would otherwise be very brittle if hard-coded.
+		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
+	- Note:
+		- Pre-next-cut.
+	- Progress log:
+		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
+		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is queued.
+	- Decisions:
+		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
+		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
+		- Kinds: `openai` (cloud hosts and local servers), `anthropic`, and `command` (subscription CLIs), since those cover nearly every agent.
+		- It runs as the operator, before `update` runs itself through sudo. A run that starts as root skips it with a note.
+		- The API key comes from the operator's environment, never the config, which everyone can read.
+		- `--yes` doesn't cover a jar the agent found, the same as `--mc-version`.
+		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
+
+- Live server has the whitelist off while it's open to the internet
+	- ID: 2026111111065671
+	- Type: Bug
+	- Status: Queued
+	- Prereq IDs: 2026111111070787
+	- Severity: Critical
+	- Opened: 20261111-110656
+	- Opened by: t00mietum
+	- Incorrect behavior [Bug]:
+		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
+	- Expected behavior [Bug]:
+		- Only whitelisted players can join, Java and Bedrock both.
+	- Possible cause [Bug]:
+		- The old scripts never set it, and nothing checks it.
+	- Note:
+		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
+		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
+	- Progress log:
+		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
+		- 2026-11-12: Got the list, 1 Java and 1 Bedrock player, kept in the private notes. The console commands are written up. Waits on them being run on the live server, and on a check of Geyser's `auth-type` there, which decides `fwhitelist` or `whitelist` for the Bedrock player.
+		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
+		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
+		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
+
+- CICD reset: other hosts and VMs
+	- ID: 2026111219111126
+	- Type: Task
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Run what needs another CPU on a test box, under the host lock, with the VM put back as found. A box that isn't there skips its steps and never stops a run.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Linux on arm64 is the only other target, since the tool is Linux only. The arm64 build is made and packaged already; no test runs on it yet.
+		- `--no-remote` is accepted and `Other hosts` is printed in the run header, so the step slots in without a flag change.
+	- Branch: cicd
+	- Test case: n/a: pipeline step.
+
+- update
+	- ID: 2026111111065803
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111112163174
+	- Requirements:
+		- Update the tool from GitHub releases.
+		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
+		- Update plugins that have a known source, and approve the new jars.
+		- Refresh the pinned container image.
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
+	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) and 2026111117404480 (Modrinth and Hangar sources) are queued.
+
+- CICD reset: CICD process gaps
+	- ID: 2026111219111143
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- What else in the CICD process this project doesn't do yet and should.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Native fuzz tests for the parsers that read operator and download input: the shcl config, the plugin list, the settings files, and the update agent's answer.
+		- A soak test that loops the main actions headless and compares the heap and goroutines at rounds N and 2N.
+		- CodeQL from a pinned local CLI, built from a clean tree. It applies, since the repo is GPL and public on GitHub.
+		- A dogfood script and its launchers, and a demo gif for the README, both CLI only.
+		- Profiling is skipped on purpose for now: the tool starts and stops a server and holds no hot loop. Revisit if `status --watch` grows one.
+		- Reproducible builds are checked, so README can say so.
+		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
+	- Branch: cicd
+	- Test case: n/a: pipeline step.
+
+- update --mc-version
+	- ID: 2026111117302963
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Prereq IDs: 2026111112264283
+	- Requirements:
+		- `--mc-version V` moves Paper to another Minecraft version, per design.md: a yes even with `--yes`, and a ZFS snapshot first.
+
+- Start at boot
+	- ID: 2026111111065816
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065763
+	- Requirements:
+		- Add `startAtBoot` to the config, and a systemd unit that runs `start --foreground`, per `design.md`.
+		- `start` and `stop` go through `systemctl` when the unit is enabled.
+		- `setup` and `repair` install or remove the unit to match the config.
+
+- Bedrock LAN discovery
+	- ID: 2026111111065829
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711 2026111113015461
+	- Requirements:
+		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
+		- Fix `how-to-connect.md` if they don't.
+	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
+	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
+
+- NixOS module
+	- ID: 2026111111065855
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Add a flake with a NixOS module for the account, Docker, the config file, the firewall unit, and the boot unit.
+		- On NixOS, `setup`, `repair`, and `update` check the system parts and print module settings, rather than change them.
+	- 2026-11-12: Run modes now take Podman (default), Docker, or native, so the Docker lines here mean Podman or Docker.
+
+- Release-install script
+	- ID: 2026111111070761
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868
+	- Requirements:
+		- Runnable via a single `curl` or `wget`, and documented under "how to install".
+		- Downloads, installs, and runs the latest release, with an option to abort.
+	- Target OS: Debian, NixOS
+	- Decisions:
+		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
+	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
+
+- First release
+	- ID: 2026111111070774
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868, 2026111111070761
+	- Requirements:
+		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
+
+- Move the first server over
+	- ID: 2026111111070787
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Move the existing server to the new account and tool with `setup --adopt`.
+		- Approve the plugins that are there now.
+		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
+		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
+		- Retire the old start, stop, and manage scripts after it runs clean.
+
+- Update agent: Paper fallback and the --mc-version report
+	- ID: 2026111210034308
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-100343
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Prereq IDs: 2026111210034298 2026111117302963
+	- Requirements:
+		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
+		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
+	- Estimated effort: Avg
+
 - setup and repair offer zfs allow for snapshots
 	- ID: 2026111211050654
 	- Type: Feature
@@ -33,6 +265,202 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- With `zfsDataset` set, `setup` offers `zfs allow` for snapshot, destroy, and mount on the dataset to the operator, per design.md's ZFS snapshots, so snapshots don't need sudo.
 		- `repair` reports it when it's missing.
+
+- update --plugins: Modrinth and Hangar sources
+	- ID: 2026111117404480
+	- Type: Feature
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-174044
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Prereq IDs: 2026111117302973
+	- Requirements:
+		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
+
+- Dev-environment install script
+	- ID: 2026111111070800
+	- Type: Feature
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261111-110708
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868
+	- Requirements:
+		- Runnable via a single `curl` or `wget`, and documented under "how to develop".
+		- Clones main, installs dependencies, and states what it will do, with an option to abort.
+	- Target OS: Debian, NixOS
+	- Decisions:
+		- It's Bash only, since both targets are Linux.
+
+- CI/CD pipeline
+	- ID: 2026111111065868
+	- Type: Feature
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Requirements:
+		- A CI/CD pipeline kicked off by a bash script (`cicd/cicd.bash`). It builds, tests, and can commit and push. Packaging and publishing are opt-in.
+	- Progress log:
+		- 2026-11-12: `cicd/cicd.bash` runs format, lint, tests, race tests, the vulnerability scan, release builds for amd64 and arm64, `.deb` and `.rpm` packages, both root host checks, dogfood, and publish. A full run passed all 9 steps that apply to a hands-off run.
+		- 2026-11-12: Dogfood was run against a stand-in folder, and publish in a throwaway clone, where it committed only the file it reformatted and left another edit alone. The real dogfood folder waits for a go-ahead.
+	- Decisions:
+		- Packaging is in the default run, not opt-in, per the CICD process. `--quick` leaves it out.
+		- Go steps run in a container built from `cicd/container/`, with the Go image and every tool pinned in `cicd/config.bash`. The first full run found 2 standard library advisories in the Go 1.26.9 image, so the pinned image is 1.26.11.
+	- Branch: cicd
+	- Test case: n/a: the pipeline. Its own checks are the CICD reset items.
+
+- CICD reset: containers
+	- ID: 2026111219111113
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Build and test in a container from a pinned recipe in the repo, falling back to this box with one line when docker is missing or the image can't be built. A test whose point is the real OS runs outside it.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- `cicd/cicd.bash` runs format-adjacent Go steps in the image built from `cicd/container/`. Every tool version and the Go image digest sit in `cicd/config.bash`.
+		- The container run found a test that depended on the umask, and fixed it (df5zf).
+		- The root host check keeps its own privileged container, since it needs systemd and a real sudo.
+	- Branch: cicd
+	- Test case: n/a: pipeline step. Watched to fail: a test failure in the container turned the run red.
+
+- CICD reset: temp files and safe removal
+	- ID: 2026111219111139
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Run folders go in the host temp folder under the project name, removed at the end and by a trap, with stale ones swept. Removal goes through a guard that refuses anything outside a temp folder.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- `cicd/cicd.bash` and the root host check both make `<project>/<stamp>_<NNN>` with a `run.pid`. `cicd/utility/include/safe-rm.bash` is the guard, plus a variant that names the one parent a repo folder may be removed under.
+	- Branch: cicd
+	- Test case: n/a: pipeline step.
+
+- CICD reset: container cleanup
+	- ID: 2026111219111152
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Label every container, image, and volume with the project and run. Remove the run's containers at the end, then dangling and older images of its own, and empty a cache volume over 2 GB. Never prune the build cache.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Done in `cicd.bash`, with one line before and after of `docker system df`. The older-image rule keeps the current tag and the one before.
+	- Branch: cicd
+	- Test case: n/a: pipeline step. Checked by running it twice and listing leftovers by label.
+
+- CICD reset: CPU and priority
+	- ID: 2026111219111165
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Build and test use at most half the CPUs, a quarter when the box is busy or the step is hard. Everything runs at low priority and under a memory cap.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Counts are worked out once in `cicd/config.bash`, refreshed before each step, and passed to go, go test, and the containers. `CICD_MEM_CAP` sets the cap.
+	- Branch: cicd
+	- Test case: n/a: pipeline step.
+
+- CICD reset: standard flags
+	- ID: 2026111219111178
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Take the shared flags, so a round, a hook, or a hosted workflow never needs this project's own mix.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- `--quick`, `--long`, `--leakcheck`, `--no-leakcheck`, `--backlog-run-quick [area]`, `--backlog-run-full`, `--merge-gate`, `--no-container`, `--no-remote`, `--no-sync`, `--keep-temp`, `--list`, `--help`, and `--message`. `--gate` and `--ci` stay as other names.
+		- The three hands-off runs never sync, dogfood, publish, commit, push, or rewrite a tracked file. `cicd/hooks/pre-push` runs the merge gate on a push to main and skips it when only the paths in `cicd/docs-only-paths` change.
+		- Release binaries keep `amd64` in their names, since `update --self` reads that. The packages use each format's own arch names.
+	- Branch: cicd
+	- Test case: n/a: pipeline step. Watched to fail: a badly formatted file and a test with no ID each turned the gate red, and the hook was run against a docs-only range, a code range, a push to dev, and a failing gate.
+
+- CICD reset: step output
+	- ID: 2026111219111191
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Print each step as a rule, a Starting line, and a PASS, FAIL, or SKIP line with local timestamps, and list the turned-off steps first.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Done in `cicd.bash`, with a summary at the end and a skip shown as SKIP in both places.
+	- Branch: cicd
+	- Test case: n/a: pipeline step.
+
+- CICD reset: a test for every Done item
+	- ID: 2026111219111104
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Every Done feature and bug has a regression test in CI, or says why not.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Checked all Done items: each names its tests, and the one lint fix names none and says why. No test was missing.
+		- Every package's tests now run a goroutine leak check at exit, which failed when a goroutine was planted.
+	- Branch: cicd
+	- Test case: done: every Done item names its tests.
+
+- CICD reset: test IDs
+	- ID: 2026111219111117
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Every CI test has a unique ID, and the run prints one line per test with its status.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- IDs were already on every Go test. `cicd/utility/test-id.bash` now fails the lint step on a test with no ID, a bad one, or a repeat, and lists them for `--list`. The root host checks are read as well.
+		- The run prints `PASS|FAIL|SKIP <id> <name>` for each test.
+	- Branch: cicd
+	- Test case: n/a: pipeline step. Watched to fail: a planted test with no ID, a bad ID, and a repeat each reported.
+
+- CICD reset: version line
+	- ID: 2026111219111130
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- `--version` and `--about` show the build number, and a build that isn't a release adds its date.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Build number is the commit's minutes since 2000-01-01 UTC in lowercase Crockford base 32. The build stamps the commit time and a release flag; a plain `go build` reads the commit time Go recorded.
+		- A release is a build on main whose HEAD carries the version's tag.
+	- Branch: cicd
+	- Test case: df785 and df786
 
 - setup --adopt approves Geyser and Floodgate with no source
 	- ID: 2026111210364791
@@ -86,64 +514,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Acceptance signoff: Self-closed: df74x passes, per the standing close policy.
 	- Closed: 20261112-093323
 
-- Move shared code to tt-safeserver
-	- ID: 2026111111303242
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 20261111-113032
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
-	- Requirements:
-		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
-		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
-		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
-		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
-	- Decisions:
-		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
-		- GPL v2 or later.
-	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
-
-- Live server has the whitelist off while it's open to the internet
-	- ID: 2026111111065671
-	- Type: Bug
-	- Status: Queued
-	- Prereq IDs: 2026111111070787
-	- Severity: Critical
-	- Opened: 20261111-110656
-	- Opened by: t00mietum
-	- Incorrect behavior [Bug]:
-		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
-	- Expected behavior [Bug]:
-		- Only whitelisted players can join, Java and Bedrock both.
-	- Possible cause [Bug]:
-		- The old scripts never set it, and nothing checks it.
-	- Note:
-		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
-		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
-	- Progress log:
-		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
-		- 2026-11-12: Got the list, 1 Java and 1 Bedrock player, kept in the private notes. The console commands are written up. Waits on them being run on the live server, and on a check of Geyser's `auth-type` there, which decides `fwhitelist` or `whitelist` for the Bedrock player.
-		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
-		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
-
-- update
-	- ID: 2026111111065803
-	- Type: Feature
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
-	- Requirements:
-		- Update the tool from GitHub releases.
-		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
-		- Update plugins that have a known source, and approve the new jars.
-		- Refresh the pinned container image.
-	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
-	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) and 2026111117404480 (Modrinth and Hangar sources) are queued.
-
 - Commands fail for the operator until a new login after setup
 	- ID: 2026111207565307
 	- Type: Bug
@@ -171,18 +541,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df68g, df68h, df68j
 	- Acceptance signoff: Self-closed: df68j passed in the root host check on b23.
 	- Closed: 20261112-092846
-
-- update --mc-version
-	- ID: 2026111117302963
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-173029
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Prereq IDs: 2026111112264283
-	- Requirements:
-		- `--mc-version V` moves Paper to another Minecraft version, per design.md: a yes even with `--yes`, and a ZFS snapshot first.
 
 - update --self
 	- ID: 2026111117302995
@@ -245,124 +603,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df77n, df77p, df77q, df77r, df780, df781, df782, df783, df784
 	- Acceptance signoff: Self-closed: df780 to df784 pass in the root host check with `--zfs`, per the standing close policy.
 	- Closed: 20261112-111928
-
-- Start at boot
-	- ID: 2026111111065816
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065763
-	- Requirements:
-		- Add `startAtBoot` to the config, and a systemd unit that runs `start --foreground`, per `design.md`.
-		- `start` and `stop` go through `systemctl` when the unit is enabled.
-		- `setup` and `repair` install or remove the unit to match the config.
-
-- Bedrock LAN discovery
-	- ID: 2026111111065829
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711 2026111113015461
-	- Requirements:
-		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
-		- Fix `how-to-connect.md` if they don't.
-	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
-	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
-	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
-
-- NixOS module
-	- ID: 2026111111065855
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Add a flake with a NixOS module for the account, Docker, the config file, the firewall unit, and the boot unit.
-		- On NixOS, `setup`, `repair`, and `update` check the system parts and print module settings, rather than change them.
-	- 2026-11-12: Run modes now take Podman (default), Docker, or native, so the Docker lines here mean Podman or Docker.
-
-- CI/CD pipeline
-	- ID: 2026111111065868
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Requirements:
-		- A CI/CD pipeline kicked off by a bash script (`cicd/cicd.bash`). It builds, tests, and can commit and push. Packaging and publishing are opt-in.
-
-- Release-install script
-	- ID: 2026111111070761
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868
-	- Requirements:
-		- Runnable via a single `curl` or `wget`, and documented under "how to install".
-		- Downloads, installs, and runs the latest release, with an option to abort.
-	- Target OS: Debian, NixOS
-	- Decisions:
-		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
-	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
-
-- First release
-	- ID: 2026111111070774
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868, 2026111111070761
-	- Requirements:
-		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
-	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
-
-- Move the first server over
-	- ID: 2026111111070787
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Move the existing server to the new account and tool with `setup --adopt`.
-		- Approve the plugins that are there now.
-		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
-		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
-		- Retire the old start, stop, and manage scripts after it runs clean.
-
-- Connect the service to an AI agent to update the game programs and add-ons
-	- ID: 2026111207010610
-	- Type: Feature
-	- Status: Started
-	- Priority: High
-	- Opened: 20261112-070106
-	- Opened by: t00mietum
-	- Requirements:
-		- Ability to connect the service to an AI agent, for the purpose of updating the game programs and add-ons, which would otherwise be very brittle if hard-coded.
-		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
-	- Note:
-		- Pre-next-cut.
-	- Progress log:
-		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
-		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is queued.
-	- Decisions:
-		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
-		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
-		- Kinds: `openai` (cloud hosts and local servers), `anthropic`, and `command` (subscription CLIs), since those cover nearly every agent.
-		- It runs as the operator, before `update` runs itself through sudo. A run that starts as root skips it with a note.
-		- The API key comes from the operator's environment, never the config, which everyone can read.
-		- `--yes` doesn't cover a jar the agent found, the same as `--mc-version`.
-		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
 
 - Update agent: config keys, answer format, and the command kind
 	- ID: 2026111210033639
@@ -460,20 +700,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1112b
 	- Test case: df76h, df76j, df76k, df76m, df76n (root host)
 	- Closed: 20261112-103705
-
-- Update agent: Paper fallback and the --mc-version report
-	- ID: 2026111210034308
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261112-100343
-	- Opened by:
-	- Parent ID: 2026111207010610
-	- Prereq IDs: 2026111210034298 2026111117302963
-	- Requirements:
-		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
-		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
-	- Estimated effort: Avg
 
 - cmd sometimes misses its answer right after a start
 	- ID: 2026111207565308
@@ -582,33 +808,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df5z2
 	- Acceptance signoff: Self-closed: df5z2 passes, per the standing close policy.
 	- Closed: 20261112-135900
-
-- update --plugins: Modrinth and Hangar sources
-	- ID: 2026111117404480
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261111-174044
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Prereq IDs: 2026111117302973
-	- Requirements:
-		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
-
-- Dev-environment install script
-	- ID: 2026111111070800
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261111-110708
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868
-	- Requirements:
-		- Runnable via a single `curl` or `wget`, and documented under "how to develop".
-		- Clones main, installs dependencies, and states what it will do, with an option to abort.
-	- Target OS: Debian, NixOS
-	- Decisions:
-		- It's Bash only, since both targets are Linux.
 
 - setup's apt install fails on a fresh host
 	- ID: 2026111207565300

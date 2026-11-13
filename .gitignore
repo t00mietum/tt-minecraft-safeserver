@@ -1,0 +1,16 @@
+## CICD run artifacts (logs, lint output, release builds) - local only
+cicd/artifacts/
+
+## What an OS or an editor drops beside the files it touches.
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+## go test's compiled test binaries and profiles.
+*.test
+*.out

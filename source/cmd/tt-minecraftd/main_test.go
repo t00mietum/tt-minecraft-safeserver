@@ -113,7 +113,7 @@ func TestHelpAboutVersion(t *testing.T) {
 		{[]string{"stop", "--help"}, []string{"--warn N", "--dry-run "}},
 		{[]string{"watch", "--help"}, []string{"--interval N"}},
 		{[]string{"--about"}, []string{"GPL v2 or later"}},
-		{[]string{"--version"}, []string{"tt-minecraftd " + version + " (build "}},
+		{[]string{"--version"}, []string{"tt-minecraftd " + version + " build "}},
 	} {
 		code, out, errOut := runArgs(c.args...)
 		if code != exitOK || errOut != "" {
@@ -597,5 +597,38 @@ func TestUpdateAgent(t *testing.T) {
 
 	if _, out, _ := runArgs("update", "--help"); strings.Contains(out, "agent-answer") {
 		t.Errorf("help shows the hand-off flag: %q", out)
+	}
+}
+
+func TestBuildNumber(t *testing.T) {
+	defer testid.Line(t, "df785")
+	for _, c := range []struct {
+		at   time.Time
+		want string
+	}{
+		// The example in the CICD rules: 2026-10-24 22:00 UTC.
+		{time.Date(2026, 10, 24, 22, 0, 0, 0, time.UTC), "decp8"},
+		{time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), "0"},
+		{time.Date(2000, 1, 1, 0, 31, 59, 0, time.UTC), "z"},
+		{time.Date(2000, 1, 1, 0, 32, 0, 0, time.UTC), "10"},
+	} {
+		if got := buildNumber(c.at); got != c.want {
+			t.Errorf("buildNumber(%v) = %q, want %q", c.at, got, c.want)
+		}
+	}
+}
+
+func TestVersionLine(t *testing.T) {
+	defer testid.Line(t, "df786")
+	at := time.Date(2026, 10, 24, 22, 0, 0, 0, time.UTC)
+	date := at.Local().Format("2006-01-02")
+	if got, want := versionLine(at, true, false), "tt-minecraftd "+version+" build decp8 ("+date+")"; got != want {
+		t.Errorf("a non-release build: %q, want %q", got, want)
+	}
+	if got, want := versionLine(at, true, true), "tt-minecraftd "+version+" build decp8"; got != want {
+		t.Errorf("a release build: %q, want %q", got, want)
+	}
+	if got, want := versionLine(time.Time{}, false, false), "tt-minecraftd "+version+" build unknown"; got != want {
+		t.Errorf("no commit time: %q, want %q", got, want)
 	}
 }

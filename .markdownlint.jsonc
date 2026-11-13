@@ -1,0 +1,10 @@
+{
+	// House style: prose never hard-wraps; one paragraph or bullet = one physical line.
+	"MD013": false,
+	// House style: tabs for indentation.
+	"MD010": false,
+	// Tab indentation makes ul-indent column counts meaningless.
+	"MD007": false,
+	// Keep a Changelog repeats Added/Changed/Fixed under every version; only clashes within one section are real.
+	"MD024": { "siblings_only": true }
+}

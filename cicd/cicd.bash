@@ -1,0 +1,683 @@
+#!/usr/bin/env bash
+
+#  shellcheck disable=1091  ## 'source is valid here, but shellcheck doesn't know the path to it.'
+#  shellcheck disable=2034  ## 'variable appears unused.' Complains about valid use of variable indirection (e.g. local -n var=$1)
+#  shellcheck disable=2153  ## 'Possible misspelling.' False hits on vars assigned in the sourced config.bash.
+#  shellcheck disable=2154  ## 'referenced but not assigned.' False hits on vars assigned in the sourced files.
+#  shellcheck disable=2155  ## 'Declare and assign separately to avoid masking return values.' Cumbersome and unnecessary.
+#  shellcheck enable=require-variable-braces  ## Every expansion braced: "${var}", not "$var".
+
+##	- Purpose: Local CI/CD pipeline for tt-minecraft-safeserver. Project settings live in config.bash.
+##	- Steps (fail-fast, any error aborts before the next step):
+##	   remote sync, format, lint, tests, race tests, vulnerability scan, release builds, packages,
+##	   root host checks, root host ZFS checks, dogfood, publish
+##	- Syntax:
+##	  cicd/cicd.bash [options]
+##	  Options:
+##	   -q, --quiet         quiet + unattended (no prompt)
+##	   -m, --message MSG   commit message for the publish stage (also --msg, and -m=MSG)
+##	   (no flags)          the default run: every step above
+##	   --quick             what fits in about 10 minutes: no race tests, vulnerability scan, packages
+##	                       or root host checks. Ends with dogfood and publish.
+##	   --long              everything. Nothing here takes hours yet, so the same as no flags.
+##	       --slow          alias for --long
+##	   --leakcheck         add every leak check to the run, race tests included
+##	   --no-leakcheck      take every leak check out: race tests, and the goroutine check in the tests
+##	   --backlog-run-quick [AREA...]
+##	                       what a backlog worker runs before it commits, in one call of about 4 minutes:
+##	                       format check, lint and tests, or only the areas named. Areas are the
+##	                       folders under source/internal, and cli for the command.
+##	   --backlog-run-full  what a backlog round runs once at its end: every check of the default run
+##	   --merge-gate        the same checks, before a merge to main. Runs from the pre-push hook.
+##	   --gate [AREA...]    alias for --backlog-run-quick
+##	       --ci            alias for --merge-gate
+##	                       None of those three dogfoods, publishes, commits, pushes, installs, syncs,
+##	                       prompts, or rewrites a tracked file.
+##	   --no-container      run on this box rather than in the build container
+##	   --no-remote         skip other hosts and VMs (none are used yet)
+##	   --no-sync           skip the remote sync
+##	   --no-<step>         skip one step: format, lint, test, race, vuln, build, package, roothost,
+##	                       rootzfs, dogfood, publish
+##	   --keep-temp         keep the run's temp folder and containers, and say where they are
+##	   --list              print the steps and test IDs the other options would run, and run nothing
+##	   --lint-check        print only run output that wasn't seen before, then mark it seen. For the
+##	                       startup ritual. Exit 2 when there is no log yet.
+##	   -h, --help          show this help
+##	- If neither -q nor -m is given, the run prompts once for a commit message (Ctrl+C aborts the
+##	  whole run), then finishes unattended.
+##	- CICD_DOGFOOD_DEST names another dogfood folder, for a test.
+##	- CICD_MEM_CAP caps the run's memory, with no swap: a size such as 24g, or none.
+##	  The default is a third of RAM, from 4g to 32g.
+##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
+##	  A merge gate or full run that includes them goes past one 10-minute call, so start it detached.
+
+##	History: At bottom of script.
+
+##	Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+##	Licensed under the GNU General Public License v2.0 or later. Full text at:
+##		https://spdx.org/licenses/GPL-2.0-or-later.html
+##	SPDX-License-Identifier: GPL-2.0-or-later
+
+
+if (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] < 404 )); then
+	printf '%s\n' "${0##*/}: needs bash 4.4 or newer, and this is bash ${BASH_VERSION}." >&2; exit 1
+fi
+set -Eeuo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "${here}/.." && pwd)"
+source "${here}/config.bash"
+[[ -z "${CICD_DOGFOOD_DEST:-}" ]] || DOGFOOD_DESTS=("${CICD_DOGFOOD_DEST}")  ## another folder, for a test
+source "${here}/utility/include/gfs-rotate.bash"
+source "${here}/utility/include/safe-rm.bash"
+## A memory cap with no swap, CICD_MEM_CAP or a third of the RAM from 4g to 32g, checked before
+## anything starts. The whole run goes again under a user scope at the cap, once, first in line
+## for the OOM killer. A step killed at the cap exits 137.
+source "${here}/utility/include/mem-cap.bash"
+fMemCap || exit 2
+fMemScope "${here}/${BASH_SOURCE[0]##*/}" "$@"
+fLowPriority
+cd "${root}"
+stamp="$(date +%Y%m%d-%H%M%S)"
+
+## printf, not 'echo -e': a typed commit message passes through here.
+declare -i __wasLastEchoBlank=0
+fEcho_ResetBlankCounter(){ __wasLastEchoBlank=0; }
+fEcho_Clean(){
+	if [[ -n "${1:-}" ]]; then printf '%s\n' "$*"; __wasLastEchoBlank=0
+	elif ((! __wasLastEchoBlank)); then echo; __wasLastEchoBlank=1; fi
+}
+fEcho(){       if [[ -n "$*"     ]]; then fEcho_Clean "[ $* ]"; else fEcho_Clean ""; fi; }
+fEcho_Force(){ fEcho_ResetBlankCounter; fEcho "$*"; }
+__letterbox="•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"
+fSection(){ fCpuBudget; fEcho_Clean; fEcho_Clean "${__letterbox}"; fEcho "$*"; }
+fDie(){ { fEcho_Force "FAILED: $*"; } >&2; exit 1; }
+fUsage(){ fEcho_Clean "$*" >&2; exit 2; }
+
+declare -A stepTitle=(
+	[sync]="Remote sync" [format]="Format" [lint]="Lint" [test]="Tests" [race]="Race tests"
+	[vuln]="Vulnerability scan" [build]="Release builds" [package]="Packages"
+	[roothost]="Root host checks" [rootzfs]="Root host ZFS checks" [dogfood]="Dogfood" [publish]="Publish"
+)
+allSteps=(sync format lint test race vuln build package roothost rootzfs dogfood publish)
+stepList=(); stepTotal=0; stepName=""; stepWhere=""; stepSkip=""
+declare -A stepOff=() stepResult=()
+fStepTime(){
+	if [[ "${EPOCHREALTIME:-}" =~ ^([0-9]+)[.,]([0-9]{2}) ]]; then printf '%(%Y%m%d-%H%M%S)T.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+	else printf '%(%Y%m%d-%H%M%S)T.00' -1; fi
+}
+fStepOf(){ local i; for i in "${!stepList[@]}"; do [[ "${stepList[i]}" != "$1" ]] || { printf 'Step %s of %s' "$((i + 1))" "${stepTotal}"; return 0; }; done ;}
+fStep(){ stepSkip=""; stepName="${stepTitle[$1]:-$1}"; stepWhere="$(fStepOf "$1")"; stepNow="$1"; fSection "$(fStepTime): ${stepWhere}; Starting ${stepName}" ;}
+## PASS, SKIP, or FAIL from the exit trap for a step a failure left open.
+fStepEnd(){
+	local r="${1:-PASS}"
+	[[ -n "${stepName}" ]] || return 0
+	[[ -z "${stepSkip}" ]] || r=SKIP
+	fEcho "$(fStepTime): ${stepWhere}; ${r} ${stepName}"
+	stepResult["${stepNow}"]="${r}${stepSkip:+ (${stepSkip})}"
+	stepName=""
+}
+## A step that can't run here. The run goes on, and the summary says why.
+fSkip(){ stepSkip="$*"; fEcho_Clean "SKIP: $*"; }
+
+mode=default; message=""; quiet=0; leakOpt=""; noContainer=0; noRemote=0; keepTemp=0; listOnly=0; lintCheck=0
+gateAreas=(); aliasNote=""; modeOpts=()
+while (($#)); do case "$1" in
+	-q|--quiet)         quiet=1; shift ;;
+	--quick)            modeOpts+=(quick); shift ;;
+	--long|--slow)      modeOpts+=(long); shift ;;
+	--leakcheck|--no-leakcheck)
+		[[ -z "${leakOpt}" || "${leakOpt}" == "$1" ]] || fUsage "--leakcheck and --no-leakcheck are opposites; give one."
+		leakOpt="$1"; shift ;;
+	--no-container)     noContainer=1; shift ;;
+	--no-remote)        noRemote=1; shift ;;
+	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-vuln|--no-build|--no-package|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
+		stepOff["${1#--no-}"]="skipped by $1"; shift ;;
+	--message=*|--msg=*|-m=*) message="${1#*=}"; shift ;;
+	-m|--message|--msg) message="${2-}"; shift; (($#)) && shift ;;
+	--backlog-run-quick|--gate)
+		[[ "$1" == --gate ]] && aliasNote="--gate is another name for --backlog-run-quick"
+		modeOpts+=(gate); shift
+		while (($#)) && [[ "$1" != -* ]]; do gateAreas+=("$1"); shift; done ;;
+	--backlog-run-full) modeOpts+=(full); shift ;;
+	--merge-gate|--ci)
+		[[ "$1" == --ci ]] && aliasNote="--ci is another name for --merge-gate"
+		modeOpts+=(merge); shift ;;
+	--keep-temp)        keepTemp=1; shift ;;
+	--list)             listOnly=1; shift ;;
+	--lint-check)       lintCheck=1; shift ;;
+	-h|--help)          sed -n '/^##	- Purpose:/,/^##	History:/p' "${BASH_SOURCE[0]}" | sed '$d; s/^##	\{0,1\}//'; exit 0 ;;
+	*) fUsage "unknown option: ${1} (try --help)" ;;
+esac; done
+
+if ((lintCheck)); then exec "${here}/utility/lint-report.bash" --check; fi
+
+if ((${#modeOpts[@]})); then
+	mode="${modeOpts[0]}"
+	for m in "${modeOpts[@]}"; do [[ "${m}" == "${mode}" ]] || fUsage "${mode} and ${m} are separate runs; give one."; done
+fi
+handsOff=0; [[ "${mode}" == gate || "${mode}" == full || "${mode}" == merge ]] && handsOff=1
+if ((handsOff)) && [[ -n "${message}" ]]; then fUsage "--${mode} never publishes, so it takes no --message."; fi
+[[ -z "${aliasNote}" ]] || { fEcho_Clean; fEcho_Clean "${aliasNote}"; }
+
+areaDirs=()
+if [[ "${mode}" == gate ]]; then
+	gateAreasAll=(cli); for d in "${root}"/source/internal/*/; do gateAreasAll+=("$(basename "${d}")"); done
+	for a in "${gateAreas[@]:-}"; do
+		[[ -z "${a}" ]] && continue
+		[[ " ${gateAreasAll[*]} " == *" ${a} "* ]] || fUsage "--backlog-run-quick: no area '${a}'. Areas: ${gateAreasAll[*]}"
+		if [[ "${a}" == cli ]]; then areaDirs+=("./${CLI_AREA_DIR}/..."); else areaDirs+=("./source/internal/${a}/..."); fi
+	done
+fi
+pkgs=("./...")
+((${#areaDirs[@]})) && pkgs=("${areaDirs[@]}")
+
+## Which steps this mode runs, and why the rest don't.
+declare -A modeSteps=(
+	[default]="sync format lint test race vuln build package roothost rootzfs dogfood publish"
+	[long]="sync format lint test race vuln build package roothost rootzfs dogfood publish"
+	[quick]="sync format lint test build dogfood publish"
+	[gate]="format lint test"
+	[full]="format lint test race vuln build package roothost rootzfs"
+	[merge]="format lint test race vuln build package roothost rootzfs"
+)
+[[ "${leakOpt}" != --leakcheck ]] || modeSteps[${mode}]="${modeSteps[${mode}]/race/} race"
+[[ "${leakOpt}" != --no-leakcheck ]] || stepOff[race]="skipped by --no-leakcheck"
+for s in "${allSteps[@]}"; do
+	if [[ -n "${stepOff[${s}]:-}" ]]; then continue
+	elif [[ " ${modeSteps[${mode}]} " == *" ${s} "* ]]; then stepList+=("${s}")
+	else stepOff["${s}"]="not part of the ${mode} run"; fi
+done
+## Keep the pipeline's own order, whatever order --leakcheck added a step in.
+ordered=(); for s in "${allSteps[@]}"; do [[ " ${stepList[*]} " != *" ${s} "* ]] || ordered+=("${s}"); done
+stepList=("${ordered[@]}")
+stepTotal="${#stepList[@]}"
+
+## One folder for the run's temp files, ${HOST_TEMP}/<app>/<start time>_<NNN>. TMPDIR, TEMP and TMP point
+## into it. Its run.pid marks it as a run's, and is checked again before removal.
+runTmp=""; runName=""; runRoot=""; runRe='^[0-9]{8}-[0-9]{6}_[0-9]{3}$'
+tidyGone=(); declare -i tidyFreed=0
+useContainer=0; ctrImage=""; ctrCacheVol="${APP_NAME}-go-cache"; ctrFailed=0
+dockerBefore=""
+## Apparent size: what ZFS reports on disk is compressed, and lags fresh writes.
+fDirBytes(){ local out=""; out="$(du -sbx -- "$1" 2>/dev/null)" || out=0; echo "${out%%[[:space:]]*}" ;}
+## The project's own run folders over 2 days old, whose run is gone.
+fSweepRuns(){
+	local d pid size
+	local -i nStale=0
+	while IFS= read -r d; do
+		[[ "${d##*/}" =~ ${runRe} && "${d}" != "${runTmp}" && -f "${d}/run.pid" && ! -L "${d}" ]] || continue
+		pid=""; read -r pid < "${d}/run.pid" || true
+		if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then continue; fi
+		size="$(fDirBytes "${d}")"
+		if fSafeRm "${d}" >/dev/null; then nStale+=1; tidyFreed+=size; fi
+	done < <(find "${runRoot}" -mindepth 1 -maxdepth 1 -type d -mtime +1 2>/dev/null || true)
+	((nStale == 0)) || tidyGone+=("${nStale} stale run folder(s)")
+}
+## Containers by this run's label, then what the pipeline's images left behind. Never docker's build
+## cache, never anything without the project's label, never rmi -f.
+fCtrCleanup(){
+	local ids="" id repo n
+	command -v docker >/dev/null 2>&1 || return 0
+	docker info >/dev/null 2>&1 || return 0
+	if ((! keepTemp)); then
+		ids="$(docker ps -aq --filter "label=dev.run=${runName}" 2>/dev/null || true)"
+		if [[ -n "${ids}" ]]; then
+			# shellcheck disable=SC2086 # one ID per word
+			docker stop -t 20 ${ids} >/dev/null 2>&1 || true
+			# shellcheck disable=SC2086
+			docker rm ${ids} >/dev/null 2>&1 || true
+			tidyGone+=("$(wc -w <<< "${ids}") container(s)")
+		fi
+		ids="$(docker images -q --filter dangling=true --filter "label=dev.project=${APP_NAME}" 2>/dev/null || true)"
+		for id in ${ids}; do docker rmi "${id}" >/dev/null 2>&1 && tidyGone+=("a dangling image"); done
+		## Keep the current tag and the one before it, of each image the pipeline makes.
+		for repo in "${APP_NAME}-cicd" "${APP_NAME}-root-host"; do
+			n=0
+			while read -r id; do
+				n=$((n + 1)); ((n > 2)) || continue
+				docker rmi "${id}" >/dev/null 2>&1 && tidyGone+=("an old ${repo} image")
+			done < <(docker images --filter "label=dev.project=${APP_NAME}" --filter "reference=${repo}" --format '{{.CreatedAt}}|{{.ID}}' 2>/dev/null | sort -r | cut -d'|' -f2)
+		done
+	else
+		fEcho_Clean "Kept containers and images, by label dev.run=${runName}"
+	fi
+	## The Go cache volume stays between runs for speed, and is emptied whole when over 2 GB.
+	if [[ -n "${ctrImage}" ]] && docker volume inspect "${ctrCacheVol}" >/dev/null 2>&1; then
+		local mb
+		mb="$(docker run --rm --user "$(id -u):$(id -g)" -v "${ctrCacheVol}:/cache" "${ctrImage}" du -sm /cache 2>/dev/null | cut -f1 || echo 0)"
+		if [[ "${mb}" =~ ^[0-9]+$ ]] && ((mb > 2048)); then
+			docker run --rm --user "$(id -u):$(id -g)" -v "${ctrCacheVol}:/cache" "${ctrImage}" sh -c 'chmod -R u+w /cache; find /cache -mindepth 1 -delete' >/dev/null 2>&1 \
+				&& tidyGone+=("the Go cache volume (${mb} MB)")
+		fi
+	fi
+}
+fRunTmpDone(){
+	local rc="${1:-0}" size="" list="" after=""
+	((rc == 0)) || fStepEnd FAIL
+	[[ -n "${runTmp}" ]] || return 0
+	trap '' INT TERM
+	fCtrCleanup || true
+	if ((keepTemp)); then fEcho_Clean; fEcho_Clean "Kept the temp folder: ${runTmp}"; fEcho_Clean; fi
+	if ((! keepTemp)) && [[ "${runName}" =~ ${runRe} && -f "${runTmp}/run.pid" ]]; then
+		size="$(fDirBytes "${runTmp}")"
+		if fSafeRm "${runTmp}" >/dev/null; then tidyGone+=("the run folder"); tidyFreed+=size; fi
+	fi
+	if ((! ${#tidyGone[@]})); then fEcho_Clean "Cleanup: nothing to remove"; fEcho_Clean; return 0; fi
+	printf -v list '%s, ' "${tidyGone[@]}"
+	fEcho_Clean "Cleanup: removed ${list%, }; freed about $(numfmt --to=si --suffix=B "${tidyFreed}" 2>/dev/null || echo "${tidyFreed} bytes") of files"
+	if [[ -n "${dockerBefore}" ]] && command -v docker >/dev/null 2>&1; then
+		after="$(docker system df --format '{{.Type}} {{.Size}}' 2>/dev/null | tr '\n' ';' || true)"
+		fEcho_Clean "Docker: before ${dockerBefore%;}"
+		fEcho_Clean "        after  ${after%;}"
+	fi
+	fEcho_Clean
+}
+if ((! listOnly)); then
+	## Once, so every path under it is spelled the same.
+	HOST_TEMP="$(realpath -e -- "${HOST_TEMP:-${TMPDIR:-/tmp}}")" || fDie "no temp folder at ${HOST_TEMP:-${TMPDIR:-/tmp}}"
+	export HOST_TEMP
+	runRoot="${HOST_TEMP}/${APP_NAME}"
+	mkdir -p -- "${runRoot}" || fDie "can't make ${runRoot}"
+	## A plain mkdir, so a name another run took fails and the counter goes on.
+	for ((runSeq = 1; runSeq < 1000; runSeq++)); do
+		printf -v runTmp '%s/%s_%03d' "${runRoot}" "${stamp}" "${runSeq}"
+		mkdir -- "${runTmp}" 2>/dev/null && break
+		runTmp=""
+	done
+	[[ -n "${runTmp}" ]] || fDie "can't make a run folder in ${runRoot}"
+	runName="${runTmp##*/}"
+	echo "$$" > "${runTmp}/run.pid"
+	trap 'fRunTmpDone "$?"' EXIT
+	trap 'exit 130' INT; trap 'exit 143' TERM
+	export TMPDIR="${runTmp}" TEMP="${runTmp}" TMP="${runTmp}"
+	fSweepRuns
+fi
+trap 'rc=$?; printf "\n[ CICD ABORTED (exit %s) at line %s: %s ]\n" "${rc}" "${LINENO}" "${BASH_COMMAND}" >&2; exit "${rc}"' ERR
+
+publishMsg=""
+if   [[ -n "${message}" ]]; then publishMsg="${message}"
+elif ((quiet));             then publishMsg="${APP_NAME} CI/CD ${stamp}"
+fi
+
+fGlobFiles(){ ## OUT_ARRAY GLOB...
+	local -n out_gF="$1"; shift
+	local g f hadNullglob=0
+	out_gF=()
+	shopt -q nullglob && hadNullglob=1; shopt -s nullglob
+	for g in "$@"; do for f in ${g}; do [[ -f "${f}" ]] && out_gF+=("${f}"); done; done
+	((hadNullglob)) || shopt -u nullglob
+}
+fGlobFiles shellFiles "${SHELL_LINT_GLOBS[@]}"
+fGlobFiles mdFiles "${MD_LINT_GLOBS[@]}"
+
+## The version, read from its one place.
+goVersion="$(sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1)"
+[[ -n "${goVersion}" ]] || fDie "no version in ${VERSION_FILE}"
+fCommitEpoch(){ git log -1 --format=%ct 2>/dev/null || echo 0 ;}
+fIsRelease(){ [[ "$(git branch --show-current 2>/dev/null)" == main && "$(git describe --exact-match --tags HEAD 2>/dev/null || true)" == "${goVersion}" ]] && echo 1 || echo 0 ;}
+
+## A host tool by name: on PATH, or where go install puts it.
+fHostTool(){ local f="" d
+	f="$(command -v "$1" 2>/dev/null || true)"
+	for d in "${HOME}/go/bin/bin" "${HOME}/.go/bin" "${HOME}/go/bin"; do [[ -n "${f}" || ! -x "${d}/$1" ]] || f="${d}/$1"; done
+	echo "${f}"
+}
+
+## The container. Built once per recipe, from cicd/container, with the pinned versions as build args.
+fCtrSetup(){
+	local tag
+	((! noContainer)) || { fEcho_Clean "Container: off (--no-container), running on this box"; return 0; }
+	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fEcho_Clean "Container: no docker here, running on this box"; return 0; fi
+	tag="${APP_NAME}-cicd:$({ cat "${here}/container/Dockerfile"; grep -E '^(GO_IMAGE|STATICCHECK_VERSION|GOVULNCHECK_VERSION|GOSEC_VERSION|NFPM_VERSION)=' "${here}/config.bash"; } | sha256sum | cut -c1-12)"
+	if ! docker image inspect "${tag}" >/dev/null 2>&1; then
+		fEcho_Clean "Container: building ${tag}"
+		if ! nice -n 19 docker build -q --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" \
+			--build-arg "GO_IMAGE=${GO_IMAGE}" --build-arg "STATICCHECK_VERSION=${STATICCHECK_VERSION}" --build-arg "GOVULNCHECK_VERSION=${GOVULNCHECK_VERSION}" \
+			--build-arg "GOSEC_VERSION=${GOSEC_VERSION}" --build-arg "NFPM_VERSION=${NFPM_VERSION}" -t "${tag}" "${here}/container" >/dev/null; then
+			fEcho_Clean "Container: the image would not build, running on this box"; return 0
+		fi
+	fi
+	if ! docker volume inspect "${ctrCacheVol}" >/dev/null 2>&1; then
+		docker volume create --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" "${ctrCacheVol}" >/dev/null
+		docker run --rm --user 0 -v "${ctrCacheVol}:/cache" "${tag}" chmod 1777 /cache
+	fi
+	ctrImage="${tag}"; useContainer=1
+	dockerBefore="$(docker system df --format '{{.Type}} {{.Size}}' 2>/dev/null | tr '\n' ';' || true)"
+	fEcho_Clean "Container: ${tag}"
+}
+## fGo STEP [VAR=value...] -- command...: a Go tool, in the container or on this box, from the repo root.
+fGo(){
+	local step="$1" envs=() memArgs=() jobs="${BUILD_JOBS}" e
+	shift
+	while (($#)) && [[ "$1" != -- ]]; do envs+=("$1"); shift; done
+	shift
+	for e in "${envs[@]:-}"; do [[ "${e}" != HEAVY=1 ]] || jobs="${HEAVY_JOBS}"; done
+	if ((useContainer)); then
+		fMemCtrArgs memArgs
+		local envArgs=() w
+		for w in "${envs[@]:-}"; do [[ -z "${w}" || "${w}" == HEAVY=1 ]] || envArgs+=(-e "${w}"); done
+		docker run --rm --name "${APP_NAME}-${runName}-${step}" --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" \
+			"${memArgs[@]}" --cpus "${jobs}" --cpu-shares 256 --user "$(id -u):$(id -g)" \
+			-e HOME=/cache/home -e GOCACHE=/cache/gocache -e GOMODCACHE=/cache/gomod -e "GOMAXPROCS=${jobs}" \
+			"${envArgs[@]}" -v "${ctrCacheVol}:/cache" -v "${root}:/src:ro" -v "${runTmp}:${runTmp}" \
+			-v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro -w /src \
+			"${ctrImage}" nice -n 19 "$@"
+	else
+		( for w in "${envs[@]:-}"; do [[ -z "${w}" || "${w}" == HEAVY=1 ]] || export "${w?}"; done
+		  export GOMAXPROCS="${jobs}" GOFLAGS="${GOFLAGS:+${GOFLAGS} }-buildvcs=false"
+		  cmd="$1"; shift
+		  case "${cmd}" in
+			staticcheck|gosec|govulncheck|nfpm) cmd="$(fHostTool "${cmd}")"; [[ -n "${cmd}" ]] || { echo "not installed: $1" >&2; exit 127; } ;;
+		  esac
+		  "${cmd}" "$@" )
+	fi
+}
+## Go packages, as the arguments for a tool: all of them, or the named areas.
+fPkgs(){ printf '%s\n' "${pkgs[@]}"; }
+
+lintLog=""
+fLintOut(){ if [[ -n "${lintLog}" ]]; then tee -a "${lintLog}"; else cat; fi; }
+
+fStepSync(){
+	if ! git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+		fEcho_Clean "no upstream for this branch - nothing to sync"
+	elif ! git fetch --quiet 2>/dev/null; then
+		fEcho_Clean "WARNING: can't reach origin - building without refreshing"
+	else
+		local counts behind ahead
+		counts="$(git rev-list --left-right --count '@{u}...HEAD' 2>/dev/null || printf '0\t0')"
+		behind="${counts%%[[:space:]]*}"; ahead="${counts##*[[:space:]]}"
+		if   ((behind == 0)); then fEcho_Clean "up to date with origin (${ahead} to publish)"
+		elif ((ahead > 0)); then
+			## Diverged: merge when it merges cleanly, otherwise put the tree back and stop.
+			fEcho_Clean "diverged (${ahead} local, ${behind} remote); merging upstream with --no-ff"
+			git merge --no-ff --no-edit --autostash '@{u}' >/dev/null 2>&1 || { git merge --abort >/dev/null 2>&1 || true; fDie "upstream doesn't merge cleanly; reconcile before building"; }
+		else
+			fEcho_Clean "fast-forwarding ${behind} commit(s) from origin"
+			git merge --ff-only --autostash '@{u}' || fDie "fast-forward from origin failed"
+		fi
+	fi
+	## Read after the sync, which can move HEAD.
+	goVersion="$(sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1)"
+}
+
+formatChanged=()
+fStepFormat(){
+	local bad
+	bad="$(gofmt -l source 2>/dev/null || true)"
+	if [[ -z "${bad}" ]]; then fEcho_Clean "gofmt: clean"; return 0; fi
+	if ((handsOff)) || [[ "${mode}" == gate ]]; then
+		printf '%s\n' "${bad}"; fDie "gofmt wants to reformat the files above"
+	fi
+	## A run that publishes may reformat, and records which files it touched so publish adds only those.
+	local f
+	while IFS= read -r f; do gofmt -w "${f}"; formatChanged+=("${f}"); done <<< "${bad}"
+	fEcho_Clean "gofmt: reformatted ${#formatChanged[@]} file(s)"
+}
+
+fStepLint(){
+	local f drift=() spec have
+	if [[ -n "${LINT_LOG_DIR:-}" ]]; then lintLog="${root}/${LINT_LOG_DIR}/lint_${stamp}.txt"; fi
+	for f in "${shellFiles[@]}"; do bash -n "${f}" || fDie "syntax error: ${f}"; done
+	fEcho_Clean "bash -n: ${#shellFiles[@]} file(s)"
+	fGo lint -- go vet "${pkgs[@]}" 2>&1 | fLintOut || fDie "go vet findings"
+	fEcho_Clean "go vet: clean"
+	fGo lint -- staticcheck "${pkgs[@]}" 2>&1 | fLintOut || fDie "staticcheck findings"
+	fEcho_Clean "staticcheck: clean"
+	fGo lint -- gosec -quiet "${pkgs[@]}" 2>&1 | fLintOut || fDie "gosec findings"
+	fEcho_Clean "gosec: clean"
+	if ((${#areaDirs[@]})); then return 0; fi
+	if command -v shellcheck >/dev/null 2>&1; then
+		shellcheck "${shellFiles[@]}" 2>&1 | fLintOut || fDie "shellcheck findings"
+		fEcho_Clean "shellcheck: clean"
+	else fEcho "WARNING: shellcheck skipped (not installed)"; fi
+	if command -v markdownlint >/dev/null 2>&1; then
+		markdownlint "${mdFiles[@]}" 2>&1 | fLintOut || fDie "markdownlint findings"
+		fEcho_Clean "markdownlint: clean (${#mdFiles[@]} file(s))"
+	else fEcho "WARNING: markdownlint skipped (not installed)"; fi
+	"${here}/utility/test-id.bash" --check -q || fDie "test IDs (see above)"
+	fEcho_Clean "test IDs: every test has its own"
+	for spec in "${TOOL_VERSIONS[@]}"; do
+		case "${spec%%=*}" in
+			shellcheck)   have="$(shellcheck --version 2>/dev/null | awk '$1=="version:"{print $2}')" ;;
+			markdownlint) have="$(markdownlint --version 2>/dev/null || true)" ;;
+			*) have="" ;;
+		esac
+		[[ -z "${have}" || "${have}" == "${spec#*=}" ]] || drift+=("${spec%%=*} ${have} (recorded ${spec#*=})")
+	done
+	((${#drift[@]} == 0)) || fEcho "WARNING: tool versions differ from the recorded set: ${drift[*]}"
+}
+
+## One line per test with its ID, from the test binary's own output, then the verdict.
+fGoTestRun(){ ## LABEL [VAR=value...]: go test over the chosen packages, to a log in the run folder
+	local label="$1" log rc=0 extra=()
+	shift
+	log="${runTmp}/gotest_${label}.log"
+	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
+	fGo test "${extra[@]}" "$@" -- go test -count=1 -p "${testJobs}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
+	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	if ((rc)); then
+		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true
+		fDie "go test failed (${label})"
+	fi
+	fEcho_Clean "go test (${label}): $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+}
+fStepTest(){
+	local fresh="${runTmp}/gotmp"
+	testJobs="${BUILD_JOBS}"
+	mkdir -- "${fresh}"
+	## Twice, the second with TMPDIR on this run's folder: ext4 there caught an inode-reuse bug /tmp hid.
+	if ((useContainer)); then fGoTestRun default; else fGoTestRun default "TMPDIR=${TMPDIR_DEFAULT:-/tmp}"; fi
+	fGoTestRun fresh "TMPDIR=${fresh}"
+}
+fStepRace(){
+	local log="${runTmp}/gotest_race.log" rc=0 fresh="${runTmp}/gorace" extra=()
+	mkdir -- "${fresh}"
+	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
+	## -race needs cgo, and the container has gcc.
+	fGo race "${extra[@]}" HEAVY=1 CGO_ENABLED=1 "TMPDIR=${fresh}" -- go test -race -count=1 -p "${HEAVY_JOBS}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
+	if ((rc)); then grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true; fDie "race test failed"; fi
+	fEcho_Clean "go test -race: $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+}
+fStepVuln(){
+	local out rc=0
+	out="$(fGo vuln -- govulncheck -test "${pkgs[@]}" 2>&1)" || rc=$?
+	if ((rc)); then
+		## Offline is a skip. A real finding says "Vulnerability #".
+		if grep -q 'Vulnerability #' <<< "${out}"; then grep -E 'Vulnerability #|Found in|Fixed in|More info|affected by' <<< "${out}" | fLintOut; fDie "govulncheck findings"; fi
+		fSkip "govulncheck can't reach vuln.go.dev"; return 0
+	fi
+	fEcho_Clean "govulncheck: clean"
+}
+
+relDir=""
+fStepBuild(){
+	local t os arch out epoch rel sum1 sum2
+	epoch="$(fCommitEpoch)"; rel="$(fIsRelease)"
+	relDir="${root}/${RELEASE_DIR}/${goVersion}"
+	mkdir -p -- "${relDir}"
+	for t in "${RELEASE_TARGETS[@]}"; do
+		os="${t%%/*}"; arch="${t##*/}"
+		out="${runTmp}/build/${EXE_NAME}-${os}-${arch}"
+		mkdir -p -- "${runTmp}/build"
+		fGo build "GOOS=${os}" "GOARCH=${arch}" CGO_ENABLED=0 GOAMD64=v1 -- go build "${GO_BUILD_FLAGS[@]}" -p "${BUILD_JOBS}" \
+			-ldflags "${GO_LDFLAGS_COMMON} -X main.version=${goVersion} -X main.buildEpoch=${epoch} -X main.release=${rel}" -o "${out}" "${GO_MAIN_PKG}" \
+			|| fDie "go build failed for ${os}/${arch}"
+		cp -f -- "${out}" "${relDir}/${EXE_NAME}-${os}-${arch}"
+		fEcho_Clean "built ${EXE_NAME}-${os}-${arch}  $(sha256sum "${out}" | cut -c1-16)  $(stat -c %s "${out}") bytes"
+	done
+	if [[ "${mode}" != quick ]]; then
+		## The same source has to give the same bytes, from another path.
+		mkdir -p -- "${runTmp}/build2"
+		fGo build GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOAMD64=v1 -- go build "${GO_BUILD_FLAGS[@]}" -p "${BUILD_JOBS}" \
+			-ldflags "${GO_LDFLAGS_COMMON} -X main.version=${goVersion} -X main.buildEpoch=${epoch} -X main.release=${rel}" -o "${runTmp}/build2/${EXE_NAME}-linux-amd64" "${GO_MAIN_PKG}" \
+			|| fDie "go build failed (second build)"
+		sum1="$(sha256sum < "${runTmp}/build/${EXE_NAME}-linux-amd64")"; sum2="$(sha256sum < "${runTmp}/build2/${EXE_NAME}-linux-amd64")"
+		[[ "${sum1}" == "${sum2}" ]] || fDie "the same source built to two different binaries"
+		fEcho_Clean "reproducible: two builds of linux/amd64 give the same checksum"
+	fi
+	fEcho_Clean "$("${runTmp}/build/${EXE_NAME}-linux-amd64" --version 2>&1 || true)"
+}
+fStepPackage(){
+	local t arch f ver="${goVersion#v}" yaml epoch fmt
+	epoch="$(fCommitEpoch)"
+	[[ -d "${relDir}" ]] || fDie "no build to package"
+	for t in "${RELEASE_TARGETS[@]}"; do
+		arch="${t##*/}"
+		yaml="${runTmp}/nfpm_${arch}.yaml"
+		cat > "${yaml}" <<EOF_YAML
+name: ${EXE_NAME}
+arch: ${arch}
+platform: linux
+version: ${ver}
+maintainer: t00mietum
+description: A hardened Paper Minecraft server, run in Podman, Docker, or natively.
+license: GPL-2.0-or-later
+homepage: https://github.com/t00mietum/tt-minecraft-safeserver
+contents:
+  - src: ${runTmp}/build/${EXE_NAME}-linux-${arch}
+    dst: /usr/bin/${EXE_NAME}
+    file_info:
+      mode: 0755
+  - src: license.md
+    dst: /usr/share/doc/${EXE_NAME}/license.md
+EOF_YAML
+		for fmt in deb rpm; do
+			fGo package "SOURCE_DATE_EPOCH=${epoch}" -- nfpm package -p "${fmt}" -f "${yaml}" -t "${runTmp}/pkg_${arch}.${fmt}" > "${runTmp}/nfpm.log" 2>&1 \
+				|| { cat "${runTmp}/nfpm.log"; fDie "nfpm failed for ${fmt} ${arch}"; }
+			f="${runTmp}/pkg_${arch}.${fmt}"
+			cp -f -- "${f}" "${relDir}/${EXE_NAME}_${ver}_${arch}.${fmt}"
+			fEcho_Clean "packaged ${EXE_NAME}_${ver}_${arch}.${fmt}"
+		done
+	done
+	(cd "${relDir}" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > "${runTmp}/sums" && cp -f -- "${runTmp}/sums" SHA256SUMS)
+	fEcho_Clean "SHA256SUMS: $(wc -l < "${relDir}/SHA256SUMS") file(s)"
+	fReleaseRotate
+}
+## One folder per version. Keep the newest few, by modification time.
+fReleaseRotate(){
+	local d n=0
+	while IFS= read -r d; do
+		n=$((n + 1)); ((n > RELEASE_KEEP)) || continue
+		fSafeRmUnder "${root}/${RELEASE_DIR}" "${d}" >/dev/null && tidyGone+=("old release folder ${d##*/}")
+	done < <(find "${root}/${RELEASE_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+}
+fRootHost(){ ## [--zfs]
+	local log="${runTmp}/roothost${1:-}.log" rc=0
+	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fSkip "no docker here"; return 0; fi
+	nice -n 19 bash "${here}/root-host/root-host.bash" "${@}" > "${log}" 2>&1 || rc=$?
+	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	if ((rc)); then tail -n 60 "${log}"; fDie "root host checks failed"; fi
+	fEcho_Clean "root host: $(grep -cE '^PASS ' "${log}" || true) check(s) passed"
+}
+fStepDogfood(){
+	local d="" cand exe="${EXE_NAME}" src="${relDir}/${EXE_NAME}-linux-amd64"
+	for cand in "${DOGFOOD_DESTS[@]}"; do [[ -d "${cand}" && -w "${cand}" ]] && { d="${cand}"; break; }; done
+	[[ -n "${d}" ]] || { fSkip "no dogfood folder exists: ${DOGFOOD_DESTS[*]}"; return 0; }
+	[[ -f "${src}" ]] || fDie "no native build to copy"
+	if [[ -e "${d}/${exe}" ]] && command -v fuser >/dev/null 2>&1 && fuser -s "${d}/${exe}" 2>/dev/null; then
+		fSkip "${d}/${exe} is in use"; return 0
+	fi
+	cp -f -- "${src}" "${d}/${exe}"; chmod +x "${d}/${exe}"
+	fEcho_Clean "installed -> ${d}/${exe}"
+}
+fGitTool(){ if command -v gitsby >/dev/null 2>&1; then gitsby raw git "$@"; else git "$@"; fi; }
+fStepPublish(){
+	local f branch
+	if ((${#formatChanged[@]})); then
+		[[ -n "${publishMsg}" ]] || publishMsg="${APP_NAME} CI/CD ${stamp}"
+		for f in "${formatChanged[@]}"; do fGitTool add -- "${f}"; done
+		fGitTool commit -m "${publishMsg}" -- "${formatChanged[@]}" >/dev/null
+		fEcho_Clean "committed ${#formatChanged[@]} reformatted file(s): \"${publishMsg}\""
+	else
+		fEcho_Clean "nothing for the run to commit"
+	fi
+	branch="$(git branch --show-current)"
+	if [[ -z "${branch}" ]]; then fSkip "no branch to push"; return 0; fi
+	if GIT_SSH_COMMAND='ssh' fGitTool push -u origin "${branch}" >/dev/null 2>&1; then fEcho_Clean "pushed ${branch}"; else fEcho "WARNING: push of ${branch} failed"; fi
+}
+
+fCpuPlan(){
+	fEcho_Clean "Cores ...............: ${BUILD_JOBS} of ${cpuCores}, ${HEAVY_JOBS} for the hard steps (load ${cpuLoad:-unknown}), at low priority"
+	if [[ "${CICD_MEM_SCOPED:-none}" != none ]]; then fEcho_Clean "Memory cap ..........: ${CICD_MEM_SCOPED^^}, no swap (CICD_MEM_CAP; a step over it exits 137)"
+	elif [[ "${memCap}" == none ]]; then fEcho_Clean "Memory cap ..........: none (CICD_MEM_CAP=none)"
+	else fEcho_Clean "Memory cap ..........: none (no systemd user scope here)"; fi
+}
+
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+fEcho_Clean
+case "${mode}" in
+	gate)  fEcho_Clean "${APP_NAME} backlog quick run${gateAreas[*]:+: ${gateAreas[*]}}" ;;
+	full)  fEcho_Clean "${APP_NAME} backlog full run: every check of the default run; nothing is synced, dogfooded, published or rewritten" ;;
+	merge) fEcho_Clean "${APP_NAME} merge gate: every check of the default run; nothing is synced, dogfooded, published or rewritten" ;;
+	*)     fEcho_Clean "${APP_NAME} local CI/CD (${mode} run)" ;;
+esac
+fEcho_Clean
+fEcho_Clean "Repo root ...........: ${root}"
+fEcho_Clean "Version .............: ${goVersion}"
+fCpuPlan
+if ((noRemote)); then fEcho_Clean "Other hosts .........: skipped by --no-remote"; else fEcho_Clean "Other hosts .........: none used yet"; fi
+if [[ "${leakOpt}" == --leakcheck ]]; then fEcho_Clean "Leak checks .........: every one (--leakcheck): race tests, goroutine check"
+elif [[ "${leakOpt}" == --no-leakcheck ]]; then fEcho_Clean "Leak checks .........: none (--no-leakcheck)"
+else fEcho_Clean "Leak checks .........: goroutine check in every test run; race tests where the run has them"; fi
+fEcho_Clean "Steps ...............: ${stepList[*]}"
+offNote=""
+for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || offNote+="${s} (${stepOff[${s}]}), "; done
+[[ -z "${offNote}" ]] || fEcho_Clean "Turned off ..........: ${offNote%, }"
+fEcho_Clean
+
+if ((listOnly)); then
+	fEcho_Clean "$(bash "${here}/utility/test-id.bash" --list | grep -c .) test(s) with IDs:"
+	bash "${here}/utility/test-id.bash" --list | sed 's/^/  /'
+	fEcho_Clean
+	exit 0
+fi
+
+if ((! quiet && ! handsOff)) && [[ " ${stepList[*]} " == *" publish "* && -z "${publishMsg}" ]]; then
+	read -r -p "Commit message for the publish stage (blank = a stamped default; Ctrl+C aborts): " typedMessage
+	fEcho_ResetBlankCounter
+	publishMsg="${typedMessage}"
+fi
+
+## Tee the rest of the run to a gitignored log, for the lint check at session start.
+if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/null; then
+	gfs_rotate "${root}/${LINT_LOG_DIR}" run log >/dev/null 2>&1 || true
+	gfs_rotate "${root}/${LINT_LOG_DIR}" lint txt >/dev/null 2>&1 || true
+	exec > >(tee "${root}/${LINT_LOG_DIR}/run_${stamp}.log") 2>&1
+	## Wait for tee to drain, else the prompt comes back mid-flush.
+	teePid=$!
+	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
+fi
+
+needCtr=0; for s in lint test race vuln build package; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+((! needCtr)) || fCtrSetup
+
+for s in "${stepList[@]}"; do
+	fStep "${s}"
+	case "${s}" in
+		sync)     fStepSync ;;
+		format)   fStepFormat ;;
+		lint)     fStepLint ;;
+		test)     fStepTest ;;
+		race)     fStepRace ;;
+		vuln)     fStepVuln ;;
+		build)    fStepBuild ;;
+		package)  fStepPackage ;;
+		roothost) fRootHost ;;
+		rootzfs)  fRootHost --zfs ;;
+		dogfood)  fStepDogfood ;;
+		publish)  fStepPublish ;;
+	esac
+	fStepEnd
+done
+
+fSection "Summary"
+for s in "${stepList[@]}"; do fEcho_Clean "  ${stepResult[${s}]:-?}  ${stepTitle[${s}]}"; done
+for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || fEcho_Clean "  off   ${stepTitle[${s}]} (${stepOff[${s}]})"; done
+fSection "${APP_NAME} CI/CD: done."
+fEcho_Clean
+
+
+##	History:
+##		- 2026-11-12: Created, from the sister projects' pipelines, with the container, the shared flags, the step lines, and the rest of the CICD process rules.

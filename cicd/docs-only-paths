@@ -1,0 +1,5 @@
+## Paths a push to main can change without the merge gate. One glob per line; a * crosses folders.
+*.md
+project/*
+.github/*
+.markdownlint.jsonc
