@@ -69,9 +69,10 @@ LINT_LOG_DIR="cicd/artifacts/lint"
 RELEASE_DIR="cicd/artifacts/release"
 RELEASE_KEEP=5
 
-## Dogfood: the native build goes to the first dir here that exists and is writable.
+## Dogfood: this is the only server, so the build goes to its final place, where setup puts it.
+## Root's folder, so the step installs with sudo when it can without a password.
 DOGFOOD_DESTS=(
-	"${HOME}/synced/0-0/common/exec/app/linux"
+	"/usr/local/bin"
 )
 
 ## Half the cores, rounded down, or a quarter on a busy box (1-minute load over half the cores).

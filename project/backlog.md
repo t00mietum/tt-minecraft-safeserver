@@ -137,7 +137,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Native fuzz tests for the parsers that read operator and download input: the shcl config, the plugin list, the settings files, and the update agent's answer.
 		- A soak test that loops the main actions headless and compares the heap and goroutines at rounds N and 2N.
 		- CodeQL from a pinned local CLI, built from a clean tree. It applies, since the repo is GPL and public on GitHub.
-		- A dogfood script and its launchers, and a demo gif for the README, both CLI only.
+		- A demo gif for the README, CLI only.
 		- Profiling is skipped on purpose for now: the tool starts and stops a server and holds no hot loop. Revisit if `status --watch` grows one.
 		- Reproducible builds are checked, so README can say so.
 		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
@@ -304,7 +304,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- A CI/CD pipeline kicked off by a bash script (`cicd/cicd.bash`). It builds, tests, and can commit and push. Packaging and publishing are opt-in.
 	- Progress log:
 		- 2026-11-12: `cicd/cicd.bash` runs format, lint, tests, race tests, the vulnerability scan, release builds for amd64 and arm64, `.deb` and `.rpm` packages, both root host checks, dogfood, and publish. A full run passed all 9 steps that apply to a hands-off run.
-		- 2026-11-12: Dogfood was run against a stand-in folder, and publish in a throwaway clone, where it committed only the file it reformatted and left another edit alone. The real dogfood folder waits for a go-ahead.
+		- 2026-11-12: Dogfood was run against a stand-in folder, and publish in a throwaway clone, where it committed only the file it reformatted and left another edit alone. Dogfood goes to `/usr/local/bin`, the tool's final place, since this is the only server. It installs with a passwordless sudo, or prints the one command to run.
 	- Decisions:
 		- Packaging is in the default run, not opt-in, per the CICD process. `--quick` leaves it out.
 		- Go steps run in a container built from `cicd/container/`, with the Go image and every tool pinned in `cicd/config.bash`. The first full run found 2 standard library advisories in the Go 1.26.9 image, so the pinned image is 1.26.11.

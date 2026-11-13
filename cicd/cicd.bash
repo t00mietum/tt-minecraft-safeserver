@@ -572,14 +572,19 @@ fRootHost(){ ## [--zfs]
 	fEcho_Clean "root host: $(grep -cE '^PASS ' "${log}" || true) check(s) passed"
 }
 fStepDogfood(){
-	local d="" cand exe="${EXE_NAME}" src="${relDir}/${EXE_NAME}-linux-amd64"
-	for cand in "${DOGFOOD_DESTS[@]}"; do [[ -d "${cand}" && -w "${cand}" ]] && { d="${cand}"; break; }; done
-	[[ -n "${d}" ]] || { fSkip "no dogfood folder exists: ${DOGFOOD_DESTS[*]}"; return 0; }
+	local d="${DOGFOOD_DESTS[0]}" exe="${EXE_NAME}" src="${relDir}/${EXE_NAME}-linux-amd64"
 	[[ -f "${src}" ]] || fDie "no native build to copy"
 	if [[ -e "${d}/${exe}" ]] && command -v fuser >/dev/null 2>&1 && fuser -s "${d}/${exe}" 2>/dev/null; then
 		fSkip "${d}/${exe} is in use"; return 0
 	fi
-	cp -f -- "${src}" "${d}/${exe}"; chmod +x "${d}/${exe}"
+	if [[ -d "${d}" && -w "${d}" ]]; then
+		cp -f -- "${src}" "${d}/${exe}"; chmod +x "${d}/${exe}"
+	## The final destination is root's, and an unattended run never asks for a password.
+	elif sudo -n true 2>/dev/null; then
+		sudo -n install -m 0755 -- "${src}" "${d}/${exe}" || fDie "sudo install to ${d} failed"
+	else
+		fSkip "${d} needs root; run: sudo install -m 0755 ${src} ${d}/${exe}"; return 0
+	fi
 	fEcho_Clean "installed -> ${d}/${exe}"
 }
 fGitTool(){ if command -v gitsby >/dev/null 2>&1; then gitsby raw git "$@"; else git "$@"; fi; }
