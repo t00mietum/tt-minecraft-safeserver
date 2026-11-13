@@ -290,7 +290,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: README doesn't say release builds are reproducible
 	- ID: 2026111311485876
 	- Type: Task
-	- Status: Waiting on signoff
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261113-114858
 	- Opened by:
@@ -301,12 +301,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-13: README's Building from source says release builds are reproducible, and how to check one with `cicd/utility/verify-release.bash <tag>`. The script rebuilds each Linux binary from the tag with that tag's pinned Go version and flags, and compares it with the release's SHA256SUMS.
 		- Waiting on signoff: README wording. Read its Building from source section.
 		- Verified: the script matched both binaries of a container build of the same commit, under a stand-in tag in a throwaway clone, and exited 1 on a changed sum. A host build with a different Go version gave other bytes, so the pinned version matters.
+		- 20261113: README wording read and closed under the standing close policy in memory.md (plain, accurate, matches the build step's double build).
 	- Branch: nov13-2026111311485862
 	- Commit: b6f08c5
 	- Test case: n/a: a README line and a helper script, checked by hand against a container build. The claim itself is pinned by the build step's twice-built check.
 	- Decisions:
 		- A script rather than a pasted go build line: it reads the Go version and flags from the tag's own config.bash, so README can't go stale when they change.
 		- Go fetches the pinned version through GOTOOLCHAIN, so no container is needed to check a release.
+	- Closed: 20261113
 
 - CICD gaps: shellcheck and markdownlint run from the host
 	- ID: 2026111311485890
