@@ -25,18 +25,30 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - TestSetup and TestUpdate reach the host's own runner and account files
 	- ID: 2026111312221899
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Low
 	- Opened: 20261113-122218
 	- Opened by:
 	- Related IDs: 2026111311485831
 	- Incorrect behavior: The setup and update tests in the command use the real runner and the real `/etc/passwd` and `/etc/group`, and `launch.Installed` asks the host's PATH. Their dry runs ran no commands here, but a change to either path could reach the host.
 	- Expected behavior: They use `hostRunner` and `setupSteps` stand-ins, as the command's soak test does.
+	- Actual cause: The soak's stand-ins were set up in the soak test alone, so the older tests never took them.
+	- Progress log:
+		- 2026-11-13: Verified: with the helper's runner and setupSteps put back on the real runner, TestSetup, TestUpdate and TestUpdateAgent each failed on the runner count. They pass with it, and the soak passed at 20 rounds. The backlog quick run passed.
+		- Swept: every hostRunner and setupSteps caller in the command. setup's repair goes through noHostChecks. TestUpdateAgent's update also took the real runner, so it uses the helper too. Its stand-in agent script now reads its input with shell builtins, since PATH is empty.
+	- Decisions:
+		- TestUpdate counts the runner only from its dry runs, since the update that goes through sudo also builds its runner, and that run is left out as root.
+	- Actual fix: A shared test helper, noHostRunner, gives setup and update a stand-in runner and stand-in account files, empties PATH, and makes launch.Installed false. TestSetup, TestUpdate, TestUpdateAgent and the soak use it, and each fails unless setup and update took the stand-in runner.
+	- Branch: nov13-2026111312221899
+	- Commit: 0c0eb6c
+	- Test case: df65m TestSetup, df671 TestUpdate, df76m TestUpdateAgent, df78f TestSoak
+	- Acceptance signoff: Self-closed: the intent was clear, and the tests were watched to fail.
+	- Closed: 20261113-125955
 
 - Player names and log lines shown to the operator keep text-direction characters
 	- ID: 2026111311594944
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261113-115949
 	- Opened by:
@@ -44,6 +56,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- settings.printable and the log reader drop control characters only. A name in whitelist.json or ops.json, which the server account can write, can hold a right-to-left override and change how the line reads. The plugin and agent text cleaners drop these as well.
 		- Sweep: settings/players.go printable, server/log.go, launch/console.go.
+		- 2026-11-13: Verified: df78h and df78g failed on the old Clean and op warnings, and pass after. The backlog quick run passed.
+		- Swept: every server.Clean caller, which is status's names and log tail and cmd's answer lines, plus the op warnings. launch/console.go refuses the operator's own line rather than showing server text, and quotes it with %q, which escapes these characters, so it stays as it is. config.go's trim isn't shown to the operator.
+	- Decisions:
+		- Right-to-left text itself, and the marks U+200E, U+200F and U+061C, are kept. Only the characters that override or isolate direction for the rest of a line are dropped, as in the plugin and agent cleaners.
+	- Actual cause: server.Clean, which status and cmd use for log lines and names, and settings' own copy for the op warnings in start and repair, dropped only control characters.
+	- Actual fix: server.Clean also drops the embedding, override and isolate characters, U+202A to U+202E and U+2066 to U+2069, the same set the plugin and agent cleaners drop. The op warnings use server.Clean in place of their own copy.
+	- Branch: nov13-2026111312221899
+	- Commit: 4ccf48f
+	- Test case: df78h TestClean, df78g TestWarningsDirection
+	- Acceptance signoff: Self-closed: the intent was clear, and both tests failed before the fix and pass after.
+	- Closed: 20261113-125955
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242

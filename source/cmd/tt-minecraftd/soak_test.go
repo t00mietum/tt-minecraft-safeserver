@@ -14,8 +14,6 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
-	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/soak"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -37,28 +35,7 @@ func TestSoak(t *testing.T) {
 	t.Cleanup(func() { asRoot = old })
 	// Nothing on the host can run, and setup and update have to take the
 	// stand-in runner.
-	t.Setenv("PATH", t.TempDir())
-	fake, took := &host.Fake{}, 0
-	oldRunner, oldSteps, oldInstalled := hostRunner, setupSteps, launch.Installed
-	t.Cleanup(func() { hostRunner, setupSteps, launch.Installed = oldRunner, oldSteps, oldInstalled })
-	hostRunner = func(bool) host.Runner { took++; return fake }
-	launch.Installed = func(string) bool { return false }
-	etc := t.TempDir()
-	passwd, group := filepath.Join(etc, "passwd"), filepath.Join(etc, "group")
-	if err := os.WriteFile(passwd, []byte("minecraftd:x:990:991::/nonexistent:/usr/sbin/nologin\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(group, []byte("minecraftd:x:991:\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	setupSteps = func(inv invocation) (host.Runner, func(c *config.Config) *repairpkg.Host) {
-		took++
-		return fake, func(c *config.Config) *repairpkg.Host {
-			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"),
-				NftThere: func() bool { return false }}
-		}
-	}
+	fake, took := noHostRunner(t)
 
 	dir := t.TempDir()
 	if err := os.Symlink("paper-26.3-244.jar", filepath.Join(dir, "paper.jar")); err != nil {
@@ -102,7 +79,7 @@ func TestSoak(t *testing.T) {
 	}
 	var b bytes.Buffer
 	soak.Check(t, func(i int) error {
-		fake.Ran, took = fake.Ran[:0], 0
+		fake.Ran, *took = fake.Ran[:0], 0
 		for _, s := range steps {
 			code, out, msg := runArgs(s.args...)
 			if code != s.code || !strings.Contains(out+msg, s.want) {
@@ -110,8 +87,8 @@ func TestSoak(t *testing.T) {
 			}
 		}
 		// update, and setup with its own update.
-		if took != 3 {
-			return fmt.Errorf("the stand-in runner was taken %d times, not 3", took)
+		if *took != 3 {
+			return fmt.Errorf("the stand-in runner was taken %d times, not 3", *took)
 		}
 		b.Reset()
 		if err := probe.Take(context.Background()).Write(&b, 80); err != nil || !strings.Contains(b.String(), "not running") {

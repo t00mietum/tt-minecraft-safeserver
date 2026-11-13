@@ -38,11 +38,13 @@ func OpenRegular(file string) (*os.File, error) {
 	return f, nil
 }
 
-// Clean drops control characters, so a player's name or chat line can't send
-// escape codes to the operator's terminal.
+// Clean drops control characters and the ones that flip text direction, so a
+// player's name or chat line can't send escape codes to the operator's
+// terminal or change how the rest of the line reads.
 func Clean(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		switch {
+		case unicode.IsControl(r), r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
 			return -1
 		}
 		return r

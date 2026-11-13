@@ -7,7 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // Player is one entry in whitelist.json or ops.json.
@@ -58,13 +59,13 @@ func Warnings(serverDir string) []string {
 	if len(ops) > maxOps {
 		names := make([]string, 0, len(ops))
 		for _, o := range ops {
-			names = append(names, printable(o.Name))
+			names = append(names, server.Clean(o.Name))
 		}
 		warns = append(warns, fmt.Sprintf("there are %d ops (%s); each one can change anything, so keep it to %d or fewer", len(ops), strings.Join(names, ", "), maxOps))
 	}
 	for _, o := range ops {
 		if len(white) > 0 && !listed(white, o) {
-			warns = append(warns, fmt.Sprintf("op %s isn't on the whitelist", printable(o.Name)))
+			warns = append(warns, fmt.Sprintf("op %s isn't on the whitelist", server.Clean(o.Name)))
 		}
 	}
 	return warns
@@ -80,15 +81,4 @@ func listed(list []Player, p Player) bool {
 		}
 	}
 	return false
-}
-
-// printable drops control characters, since the server can write these files
-// and also a name goes to the operator's terminal.
-func printable(s string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, s)
 }
