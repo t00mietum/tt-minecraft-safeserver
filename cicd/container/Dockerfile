@@ -48,3 +48,9 @@ RUN cd /opt/markdownlint \
 	&& npm ci --ignore-scripts --omit=dev --no-audit --no-fund --loglevel=error \
 	&& ln -s /opt/markdownlint/node_modules/.bin/markdownlint /usr/local/bin/markdownlint \
 	&& rm -rf /root/.npm
+
+# zstd unpacks the CodeQL bundle, which the CodeQL step keeps in its own cache
+# volume rather than in the image.
+RUN apt-get update -qq \
+	&& apt-get install -y -qq --no-install-recommends zstd >/dev/null \
+	&& rm -rf /var/lib/apt/lists/*

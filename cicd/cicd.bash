@@ -9,8 +9,9 @@
 
 ##	- Purpose: Local CI/CD pipeline for tt-minecraft-safeserver. Project settings live in config.bash.
 ##	- Steps (fail-fast, any error aborts before the next step):
-##	   remote sync, format, lint, tests, race tests, fuzzing, soak, vulnerability scan, release
-##	   builds, packages, tests on linux/arm64, root host checks, root host ZFS checks, dogfood, publish
+##	   remote sync, format, lint, tests, race tests, fuzzing, soak, vulnerability scan, CodeQL,
+##	   release builds, packages, tests on linux/arm64, root host checks, root host ZFS checks,
+##	   dogfood, publish
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  Options:
@@ -27,8 +28,10 @@
 ##	                       the tests
 ##	   --backlog-run-quick [AREA...]
 ##	                       what a backlog worker runs before it commits, in one call of about 4 minutes:
-##	                       format check, lint and tests, or only the areas named. Areas are the
-##	                       folders under source/internal, and cli for the command.
+##	                       format check, lint, tests and CodeQL, or only the areas named, which
+##	                       leaves out the whole-tree checks: shellcheck, markdownlint, test IDs
+##	                       and CodeQL. Areas are the folders under source/internal, and cli for
+##	                       the command.
 ##	   --backlog-run-full  what a backlog round runs once at its end: every check of the default run
 ##	   --merge-gate        the same checks, before a merge to main. Runs from the pre-push hook.
 ##	   --gate [AREA...]    alias for --backlog-run-quick
@@ -38,8 +41,8 @@
 ##	   --no-container      run on this box rather than in the build container
 ##	   --no-remote         skip other hosts and VMs: the arm64 tests
 ##	   --no-sync           skip the remote sync
-##	   --no-<step>         skip one step: format, lint, test, race, fuzz, soak, vuln, build, package,
-##	                       arm64, roothost, rootzfs, dogfood, publish
+##	   --no-<step>         skip one step: format, lint, test, race, fuzz, soak, vuln, codeql, build,
+##	                       package, arm64, roothost, rootzfs, dogfood, publish
 ##	   --keep-temp         keep the run's temp folder and containers, and say where they are
 ##	   --list              print the steps and test IDs the other options would run, and run nothing
 ##	   --lint-check        print only run output that wasn't seen before, then mark it seen. For the
@@ -62,6 +65,10 @@
 ##	- The soak step runs each TestSoak, which loops the main actions headless and fails when the live
 ##	  heap or the goroutines grow between round N and round 2N. N is SOAK_ROUNDS in config.bash
 ##	  (SOAK_ROUNDS_LONG in --long), or CICD_SOAK_ROUNDS. It uses a quarter of the cores.
+##	- The CodeQL step analyzes a copy of the tracked Go files with the pinned bundle and the query
+##	  suite in config.bash (CODEQL_*), and fails on any result. The bundle is downloaded once, checked
+##	  against its sum, and kept in the docker volume <app>-codeql, or under ~/.cache/<app>/codeql with
+##	  --no-container. It uses a quarter of the cores, and skips on a box that isn't Linux amd64.
 ##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
 ##	  A merge gate or full run that includes them goes past one 10-minute call, so start it detached.
 
@@ -110,10 +117,10 @@ fUsage(){ fEcho_Clean "$*" >&2; exit 2; }
 
 declare -A stepTitle=(
 	[sync]="Remote sync" [format]="Format" [lint]="Lint" [test]="Tests" [race]="Race tests" [fuzz]="Fuzzing"
-	[soak]="Soak" [vuln]="Vulnerability scan" [build]="Release builds" [package]="Packages" [arm64]="Tests on linux/arm64"
+	[soak]="Soak" [vuln]="Vulnerability scan" [codeql]="CodeQL" [build]="Release builds" [package]="Packages" [arm64]="Tests on linux/arm64"
 	[roothost]="Root host checks" [rootzfs]="Root host ZFS checks" [dogfood]="Dogfood" [publish]="Publish"
 )
-allSteps=(sync format lint test race fuzz soak vuln build package arm64 roothost rootzfs dogfood publish)
+allSteps=(sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs dogfood publish)
 stepList=(); stepTotal=0; stepName=""; stepWhere=""; stepSkip=""
 declare -A stepOff=() stepResult=()
 fStepTime(){
@@ -145,7 +152,7 @@ while (($#)); do case "$1" in
 		leakOpt="$1"; shift ;;
 	--no-container)     noContainer=1; shift ;;
 	--no-remote)        noRemote=1; shift ;;
-	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-fuzz|--no-soak|--no-vuln|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
+	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-fuzz|--no-soak|--no-vuln|--no-codeql|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
 		stepOff["${1#--no-}"]="skipped by $1"; shift ;;
 	--message=*|--msg=*|-m=*) message="${1#*=}"; shift ;;
 	-m|--message|--msg) message="${2-}"; shift; (($#)) && shift ;;
@@ -188,18 +195,19 @@ pkgs=("./...")
 
 ## Which steps this mode runs, and why the rest don't.
 declare -A modeSteps=(
-	[default]="sync format lint test race fuzz soak vuln build package arm64 roothost rootzfs dogfood publish"
-	[long]="sync format lint test race fuzz soak vuln build package arm64 roothost rootzfs dogfood publish"
-	[quick]="sync format lint test fuzz build arm64 dogfood publish"
-	[gate]="format lint test"
-	[full]="format lint test race fuzz soak vuln build package arm64 roothost rootzfs"
-	[merge]="format lint test race fuzz soak vuln build package arm64 roothost rootzfs"
+	[default]="sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs dogfood publish"
+	[long]="sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs dogfood publish"
+	[quick]="sync format lint test fuzz codeql build arm64 dogfood publish"
+	[gate]="format lint test codeql"
+	[full]="format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs"
+	[merge]="format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs"
 )
 if [[ "${leakOpt}" == --leakcheck ]]; then
 	for s in race soak; do [[ " ${modeSteps[${mode}]} " == *" ${s} "* ]] || modeSteps[${mode}]+=" ${s}"; done
 fi
 [[ "${leakOpt}" != --no-leakcheck ]] || { stepOff[race]="skipped by --no-leakcheck"; stepOff[soak]="skipped by --no-leakcheck"; }
 ((! noRemote)) || stepOff[arm64]="skipped by --no-remote"
+((! ${#areaDirs[@]})) || [[ -n "${stepOff[codeql]:-}" ]] || stepOff[codeql]="whole tree only, and areas were named"
 for s in "${allSteps[@]}"; do
 	if [[ -n "${stepOff[${s}]:-}" ]]; then continue
 	elif [[ " ${modeSteps[${mode}]} " == *" ${s} "* ]]; then stepList+=("${s}")
@@ -214,7 +222,7 @@ stepTotal="${#stepList[@]}"
 ## into it. Its run.pid marks it as a run's, and is checked again before removal.
 runTmp=""; runName=""; runRoot=""; runRe='^[0-9]{8}-[0-9]{6}_[0-9]{3}$'
 tidyGone=(); declare -i tidyFreed=0
-useContainer=0; ctrImage=""; ctrCacheVol="${APP_NAME}-go-cache"; ctrFailed=0
+useContainer=0; ctrImage=""; ctrCacheVol="${APP_NAME}-go-cache"; ctrCodeqlVol="${APP_NAME}-codeql"; ctrFailed=0
 dockerBefore=""
 ## Apparent size: what ZFS reports on disk is compressed, and lags fresh writes.
 fDirBytes(){ local out=""; out="$(du -sbx -- "$1" 2>/dev/null)" || out=0; echo "${out%%[[:space:]]*}" ;}
@@ -367,6 +375,7 @@ fCtrSetup(){
 	fEcho_Clean "Container: ${tag}"
 }
 ## fGo STEP [VAR=value...] -- command...: a Go tool, in the container or on this box, from the repo root.
+## HEAVY=1 gives it the hard steps' cores, and MOUNT=VOLUME:PATH adds a volume in the container.
 fGo(){
 	local step="$1" envs=() memArgs=() jobs="${BUILD_JOBS}" e
 	shift
@@ -376,7 +385,9 @@ fGo(){
 	if ((useContainer)); then
 		fMemCtrArgs memArgs
 		local envArgs=() w
-		for w in "${envs[@]:-}"; do [[ -z "${w}" || "${w}" == HEAVY=1 ]] || envArgs+=(-e "${w}"); done
+		for w in "${envs[@]:-}"; do
+			case "${w}" in ""|HEAVY=1) ;; MOUNT=*) envArgs+=(-v "${w#MOUNT=}") ;; *) envArgs+=(-e "${w}") ;; esac
+		done
 		docker run --rm --name "${APP_NAME}-${runName}-${step}" --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" \
 			"${memArgs[@]}" --cpus "${jobs}" --cpu-shares 256 --user "$(id -u):$(id -g)" \
 			-e HOME=/cache/home -e GOCACHE=/cache/gocache -e GOMODCACHE=/cache/gomod -e "GOMAXPROCS=${jobs}" \
@@ -384,7 +395,7 @@ fGo(){
 			-v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro -w /src \
 			"${ctrImage}" nice -n 19 "$@"
 	else
-		( for w in "${envs[@]:-}"; do [[ -z "${w}" || "${w}" == HEAVY=1 ]] || export "${w?}"; done
+		( for w in "${envs[@]:-}"; do [[ -z "${w}" || "${w}" == HEAVY=1 || "${w}" == MOUNT=* ]] || export "${w?}"; done
 		  export GOMAXPROCS="${jobs}" GOFLAGS="${GOFLAGS:+${GOFLAGS} }-buildvcs=false"
 		  cmd="$1"; shift
 		  case "${cmd}" in
@@ -560,6 +571,65 @@ fStepSoak(){
 	n="$(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true)"
 	((n)) || { fSkip "no soak tests in ${pkgs[*]}"; return 0; }
 	fEcho_Clean "soak: ${n} test(s), nothing grew"
+}
+
+## The pinned bundle, fetched once into its cache, run over a copy of the tracked Go files so stray
+## files in the tree don't count. Any result fails the step.
+fCodeqlRam(){ ## memory for codeql's --ram, in MB: 8 GB, or three quarters of a smaller cap
+	local mb=8192 n
+	if [[ "${memCap:-none}" =~ ^([0-9]+)([kmg]?)$ ]]; then
+		n="${BASH_REMATCH[1]}"
+		case "${BASH_REMATCH[2]}" in g) n=$((10#${n} * 1024)) ;; m) n=$((10#${n})) ;; k) n=$((10#${n} / 1024)) ;; *) n=$((10#${n} / 1048576)) ;; esac
+		((n * 3 / 4 >= mb)) || mb=$((n * 3 / 4))
+	fi
+	((mb >= 1024)) || mb=1024
+	echo "${mb}"
+}
+fStepCodeql(){
+	local cache copy="${runTmp}/codeqlsrc" db="${runTmp}/codeqldb" out="${runTmp}/codeql.csv" log="${runTmp}/codeql.log" cql ram f
+	local mount=() files=() rc=0 n re
+	if [[ "$(uname -s)/$(uname -m)" != Linux/x86_64 ]]; then fSkip "CodeQL has no build for $(uname -s)/$(uname -m)"; return 0; fi
+	if ((useContainer)); then
+		cache=/codeql; mount=("MOUNT=${ctrCodeqlVol}:/codeql")
+		if ! docker volume inspect "${ctrCodeqlVol}" >/dev/null 2>&1; then
+			docker volume create --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" "${ctrCodeqlVol}" >/dev/null
+			docker run --rm --user 0 -v "${ctrCodeqlVol}:/codeql" "${ctrImage}" chmod 1777 /codeql
+		fi
+	else
+		cache="${XDG_CACHE_HOME:-${HOME}/.cache}/${APP_NAME}/codeql"
+		command -v zstd >/dev/null 2>&1 || { fSkip "zstd isn't installed here, to unpack the CodeQL bundle"; return 0; }
+	fi
+	fGo codeql "${mount[@]}" -- bash cicd/utility/codeql-fetch.bash "${cache}" > "${log}" 2>&1 || rc=$?
+	if ((rc)); then
+		tail -n 20 "${log}"
+		## A box that can't reach GitHub skips, as the vulnerability scan does; a wrong sum fails.
+		grep -q 'curl: ([0-9]*) \(Could not resolve\|Failed to connect\|Connection timed out\)' "${log}" && { fSkip "can't reach GitHub for the CodeQL bundle"; return 0; }
+		fDie "the CodeQL bundle didn't fetch or check out"
+	fi
+	sed 's/^/  /' "${log}"
+	cql="${cache}/${CODEQL_VERSION}/codeql/codeql"
+	ram="$(fCodeqlRam)"
+	mkdir -- "${copy}"
+	while IFS= read -r -d '' f; do [[ ! -f "${f}" ]] || files+=("${f}"); done < <(git ls-files -z -- source go.mod go.sum)
+	((${#files[@]})) || fDie "no tracked Go files to analyze"
+	cp --parents -t "${copy}" -- "${files[@]}"
+	fEcho_Clean "${#files[@]} tracked file(s), ${HEAVY_JOBS} thread(s), ${ram} MB, suite ${CODEQL_SUITE#*:}"
+	rc=0
+	fGo codeql HEAVY=1 "${mount[@]}" -- "${cql}" database create "${db}" --language=go --source-root="${copy}" \
+		--command="go build -p ${HEAVY_JOBS} ./..." --threads="${HEAVY_JOBS}" --ram="${ram}" >> "${log}" 2>&1 || rc=$?
+	((rc == 0)) || { tail -n 40 "${log}"; fDie "codeql database create failed"; }
+	fGo codeql HEAVY=1 "${mount[@]}" -- "${cql}" database analyze "${db}" "${CODEQL_SUITE}" --format=csv --output="${out}" \
+		--threads="${HEAVY_JOBS}" --ram="${ram}" >> "${log}" 2>&1 || rc=$?
+	((rc == 0)) || { tail -n 40 "${log}"; fDie "codeql database analyze failed"; }
+	## name, description, severity, message, path, line, ...
+	re='^"(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","([0-9]+)"'
+	while IFS= read -r f; do
+		if [[ "${f}" =~ ${re} ]]; then printf '  %s:%s: %s: %s (%s)\n' "${BASH_REMATCH[9]#/}" "${BASH_REMATCH[11]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[7]//\"\"/\"}" "${BASH_REMATCH[1]}"
+		else printf '  %s\n' "${f}"; fi
+	done < "${out}" | fLintOut
+	n="$(grep -c . "${out}" || true)"
+	((n == 0)) || fDie "CodeQL: ${n} result(s)"
+	fEcho_Clean "CodeQL ${CODEQL_VERSION}: no results"
 }
 
 relDir=""
@@ -761,7 +831,7 @@ if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/nul
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
 fi
 
-needCtr=0; for s in lint test race fuzz soak vuln build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+needCtr=0; for s in lint test race fuzz soak vuln codeql build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
 ((! needCtr)) || fCtrSetup
 
 for s in "${stepList[@]}"; do
@@ -775,6 +845,7 @@ for s in "${stepList[@]}"; do
 		fuzz)     fStepFuzz ;;
 		soak)     fStepSoak ;;
 		vuln)     fStepVuln ;;
+		codeql)   fStepCodeql ;;
 		build)    fStepBuild ;;
 		package)  fStepPackage ;;
 		arm64)    fStepArm64 ;;
@@ -799,3 +870,4 @@ fEcho_Clean
 ##		- 2026-11-13: fuzz step: each Fuzz target for a budget, from a copy of the tree.
 ##		- 2026-11-13: shellcheck and markdownlint run in the image, at pinned versions.
 ##		- 2026-11-13: soak step: the main actions over and over, heap and goroutines at round N against 2N.
+##		- 2026-11-13: CodeQL step: the pinned Go bundle over the tracked Go files, cached outside the repo.

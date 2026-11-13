@@ -177,7 +177,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Reproducible builds are checked, so README can say so.
 		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
 		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
-		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, and soak are done; the other 3 are Queued.
+		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done; the other 2 are Queued.
 	- Branch: nov13
 	- Test case: n/a: pipeline step.
 
@@ -237,7 +237,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: run CodeQL from a pinned local CLI
 	- ID: 2026111311485847
 	- Type: Task
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -245,6 +245,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Related IDs: 2026111111065868
 	- Progress log:
 		- CodeQL applies, since the repo is GPL and public on GitHub. Pin the CLI and query pack, and analyze a clean tree. No hosted run.
+		- 2026-11-13: A CodeQL step runs the pinned Go bundle, which holds the CLI and its query packs, over a copy of the tracked Go files, and fails on any result. It's in the quick gate, quick, default, full and merge-gate runs, and leaves out a quick gate that names areas. The bundle is checked against its pinned sum and kept in a docker volume, or under ~/.cache without the container.
+		- Verified: the step found 2 results on the tree as it was, both in launch's pty closes, and passed after they were fixed. A wrong sum failed the step and left the cached copy alone. The run without the container fetched to its own cache and removed an older version. The quick gate passed with the step in it.
+	- Decisions:
+		- The suite is security-and-quality, the widest standard one, since it found only 2 results here.
+		- It's in the quick gate, since it takes about 40 s with the bundle cached. With areas named it's left out, like the other whole-tree checks.
+		- The bundle has no arm64 build, so the step skips on a box that isn't Linux amd64.
+		- The volume keeps one version. A new pin replaces the old one after it unpacks, at about 250 MB, so the 2 GB cache rule never comes into play.
+		- A box that can't reach GitHub skips the step, as the vulnerability scan does. A wrong sum fails it.
+		- zstd is added to the image, to unpack the bundle.
+		- A clean tree is read as the tracked Go files as they stand, so untracked files and build output don't count, and a worker's uncommitted edit is checked like the other steps check it.
+		- Swept: the step runs over the whole tree, and its 2 results were the only ones.
+	- Branch: nov13-2026111311485847
+	- Commit: 332e07a
+	- Test case: n/a: pipeline step. Watched to fail on 2 real results, and on a wrong bundle sum.
+	- Closed: 20261113-123502
+	- Acceptance signoff: Self-closed: the intent was clear, and the step was watched to fail and to pass.
+	- Actual effort: Avg
 
 - CICD gaps: record a CLI demo gif for the README
 	- ID: 2026111311485862

@@ -66,6 +66,13 @@ FUZZ_TIME="30s"
 FUZZ_TIME_QUICK="10s"
 FUZZ_TIME_LONG="5m"
 
+## CodeQL: the Go bundle, which pins the CLI and its query packs together. It's kept in a docker
+## volume, or under ~/.cache with --no-container, and checked against the sum before it's unpacked.
+## Linux amd64 only, since there's no arm64 build. The sum is the release asset's digest on GitHub.
+CODEQL_VERSION="2.27.4"
+CODEQL_SHA256="d79b33f86ec8b20af73d3456041349a2780c1081ee8c0eca624b9a25c5cb2e15"
+CODEQL_SUITE="codeql/go-queries:codeql-suites/go-security-and-quality.qls"
+
 ## Soak: rounds of the main actions before the first heap and goroutine sample, and again before
 ## the second. The tests skip outside the soak step.
 SOAK_ENV="TT_MINECRAFTD_SOAK"   ## soak.Env in source/internal/soak
@@ -139,3 +146,4 @@ fLowPriority(){
 ##		- 2026-11-12: Created.
 ##		- 2026-11-13: Fuzz times. shellcheck, markdownlint and Node pinned for the image.
 ##		- 2026-11-13: Soak rounds.
+##		- 2026-11-13: CodeQL bundle pin.
