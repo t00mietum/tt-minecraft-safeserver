@@ -167,7 +167,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
 		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
 		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz and the lint tools are done; the other 4 are Queued.
-	- Branch: nov13-2026111219111143
+	- Branch: nov13
 	- Test case: n/a: pipeline step.
 
 - CICD gaps: fuzz the parsers that read operator and download input
