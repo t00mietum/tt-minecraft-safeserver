@@ -91,7 +91,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: other hosts and VMs
 	- ID: 2026111219111126
 	- Type: Task
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -102,8 +102,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- Linux on arm64 is the only other target, since the tool is Linux only. The arm64 build is made and packaged already; no test runs on it yet.
 		- `--no-remote` is accepted and `Other hosts` is printed in the run header, so the step slots in without a flag change.
-	- Branch: cicd
-	- Test case: n/a: pipeline step.
+		- 2026-11-13: A new arm64 step builds the linux/arm64 test binaries and runs them on the arm64 test box, through the host lock's wrap, which wakes the VM and puts it back. It runs in the default, long, quick, full, and merge gate runs. `--no-remote` and `--no-arm64` skip it, and the run header names the box.
+		- Verified: the step through cicd.bash ran all 176 Go test IDs on the box, 175 passing and the live agent test skipped as it does here, in about 35 s. The box went back to paused, and its work folder was removed.
+		- Verified: with the VM tool missing, an unknown box, and the box held by another caller past the wait, the step showed SKIP and the run passed. A missing test binary on the box made the box's run exit 1. A TERM mid-run left the box paused, its folder gone, and nothing running there.
+		- On the box, df66c's nft check takes its no-namespace branch, as it says in its log line.
+	- Decisions:
+		- The box runs the test binaries the build container makes, from a copy of `source` and `project`, rather than building there, since the box is emulated and slow.
+		- Tests run as the box's plain test account, not the admin one, since that one has passwordless sudo.
+		- The quick run includes it, since it takes under a minute, but waits at most 60 s for the box. The quick gate leaves it out.
+		- `--keep-temp` keeps the local run folder only. The box's work folder is always removed.
+		- The Windows name rule doesn't apply: the tool is Linux only, so no Windows box is used.
+	- Branch: nov13
+	- Test case: n/a: pipeline step. Watched to fail: a missing test binary on the box failed the box's run, and a missing tool, an unknown box, and a busy box each gave SKIP.
+	- Acceptance signoff: Self-closed: the step ran on the box and put the VM back, and each skip and fail case was run.
+	- Closed: 20261113-114525
 
 - update
 	- ID: 2026111111065803

@@ -43,6 +43,14 @@ GO_LDFLAGS_COMMON="-s -w -buildid="
 ## they say amd64; the packages use each format's own arch names.
 RELEASE_TARGETS=("linux/amd64" "linux/arm64")
 
+## Other hosts: linux/arm64 is the only other target, since the tool is Linux only. The arm64 step
+## runs the test binaries on that box, held through the shared host lock's wrap in VM_STATE_TOOL,
+## which also puts a VM back the way it was found. A box or tool that isn't there skips the step.
+ARM64_HOST="${CICD_ARM64_HOST:-vmDebARM64}"              ## the name the host lock knows it by
+ARM64_SSH="${CICD_ARM64_SSH:-tester@${ARM64_HOST}}"     ## ssh target, a plain test account
+VM_STATE_TOOL="${CICD_VM_STATE:-vm-state}"              ## on PATH, or a full path
+ARM64_LOCK_WAIT="${CICD_ARM64_LOCK_WAIT:-600}"          ## seconds to wait for the box before skipping
+
 ## The areas --backlog-run-quick takes are the folders under source/internal, plus cli for the command.
 CLI_AREA_DIR="source/cmd/tt-minecraftd"
 

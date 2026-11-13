@@ -10,7 +10,7 @@
 ##	- Purpose: Local CI/CD pipeline for tt-minecraft-safeserver. Project settings live in config.bash.
 ##	- Steps (fail-fast, any error aborts before the next step):
 ##	   remote sync, format, lint, tests, race tests, vulnerability scan, release builds, packages,
-##	   root host checks, root host ZFS checks, dogfood, publish
+##	   tests on linux/arm64, root host checks, root host ZFS checks, dogfood, publish
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  Options:
@@ -18,7 +18,8 @@
 ##	   -m, --message MSG   commit message for the publish stage (also --msg, and -m=MSG)
 ##	   (no flags)          the default run: every step above
 ##	   --quick             what fits in about 10 minutes: no race tests, vulnerability scan, packages
-##	                       or root host checks. Ends with dogfood and publish.
+##	                       or root host checks, and at most 60s waiting for the arm64 box. Ends with
+##	                       dogfood and publish.
 ##	   --long              everything. Nothing here takes hours yet, so the same as no flags.
 ##	       --slow          alias for --long
 ##	   --leakcheck         add every leak check to the run, race tests included
@@ -34,10 +35,10 @@
 ##	                       None of those three dogfoods, publishes, commits, pushes, installs, syncs,
 ##	                       prompts, or rewrites a tracked file.
 ##	   --no-container      run on this box rather than in the build container
-##	   --no-remote         skip other hosts and VMs (none are used yet)
+##	   --no-remote         skip other hosts and VMs: the arm64 tests
 ##	   --no-sync           skip the remote sync
-##	   --no-<step>         skip one step: format, lint, test, race, vuln, build, package, roothost,
-##	                       rootzfs, dogfood, publish
+##	   --no-<step>         skip one step: format, lint, test, race, vuln, build, package, arm64,
+##	                       roothost, rootzfs, dogfood, publish
 ##	   --keep-temp         keep the run's temp folder and containers, and say where they are
 ##	   --list              print the steps and test IDs the other options would run, and run nothing
 ##	   --lint-check        print only run output that wasn't seen before, then mark it seen. For the
@@ -48,6 +49,11 @@
 ##	- CICD_DOGFOOD_DEST names another dogfood folder, for a test.
 ##	- CICD_MEM_CAP caps the run's memory, with no swap: a size such as 24g, or none.
 ##	  The default is a third of RAM, from 4g to 32g.
+##	- The arm64 step builds the test binaries for linux/arm64 and runs them on the arm64 test box,
+##	  ARM64_HOST in config.bash, under the shared host lock. VM_STATE_TOOL holds the box and puts a
+##	  VM back the way it was found. A box or tool that isn't there, or a box busy past
+##	  ARM64_LOCK_WAIT, is a SKIP and the run goes on. CICD_ARM64_HOST, CICD_ARM64_SSH, CICD_VM_STATE
+##	  and CICD_ARM64_LOCK_WAIT override them.
 ##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
 ##	  A merge gate or full run that includes them goes past one 10-minute call, so start it detached.
 
@@ -96,10 +102,10 @@ fUsage(){ fEcho_Clean "$*" >&2; exit 2; }
 
 declare -A stepTitle=(
 	[sync]="Remote sync" [format]="Format" [lint]="Lint" [test]="Tests" [race]="Race tests"
-	[vuln]="Vulnerability scan" [build]="Release builds" [package]="Packages"
+	[vuln]="Vulnerability scan" [build]="Release builds" [package]="Packages" [arm64]="Tests on linux/arm64"
 	[roothost]="Root host checks" [rootzfs]="Root host ZFS checks" [dogfood]="Dogfood" [publish]="Publish"
 )
-allSteps=(sync format lint test race vuln build package roothost rootzfs dogfood publish)
+allSteps=(sync format lint test race vuln build package arm64 roothost rootzfs dogfood publish)
 stepList=(); stepTotal=0; stepName=""; stepWhere=""; stepSkip=""
 declare -A stepOff=() stepResult=()
 fStepTime(){
@@ -131,7 +137,7 @@ while (($#)); do case "$1" in
 		leakOpt="$1"; shift ;;
 	--no-container)     noContainer=1; shift ;;
 	--no-remote)        noRemote=1; shift ;;
-	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-vuln|--no-build|--no-package|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
+	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-vuln|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
 		stepOff["${1#--no-}"]="skipped by $1"; shift ;;
 	--message=*|--msg=*|-m=*) message="${1#*=}"; shift ;;
 	-m|--message|--msg) message="${2-}"; shift; (($#)) && shift ;;
@@ -174,15 +180,16 @@ pkgs=("./...")
 
 ## Which steps this mode runs, and why the rest don't.
 declare -A modeSteps=(
-	[default]="sync format lint test race vuln build package roothost rootzfs dogfood publish"
-	[long]="sync format lint test race vuln build package roothost rootzfs dogfood publish"
-	[quick]="sync format lint test build dogfood publish"
+	[default]="sync format lint test race vuln build package arm64 roothost rootzfs dogfood publish"
+	[long]="sync format lint test race vuln build package arm64 roothost rootzfs dogfood publish"
+	[quick]="sync format lint test build arm64 dogfood publish"
 	[gate]="format lint test"
-	[full]="format lint test race vuln build package roothost rootzfs"
-	[merge]="format lint test race vuln build package roothost rootzfs"
+	[full]="format lint test race vuln build package arm64 roothost rootzfs"
+	[merge]="format lint test race vuln build package arm64 roothost rootzfs"
 )
 [[ "${leakOpt}" != --leakcheck ]] || modeSteps[${mode}]="${modeSteps[${mode}]/race/} race"
 [[ "${leakOpt}" != --no-leakcheck ]] || stepOff[race]="skipped by --no-leakcheck"
+((! noRemote)) || stepOff[arm64]="skipped by --no-remote"
 for s in "${allSteps[@]}"; do
 	if [[ -n "${stepOff[${s}]:-}" ]]; then continue
 	elif [[ " ${modeSteps[${mode}]} " == *" ${s} "* ]]; then stepList+=("${s}")
@@ -563,6 +570,39 @@ fReleaseRotate(){
 		fSafeRmUnder "${root}/${RELEASE_DIR}" "${d}" >/dev/null && tidyGone+=("old release folder ${d##*/}")
 	done < <(find "${root}/${RELEASE_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
 }
+## The arm64 test binaries, built here and run on the arm64 box inside the host lock's wrap. The
+## helper leaves "reached" once the box answers, so a box that never did is a SKIP, not a FAIL.
+fStepArm64(){
+	local tool bin="${runTmp}/arm64bin" log="${runTmp}/arm64.log" state="${runTmp}/arm64state" rc=0 testRc="" d extra=() lockWait="${ARM64_LOCK_WAIT}"
+	## The tests take about a minute there, but a quick run doesn't sit in line for the box.
+	[[ "${lockWait}" =~ ^[0-9]{1,6}$ ]] || lockWait=600
+	[[ "${mode}" != quick ]] || ((lockWait <= 60)) || lockWait=60
+	tool="$(command -v -- "${VM_STATE_TOOL}" 2>/dev/null || true)"
+	if [[ -z "${tool}" ]]; then fSkip "no ${VM_STATE_TOOL} here to hold ${ARM64_HOST}"; return 0; fi
+	mkdir -- "${bin}" "${state}"
+	fGo arm64 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 -- go test -c "${GO_BUILD_FLAGS[@]}" -p "${BUILD_JOBS}" -o "${bin}/" ./... > "${runTmp}/arm64build.log" 2>&1 \
+		|| { cat "${runTmp}/arm64build.log"; fDie "arm64 test build failed"; }
+	## Package folder basenames are unique here, as go test -c -o DIR/ needs.
+	while IFS= read -r d; do [[ ! -f "${bin}/${d##*/}.test" ]] || printf '%s %s\n' "${d##*/}.test" "${d}"; done \
+		< <(find source -name '*_test.go' -printf '%h\n' | sort -u) > "${bin}/pkgdirs"
+	fEcho_Clean "built $(wc -l < "${bin}/pkgdirs") arm64 test binaries; waiting up to ${lockWait}s for ${ARM64_HOST}"
+	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
+	"${tool}" wrap "${ARM64_HOST}" --wait "${lockWait}" --why "${APP_NAME}: arm64 tests" -- \
+		bash "${here}/utility/arm64-tests.bash" "${ARM64_SSH}" "${bin}" "${runName}" "${state}" "${extra[@]}" > "${log}" 2>&1 || rc=$?
+	if [[ ! -f "${state}/reached" ]]; then
+		tail -n 5 "${log}" | sed 's/^/  /'
+		fSkip "${ARM64_HOST} isn't there, or stayed busy past ${lockWait}s; exit ${rc}"; return 0
+	fi
+	grep -E '^(box: |work folder: |removed |arm64-tests: )' "${log}" || true
+	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	if [[ -f "${state}/rc" ]]; then read -r testRc < "${state}/rc" || true; fi
+	if [[ "${testRc}" != 0 ]]; then
+		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true
+		fDie "arm64 tests failed on ${ARM64_HOST}"
+	fi
+	((rc == 0)) || fEcho "WARNING: ${VM_STATE_TOOL} exited ${rc} after the tests passed; check ${ARM64_HOST} went back as found"
+	fEcho_Clean "arm64 on ${ARM64_HOST}: $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+}
 fRootHost(){ ## [--zfs]
 	local log="${runTmp}/roothost${1:-}.log" rc=0
 	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fSkip "no docker here"; return 0; fi
@@ -622,7 +662,9 @@ fEcho_Clean
 fEcho_Clean "Repo root ...........: ${root}"
 fEcho_Clean "Version .............: ${goVersion}"
 fCpuPlan
-if ((noRemote)); then fEcho_Clean "Other hosts .........: skipped by --no-remote"; else fEcho_Clean "Other hosts .........: none used yet"; fi
+if ((noRemote)); then fEcho_Clean "Other hosts .........: skipped by --no-remote"
+elif [[ " ${stepList[*]} " != *" arm64 "* ]]; then fEcho_Clean "Other hosts .........: none in this run"
+else fEcho_Clean "Other hosts .........: ${ARM64_HOST} (linux/arm64 tests), through ${VM_STATE_TOOL}"; fi
 if [[ "${leakOpt}" == --leakcheck ]]; then fEcho_Clean "Leak checks .........: every one (--leakcheck): race tests, goroutine check"
 elif [[ "${leakOpt}" == --no-leakcheck ]]; then fEcho_Clean "Leak checks .........: none (--no-leakcheck)"
 else fEcho_Clean "Leak checks .........: goroutine check in every test run; race tests where the run has them"; fi
@@ -655,7 +697,7 @@ if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/nul
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
 fi
 
-needCtr=0; for s in lint test race vuln build package; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+needCtr=0; for s in lint test race vuln build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
 ((! needCtr)) || fCtrSetup
 
 for s in "${stepList[@]}"; do
@@ -669,6 +711,7 @@ for s in "${stepList[@]}"; do
 		vuln)     fStepVuln ;;
 		build)    fStepBuild ;;
 		package)  fStepPackage ;;
+		arm64)    fStepArm64 ;;
 		roothost) fRootHost ;;
 		rootzfs)  fRootHost --zfs ;;
 		dogfood)  fStepDogfood ;;
@@ -686,3 +729,4 @@ fEcho_Clean
 
 ##	History:
 ##		- 2026-11-12: Created, from the sister projects' pipelines, with the container, the shared flags, the step lines, and the rest of the CICD process rules.
+##		- 2026-11-13: arm64 step: the linux/arm64 tests run on the arm64 test box, under the host lock.
