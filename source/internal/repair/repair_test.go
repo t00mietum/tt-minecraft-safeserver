@@ -280,7 +280,12 @@ func ownHost(t *testing.T, serverIsMe bool, state string) (*Host, *host.Fake) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(h.Cfg.ServerDir, "world", "level.dat"), nil, 0o660); err != nil {
+	// WriteFile's mode goes through the umask, so set it again.
+	level := filepath.Join(h.Cfg.ServerDir, "world", "level.dat")
+	if err := os.WriteFile(level, nil, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(level, 0o660); err != nil {
 		t.Fatal(err)
 	}
 	return h, f

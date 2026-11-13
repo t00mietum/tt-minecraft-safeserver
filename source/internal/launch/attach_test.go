@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("TT_ATTACH_STANDIN") != "" {
 		os.Exit(attachStandIn())
 	}
-	os.Exit(m.Run())
+	testid.Main(m)
 }
 
 // attachStandIn reads its terminal the way attach does: Ctrl-C detaches only
