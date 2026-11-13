@@ -3,3 +3,4 @@
 project/*
 .github/*
 .markdownlint.jsonc
+assets/demo.gif

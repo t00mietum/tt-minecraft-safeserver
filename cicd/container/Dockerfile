@@ -54,3 +54,8 @@ RUN cd /opt/markdownlint \
 RUN apt-get update -qq \
 	&& apt-get install -y -qq --no-install-recommends zstd >/dev/null \
 	&& rm -rf /var/lib/apt/lists/*
+
+# ImageMagick, a monospace font and gifsicle draw the README's demo gif.
+RUN apt-get update -qq \
+	&& apt-get install -y -qq --no-install-recommends imagemagick fonts-dejavu-core gifsicle >/dev/null \
+	&& rm -rf /var/lib/apt/lists/*

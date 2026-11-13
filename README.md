@@ -57,6 +57,10 @@
 
 tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `tt-minecraftd`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.
 
+<!-- The first release run draws assets/demo.gif. Uncomment this then.
+<p align="center"><img src="assets/demo.gif" alt="tt-minecraftd showing its version, the server status, and the unsafe settings that stop a start"></p>
+-->
+
 <!-- TOC ignore:true -->
 ## Table of contents
 
@@ -132,6 +136,16 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 ## Installing
 
 ## Building from source
+
+Release builds are reproducible: a tag always builds to the same bytes. The pipeline builds linux/amd64 twice, from 2 folders, and fails when the checksums differ.
+
+To check a release against its source, run this from a clone:
+
+~~~bash
+cicd/utility/verify-release.bash v1.0.0-alpha.1
+~~~
+
+It rebuilds each Linux binary from the tag, with the Go version and flags the release was built with, and compares it with the release's `SHA256SUMS`. It needs git, curl, and Go 1.21 or newer, which fetches the pinned Go version itself.
 
 ## Copyright and license
 

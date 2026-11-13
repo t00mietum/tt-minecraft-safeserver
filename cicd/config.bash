@@ -104,6 +104,9 @@ LINT_LOG_DIR="cicd/artifacts/lint"
 ## Release builds and packages, one folder per version.
 RELEASE_DIR="cicd/artifacts/release"
 RELEASE_KEEP=5
+## The demo gif: each render, GFS-rotated, and the copy README shows, which only a release run updates.
+DEMO_DIR="cicd/artifacts/demo"
+DEMO_GIF="assets/demo.gif"
 
 ## Dogfood: this is the only server, so the build goes to its final place, where setup puts it.
 ## Root's folder, so the step installs with sudo when it can without a password.
@@ -147,3 +150,4 @@ fLowPriority(){
 ##		- 2026-11-13: Fuzz times. shellcheck, markdownlint and Node pinned for the image.
 ##		- 2026-11-13: Soak rounds.
 ##		- 2026-11-13: CodeQL bundle pin.
+##		- 2026-11-13: Demo gif paths.

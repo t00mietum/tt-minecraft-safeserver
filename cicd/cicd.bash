@@ -11,7 +11,7 @@
 ##	- Steps (fail-fast, any error aborts before the next step):
 ##	   remote sync, format, lint, tests, race tests, fuzzing, soak, vulnerability scan, CodeQL,
 ##	   release builds, packages, tests on linux/arm64, root host checks, root host ZFS checks,
-##	   dogfood, publish
+##	   demo gif, dogfood, publish
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  Options:
@@ -19,7 +19,7 @@
 ##	   -m, --message MSG   commit message for the publish stage (also --msg, and -m=MSG)
 ##	   (no flags)          the default run: every step above
 ##	   --quick             what fits in about 10 minutes: no race tests, soak, vulnerability scan,
-##	                       packages or root host checks, a short fuzz, and at most 60s waiting for
+##	                       packages, root host checks or demo gif, a short fuzz, and at most 60s waiting for
 ##	                       the arm64 box. Ends with dogfood and publish.
 ##	   --long              everything, with a longer fuzz and soak. Otherwise the same as no flags.
 ##	       --slow          alias for --long
@@ -42,7 +42,7 @@
 ##	   --no-remote         skip other hosts and VMs: the arm64 tests
 ##	   --no-sync           skip the remote sync
 ##	   --no-<step>         skip one step: format, lint, test, race, fuzz, soak, vuln, codeql, build,
-##	                       package, arm64, roothost, rootzfs, dogfood, publish
+##	                       package, arm64, roothost, rootzfs, demo, dogfood, publish
 ##	   --keep-temp         keep the run's temp folder and containers, and say where they are
 ##	   --list              print the steps and test IDs the other options would run, and run nothing
 ##	   --lint-check        print only run output that wasn't seen before, then mark it seen. For the
@@ -69,6 +69,11 @@
 ##	  suite in config.bash (CODEQL_*), and fails on any result. The bundle is downloaded once, checked
 ##	  against its sum, and kept in the docker volume <app>-codeql, or under ~/.cache/<app>/codeql with
 ##	  --no-container. It uses a quarter of the cores, and skips on a box that isn't Linux amd64.
+##	- The demo step records the README's CLI demo gif from the linux/amd64 build, with
+##	  utility/demo.bash, in the build container as root with no network, since it writes a made-up
+##	  install under /etc and /srv. Each render goes to DEMO_DIR in config.bash, GFS-rotated. Only a
+##	  release run copies it to DEMO_GIF, which the publish stage then commits. Without the container
+##	  it's a SKIP.
 ##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
 ##	  A merge gate or full run that includes them goes past one 10-minute call, so start it detached.
 
@@ -118,9 +123,9 @@ fUsage(){ fEcho_Clean "$*" >&2; exit 2; }
 declare -A stepTitle=(
 	[sync]="Remote sync" [format]="Format" [lint]="Lint" [test]="Tests" [race]="Race tests" [fuzz]="Fuzzing"
 	[soak]="Soak" [vuln]="Vulnerability scan" [codeql]="CodeQL" [build]="Release builds" [package]="Packages" [arm64]="Tests on linux/arm64"
-	[roothost]="Root host checks" [rootzfs]="Root host ZFS checks" [dogfood]="Dogfood" [publish]="Publish"
+	[roothost]="Root host checks" [rootzfs]="Root host ZFS checks" [demo]="Demo gif" [dogfood]="Dogfood" [publish]="Publish"
 )
-allSteps=(sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs dogfood publish)
+allSteps=(sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs demo dogfood publish)
 stepList=(); stepTotal=0; stepName=""; stepWhere=""; stepSkip=""
 declare -A stepOff=() stepResult=()
 fStepTime(){
@@ -152,7 +157,7 @@ while (($#)); do case "$1" in
 		leakOpt="$1"; shift ;;
 	--no-container)     noContainer=1; shift ;;
 	--no-remote)        noRemote=1; shift ;;
-	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-fuzz|--no-soak|--no-vuln|--no-codeql|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
+	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-fuzz|--no-soak|--no-vuln|--no-codeql|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-demo|--no-dogfood|--no-publish)
 		stepOff["${1#--no-}"]="skipped by $1"; shift ;;
 	--message=*|--msg=*|-m=*) message="${1#*=}"; shift ;;
 	-m|--message|--msg) message="${2-}"; shift; (($#)) && shift ;;
@@ -195,8 +200,8 @@ pkgs=("./...")
 
 ## Which steps this mode runs, and why the rest don't.
 declare -A modeSteps=(
-	[default]="sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs dogfood publish"
-	[long]="sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs dogfood publish"
+	[default]="sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs demo dogfood publish"
+	[long]="sync format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs demo dogfood publish"
 	[quick]="sync format lint test fuzz codeql build arm64 dogfood publish"
 	[gate]="format lint test codeql"
 	[full]="format lint test race fuzz soak vuln codeql build package arm64 roothost rootzfs"
@@ -745,6 +750,30 @@ fRootHost(){ ## [--zfs]
 	if ((rc)); then tail -n 60 "${log}"; fDie "root host checks failed"; fi
 	fEcho_Clean "root host: $(grep -cE '^PASS ' "${log}" || true) check(s) passed"
 }
+## The README's CLI demo, from the linux/amd64 build. A render of an unreleased build stays in the
+## artifacts; only a release run updates the tracked copy.
+demoChanged=()
+fStepDemo(){
+	local src="${runTmp}/build/${EXE_NAME}-linux-amd64" out="${runTmp}/demo.gif" log="${runTmp}/demo.log" memArgs=()
+	((useContainer)) || { fSkip "needs the build container, since it writes a made-up install under /etc and /srv"; return 0; }
+	[[ -x "${src}" ]] || { fSkip "no linux/amd64 build in this run"; return 0; }
+	fMemCtrArgs memArgs
+	docker run --rm --name "${APP_NAME}-${runName}-demo" --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" \
+		"${memArgs[@]}" --cpus "${BUILD_JOBS}" --cpu-shares 256 --network none --user 0 -e "OWNER=$(id -u):$(id -g)" \
+		-v "${root}:/src:ro" -v "${runTmp}:${runTmp}" "${ctrImage}" nice -n 19 bash /src/cicd/utility/demo.bash "${src}" "${runTmp}/demo" "${out}" \
+		> "${log}" 2>&1 || { tail -n 30 "${log}"; fDie "the demo didn't record"; }
+	tail -n 1 "${log}"
+	mkdir -p -- "${root}/${DEMO_DIR}"
+	cp -f -- "${out}" "${root}/${DEMO_DIR}/demo_${stamp}.gif"
+	gfs_rotate "${root}/${DEMO_DIR}" demo gif >/dev/null 2>&1 || true
+	fEcho_Clean "kept in ${DEMO_DIR}: $(find "${root}/${DEMO_DIR}" -maxdepth 1 -name 'demo_*.gif' | wc -l) render(s)"
+	if [[ "$(fIsRelease)" == 1 ]]; then
+		mkdir -p -- "$(dirname -- "${root}/${DEMO_GIF}")"
+		cp -f -- "${out}" "${root}/${DEMO_GIF}"
+		if git ls-files --error-unmatch -- "${DEMO_GIF}" >/dev/null 2>&1 && git diff --quiet -- "${DEMO_GIF}"; then fEcho_Clean "release: ${DEMO_GIF} is unchanged"
+		else demoChanged=("${DEMO_GIF}"); fEcho_Clean "release: ${DEMO_GIF} updated, for the publish stage to commit"; fi
+	fi
+}
 fStepDogfood(){
 	local d="${DOGFOOD_DESTS[0]}" exe="${EXE_NAME}" src="${relDir}/${EXE_NAME}-linux-amd64"
 	[[ -f "${src}" ]] || fDie "no native build to copy"
@@ -763,12 +792,12 @@ fStepDogfood(){
 }
 fGitTool(){ if command -v gitsby >/dev/null 2>&1; then gitsby raw git "$@"; else git "$@"; fi; }
 fStepPublish(){
-	local f branch
-	if ((${#formatChanged[@]})); then
+	local f branch changed=("${formatChanged[@]}" "${demoChanged[@]}")
+	if ((${#changed[@]})); then
 		[[ -n "${publishMsg}" ]] || publishMsg="${APP_NAME} CI/CD ${stamp}"
-		for f in "${formatChanged[@]}"; do fGitTool add -- "${f}"; done
-		fGitTool commit -m "${publishMsg}" -- "${formatChanged[@]}" >/dev/null
-		fEcho_Clean "committed ${#formatChanged[@]} reformatted file(s): \"${publishMsg}\""
+		for f in "${changed[@]}"; do fGitTool add -- "${f}"; done
+		fGitTool commit -m "${publishMsg}" -- "${changed[@]}" >/dev/null
+		fEcho_Clean "committed ${#changed[@]} file(s) the run changed: ${changed[*]}: \"${publishMsg}\""
 	else
 		fEcho_Clean "nothing for the run to commit"
 	fi
@@ -831,7 +860,7 @@ if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/nul
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
 fi
 
-needCtr=0; for s in lint test race fuzz soak vuln codeql build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+needCtr=0; for s in lint test race fuzz soak vuln codeql build package arm64 demo; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
 ((! needCtr)) || fCtrSetup
 
 for s in "${stepList[@]}"; do
@@ -851,6 +880,7 @@ for s in "${stepList[@]}"; do
 		arm64)    fStepArm64 ;;
 		roothost) fRootHost ;;
 		rootzfs)  fRootHost --zfs ;;
+		demo)     fStepDemo ;;
 		dogfood)  fStepDogfood ;;
 		publish)  fStepPublish ;;
 	esac
@@ -871,3 +901,4 @@ fEcho_Clean
 ##		- 2026-11-13: shellcheck and markdownlint run in the image, at pinned versions.
 ##		- 2026-11-13: soak step: the main actions over and over, heap and goroutines at round N against 2N.
 ##		- 2026-11-13: CodeQL step: the pinned Go bundle over the tracked Go files, cached outside the repo.
+##		- 2026-11-13: demo step: the README's CLI demo gif, kept GFS-rotated, and committed only at a release.

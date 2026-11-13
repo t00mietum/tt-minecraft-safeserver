@@ -177,7 +177,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Reproducible builds are checked, so README can say so.
 		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
 		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
-		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done; the other 2 are Queued.
+		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done. The README line waits on signoff, and the demo gif is Stalled until the first release.
 	- Branch: nov13
 	- Test case: n/a: pipeline step.
 
@@ -266,7 +266,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: record a CLI demo gif for the README
 	- ID: 2026111311485862
 	- Type: Task
-	- Status: Queued
+	- Status: Stalled
 	- Priority: Low
 	- Opened: 20261113-114858
 	- Opened by:
@@ -274,11 +274,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Related IDs: 2026111111065868
 	- Progress log:
 		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
+		- 2026-11-13: The demo step renders a CLI gif from the linux/amd64 build in the default and long runs, not in quick. It runs as root in the build container with no network, on a made-up install (made-up players, a stand-in plugin), and shows --version, status, and start --dry-run refusing unsafe settings. ImageMagick draws each screen and gifsicle joins them, so no display is used.
+		- Each render goes to the artifacts folder, GFS-rotated. Only a release run (main, at the version's tag) copies it to assets/demo.gif, and publish commits it. README's image line is commented out until then.
+		- Held for: the first release run, which draws assets/demo.gif. Then uncomment README's image line.
+		- Verified: the step passed in a run of the build and demo steps. In a throwaway clone on main with the version tag, it wrote assets/demo.gif and publish committed it and pushed to a stand-in remote.
+	- Branch: nov13-2026111311485862
+	- Commit: b6f08c5, dd12fc9
+	- Test case: n/a: pipeline step; checked by a run of it, and on a stand-in release clone.
+	- Decisions:
+		- Drawn from text with ImageMagick rather than recorded from a terminal on a virtual display, so no window can open and no display number is shared.
+		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
+		- Skipped without the build container, since it writes under /etc and /srv.
+		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
 
 - CICD gaps: README doesn't say release builds are reproducible
 	- ID: 2026111311485876
 	- Type: Task
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: Low
 	- Opened: 20261113-114858
 	- Opened by:
@@ -286,6 +298,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Related IDs: 2026111111065868
 	- Progress log:
 		- The build step already builds linux/amd64 twice and fails when the checksums differ. README should say so, and how to check a release.
+		- 2026-11-13: README's Building from source says release builds are reproducible, and how to check one with `cicd/utility/verify-release.bash <tag>`. The script rebuilds each Linux binary from the tag with that tag's pinned Go version and flags, and compares it with the release's SHA256SUMS.
+		- Waiting on signoff: README wording. Read its Building from source section.
+		- Verified: the script matched both binaries of a container build of the same commit, under a stand-in tag in a throwaway clone, and exited 1 on a changed sum. A host build with a different Go version gave other bytes, so the pinned version matters.
+	- Branch: nov13-2026111311485862
+	- Commit: b6f08c5
+	- Test case: n/a: a README line and a helper script, checked by hand against a container build. The claim itself is pinned by the build step's twice-built check.
+	- Decisions:
+		- A script rather than a pasted go build line: it reads the Go version and flags from the tag's own config.bash, so README can't go stale when they change.
+		- Go fetches the pinned version through GOTOOLCHAIN, so no container is needed to check a release.
 
 - CICD gaps: shellcheck and markdownlint run from the host
 	- ID: 2026111311485890
