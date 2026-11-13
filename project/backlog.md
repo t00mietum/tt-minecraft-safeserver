@@ -22,52 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- TestSetup and TestUpdate reach the host's own runner and account files
-	- ID: 2026111312221899
-	- Type: Bug
-	- Status: Done
-	- Severity: Low
-	- Opened: 20261113-122218
-	- Opened by:
-	- Related IDs: 2026111311485831
-	- Incorrect behavior: The setup and update tests in the command use the real runner and the real `/etc/passwd` and `/etc/group`, and `launch.Installed` asks the host's PATH. Their dry runs ran no commands here, but a change to either path could reach the host.
-	- Expected behavior: They use `hostRunner` and `setupSteps` stand-ins, as the command's soak test does.
-	- Actual cause: The soak's stand-ins were set up in the soak test alone, so the older tests never took them.
-	- Progress log:
-		- 2026-11-13: Verified: with the helper's runner and setupSteps put back on the real runner, TestSetup, TestUpdate and TestUpdateAgent each failed on the runner count. They pass with it, and the soak passed at 20 rounds. The backlog quick run passed.
-		- Swept: every hostRunner and setupSteps caller in the command. setup's repair goes through noHostChecks. TestUpdateAgent's update also took the real runner, so it uses the helper too. Its stand-in agent script now reads its input with shell builtins, since PATH is empty.
-	- Decisions:
-		- TestUpdate counts the runner only from its dry runs, since the update that goes through sudo also builds its runner, and that run is left out as root.
-	- Actual fix: A shared test helper, noHostRunner, gives setup and update a stand-in runner and stand-in account files, empties PATH, and makes launch.Installed false. TestSetup, TestUpdate, TestUpdateAgent and the soak use it, and each fails unless setup and update took the stand-in runner.
-	- Branch: nov13-2026111312221899
-	- Commit: 0c0eb6c
-	- Test case: df65m TestSetup, df671 TestUpdate, df76m TestUpdateAgent, df78f TestSoak
-	- Acceptance signoff: Self-closed: the intent was clear, and the tests were watched to fail.
-	- Closed: 20261113-125955
-
-- Player names and log lines shown to the operator keep text-direction characters
-	- ID: 2026111311594944
-	- Type: Bug
-	- Status: Done
-	- Priority: Low
-	- Opened: 20261113-115949
-	- Opened by:
-	- Related IDs: 2026111311485816
-	- Progress log:
-		- settings.printable and the log reader drop control characters only. A name in whitelist.json or ops.json, which the server account can write, can hold a right-to-left override and change how the line reads. The plugin and agent text cleaners drop these as well.
-		- Sweep: settings/players.go printable, server/log.go, launch/console.go.
-		- 2026-11-13: Verified: df78h and df78g failed on the old Clean and op warnings, and pass after. The backlog quick run passed.
-		- Swept: every server.Clean caller, which is status's names and log tail and cmd's answer lines, plus the op warnings. launch/console.go refuses the operator's own line rather than showing server text, and quotes it with %q, which escapes these characters, so it stays as it is. config.go's trim isn't shown to the operator.
-	- Decisions:
-		- Right-to-left text itself, and the marks U+200E, U+200F and U+061C, are kept. Only the characters that override or isolate direction for the rest of a line are dropped, as in the plugin and agent cleaners.
-	- Actual cause: server.Clean, which status and cmd use for log lines and names, and settings' own copy for the op warnings in start and repair, dropped only control characters.
-	- Actual fix: server.Clean also drops the embedding, override and isolate characters, U+202A to U+202E and U+2066 to U+2069, the same set the plugin and agent cleaners drop. The op warnings use server.Clean in place of their own copy.
-	- Branch: nov13-2026111312221899
-	- Commit: 4ccf48f
-	- Test case: df78h TestClean, df78g TestWarningsDirection
-	- Acceptance signoff: Self-closed: the intent was clear, and both tests failed before the fix and pass after.
-	- Closed: 20261113-125955
-
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -85,6 +39,30 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
 		- GPL v2 or later.
 	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
+
+- CICD gaps: record a CLI demo gif for the README
+	- ID: 2026111311485862
+	- Type: Task
+	- Status: Stalled
+	- Priority: Low
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
+		- 2026-11-13: The demo step renders a CLI gif from the linux/amd64 build in the default and long runs, not in quick. It runs as root in the build container with no network, on a made-up install (made-up players, a stand-in plugin), and shows --version, status, and start --dry-run refusing unsafe settings. ImageMagick draws each screen and gifsicle joins them, so no display is used.
+		- Each render goes to the artifacts folder, GFS-rotated. Only a release run (main, at the version's tag) copies it to assets/demo.gif, and publish commits it. README's image line is commented out until then.
+		- Held for: the first release run, which draws assets/demo.gif. Then uncomment README's image line.
+		- Verified: the step passed in a run of the build and demo steps. In a throwaway clone on main with the version tag, it wrote assets/demo.gif and publish committed it and pushed to a stand-in remote.
+	- Branch: nov13-2026111311485862
+	- Commit: b6f08c5, dd12fc9
+	- Test case: n/a: pipeline step; checked by a run of it, and on a stand-in release clone.
+	- Decisions:
+		- Drawn from text with ImageMagick rather than recorded from a terminal on a virtual display, so no window can open and no display number is shared.
+		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
+		- Skipped without the build container, since it writes under /etc and /srv.
+		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
 
 - Connect the service to an AI agent to update the game programs and add-ons
 	- ID: 2026111207010610
@@ -134,35 +112,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
 		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
 
-- CICD reset: other hosts and VMs
-	- ID: 2026111219111126
-	- Type: Task
-	- Status: Done
-	- Priority: High
-	- Opened: 20261112-191111
-	- Opened by:
-	- Related IDs: 2026111111065868
-	- Requirements:
-		- Run what needs another CPU on a test box, under the host lock, with the VM put back as found. A box that isn't there skips its steps and never stops a run.
-		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
-	- Progress log:
-		- Linux on arm64 is the only other target, since the tool is Linux only. The arm64 build is made and packaged already; no test runs on it yet.
-		- `--no-remote` is accepted and `Other hosts` is printed in the run header, so the step slots in without a flag change.
-		- 2026-11-13: A new arm64 step builds the linux/arm64 test binaries and runs them on the arm64 test box, through the host lock's wrap, which wakes the VM and puts it back. It runs in the default, long, quick, full, and merge gate runs. `--no-remote` and `--no-arm64` skip it, and the run header names the box.
-		- Verified: the step through cicd.bash ran all 176 Go test IDs on the box, 175 passing and the live agent test skipped as it does here, in about 35 s. The box went back to paused, and its work folder was removed.
-		- Verified: with the VM tool missing, an unknown box, and the box held by another caller past the wait, the step showed SKIP and the run passed. A missing test binary on the box made the box's run exit 1. A TERM mid-run left the box paused, its folder gone, and nothing running there.
-		- On the box, df66c's nft check takes its no-namespace branch, as it says in its log line.
-	- Decisions:
-		- The box runs the test binaries the build container makes, from a copy of `source` and `project`, rather than building there, since the box is emulated and slow.
-		- Tests run as the box's plain test account, not the admin one, since that one has passwordless sudo.
-		- The quick run includes it, since it takes under a minute, but waits at most 60 s for the box. The quick gate leaves it out.
-		- `--keep-temp` keeps the local run folder only. The box's work folder is always removed.
-		- The Windows name rule doesn't apply: the tool is Linux only, so no Windows box is used.
-	- Branch: nov13
-	- Test case: n/a: pipeline step. Watched to fail: a missing test binary on the box failed the box's run, and a missing tool, an unknown box, and a busy box each gave SKIP.
-	- Acceptance signoff: Self-closed: the step ran on the box and put the VM back, and each skip and fail case was run.
-	- Closed: 20261113-114525
-
 - update
 	- ID: 2026111111065803
 	- Type: Feature
@@ -203,216 +152,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done. The README line waits on signoff, and the demo gif is Stalled until the first release.
 	- Branch: nov13
 	- Test case: n/a: pipeline step.
-
-- CICD gaps: fuzz the parsers that read operator and download input
-	- ID: 2026111311485816
-	- Type: Task
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- Native fuzz targets for the shcl config, the plugin list, the settings files, a jar's plugin.yml, and the update agent's answer.
-		- A fuzz step runs each target at its usual budget in the default run, and briefly in the quick run. The seeds run with the plain tests.
-		- 2026-11-13: 6 fuzz targets: the agent's answer through Parse and Check, the config file, the plugin list, a jar's plugin.yml, server.properties line for line, and Fix on a fuzzed server tree. A fuzz step runs each in turn, 30 s in the default and full runs, 10 s in quick, and 5 min in long. The quick gate runs only the seeds.
-		- The seeds found 3 bugs, each fixed here, since the step fails on them. A plugin name kept text-direction characters and could be cut inside a character. A server.properties value starting with a form feed lost it. A last line ending in a backslash swallowed the first setting Fix added after it, so the file stayed unsafe.
-		- Verified: each of those seeds failed before its fix and passed after. Each target fuzzed 20 to 30 s on the host with nothing found. The step passed in the container at 5 s per target, and a planted panic in Parse failed it, printed the failing input, and left the tree clean.
-		- Swept: the agent's own cleaner already drops the same characters and cuts on a character boundary. settings.printable and the log reader don't; filed as its own bug.
-	- Branch: nov13-2026111219111143
-	- Test case: df787 FuzzParse, df788 FuzzRead, df789 FuzzReadApproved, df78a FuzzClaims, df78b FuzzProperties, df78c FuzzFix. Their seeds run with the plain tests.
-	- Closed: 20261113-115949
-	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
-	- Decisions:
-		- Fuzzing runs from a copy of the tree in the run folder, since the tree is read-only in the container and go test writes a failing input under the package. The step prints that input; it isn't copied back.
-		- Fuzz counts as a hard step, so it gets a quarter of the cores.
-		- An update with no hash isn't a fuzz failure, since Check allows it on purpose. A set value that isn't valid UTF-8 is skipped, since every value the tool sets is checked text.
-
-- CICD gaps: add a soak test
-	- ID: 2026111311485831
-	- Type: Task
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- Loop the main actions headless, and compare the heap and goroutine counts at rounds N and 2N. It runs in the default run, at a quarter of the cores.
-		- 2026-11-13: A soak step runs each soak test in the default, long, full and merge runs, after fuzzing. One test loops start, console, cmd and stop against a stand-in host. The other loops --version, --help, repair --check, update and setup dry runs, and a usage error through the command line, plus a status probe kept between rounds as watch keeps it. Each takes the live heap after a GC and the goroutine count after round N and round 2N, and fails when either grew past its slack.
-		- 100 rounds a half in the default run, about 30 s in all, and 1000 in long. The plain tests skip both.
-		- Verified: the step passed in the container. A planted heap leak in the command line's entry and a planted goroutine per cmd each turned it red. A run where the rounds didn't reach the tests failed rather than passing on skips. The backlog quick run passed.
-		- Swept: every main action the CLI has is in one of the 2 loops. watch's own ticker loop isn't, since its probe is what changes per pass.
-		- 2026-11-13: The command's soak ran setup and update on the real runner and account files. Both now take stand-ins, through new `hostRunner` and `setupSteps` vars, and both soaks run with an empty PATH and `launch.Installed` false, so nothing on the host can run. The soak fails unless setup and update took the stand-in runner each round.
-		- Verified: with update put back on the real runner, the soak failed on its first round. The step passed again in the container, and the backlog quick run passed.
-		- Swept: every `host.NewExec` and `exec` call the 2 loops can reach. The status probe and the launch rig already used stand-ins, repair's host checks go through `noHostChecks`, and the usage error stops before any runner. setup can still check whether the `nft` and `catatonit` files exist, which only reads.
-		- The older setup and update tests do the same as the soak did, filed as 2026111312221899.
-	- Decisions:
-		- The soak counts as a leak check. --no-leakcheck takes it out, and --leakcheck adds it to the quick and backlog quick runs, as it does race tests. --no-soak skips it alone.
-		- It loops in the test process against stand-ins rather than a real server, since a heap and goroutine count only mean something inside one process, and a real start needs root and about 20 s.
-		- Slack is 1 MiB or a tenth of the heap, and 2 goroutines. At 100 rounds that catches about 10 KB or one goroutine kept per round.
-	- Branch: nov13-2026111311485831
-	- Test case: df78d TestLeak checks that the soak catches a kept goroutine or heap and passes a warmed cache. df78e and df78f are the 2 soaks, TestSoak in launch and in the command.
-	- Closed: 20261113-121709
-	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
-
-- CICD gaps: run CodeQL from a pinned local CLI
-	- ID: 2026111311485847
-	- Type: Task
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- CodeQL applies, since the repo is GPL and public on GitHub. Pin the CLI and query pack, and analyze a clean tree. No hosted run.
-		- 2026-11-13: A CodeQL step runs the pinned Go bundle, which holds the CLI and its query packs, over a copy of the tracked Go files, and fails on any result. It's in the quick gate, quick, default, full and merge-gate runs, and leaves out a quick gate that names areas. The bundle is checked against its pinned sum and kept in a docker volume, or under ~/.cache without the container.
-		- Verified: the step found 2 results on the tree as it was, both in launch's pty closes, and passed after they were fixed. A wrong sum failed the step and left the cached copy alone. The run without the container fetched to its own cache and removed an older version. The quick gate passed with the step in it.
-	- Decisions:
-		- The suite is security-and-quality, the widest standard one, since it found only 2 results here.
-		- It's in the quick gate, since it takes about 40 s with the bundle cached. With areas named it's left out, like the other whole-tree checks.
-		- The bundle has no arm64 build, so the step skips on a box that isn't Linux amd64.
-		- The volume keeps one version. A new pin replaces the old one after it unpacks, at about 250 MB, so the 2 GB cache rule never comes into play.
-		- A box that can't reach GitHub skips the step, as the vulnerability scan does. A wrong sum fails it.
-		- zstd is added to the image, to unpack the bundle.
-		- A clean tree is read as the tracked Go files as they stand, so untracked files and build output don't count, and a worker's uncommitted edit is checked like the other steps check it.
-		- Swept: the step runs over the whole tree, and its 2 results were the only ones.
-	- Branch: nov13-2026111311485847
-	- Commit: 332e07a
-	- Test case: n/a: pipeline step. Watched to fail on 2 real results, and on a wrong bundle sum.
-	- Closed: 20261113-123502
-	- Acceptance signoff: Self-closed: the intent was clear, and the step was watched to fail and to pass.
-	- Actual effort: Avg
-
-- CICD gaps: record a CLI demo gif for the README
-	- ID: 2026111311485862
-	- Type: Task
-	- Status: Stalled
-	- Priority: Low
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
-		- 2026-11-13: The demo step renders a CLI gif from the linux/amd64 build in the default and long runs, not in quick. It runs as root in the build container with no network, on a made-up install (made-up players, a stand-in plugin), and shows --version, status, and start --dry-run refusing unsafe settings. ImageMagick draws each screen and gifsicle joins them, so no display is used.
-		- Each render goes to the artifacts folder, GFS-rotated. Only a release run (main, at the version's tag) copies it to assets/demo.gif, and publish commits it. README's image line is commented out until then.
-		- Held for: the first release run, which draws assets/demo.gif. Then uncomment README's image line.
-		- Verified: the step passed in a run of the build and demo steps. In a throwaway clone on main with the version tag, it wrote assets/demo.gif and publish committed it and pushed to a stand-in remote.
-	- Branch: nov13-2026111311485862
-	- Commit: b6f08c5, dd12fc9
-	- Test case: n/a: pipeline step; checked by a run of it, and on a stand-in release clone.
-	- Decisions:
-		- Drawn from text with ImageMagick rather than recorded from a terminal on a virtual display, so no window can open and no display number is shared.
-		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
-		- Skipped without the build container, since it writes under /etc and /srv.
-		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
-
-- CICD gaps: README doesn't say release builds are reproducible
-	- ID: 2026111311485876
-	- Type: Task
-	- Status: Done
-	- Priority: Low
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- The build step already builds linux/amd64 twice and fails when the checksums differ. README should say so, and how to check a release.
-		- 2026-11-13: README's Building from source says release builds are reproducible, and how to check one with `cicd/utility/verify-release.bash <tag>`. The script rebuilds each Linux binary from the tag with that tag's pinned Go version and flags, and compares it with the release's SHA256SUMS.
-		- Waiting on signoff: README wording. Read its Building from source section.
-		- Verified: the script matched both binaries of a container build of the same commit, under a stand-in tag in a throwaway clone, and exited 1 on a changed sum. A host build with a different Go version gave other bytes, so the pinned version matters.
-		- 20261113: README wording read and closed under the standing close policy in memory.md (plain, accurate, matches the build step's double build).
-	- Branch: nov13-2026111311485862
-	- Commit: b6f08c5
-	- Test case: n/a: a README line and a helper script, checked by hand against a container build. The claim itself is pinned by the build step's twice-built check.
-	- Decisions:
-		- A script rather than a pasted go build line: it reads the Go version and flags from the tag's own config.bash, so README can't go stale when they change.
-		- Go fetches the pinned version through GOTOOLCHAIN, so no container is needed to check a release.
-	- Closed: 20261113
-
-- CICD gaps: shellcheck and markdownlint run from the host
-	- ID: 2026111311485890
-	- Type: Task
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- They aren't in the build image, so their versions are only compared against the recorded ones. Pin both in the image, like the Go tools, and keep the host fallback.
-		- 2026-11-13: The build image has shellcheck and markdownlint at the recorded versions, and Node for markdownlint. The lint step runs both there. Without the container it uses the host's copies, as before, and still compares their versions with the pins.
-		- Verified: the image built, and its shellcheck, markdownlint and Node print the pinned versions. The quick gate passed in the container, and the lint step passed on the host with --no-container.
-	- Branch: nov13-2026111219111143
-	- Test case: n/a: pipeline step. Watched to fail: a planted shellcheck finding and a planted markdownlint finding each failed the lint step in the container.
-	- Closed: 20261113-120637
-	- Acceptance signoff: Self-closed: the intent was clear, and the step was run both ways and watched to fail.
-	- Decisions:
-		- markdownlint's dependencies are pinned by a lock file in the container recipe, installed with npm ci, so its version is read from there rather than kept twice.
-		- Each download is checked against a pinned sum before it's unpacked. shellcheck doesn't publish sums, so its pins are of the release files as first downloaded.
-		- xz-utils comes from Debian at build time, only to unpack the shellcheck tarball after its sum passes.
-		- amd64 and arm64 both have pins, so the image still builds on an arm64 box.
-		- The image grows from 1.44 GB to 1.67 GB, most of it Node.
-
-- update --mc-version
-	- ID: 2026111117302963
-	- Type: Feature
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261111-173029
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Prereq IDs: 2026111112264283
-	- Requirements:
-		- `--mc-version V` moves Paper to another Minecraft version, per design.md: a yes even with `--yes`, and a ZFS snapshot first.
-	- Actual effort: Avg
-	- Progress log:
-		- 20261113: `update --mc-version V` moves Paper to the newest stable build of V. A move asks once, even with `--yes`, then snapshots `zfsDataset` before anything changes. A version older than the one `paper.jar` is on is refused.
-		- Verified: df78j, df78k, df78m, and df78n pass, and so does the quick gate on both temp folders, plus race tests on the 4 packages. Each fails with its check taken out: `--yes` covering the move, the snapshot, the refusal of an older version, the new kind in the prune's pattern, the check before sudo, and a pre-release sorting before its release.
-	- Decisions:
-		- `--mc-version` goes with `--paper`, so it needs that part or no part named. With no part named, the image check reads Java for the new version.
-		- For a move, one question replaces "Go ahead?", and `--yes` doesn't skip it. A dry run asks nothing.
-		- The version `paper.jar` is on already is a plain `--paper`. No `paper.jar` counts as a move, since its worlds' version isn't known.
-		- A version older than `paper.jar`'s is refused. Going back is a rollback to the snapshot.
-		- With no `zfsDataset` it warns to back up the server folder, rather than refusing, so a server off ZFS can still move.
-		- The snapshot is `<time>_pre_tt-minecraftd-mc-version`, taken in the root run the same way as `start`'s. A failed one stops the update with nothing changed. A failed prune only warns.
-		- The build it replaced stays, as with any `--paper`, so the old version's jar is there for a rollback.
-		- design.md's update and ZFS snapshots say this now. The choices are a `Check:` entry in questions.md.
-		- Swept: `paperVersion` (the image's Java check) follows the new version; setup's Update step passes no `--mc-version`; `zfs.Take` and `Doomed` both go through the one `ours` pattern.
-	- Branch: nov13-2026111117302963
-	- Test case: df78j, df78k, df78m, df78n
-	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
-	- Closed: 20261113-131000
-
-- Start at boot
-	- ID: 2026111111065816
-	- Type: Feature
-	- Status: Waiting for testing
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065763
-	- Requirements:
-		- Add `startAtBoot` to the config, and a systemd unit that runs `start --foreground`, per `design.md`.
-		- `start` and `stop` go through `systemctl` when the unit is enabled.
-		- `setup` and `repair` install or remove the unit to match the config.
-	- Needs local test suite run?: the root host check (`cicd/root-host/root-host.bash`, plain, without `--zfs`) for df78x: `repair` enables the unit, `start` and `stop` go through it in Podman mode, the server loads and saves, and `startAtBoot` off removes the unit.
-	- Actual effort: Avg
-	- Test case: df78p, df78q, df78r, df78s, df78t, df78v, df78w, and the root host check df78x
-	- Branch: nov13-2026111111065816
-	- 20261113: The boot unit is `source/internal/boot`. `repair` check 13 (`repair.BootCheck`) writes and enables it, or disables and removes it, and setup runs it as step 11, after the image pull. `start` and `stop` go through `systemctl` when it is enabled for their config.
-	- Verified: each new test fails with its part taken out, and passes with it in. The unit passes `systemd-analyze verify`, apart from the firewall unit missing here.
-	- Not run yet: the real systemd and sudo path, which is the root host check df78x.
-	- Decisions:
-		- The unit runs `/usr/local/bin/tt-minecraftd`, with `--config` when the config is not the default, quoted for systemd. `Type=simple`, `WantedBy=multi-user.target`, and `TimeoutStopSec` is `stopTimeout` plus 45 s. design.md updated.
-		- Start and stop go through `systemctl` only when the unit is enabled and its ExecStart names this config. Inside the unit, found by cgroup, they do the work. design.md updated.
-		- Through the unit, `start` runs the settings, jar, and firewall checks first and does not wait for loading. `--debug` and `--foreground` are refused. `stop` counts down, runs `systemctl stop`, then hands the trees back; a server still up after it gets the console `stop`. design.md updated, and a Check entry in questions.md.
-		- setup and repair enable the unit and never start it. With `startAtBoot` off, repair runs `systemctl disable`, not `--now`, so a running server keeps going. design.md updated.
-		- Docker mode adds `Wants=` and `After=docker.service`. With the firewall on it has `Requires=` and `After=` on the firewall unit.
-		- Swept: both modes check `Boot` right after refusing other servers, and stop is shared in `Kit.stop`. setup on an existing install gets check 13 through `repair.After`. `status.BootUnit` and `setup.BinPath` now come from `boot`. Main tests stub `bootServes` in TestMain.
 
 - Bedrock LAN discovery
 	- ID: 2026111111065829
@@ -537,6 +276,269 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux.
+
+- TestSetup and TestUpdate reach the host's own runner and account files
+	- ID: 2026111312221899
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 20261113-122218
+	- Opened by:
+	- Related IDs: 2026111311485831
+	- Incorrect behavior: The setup and update tests in the command use the real runner and the real `/etc/passwd` and `/etc/group`, and `launch.Installed` asks the host's PATH. Their dry runs ran no commands here, but a change to either path could reach the host.
+	- Expected behavior: They use `hostRunner` and `setupSteps` stand-ins, as the command's soak test does.
+	- Actual cause: The soak's stand-ins were set up in the soak test alone, so the older tests never took them.
+	- Progress log:
+		- 2026-11-13: Verified: with the helper's runner and setupSteps put back on the real runner, TestSetup, TestUpdate and TestUpdateAgent each failed on the runner count. They pass with it, and the soak passed at 20 rounds. The backlog quick run passed.
+		- Swept: every hostRunner and setupSteps caller in the command. setup's repair goes through noHostChecks. TestUpdateAgent's update also took the real runner, so it uses the helper too. Its stand-in agent script now reads its input with shell builtins, since PATH is empty.
+	- Decisions:
+		- TestUpdate counts the runner only from its dry runs, since the update that goes through sudo also builds its runner, and that run is left out as root.
+	- Actual fix: A shared test helper, noHostRunner, gives setup and update a stand-in runner and stand-in account files, empties PATH, and makes launch.Installed false. TestSetup, TestUpdate, TestUpdateAgent and the soak use it, and each fails unless setup and update took the stand-in runner.
+	- Branch: nov13-2026111312221899
+	- Commit: 0c0eb6c
+	- Test case: df65m TestSetup, df671 TestUpdate, df76m TestUpdateAgent, df78f TestSoak
+	- Acceptance signoff: Self-closed: the intent was clear, and the tests were watched to fail.
+	- Closed: 20261113-125955
+
+- Player names and log lines shown to the operator keep text-direction characters
+	- ID: 2026111311594944
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261113-115949
+	- Opened by:
+	- Related IDs: 2026111311485816
+	- Progress log:
+		- settings.printable and the log reader drop control characters only. A name in whitelist.json or ops.json, which the server account can write, can hold a right-to-left override and change how the line reads. The plugin and agent text cleaners drop these as well.
+		- Sweep: settings/players.go printable, server/log.go, launch/console.go.
+		- 2026-11-13: Verified: df78h and df78g failed on the old Clean and op warnings, and pass after. The backlog quick run passed.
+		- Swept: every server.Clean caller, which is status's names and log tail and cmd's answer lines, plus the op warnings. launch/console.go refuses the operator's own line rather than showing server text, and quotes it with %q, which escapes these characters, so it stays as it is. config.go's trim isn't shown to the operator.
+	- Decisions:
+		- Right-to-left text itself, and the marks U+200E, U+200F and U+061C, are kept. Only the characters that override or isolate direction for the rest of a line are dropped, as in the plugin and agent cleaners.
+	- Actual cause: server.Clean, which status and cmd use for log lines and names, and settings' own copy for the op warnings in start and repair, dropped only control characters.
+	- Actual fix: server.Clean also drops the embedding, override and isolate characters, U+202A to U+202E and U+2066 to U+2069, the same set the plugin and agent cleaners drop. The op warnings use server.Clean in place of their own copy.
+	- Branch: nov13-2026111312221899
+	- Commit: 4ccf48f
+	- Test case: df78h TestClean, df78g TestWarningsDirection
+	- Acceptance signoff: Self-closed: the intent was clear, and both tests failed before the fix and pass after.
+	- Closed: 20261113-125955
+
+- CICD reset: other hosts and VMs
+	- ID: 2026111219111126
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- Run what needs another CPU on a test box, under the host lock, with the VM put back as found. A box that isn't there skips its steps and never stops a run.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Linux on arm64 is the only other target, since the tool is Linux only. The arm64 build is made and packaged already; no test runs on it yet.
+		- `--no-remote` is accepted and `Other hosts` is printed in the run header, so the step slots in without a flag change.
+		- 2026-11-13: A new arm64 step builds the linux/arm64 test binaries and runs them on the arm64 test box, through the host lock's wrap, which wakes the VM and puts it back. It runs in the default, long, quick, full, and merge gate runs. `--no-remote` and `--no-arm64` skip it, and the run header names the box.
+		- Verified: the step through cicd.bash ran all 176 Go test IDs on the box, 175 passing and the live agent test skipped as it does here, in about 35 s. The box went back to paused, and its work folder was removed.
+		- Verified: with the VM tool missing, an unknown box, and the box held by another caller past the wait, the step showed SKIP and the run passed. A missing test binary on the box made the box's run exit 1. A TERM mid-run left the box paused, its folder gone, and nothing running there.
+		- On the box, df66c's nft check takes its no-namespace branch, as it says in its log line.
+	- Decisions:
+		- The box runs the test binaries the build container makes, from a copy of `source` and `project`, rather than building there, since the box is emulated and slow.
+		- Tests run as the box's plain test account, not the admin one, since that one has passwordless sudo.
+		- The quick run includes it, since it takes under a minute, but waits at most 60 s for the box. The quick gate leaves it out.
+		- `--keep-temp` keeps the local run folder only. The box's work folder is always removed.
+		- The Windows name rule doesn't apply: the tool is Linux only, so no Windows box is used.
+	- Branch: nov13
+	- Test case: n/a: pipeline step. Watched to fail: a missing test binary on the box failed the box's run, and a missing tool, an unknown box, and a busy box each gave SKIP.
+	- Acceptance signoff: Self-closed: the step ran on the box and put the VM back, and each skip and fail case was run.
+	- Closed: 20261113-114525
+
+- CICD gaps: fuzz the parsers that read operator and download input
+	- ID: 2026111311485816
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- Native fuzz targets for the shcl config, the plugin list, the settings files, a jar's plugin.yml, and the update agent's answer.
+		- A fuzz step runs each target at its usual budget in the default run, and briefly in the quick run. The seeds run with the plain tests.
+		- 2026-11-13: 6 fuzz targets: the agent's answer through Parse and Check, the config file, the plugin list, a jar's plugin.yml, server.properties line for line, and Fix on a fuzzed server tree. A fuzz step runs each in turn, 30 s in the default and full runs, 10 s in quick, and 5 min in long. The quick gate runs only the seeds.
+		- The seeds found 3 bugs, each fixed here, since the step fails on them. A plugin name kept text-direction characters and could be cut inside a character. A server.properties value starting with a form feed lost it. A last line ending in a backslash swallowed the first setting Fix added after it, so the file stayed unsafe.
+		- Verified: each of those seeds failed before its fix and passed after. Each target fuzzed 20 to 30 s on the host with nothing found. The step passed in the container at 5 s per target, and a planted panic in Parse failed it, printed the failing input, and left the tree clean.
+		- Swept: the agent's own cleaner already drops the same characters and cuts on a character boundary. settings.printable and the log reader don't; filed as its own bug.
+	- Branch: nov13-2026111219111143
+	- Test case: df787 FuzzParse, df788 FuzzRead, df789 FuzzReadApproved, df78a FuzzClaims, df78b FuzzProperties, df78c FuzzFix. Their seeds run with the plain tests.
+	- Closed: 20261113-115949
+	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
+	- Decisions:
+		- Fuzzing runs from a copy of the tree in the run folder, since the tree is read-only in the container and go test writes a failing input under the package. The step prints that input; it isn't copied back.
+		- Fuzz counts as a hard step, so it gets a quarter of the cores.
+		- An update with no hash isn't a fuzz failure, since Check allows it on purpose. A set value that isn't valid UTF-8 is skipped, since every value the tool sets is checked text.
+
+- CICD gaps: add a soak test
+	- ID: 2026111311485831
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- Loop the main actions headless, and compare the heap and goroutine counts at rounds N and 2N. It runs in the default run, at a quarter of the cores.
+		- 2026-11-13: A soak step runs each soak test in the default, long, full and merge runs, after fuzzing. One test loops start, console, cmd and stop against a stand-in host. The other loops --version, --help, repair --check, update and setup dry runs, and a usage error through the command line, plus a status probe kept between rounds as watch keeps it. Each takes the live heap after a GC and the goroutine count after round N and round 2N, and fails when either grew past its slack.
+		- 100 rounds a half in the default run, about 30 s in all, and 1000 in long. The plain tests skip both.
+		- Verified: the step passed in the container. A planted heap leak in the command line's entry and a planted goroutine per cmd each turned it red. A run where the rounds didn't reach the tests failed rather than passing on skips. The backlog quick run passed.
+		- Swept: every main action the CLI has is in one of the 2 loops. watch's own ticker loop isn't, since its probe is what changes per pass.
+		- 2026-11-13: The command's soak ran setup and update on the real runner and account files. Both now take stand-ins, through new `hostRunner` and `setupSteps` vars, and both soaks run with an empty PATH and `launch.Installed` false, so nothing on the host can run. The soak fails unless setup and update took the stand-in runner each round.
+		- Verified: with update put back on the real runner, the soak failed on its first round. The step passed again in the container, and the backlog quick run passed.
+		- Swept: every `host.NewExec` and `exec` call the 2 loops can reach. The status probe and the launch rig already used stand-ins, repair's host checks go through `noHostChecks`, and the usage error stops before any runner. setup can still check whether the `nft` and `catatonit` files exist, which only reads.
+		- The older setup and update tests do the same as the soak did, filed as 2026111312221899.
+	- Decisions:
+		- The soak counts as a leak check. --no-leakcheck takes it out, and --leakcheck adds it to the quick and backlog quick runs, as it does race tests. --no-soak skips it alone.
+		- It loops in the test process against stand-ins rather than a real server, since a heap and goroutine count only mean something inside one process, and a real start needs root and about 20 s.
+		- Slack is 1 MiB or a tenth of the heap, and 2 goroutines. At 100 rounds that catches about 10 KB or one goroutine kept per round.
+	- Branch: nov13-2026111311485831
+	- Test case: df78d TestLeak checks that the soak catches a kept goroutine or heap and passes a warmed cache. df78e and df78f are the 2 soaks, TestSoak in launch and in the command.
+	- Closed: 20261113-121709
+	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
+
+- CICD gaps: run CodeQL from a pinned local CLI
+	- ID: 2026111311485847
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- CodeQL applies, since the repo is GPL and public on GitHub. Pin the CLI and query pack, and analyze a clean tree. No hosted run.
+		- 2026-11-13: A CodeQL step runs the pinned Go bundle, which holds the CLI and its query packs, over a copy of the tracked Go files, and fails on any result. It's in the quick gate, quick, default, full and merge-gate runs, and leaves out a quick gate that names areas. The bundle is checked against its pinned sum and kept in a docker volume, or under ~/.cache without the container.
+		- Verified: the step found 2 results on the tree as it was, both in launch's pty closes, and passed after they were fixed. A wrong sum failed the step and left the cached copy alone. The run without the container fetched to its own cache and removed an older version. The quick gate passed with the step in it.
+	- Decisions:
+		- The suite is security-and-quality, the widest standard one, since it found only 2 results here.
+		- It's in the quick gate, since it takes about 40 s with the bundle cached. With areas named it's left out, like the other whole-tree checks.
+		- The bundle has no arm64 build, so the step skips on a box that isn't Linux amd64.
+		- The volume keeps one version. A new pin replaces the old one after it unpacks, at about 250 MB, so the 2 GB cache rule never comes into play.
+		- A box that can't reach GitHub skips the step, as the vulnerability scan does. A wrong sum fails it.
+		- zstd is added to the image, to unpack the bundle.
+		- A clean tree is read as the tracked Go files as they stand, so untracked files and build output don't count, and a worker's uncommitted edit is checked like the other steps check it.
+		- Swept: the step runs over the whole tree, and its 2 results were the only ones.
+	- Branch: nov13-2026111311485847
+	- Commit: 332e07a
+	- Test case: n/a: pipeline step. Watched to fail on 2 real results, and on a wrong bundle sum.
+	- Closed: 20261113-123502
+	- Acceptance signoff: Self-closed: the intent was clear, and the step was watched to fail and to pass.
+	- Actual effort: Avg
+
+- CICD gaps: README doesn't say release builds are reproducible
+	- ID: 2026111311485876
+	- Type: Task
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- The build step already builds linux/amd64 twice and fails when the checksums differ. README should say so, and how to check a release.
+		- 2026-11-13: README's Building from source says release builds are reproducible, and how to check one with `cicd/utility/verify-release.bash <tag>`. The script rebuilds each Linux binary from the tag with that tag's pinned Go version and flags, and compares it with the release's SHA256SUMS.
+		- Waiting on signoff: README wording. Read its Building from source section.
+		- Verified: the script matched both binaries of a container build of the same commit, under a stand-in tag in a throwaway clone, and exited 1 on a changed sum. A host build with a different Go version gave other bytes, so the pinned version matters.
+		- 20261113: README wording read and closed under the standing close policy in memory.md (plain, accurate, matches the build step's double build).
+	- Branch: nov13-2026111311485862
+	- Commit: b6f08c5
+	- Test case: n/a: a README line and a helper script, checked by hand against a container build. The claim itself is pinned by the build step's twice-built check.
+	- Decisions:
+		- A script rather than a pasted go build line: it reads the Go version and flags from the tag's own config.bash, so README can't go stale when they change.
+		- Go fetches the pinned version through GOTOOLCHAIN, so no container is needed to check a release.
+	- Closed: 20261113
+
+- CICD gaps: shellcheck and markdownlint run from the host
+	- ID: 2026111311485890
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- They aren't in the build image, so their versions are only compared against the recorded ones. Pin both in the image, like the Go tools, and keep the host fallback.
+		- 2026-11-13: The build image has shellcheck and markdownlint at the recorded versions, and Node for markdownlint. The lint step runs both there. Without the container it uses the host's copies, as before, and still compares their versions with the pins.
+		- Verified: the image built, and its shellcheck, markdownlint and Node print the pinned versions. The quick gate passed in the container, and the lint step passed on the host with --no-container.
+	- Branch: nov13-2026111219111143
+	- Test case: n/a: pipeline step. Watched to fail: a planted shellcheck finding and a planted markdownlint finding each failed the lint step in the container.
+	- Closed: 20261113-120637
+	- Acceptance signoff: Self-closed: the intent was clear, and the step was run both ways and watched to fail.
+	- Decisions:
+		- markdownlint's dependencies are pinned by a lock file in the container recipe, installed with npm ci, so its version is read from there rather than kept twice.
+		- Each download is checked against a pinned sum before it's unpacked. shellcheck doesn't publish sums, so its pins are of the release files as first downloaded.
+		- xz-utils comes from Debian at build time, only to unpack the shellcheck tarball after its sum passes.
+		- amd64 and arm64 both have pins, so the image still builds on an arm64 box.
+		- The image grows from 1.44 GB to 1.67 GB, most of it Node.
+
+- update --mc-version
+	- ID: 2026111117302963
+	- Type: Feature
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-173029
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Prereq IDs: 2026111112264283
+	- Requirements:
+		- `--mc-version V` moves Paper to another Minecraft version, per design.md: a yes even with `--yes`, and a ZFS snapshot first.
+	- Actual effort: Avg
+	- Progress log:
+		- 20261113: `update --mc-version V` moves Paper to the newest stable build of V. A move asks once, even with `--yes`, then snapshots `zfsDataset` before anything changes. A version older than the one `paper.jar` is on is refused.
+		- Verified: df78j, df78k, df78m, and df78n pass, and so does the quick gate on both temp folders, plus race tests on the 4 packages. Each fails with its check taken out: `--yes` covering the move, the snapshot, the refusal of an older version, the new kind in the prune's pattern, the check before sudo, and a pre-release sorting before its release.
+	- Decisions:
+		- `--mc-version` goes with `--paper`, so it needs that part or no part named. With no part named, the image check reads Java for the new version.
+		- For a move, one question replaces "Go ahead?", and `--yes` doesn't skip it. A dry run asks nothing.
+		- The version `paper.jar` is on already is a plain `--paper`. No `paper.jar` counts as a move, since its worlds' version isn't known.
+		- A version older than `paper.jar`'s is refused. Going back is a rollback to the snapshot.
+		- With no `zfsDataset` it warns to back up the server folder, rather than refusing, so a server off ZFS can still move.
+		- The snapshot is `<time>_pre_tt-minecraftd-mc-version`, taken in the root run the same way as `start`'s. A failed one stops the update with nothing changed. A failed prune only warns.
+		- The build it replaced stays, as with any `--paper`, so the old version's jar is there for a rollback.
+		- design.md's update and ZFS snapshots say this now. The choices are a `Check:` entry in questions.md.
+		- Swept: `paperVersion` (the image's Java check) follows the new version; setup's Update step passes no `--mc-version`; `zfs.Take` and `Doomed` both go through the one `ours` pattern.
+	- Branch: nov13-2026111117302963
+	- Test case: df78j, df78k, df78m, df78n
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
+	- Closed: 20261113-131000
+
+- Start at boot
+	- ID: 2026111111065816
+	- Type: Feature
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065763
+	- Requirements:
+		- Add `startAtBoot` to the config, and a systemd unit that runs `start --foreground`, per `design.md`.
+		- `start` and `stop` go through `systemctl` when the unit is enabled.
+		- `setup` and `repair` install or remove the unit to match the config.
+	- Needs local test suite run?: No
+	- Actual effort: Avg
+	- Test case: df78p, df78q, df78r, df78s, df78t, df78v, df78w, and the root host check df78x
+	- Branch: nov13-2026111111065816
+	- 20261113: The boot unit is `source/internal/boot`. `repair` check 13 (`repair.BootCheck`) writes and enables it, or disables and removes it, and setup runs it as step 11, after the image pull. `start` and `stop` go through `systemctl` when it is enabled for their config.
+	- Verified: each new test fails with its part taken out, and passes with it in. The unit passes `systemd-analyze verify`, apart from the firewall unit missing here.
+	- Not run yet: the real systemd and sudo path, which is the root host check df78x.
+	- Decisions:
+		- The unit runs `/usr/local/bin/tt-minecraftd`, with `--config` when the config is not the default, quoted for systemd. `Type=simple`, `WantedBy=multi-user.target`, and `TimeoutStopSec` is `stopTimeout` plus 45 s. design.md updated.
+		- Start and stop go through `systemctl` only when the unit is enabled and its ExecStart names this config. Inside the unit, found by cgroup, they do the work. design.md updated.
+		- Through the unit, `start` runs the settings, jar, and firewall checks first and does not wait for loading. `--debug` and `--foreground` are refused. `stop` counts down, runs `systemctl stop`, then hands the trees back; a server still up after it gets the console `stop`. design.md updated, and a Check entry in questions.md.
+		- setup and repair enable the unit and never start it. With `startAtBoot` off, repair runs `systemctl disable`, not `--now`, so a running server keeps going. design.md updated.
+		- Docker mode adds `Wants=` and `After=docker.service`. With the firewall on it has `Requires=` and `After=` on the firewall unit.
+		- Swept: both modes check `Boot` right after refusing other servers, and stop is shared in `Kit.stop`. setup on an existing install gets check 13 through `repair.After`. `status.BootUnit` and `setup.BinPath` now come from `boot`. Main tests stub `bootServes` in TestMain.
+	- Closed: 20261113
+	- Verified: 20261113, df78x passed in the round's --backlog-run-full (root host checks step), with all 13 steps passing.
 
 - CI/CD pipeline
 	- ID: 2026111111065868
