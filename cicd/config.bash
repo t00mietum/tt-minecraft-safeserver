@@ -30,10 +30,20 @@ STATICCHECK_VERSION="v0.7.0"
 GOVULNCHECK_VERSION="v1.5.0"
 GOSEC_VERSION="v2.30.0"
 NFPM_VERSION="v2.47.0"
-## Host tools that aren't in the image. Recorded and compared, never installed.
+## shellcheck and markdownlint, in the image too. Node is only there for markdownlint, whose version
+## and dependencies are pinned in container/markdownlint/package-lock.json. The shellcheck sums are
+## of the release files as first downloaded, since the project doesn't publish any.
+NODE_VERSION="22.23.2"
+NODE_SHA256_AMD64="b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a"
+NODE_SHA256_ARM64="013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30"
+SHELLCHECK_VERSION="v0.11.0"
+SHELLCHECK_SHA256_AMD64="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+SHELLCHECK_SHA256_ARM64="12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588"
+MARKDOWNLINT_VERSION="$(sed -n 's/^ *"markdownlint-cli": "\(.*\)".*/\1/p' "${BASH_SOURCE[0]%/*}/container/markdownlint/package.json")"
+## Without the container, the host's copies are used, and compared with these.
 TOOL_VERSIONS=(
-	"shellcheck=0.11.0"
-	"markdownlint=0.49.1"
+	"shellcheck=${SHELLCHECK_VERSION#v}"
+	"markdownlint=${MARKDOWNLINT_VERSION}"
 )
 
 ## Same flags at every build site, so a release can be rebuilt to its published checksum.
@@ -50,6 +60,11 @@ ARM64_HOST="${CICD_ARM64_HOST:-vmDebARM64}"              ## the name the host lo
 ARM64_SSH="${CICD_ARM64_SSH:-tester@${ARM64_HOST}}"     ## ssh target, a plain test account
 VM_STATE_TOOL="${CICD_VM_STATE:-vm-state}"              ## on PATH, or a full path
 ARM64_LOCK_WAIT="${CICD_ARM64_LOCK_WAIT:-600}"          ## seconds to wait for the box before skipping
+
+## Fuzzing: how long each Fuzz target runs. The seeds run with the plain tests either way.
+FUZZ_TIME="30s"
+FUZZ_TIME_QUICK="10s"
+FUZZ_TIME_LONG="5m"
 
 ## The areas --backlog-run-quick takes are the folders under source/internal, plus cli for the command.
 CLI_AREA_DIR="source/cmd/tt-minecraftd"
@@ -116,3 +131,4 @@ fLowPriority(){
 
 ##	History:
 ##		- 2026-11-12: Created.
+##		- 2026-11-13: Fuzz times. shellcheck, markdownlint and Node pinned for the image.

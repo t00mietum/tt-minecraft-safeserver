@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yottacore/shcl/source/go/v3"
 )
@@ -126,17 +127,24 @@ func yamlNameVersion(r io.Reader) (name, version string) {
 	return clean(name), clean(version)
 }
 
-// clean drops control characters, so a jar can't write escape codes to the
-// terminal, and cuts a long value.
+// clean drops control characters and the ones that flip text direction, so
+// a jar can't write escape codes to the terminal or disguise its name, and
+// cuts a long value on a character boundary.
 func clean(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+		switch {
+		case r < 0x20, r >= 0x7f && r < 0xa0,
+			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
 			return -1
 		}
 		return r
 	}, s)
 	if len(s) > 80 {
-		s = s[:80] + "..."
+		cut := 80
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "..."
 	}
 	return s
 }

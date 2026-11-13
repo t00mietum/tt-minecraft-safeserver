@@ -22,6 +22,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Player names and log lines shown to the operator keep text-direction characters
+	- ID: 2026111311594944
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261113-115949
+	- Opened by:
+	- Related IDs: 2026111311485816
+	- Progress log:
+		- settings.printable and the log reader drop control characters only. A name in whitelist.json or ops.json, which the server account can write, can hold a right-to-left override and change how the line reads. The plugin and agent text cleaners drop these as well.
+		- Sweep: settings/players.go printable, server/log.go, launch/console.go.
+
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -153,8 +165,107 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Profiling is skipped on purpose for now: the tool starts and stops a server and holds no hot loop. Revisit if `status --watch` grows one.
 		- Reproducible builds are checked, so README can say so.
 		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
-	- Branch: cicd
+		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
+		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz and the lint tools are done; the other 4 are Queued.
+	- Branch: nov13-2026111219111143
 	- Test case: n/a: pipeline step.
+
+- CICD gaps: fuzz the parsers that read operator and download input
+	- ID: 2026111311485816
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- Native fuzz targets for the shcl config, the plugin list, the settings files, a jar's plugin.yml, and the update agent's answer.
+		- A fuzz step runs each target at its usual budget in the default run, and briefly in the quick run. The seeds run with the plain tests.
+		- 2026-11-13: 6 fuzz targets: the agent's answer through Parse and Check, the config file, the plugin list, a jar's plugin.yml, server.properties line for line, and Fix on a fuzzed server tree. A fuzz step runs each in turn, 30 s in the default and full runs, 10 s in quick, and 5 min in long. The quick gate runs only the seeds.
+		- The seeds found 3 bugs, each fixed here, since the step fails on them. A plugin name kept text-direction characters and could be cut inside a character. A server.properties value starting with a form feed lost it. A last line ending in a backslash swallowed the first setting Fix added after it, so the file stayed unsafe.
+		- Verified: each of those seeds failed before its fix and passed after. Each target fuzzed 20 to 30 s on the host with nothing found. The step passed in the container at 5 s per target, and a planted panic in Parse failed it, printed the failing input, and left the tree clean.
+		- Swept: the agent's own cleaner already drops the same characters and cuts on a character boundary. settings.printable and the log reader don't; filed as its own bug.
+	- Branch: nov13-2026111219111143
+	- Test case: df787 FuzzParse, df788 FuzzRead, df789 FuzzReadApproved, df78a FuzzClaims, df78b FuzzProperties, df78c FuzzFix. Their seeds run with the plain tests.
+	- Closed: 20261113-115949
+	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
+	- Decisions:
+		- Fuzzing runs from a copy of the tree in the run folder, since the tree is read-only in the container and go test writes a failing input under the package. The step prints that input; it isn't copied back.
+		- Fuzz counts as a hard step, so it gets a quarter of the cores.
+		- An update with no hash isn't a fuzz failure, since Check allows it on purpose. A set value that isn't valid UTF-8 is skipped, since every value the tool sets is checked text.
+
+- CICD gaps: add a soak test
+	- ID: 2026111311485831
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- Loop the main actions headless, and compare the heap and goroutine counts at rounds N and 2N. It runs in the default run, at a quarter of the cores.
+
+- CICD gaps: run CodeQL from a pinned local CLI
+	- ID: 2026111311485847
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- CodeQL applies, since the repo is GPL and public on GitHub. Pin the CLI and query pack, and analyze a clean tree. No hosted run.
+
+- CICD gaps: record a CLI demo gif for the README
+	- ID: 2026111311485862
+	- Type: Task
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
+
+- CICD gaps: README doesn't say release builds are reproducible
+	- ID: 2026111311485876
+	- Type: Task
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- The build step already builds linux/amd64 twice and fails when the checksums differ. README should say so, and how to check a release.
+
+- CICD gaps: shellcheck and markdownlint run from the host
+	- ID: 2026111311485890
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- They aren't in the build image, so their versions are only compared against the recorded ones. Pin both in the image, like the Go tools, and keep the host fallback.
+		- 2026-11-13: The build image has shellcheck and markdownlint at the recorded versions, and Node for markdownlint. The lint step runs both there. Without the container it uses the host's copies, as before, and still compares their versions with the pins.
+		- Verified: the image built, and its shellcheck, markdownlint and Node print the pinned versions. The quick gate passed in the container, and the lint step passed on the host with --no-container.
+	- Branch: nov13-2026111219111143
+	- Test case: n/a: pipeline step. Watched to fail: a planted shellcheck finding and a planted markdownlint finding each failed the lint step in the container.
+	- Closed: 20261113-120637
+	- Acceptance signoff: Self-closed: the intent was clear, and the step was run both ways and watched to fail.
+	- Decisions:
+		- markdownlint's dependencies are pinned by a lock file in the container recipe, installed with npm ci, so its version is read from there rather than kept twice.
+		- Each download is checked against a pinned sum before it's unpacked. shellcheck doesn't publish sums, so its pins are of the release files as first downloaded.
+		- xz-utils comes from Debian at build time, only to unpack the shellcheck tarball after its sum passes.
+		- amd64 and arm64 both have pins, so the image still builds on an arm64 box.
+		- The image grows from 1.44 GB to 1.67 GB, most of it Node.
 
 - update --mc-version
 	- ID: 2026111117302963

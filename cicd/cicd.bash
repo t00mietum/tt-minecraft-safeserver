@@ -9,8 +9,8 @@
 
 ##	- Purpose: Local CI/CD pipeline for tt-minecraft-safeserver. Project settings live in config.bash.
 ##	- Steps (fail-fast, any error aborts before the next step):
-##	   remote sync, format, lint, tests, race tests, vulnerability scan, release builds, packages,
-##	   tests on linux/arm64, root host checks, root host ZFS checks, dogfood, publish
+##	   remote sync, format, lint, tests, race tests, fuzzing, vulnerability scan, release builds,
+##	   packages, tests on linux/arm64, root host checks, root host ZFS checks, dogfood, publish
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  Options:
@@ -18,9 +18,9 @@
 ##	   -m, --message MSG   commit message for the publish stage (also --msg, and -m=MSG)
 ##	   (no flags)          the default run: every step above
 ##	   --quick             what fits in about 10 minutes: no race tests, vulnerability scan, packages
-##	                       or root host checks, and at most 60s waiting for the arm64 box. Ends with
-##	                       dogfood and publish.
-##	   --long              everything. Nothing here takes hours yet, so the same as no flags.
+##	                       or root host checks, a short fuzz, and at most 60s waiting for the arm64
+##	                       box. Ends with dogfood and publish.
+##	   --long              everything, with a longer fuzz. Otherwise the same as no flags.
 ##	       --slow          alias for --long
 ##	   --leakcheck         add every leak check to the run, race tests included
 ##	   --no-leakcheck      take every leak check out: race tests, and the goroutine check in the tests
@@ -37,8 +37,8 @@
 ##	   --no-container      run on this box rather than in the build container
 ##	   --no-remote         skip other hosts and VMs: the arm64 tests
 ##	   --no-sync           skip the remote sync
-##	   --no-<step>         skip one step: format, lint, test, race, vuln, build, package, arm64,
-##	                       roothost, rootzfs, dogfood, publish
+##	   --no-<step>         skip one step: format, lint, test, race, fuzz, vuln, build, package,
+##	                       arm64, roothost, rootzfs, dogfood, publish
 ##	   --keep-temp         keep the run's temp folder and containers, and say where they are
 ##	   --list              print the steps and test IDs the other options would run, and run nothing
 ##	   --lint-check        print only run output that wasn't seen before, then mark it seen. For the
@@ -54,6 +54,10 @@
 ##	  VM back the way it was found. A box or tool that isn't there, or a box busy past
 ##	  ARM64_LOCK_WAIT, is a SKIP and the run goes on. CICD_ARM64_HOST, CICD_ARM64_SSH, CICD_VM_STATE
 ##	  and CICD_ARM64_LOCK_WAIT override them.
+##	- The fuzz step runs each Fuzz target in turn for FUZZ_TIME in config.bash (FUZZ_TIME_QUICK in
+##	  --quick, FUZZ_TIME_LONG in --long), from a copy of the tree, so a failing input lands in the
+##	  run folder. Its file is printed; copy it to the package's testdata/fuzz to keep it as a test.
+##	  CICD_FUZZ_TIME overrides the time in every run.
 ##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
 ##	  A merge gate or full run that includes them goes past one 10-minute call, so start it detached.
 
@@ -101,11 +105,11 @@ fDie(){ { fEcho_Force "FAILED: $*"; } >&2; exit 1; }
 fUsage(){ fEcho_Clean "$*" >&2; exit 2; }
 
 declare -A stepTitle=(
-	[sync]="Remote sync" [format]="Format" [lint]="Lint" [test]="Tests" [race]="Race tests"
+	[sync]="Remote sync" [format]="Format" [lint]="Lint" [test]="Tests" [race]="Race tests" [fuzz]="Fuzzing"
 	[vuln]="Vulnerability scan" [build]="Release builds" [package]="Packages" [arm64]="Tests on linux/arm64"
 	[roothost]="Root host checks" [rootzfs]="Root host ZFS checks" [dogfood]="Dogfood" [publish]="Publish"
 )
-allSteps=(sync format lint test race vuln build package arm64 roothost rootzfs dogfood publish)
+allSteps=(sync format lint test race fuzz vuln build package arm64 roothost rootzfs dogfood publish)
 stepList=(); stepTotal=0; stepName=""; stepWhere=""; stepSkip=""
 declare -A stepOff=() stepResult=()
 fStepTime(){
@@ -137,7 +141,7 @@ while (($#)); do case "$1" in
 		leakOpt="$1"; shift ;;
 	--no-container)     noContainer=1; shift ;;
 	--no-remote)        noRemote=1; shift ;;
-	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-vuln|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
+	--no-sync|--no-format|--no-lint|--no-test|--no-race|--no-fuzz|--no-vuln|--no-build|--no-package|--no-arm64|--no-roothost|--no-rootzfs|--no-dogfood|--no-publish)
 		stepOff["${1#--no-}"]="skipped by $1"; shift ;;
 	--message=*|--msg=*|-m=*) message="${1#*=}"; shift ;;
 	-m|--message|--msg) message="${2-}"; shift; (($#)) && shift ;;
@@ -180,12 +184,12 @@ pkgs=("./...")
 
 ## Which steps this mode runs, and why the rest don't.
 declare -A modeSteps=(
-	[default]="sync format lint test race vuln build package arm64 roothost rootzfs dogfood publish"
-	[long]="sync format lint test race vuln build package arm64 roothost rootzfs dogfood publish"
-	[quick]="sync format lint test build arm64 dogfood publish"
+	[default]="sync format lint test race fuzz vuln build package arm64 roothost rootzfs dogfood publish"
+	[long]="sync format lint test race fuzz vuln build package arm64 roothost rootzfs dogfood publish"
+	[quick]="sync format lint test fuzz build arm64 dogfood publish"
 	[gate]="format lint test"
-	[full]="format lint test race vuln build package arm64 roothost rootzfs"
-	[merge]="format lint test race vuln build package arm64 roothost rootzfs"
+	[full]="format lint test race fuzz vuln build package arm64 roothost rootzfs"
+	[merge]="format lint test race fuzz vuln build package arm64 roothost rootzfs"
 )
 [[ "${leakOpt}" != --leakcheck ]] || modeSteps[${mode}]="${modeSteps[${mode}]/race/} race"
 [[ "${leakOpt}" != --no-leakcheck ]] || stepOff[race]="skipped by --no-leakcheck"
@@ -336,12 +340,15 @@ fCtrSetup(){
 	local tag
 	((! noContainer)) || { fEcho_Clean "Container: off (--no-container), running on this box"; return 0; }
 	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fEcho_Clean "Container: no docker here, running on this box"; return 0; fi
-	tag="${APP_NAME}-cicd:$({ cat "${here}/container/Dockerfile"; grep -E '^(GO_IMAGE|STATICCHECK_VERSION|GOVULNCHECK_VERSION|GOSEC_VERSION|NFPM_VERSION)=' "${here}/config.bash"; } | sha256sum | cut -c1-12)"
+	tag="${APP_NAME}-cicd:$({ cat "${here}/container/Dockerfile" "${here}/container/markdownlint/package-lock.json"; grep -E '^(GO_IMAGE|STATICCHECK_VERSION|GOVULNCHECK_VERSION|GOSEC_VERSION|NFPM_VERSION|NODE_[A-Z0-9_]*|SHELLCHECK_[A-Z0-9_]*)=' "${here}/config.bash"; } | sha256sum | cut -c1-12)"
 	if ! docker image inspect "${tag}" >/dev/null 2>&1; then
 		fEcho_Clean "Container: building ${tag}"
 		if ! nice -n 19 docker build -q --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" \
 			--build-arg "GO_IMAGE=${GO_IMAGE}" --build-arg "STATICCHECK_VERSION=${STATICCHECK_VERSION}" --build-arg "GOVULNCHECK_VERSION=${GOVULNCHECK_VERSION}" \
-			--build-arg "GOSEC_VERSION=${GOSEC_VERSION}" --build-arg "NFPM_VERSION=${NFPM_VERSION}" -t "${tag}" "${here}/container" >/dev/null; then
+			--build-arg "GOSEC_VERSION=${GOSEC_VERSION}" --build-arg "NFPM_VERSION=${NFPM_VERSION}" \
+			--build-arg "NODE_VERSION=${NODE_VERSION}" --build-arg "NODE_SHA256_AMD64=${NODE_SHA256_AMD64}" --build-arg "NODE_SHA256_ARM64=${NODE_SHA256_ARM64}" \
+			--build-arg "SHELLCHECK_VERSION=${SHELLCHECK_VERSION}" --build-arg "SHELLCHECK_SHA256_AMD64=${SHELLCHECK_SHA256_AMD64}" \
+			--build-arg "SHELLCHECK_SHA256_ARM64=${SHELLCHECK_SHA256_ARM64}" -t "${tag}" "${here}/container" >/dev/null; then
 			fEcho_Clean "Container: the image would not build, running on this box"; return 0
 		fi
 	fi
@@ -435,16 +442,18 @@ fStepLint(){
 	fGo lint -- gosec -quiet "${pkgs[@]}" 2>&1 | fLintOut || fDie "gosec findings"
 	fEcho_Clean "gosec: clean"
 	if ((${#areaDirs[@]})); then return 0; fi
-	if command -v shellcheck >/dev/null 2>&1; then
-		shellcheck "${shellFiles[@]}" 2>&1 | fLintOut || fDie "shellcheck findings"
+	## The image has both at the pinned versions; without it, the host's copies, if any.
+	if ((useContainer)) || command -v shellcheck >/dev/null 2>&1; then
+		fGo lint -- shellcheck "${shellFiles[@]}" 2>&1 | fLintOut || fDie "shellcheck findings"
 		fEcho_Clean "shellcheck: clean"
 	else fEcho "WARNING: shellcheck skipped (not installed)"; fi
-	if command -v markdownlint >/dev/null 2>&1; then
-		markdownlint "${mdFiles[@]}" 2>&1 | fLintOut || fDie "markdownlint findings"
+	if ((useContainer)) || command -v markdownlint >/dev/null 2>&1; then
+		fGo lint -- markdownlint "${mdFiles[@]}" 2>&1 | fLintOut || fDie "markdownlint findings"
 		fEcho_Clean "markdownlint: clean (${#mdFiles[@]} file(s))"
 	else fEcho "WARNING: markdownlint skipped (not installed)"; fi
 	"${here}/utility/test-id.bash" --check -q || fDie "test IDs (see above)"
 	fEcho_Clean "test IDs: every test has its own"
+	((! useContainer)) || return 0
 	for spec in "${TOOL_VERSIONS[@]}"; do
 		case "${spec%%=*}" in
 			shellcheck)   have="$(shellcheck --version 2>/dev/null | awk '$1=="version:"{print $2}')" ;;
@@ -496,6 +505,34 @@ fStepVuln(){
 		fSkip "govulncheck can't reach vuln.go.dev"; return 0
 	fi
 	fEcho_Clean "govulncheck: clean"
+}
+
+## Each Fuzz target for its budget, from a copy of the tree: go test writes a failing input under
+## the package's testdata, and the tree is read-only in the container.
+fStepFuzz(){
+	local copy="${runTmp}/fuzzsrc" log="${runTmp}/fuzz.log" budget="${FUZZ_TIME}" f name dir rc n=0 found
+	case "${mode}" in quick) budget="${FUZZ_TIME_QUICK}" ;; long) budget="${FUZZ_TIME_LONG}" ;; esac
+	budget="${CICD_FUZZ_TIME:-${budget}}"
+	[[ "${budget}" =~ ^[0-9]+[smh]$ ]] || fDie "fuzz time '${budget}' isn't a count of s, m or h"
+	mkdir -- "${copy}"
+	cp -a -- source go.mod go.sum "${copy}/"
+	fEcho_Clean "${budget} per target, ${HEAVY_JOBS} worker(s)"
+	while IFS= read -r f; do
+		dir="./$(dirname "${f}")"
+		while IFS= read -r name; do
+			n=$((n + 1)); rc=0
+			fGo fuzz HEAVY=1 -- go -C "${copy}" test -count=1 -run '^$' -fuzz "^${name}\$" -fuzztime "${budget}" -parallel "${HEAVY_JOBS}" "${dir}" > "${log}" 2>&1 || rc=$?
+			grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+			if ((rc)); then
+				grep -vE '^(fuzz: elapsed|(PASS|FAIL|SKIP) [0-9a-z]{5} )' "${log}" | tail -n 40 || true
+				found="$(find "${copy}/${dir#./}/testdata/fuzz/${name}" -type f -newer "${copy}/go.mod" 2>/dev/null | head -n 1)"
+				[[ -z "${found}" ]] || { fEcho_Clean "failing input: ${found}"; sed 's/^/  /' "${found}"; }
+				fDie "fuzzing found a failure in ${name} (${dir})"
+			fi
+		done < <(sed -nE 's/^func (Fuzz[A-Za-z0-9_]*)\(.*/\1/p' "${f}")
+	done < <(grep -rlE '^func Fuzz' --include='*_test.go' source | sort)
+	((n)) || { fSkip "no Fuzz targets in the tree"; return 0; }
+	fEcho_Clean "fuzzing: ${n} target(s), nothing found"
 }
 
 relDir=""
@@ -697,7 +734,7 @@ if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/nul
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
 fi
 
-needCtr=0; for s in lint test race vuln build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+needCtr=0; for s in lint test race fuzz vuln build package arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
 ((! needCtr)) || fCtrSetup
 
 for s in "${stepList[@]}"; do
@@ -708,6 +745,7 @@ for s in "${stepList[@]}"; do
 		lint)     fStepLint ;;
 		test)     fStepTest ;;
 		race)     fStepRace ;;
+		fuzz)     fStepFuzz ;;
 		vuln)     fStepVuln ;;
 		build)    fStepBuild ;;
 		package)  fStepPackage ;;
@@ -730,3 +768,5 @@ fEcho_Clean
 ##	History:
 ##		- 2026-11-12: Created, from the sister projects' pipelines, with the container, the shared flags, the step lines, and the rest of the CICD process rules.
 ##		- 2026-11-13: arm64 step: the linux/arm64 tests run on the arm64 test box, under the host lock.
+##		- 2026-11-13: fuzz step: each Fuzz target for a budget, from a copy of the tree.
+##		- 2026-11-13: shellcheck and markdownlint run in the image, at pinned versions.

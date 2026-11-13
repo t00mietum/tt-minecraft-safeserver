@@ -7,8 +7,9 @@
 ##		- An ID is the whole minutes from 2000-01-01 UTC to when the test was written, in lowercase
 ##		  Crockford base 32 (0-9, a-z less i, l, o, u). A minute another test already has goes to the
 ##		  next free one.
-##		- A Go test has it as the first line of its body, `defer testid.Line(t, "<id>")`. A root
-##		  host check has it as the first argument of a `check` call in cicd/root-host/checks.bash.
+##		- A Go test has it as the first line of its body, `defer testid.Line(t, "<id>")`, or `f` in a
+##		  fuzz target. A root host check has it as the first argument of a `check` call in
+##		  cicd/root-host/checks.bash.
 ##	Syntax:
 ##		test-id.bash --check [-q] [--root DIR]
 ##		test-id.bash --list [--root DIR]
@@ -46,7 +47,7 @@ fGoTests(){
 			if (name != "") printf "-\t%s\t%s\n", fileOf, name
 			name = $2; sub(/\(.*/, "", name); fileOf = FILENAME; n = 0; next }
 		name != "" { n++
-			if (match($0, /defer testid\.Line\(t, "[^"]*"\)/)) {
+			if (match($0, /defer testid\.Line\([tf], "[^"]*"\)/)) {
 				id = substr($0, RSTART, RLENGTH); sub(/^.*, "/, "", id); sub(/".*$/, "", id)
 				printf "%s\t%s\t%s\n", id, fileOf, name; name = ""; next }
 			if (n >= 3) { printf "-\t%s\t%s\n", fileOf, name; name = "" } }
@@ -80,3 +81,4 @@ exit "${bad}"
 
 ##	History:
 ##		- 2026-11-12: Created.
+##		- 2026-11-13: Fuzz targets take their ID the same way, from `f`.
