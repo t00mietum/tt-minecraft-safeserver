@@ -821,6 +821,10 @@ cicd/                        build, test, and release scripts
 
 - With a port forward, the home address is public, and so is anything that answers on it.
 
+- When the host's own outbound traffic goes through a VPN client, such as one with a kill switch:
+	- The VPN's firewall may drop inbound connections to ports it doesn't know, so the game ports go on its allowlist too.
+	- Set `bindIP` to the server's LAN address. On all addresses, Bedrock's UDP replies leave from the tunnel's address, and joins time out. That binds Java there too, so it doesn't mix with a tunnel agent on localhost.
+
 ### Firewall
 
 - With `firewall` on, the tool puts its rules in its own nftables table, `inet tt_minecraftd`, so they apply to IPv4 and IPv6.

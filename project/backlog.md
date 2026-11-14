@@ -76,6 +76,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-14: A Bedrock phone joined over the internet with a Floodgate login and its whitelisted UUID, into the existing world.
 	- 2026-11-14: The phone session ended because the player left. The bindIP line is in the config, and a root repair --check passes but for the 0600 false alarm.
 
+- Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
+	- ID: 2026111412275150
+	- Type: Task
+	- Status: Waiting on signoff
+	- Opened: 20261114-122751
+	- Opened by: JC
+	- Progress log:
+		- 2026-11-07: Left open from the Paper 26.3 update, done before this repo. TreeCapitator 1.0 and AntiCreeper 5.1 have no updates but load. Sleeping uses the players_sleeping_percentage game rule, at 0, in place of OnePlayerSleep.
+	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
+
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -109,6 +119,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
 		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
 
+- Keep the server's DNS name current when the home address changes
+	- ID: 2026111412275159
+	- Type: Task
+	- Status: Stalled
+	- Opened: 20261114-122751
+	- Opened by: JC
+	- Requirements: The plain record players connect to follows the home WAN address, as the domain's own record already does.
+	- Progress log:
+		- 2026-11-08: The hourly DDNS job updates only the domain's own record, and its API can't change a plain record, so the game name goes stale when the address changes. A fix needs the DNS host's REST API.
+		- Held for: an API key from the DNS host.
+		- 2026-11-14: The 2 old per-edition names can be deleted, since a phone has joined through the shared name.
+
 - start doesn't catch a link in the server tree that won't resolve in the container
 	- ID: 2026111409374443
 	- Type: Bug
@@ -132,6 +154,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: It compares the installed binary's SHA-256 with the release's SHA256SUMS, and replaces it when they differ.
 	- Progress log:
 		- 2026-11-14: Seen in the live move. A build from 2026-11-12 was left in place, and the release binary was installed by hand after setup.
+
+- status says nothing listens on the Bedrock UDP port, which is normal while no Bedrock player is on
+	- ID: 2026111412275169
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261114-122751
+	- Opened by:
+	- Incorrect behavior [Bug]: Geyser opens its NetherNet UDP socket only during a join, so status reads like a fault when idle.
+	- Expected behavior [Bug]: status says the UDP port opens per join, or checks only the TCP signaling port.
 
 - repair --check fails while the server runs on files the server writes as 0600
 	- ID: 2026111412081476
