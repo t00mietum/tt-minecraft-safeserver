@@ -117,7 +117,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update
 	- ID: 2026111111065803
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -127,9 +127,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
 		- Update plugins that have a known source, and approve the new jars.
 		- Refresh the pinned container image.
+	- Test case: its children's: 2026111117302963: df78j, df78k, df78m, df78n; 2026111117302995: df77g, df77h, df77j, df77k, df77m, df671, df65m; 2026111117302950: df66x, df66y, df66z, df670, df671; 2026111117302973: df672, df671; 2026111117302985: df67p, df67q, df67r, df67s, df671; 2026111117404480: none named
+	- Closed: 20261113-182023
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
 	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) is done too. 2026111117404480 (Modrinth and Hangar sources) is queued.
+	- 2026-11-14: Closed from its children. update --self (2026111117302995) and Modrinth and Hangar sources (2026111117404480) are deferred, so the GitHub releases line waits with them.
 
 - Update agent: Paper fallback and the --mc-version report
 	- ID: 2026111210034308
@@ -217,7 +220,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Move the first server over
 	- ID: 2026111111070787
 	- Type: Task
-	- Status: Queued
+	- Status: Stalled
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -228,6 +231,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
 		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
+	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
 
 - Dev-environment install script
 	- ID: 2026111111070800
