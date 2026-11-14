@@ -53,6 +53,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Commit: fb7097b
 	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
 
+- Move the first server over
+	- ID: 2026111111070787
+	- Type: Task
+	- Status: Waiting on signoff
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Move the existing server to the new account and tool with `setup --adopt`.
+		- Approve the plugins that are there now.
+		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
+		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
+		- Retire the old start, stop, and manage scripts after it runs clean.
+	- Needs hand testing: A Bedrock phone joins from outside the LAN, and an account that isn't whitelisted is refused. Then an OK to retire the old scripts.
+	- Test case: repair --check as root (all OK), and a status ping to the home domain from outside, through the router forward
+	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
+	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
+	- 2026-11-14: Moved with setup --adopt on v1.0.0-alpha.1. The server runs in Podman as minecraftd, with the firewall table loaded. Java answers from the internet and the LAN. Details and the one config line left for a hand copy are in details.md.
+
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -86,27 +106,56 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
 		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
 
-- Move the first server over
-	- ID: 2026111111070787
-	- Type: Task
-	- Status: Stalled
+- start doesn't catch a link in the server tree that won't resolve in the container
+	- ID: 2026111409374443
+	- Type: Bug
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261114-093744
+	- Opened by:
+	- Incorrect behavior [Bug]: The container mounts each tree at its resolved path, so a link such as world -> .../worlds/current/world dangles inside it when current is itself a link. Paper may then make a new, empty world.
+	- Expected behavior [Bug]: start refuses, and names the link and the path it would need, or repair offers to point it at the resolved path.
+	- Progress log:
+		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
+
+- install.bash keeps a dev build that has the release's version
+	- ID: 2026111410134543
+	- Type: Bug
+	- Status: Queued
 	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Move the existing server to the new account and tool with `setup --adopt`.
-		- Approve the plugins that are there now.
-		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
-		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
-		- Retire the old start, stop, and manage scripts after it runs clean.
-	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
-	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
+	- Opened: 20261114-101345
+	- Opened by:
+	- Incorrect behavior [Bug]: install.bash compares only the version string, so a dogfood build of the same version is kept, and setup then runs that older code.
+	- Expected behavior [Bug]: It compares the installed binary's SHA-256 with the release's SHA256SUMS, and replaces it when they differ.
+	- Progress log:
+		- 2026-11-14: Seen in the live move. A build from 2026-11-12 was left in place, and the release binary was installed by hand after setup.
+
+- setup --adopt leaves the Floodgate key readable by others, and its own check then fails
+	- ID: 2026111410134562
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261114-101345
+	- Opened by:
+	- Incorrect behavior [Bug]: On an adopted tree, plugins/floodgate/key.pem stayed 0644, and setup ended with its repair --check failing on it. repair fixed it.
+	- Expected behavior [Bug]: setup sets the key's mode before its check, as repair does.
+
+- start's sudo -v asks for a password where a NOPASSWD rule sits beside password rules
+	- ID: 2026111410134553
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261114-101345
+	- Opened by:
+	- Incorrect behavior [Bug]: sudo -v needs every matching sudoers rule to be NOPASSWD, so it asks even where sudo -n true works. Without a terminal, start fails.
+	- Expected behavior [Bug]: Try sudo -n true first, then sudo -v.
+	- Progress log:
+		- 2026-11-14: Seen in the live move on b23. sudo tt-minecraftd start worked around it.
 
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Prereq IDs: 2026111111070787
 	- Severity: Critical
 	- Opened: 20261111-110656
@@ -126,18 +175,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
 		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
 		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
-
-- start doesn't catch a link in the server tree that won't resolve in the container
-	- ID: 2026111409374443
-	- Type: Bug
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261114-093744
-	- Opened by:
-	- Incorrect behavior [Bug]: The container mounts each tree at its resolved path, so a link such as world -> .../worlds/current/world dangles inside it when current is itself a link. Paper may then make a new, empty world.
-	- Expected behavior [Bug]: start refuses, and names the link and the path it would need, or repair offers to point it at the resolved path.
-	- Progress log:
-		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
+		- 2026-11-14: setup turned on white-list and enforce-whitelist. Both players were already on the list, the Bedrock one by Floodgate UUID, which Floodgate logins now use.
+	- Test case: repair --check safe settings OK as root, and whitelist list after the move
+	- Closed: 2026-11-14
 
 - First release
 	- ID: 2026111111070774
