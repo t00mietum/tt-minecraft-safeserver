@@ -203,7 +203,7 @@ Release builds are reproducible: a tag always builds to the same bytes. The pipe
 To check a release against its source, run this from a clone:
 
 ~~~bash
-cicd/utility/verify-release.bash v1.0.0-alpha.1
+bash cicd/utility/verify-release.bash v1.0.0-alpha.1
 ~~~
 
 It rebuilds each Linux binary from the tag, with the Go version and flags the release was built with, and compares it with the release's `SHA256SUMS`. It needs git, curl, and Go 1.21 or newer, which fetches the pinned Go version itself.
