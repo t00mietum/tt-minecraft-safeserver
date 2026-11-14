@@ -263,7 +263,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Release-install script
 	- ID: 2026111111070761
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -274,7 +274,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
+		- No --target option. setup and the boot unit both expect /usr/local/bin, so a user install wouldn't work.
+		- It always runs setup, a re-run included, since setup on an existing install runs repair and update. A current binary isn't downloaded again.
+		- --yes skips only the installer's prompt. Setup options go after --, such as -- --yes --accept-eula.
+		- curl or wget, since minimal Debian often has only wget. The answer comes from /dev/tty when the script arrives on a pipe.
+		- MIT, as helper scripts usually are, rather than the project's GPL.
+		- Tested by sourcing it with the install folder, os-release, and terminal paths pointed at a stand-in, on a PATH with stand-in curl, wget, uname, and sudo. No test-only option in the script.
 	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
+	- 2026-11-14: install.bash at the repo root finds the newest release through the GitHub API, checks the binary for this CPU against SHA256SUMS, installs it as /usr/local/bin/tt-minecraftd (through sudo when needed), and runs tt-minecraftd setup. It states its plan and asks first, and --yes skips that. README's Installing section has the curl and wget one-liners.
+	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note.
+	- Verified: df798 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the hash check, the version sort, the no answer at the prompt, the NixOS refusal, or the temp cleanup each fails it.
+	- Verified: against the live API with no release yet, it says there's no stable release to install yet.
+	- Branch: nov14-2026111111070761
+	- Commit: d63a876
+	- Test case: df798
+	- Acceptance signoff: Self-closed: tested against a stand-in release. A run against the real first release is part of 2026111111070774.
+	- Closed: 20261113-190056
 
 - First release
 	- ID: 2026111111070774

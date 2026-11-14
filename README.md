@@ -71,6 +71,7 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 - [Features](#features)
 - [Update agent](#update-agent)
 - [Installing](#installing)
+	- [Direct stable and dev install script](#direct-stable-and-dev-install-script)
 - [Building from source](#building-from-source)
 - [Copyright and license](#copyright-and-license)
 
@@ -136,6 +137,24 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 - `--set agent=none` skips the agent for one run, and `update --plugins --dry-run` shows what it suggests without downloading anything.
 
 ## Installing
+
+### Direct stable and dev install script
+
+For Debian and its derivatives, on amd64 or arm64. It finds the newest release, checks the binary against the release's `SHA256SUMS`, puts it in `/usr/local/bin/tt-minecraftd`, and runs `tt-minecraftd setup`, which does the rest.
+
+~~~bash
+bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
+~~~
+
+Or with wget:
+
+~~~bash
+bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
+~~~
+
+It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces an older binary, and setup on an existing install runs `repair` and `update`.
+
+NixOS isn't supported yet.
 
 ## Building from source
 

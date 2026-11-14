@@ -88,6 +88,7 @@ SHELL_LINT_GLOBS=(
 	"cicd/utility/include/*.bash"
 	"cicd/root-host/*.bash"
 	"cicd/hooks/pre-push"
+	"install.bash"
 )
 ## The license, conduct, and contributing texts are stock, so they stay as they came.
 MD_LINT_GLOBS=(
