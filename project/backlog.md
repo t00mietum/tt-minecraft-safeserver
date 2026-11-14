@@ -86,19 +86,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
 		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
 
-- First release
-	- ID: 2026111111070774
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868, 2026111111070761
-	- Requirements:
-		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
-	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
-	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
-
 - Move the first server over
 	- ID: 2026111111070787
 	- Type: Task
@@ -114,30 +101,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
 	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
-
-- CICD gaps: record a CLI demo gif for the README
-	- ID: 2026111311485862
-	- Type: Task
-	- Status: Stalled
-	- Priority: Low
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
-		- 2026-11-13: The demo step renders a CLI gif from the linux/amd64 build in the default and long runs, not in quick. It runs as root in the build container with no network, on a made-up install (made-up players, a stand-in plugin), and shows --version, status, and start --dry-run refusing unsafe settings. ImageMagick draws each screen and gifsicle joins them, so no display is used.
-		- Each render goes to the artifacts folder, GFS-rotated. Only a release run (main, at the version's tag) copies it to assets/demo.gif, and publish commits it. README's image line is commented out until then.
-		- Held for: the first release run, which draws assets/demo.gif. Then uncomment README's image line.
-		- Verified: the step passed in a run of the build and demo steps. In a throwaway clone on main with the version tag, it wrote assets/demo.gif and publish committed it and pushed to a stand-in remote.
-	- Branch: nov13-2026111311485862
-	- Commit: b6f08c5, dd12fc9
-	- Test case: n/a: pipeline step; checked by a run of it, and on a stand-in release clone.
-	- Decisions:
-		- Drawn from text with ImageMagick rather than recorded from a terminal on a virtual display, so no window can open and no display number is shared.
-		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
-		- Skipped without the build container, since it writes under /etc and /srv.
-		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
+	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
 
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
@@ -175,10 +139,52 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
 
+- First release
+	- ID: 2026111111070774
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868, 2026111111070761
+	- Requirements:
+		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+	- Test case: verify-release.bash v1.0.0-alpha.1 (both binaries MATCH), and SHA256SUMS checked against a public download
+	- Closed: 2026-11-14
+	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
+	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
+	- 2026-11-14: Published as a pre-release, with both binaries, 4 packages, and SHA256SUMS. main was cut from dev after a merge gate passed. verify-release.bash wasn't executable, so README and the notes now say bash before it, and dev has the mode fixed.
+
+- CICD gaps: record a CLI demo gif for the README
+	- ID: 2026111311485862
+	- Type: Task
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261113-114858
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
+	- Progress log:
+		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
+		- 2026-11-13: The demo step renders a CLI gif from the linux/amd64 build in the default and long runs, not in quick. It runs as root in the build container with no network, on a made-up install (made-up players, a stand-in plugin), and shows --version, status, and start --dry-run refusing unsafe settings. ImageMagick draws each screen and gifsicle joins them, so no display is used.
+		- Each render goes to the artifacts folder, GFS-rotated. Only a release run (main, at the version's tag) copies it to assets/demo.gif, and publish commits it. README's image line is commented out until then.
+		- Held for: the first release run, which draws assets/demo.gif. Then uncomment README's image line.
+		- Verified: the step passed in a run of the build and demo steps. In a throwaway clone on main with the version tag, it wrote assets/demo.gif and publish committed it and pushed to a stand-in remote.
+		- 2026-11-14: The first render warned about runMode native, which is off now. demo.bash uses podman, and the gif was drawn again from the released amd64 binary. README shows it.
+	- Branch: nov13-2026111311485862
+	- Commit: b6f08c5, dd12fc9
+	- Test case: the demo step (PASS in the release run), and its frames checked by eye
+	- Decisions:
+		- Drawn from text with ImageMagick rather than recorded from a terminal on a virtual display, so no window can open and no display number is shared.
+		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
+		- Skipped without the build container, since it writes under /etc and /srv.
+		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
+	- Closed: 2026-11-14
+
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143
 	- Type: Task
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -197,7 +203,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
 		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done. The README line waits on signoff, and the demo gif is Stalled until the first release.
 	- Branch: nov13
-	- Test case: n/a: pipeline step.
+	- Test case: its children's: 2026111311485862: the demo step (PASS in the release run), and its frames checked by eye; 2026111311485816: df787 FuzzParse, df788 FuzzRead, df789 FuzzReadApproved, df78a FuzzClaims, df78b FuzzProperties, df78c FuzzFix. Their seeds run with the plain tests.; 2026111311485831: df78d TestLeak checks that the soak catches a kept goroutine or heap and passes a warmed cache. df78e and df78f are the 2 soaks, TestSoak in launch and in the command.; 2026111311485847: n/a: pipeline step. Watched to fail on 2 real results, and on a wrong bundle sum.; 2026111311485876: n/a: a README line and a helper script, checked by hand against a container build. The claim itself is pinned by the build step's twice-built check.; 2026111311485890: n/a: pipeline step. Watched to fail: a planted shellcheck finding and a planted markdownlint finding each failed the lint step in the container.
+	- Closed: 20261114-100444
 
 - A push to main loses its connection while the pre-push merge gate runs
 	- ID: 2026111409494415
