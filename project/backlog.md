@@ -67,11 +67,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
 		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
-	- Needs hand testing: A Bedrock phone joins from outside the LAN, and an account that isn't whitelisted is refused. Then an OK to retire the old scripts.
+	- Needs hand testing: A Bedrock phone joins from outside the LAN, and an account that isn't whitelisted is refused.
 	- Test case: repair --check as root (all OK), and a status ping to the home domain from outside, through the router forward
 	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
 	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
 	- 2026-11-14: Moved with setup --adopt on v1.0.0-alpha.1. The server runs in Podman as minecraftd, with the firewall table loaded. Java answers from the internet and the LAN. Details and the one config line left for a hand copy are in details.md.
+	- 2026-11-14: The old server scripts are archived and trashed. 3 more past players were whitelisted.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
