@@ -218,7 +218,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Bedrock LAN discovery
 	- ID: 2026111111065829
 	- Type: Task
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -228,7 +228,37 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Fix `how-to-connect.md` if they don't.
 	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
 	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
+		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
+		- Verified: df797 loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, df797 fails.
+		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
+		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
+	- Decisions:
+		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
+		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
+		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
+	- Test case: df797
+	- Branch: nov14-2026111111065829
+	- Commit: fb7097b
 	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
+
+- Let Bedrock LAN discovery through, once Geyser answers it
+	- ID: 2026111318485184
+	- Type: Feature
+	- Status: Stalled
+		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
+	- Priority: Avg
+	- Opened: 20261113-184851
+	- Opened by:
+	- Parent ID: 2026111111065829
+	- Requirements:
+		- When a released Geyser answers LAN discovery on UDP 7551, decide whether to turn it on. It's off by default in Geyser's pull request, and it loosens the login check for LAN joins.
+		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
+		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
+		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
 
 - Release-install script
 	- ID: 2026111111070761

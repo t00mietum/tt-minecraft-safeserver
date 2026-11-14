@@ -797,7 +797,11 @@ cicd/                        build, test, and release scripts
 	- Built-in signaling is plain HTTP unless Geyser is given a certificate. The game asks players to trust the server the first time they join.
 	- To find the home's public address for players over the internet, Geyser asks public STUN servers: `stun.cloudflare.com` on UDP 3478 and `stun.l.google.com` on UDP 19302. See [Firewall](#firewall).
 
-- On the LAN, Bedrock clients find the server by itself, under Friends, LAN Games. That includes consoles. Geyser has to listen on all addresses for that, since a socket that's bound to one address doesn't get broadcasts.
+- On the LAN, the server doesn't show under Friends, LAN Games, on any device. Players at home add it by its LAN address instead, which consoles can't do. See [Needs more thought](#needs-more-thought).
+	- Bedrock 26.60 and later look for LAN games with an encrypted broadcast to UDP port 7551, every 2 seconds. Nothing goes to `bedrockPort`.
+	- Geyser 2.12.1 doesn't answer on 7551. An open Geyser pull request adds that, off by default, with a second UDP port for LAN joins.
+	- The firewall drops the server's answers to a broadcast as it stands. See [Firewall](#firewall). The same goes for the old RakNet search on `bedrockPort`, which the pinned `transport` turns off anyway.
+	- Geyser has to listen on all addresses for any of this, since a socket that's bound to one address doesn't get broadcasts.
 
 - Over the internet, phones, tablets, and Bedrock on PCs can add the server by address and port. Consoles can't add a server by address. See [Needs more thought](#needs-more-thought).
 
@@ -842,6 +846,7 @@ cicd/                        build, test, and release scripts
 		- Its own game ports are allowed. Geyser sends to its own Bedrock port over loopback, and its STUN lookup gets no answer when those are dropped.
 		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
+		- That includes the server's answer to a LAN client's broadcast. Conntrack keys the client's packet on the broadcast address, so an answer from the server's own address isn't a reply. An answer to a client that asked the server's address directly still goes out.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
 		- With `bedrock` on, UDP to ports 3478 and 19302 is allowed too, for Geyser's STUN lookup. Without it, players over the internet get only the server's LAN address, and can't connect.
 		- NetherNet's connection checks from the server to a player's own addresses count as new connections, and get dropped unless they're replies. The player's checks to the server still set up the connection.
@@ -940,7 +945,7 @@ cicd/                        build, test, and release scripts
 
 ## Needs more thought
 
-- Consoles can't join over the internet yet, since Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
+- Consoles can't join over the internet yet, since Xbox, PlayStation, and Switch can't add a server by address. Until Geyser answers LAN discovery, they can't find it at home either. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
 
 - Behind a tunnel, every player shows up as coming from localhost, unless the tunnel supports the PROXY protocol. IP bans and the per-address rate limit then don't work.
 	- `proxy-protocol` is forced off for now. Turning it on safely needs the firewall to let only the tunnel's agent reach `gamePort`.
