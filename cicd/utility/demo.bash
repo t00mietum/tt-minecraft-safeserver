@@ -43,8 +43,7 @@ prompt='$ '
 install -D -m 0755 -- "${exe}" /usr/local/bin/tt-minecraftd
 mkdir -p /etc/tt-minecraftd /srv/tt-minecraftd/server/logs /srv/tt-minecraftd/server/plugins /srv/tt-minecraftd/server/world "${work}/bin"
 cat > /etc/tt-minecraftd/config.shcl <<'EOF'
-runMode: native
-javaBin: /usr/local/bin/java
+runMode: podman
 heapMax: 4GB
 memCap: 6GB
 bedrock: false
@@ -146,3 +145,4 @@ echo "demo: ${nFrame} frames, $(stat -c %s "${outGif}") bytes -> ${outGif}"
 
 ##	History:
 ##		- 2026-11-13: Created.
+##		- 2026-11-14: Podman in the made-up config, since native mode is off.
