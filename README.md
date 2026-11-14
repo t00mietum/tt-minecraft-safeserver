@@ -72,6 +72,7 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 - [Update agent](#update-agent)
 - [Installing](#installing)
 	- [Direct stable and dev install script](#direct-stable-and-dev-install-script)
+- [Developing](#developing)
 - [Building from source](#building-from-source)
 - [Copyright and license](#copyright-and-license)
 
@@ -155,6 +156,22 @@ bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safese
 It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces an older binary, and setup on an existing install runs `repair` and `update`.
 
 NixOS isn't supported yet.
+
+## Developing
+
+On Debian and its derivatives, this sets up a dev environment in `./tt-minecraft-safeserver`. It installs what's missing of git, Go, and docker through apt, then clones the main branch.
+
+~~~bash
+bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash)
+~~~
+
+Or with wget:
+
+~~~bash
+bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash)
+~~~
+
+It shows its plan and asks before it changes anything. Add `--help` to the end of the line for its options. When it's done, it prints how to build, and how to run the checks a change has to pass, with `cicd/cicd.bash --gate`.
 
 ## Building from source
 

@@ -323,7 +323,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: Low
 	- Opened: 20261111-110708
 	- Opened by: t00mietum
@@ -334,6 +334,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux.
+		- docker.io is installed by default, since cicd/cicd.bash runs staticcheck, gosec, and the other pinned tools in its container. --no-docker skips it. Adding the account to the docker group is left to the user, with the command printed, since that group is the same as root.
+		- An existing folder counts as the clone when it's a git checkout whose go.mod names this module, so a fork's clone counts. An empty folder is used. Anything else is refused before any change.
+		- golang-go is installed when there's no Go 1.21 or newer, since those fetch the version go.mod asks for. When apt's Go is still older, such as bookworm's 1.19, it finishes the rest and fails at the end with where to get a newer Go.
+		- No --release or --target options. It always clones main, and installs nothing outside apt and the clone.
+		- MIT, like install.bash. Tested the same way: sourced with os-release, the terminal, and the CA file pointed at stand-ins, on a PATH with stand-in uname, sudo, apt-get, git, go, and docker.
+	- Branch: nov14-2026111111070800
+	- Commit: 337a7a0
+	- Test case: df799 TestInstallDevScript
+	- Needs a look at README's new Developing section, and at the docker default (see the Check: entry in questions.md).
+	- 2026-11-14: install-dev.bash at the repo root installs what's missing of git, ca-certificates, golang-go, and docker.io through apt (through sudo when needed), then clones main into ./tt-minecraft-safeserver or --dir. It states its plan and asks first, and --yes skips that. A re-run skips what's there and leaves an existing clone alone. It ends by printing how to build and run cicd/cicd.bash --gate. README's new Developing section has the curl and wget one-liners.
+	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note, as install.bash does.
+	- Verified: df799 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the module check on an existing folder, the final Go version check, the no answer at the prompt, the NixOS refusal, the no-sudo refusal, the git check, or the Go floor each fails it.
 
 - Simplify: defer native mode, update --self, and NixOS; snapshot only before a version move
 	- ID: 2026111318002875
