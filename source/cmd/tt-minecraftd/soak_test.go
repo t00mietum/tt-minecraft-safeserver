@@ -29,7 +29,7 @@ func TestSoak(t *testing.T) {
 	noDefaultConfig(t)
 	noHostChecks(t)
 	fakePaperMC(t)
-	fakeReleases(t)
+	// fakeReleases(t) // --self is deferred
 	old := asRoot
 	asRoot = func([]string) error { return nil }
 	t.Cleanup(func() { asRoot = old })

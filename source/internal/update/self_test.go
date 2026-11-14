@@ -42,8 +42,9 @@ func selfRig(t *testing.T, answers, newest string) (*rig, *fakeSelf) {
 	return r, f
 }
 
-// --self asks, then swaps the binary in. It needs no server folder, says
-// what to change on NixOS, and is part of a plain update.
+// --self asks, then swaps the binary in. It needs no server folder, and says
+// what to change on NixOS. While it's deferred (backlog 2026111318002865) a
+// plain update leaves it out.
 func TestSelf(t *testing.T) {
 	defer testid.Line(t, "df77m")
 	ctx := context.Background()
@@ -96,12 +97,12 @@ func TestSelf(t *testing.T) {
 		t.Errorf("no binary to replace: %v", err)
 	}
 
-	// All parts: Paper's build 249 and this release, in one go-ahead.
+	// All parts: Paper's build 249, and not this release.
 	r, f = selfRig(t, "y\n", "v1.0.0-alpha.2")
 	r.p.newest = 249
 	r.u.Parts = Parts{}
 	r.u.Cfg.RunMode = "native"
-	if err := r.u.Do(ctx); err != nil || len(f.installed) != 1 || len(r.p.installed) != 1 || strings.Count(r.out.String(), "Go ahead?") != 1 {
+	if err := r.u.Do(ctx); err != nil || len(f.installed) != 0 || len(r.p.installed) != 1 || strings.Count(r.out.String(), "Go ahead?") != 1 {
 		t.Errorf("all parts: %v, installed %q and %q\n%s", err, f.installed, r.p.installed, r.out)
 	}
 }

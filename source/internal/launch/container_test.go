@@ -280,6 +280,28 @@ func TestDockerStop(t *testing.T) {
 	}
 }
 
+// Only update --mc-version snapshots now, so start and stop with zfsDataset
+// set run no zfs.
+func TestNoStartStopSnapshot(t *testing.T) {
+	defer testid.Line(t, "df78z")
+	g := newRig(t)
+	g.d.Cfg.ZfsDataset = "tank/mc"
+	g.states = []string{"exited", "running", "running", "running", "exited"}
+	g.log = "[12:00:09 INFO]: Done (8.1s)! For help, type \"help\"\n"
+	ctx := context.Background()
+	if err := g.d.Start(ctx, StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.d.Stop(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range g.r.Lines() {
+		if strings.Contains(l, "zfs ") {
+			t.Errorf("ran %q", l)
+		}
+	}
+}
+
 // Not running: the trees still go back, as after a crash. Stuck: SIGTERM,
 // then SIGKILL after docker's grace time.
 func TestDockerStopEdges(t *testing.T) {

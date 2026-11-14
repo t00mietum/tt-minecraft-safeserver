@@ -23,6 +23,12 @@ check() {
 	fi
 }
 
+# Native mode is off by a constant while it's deferred (backlog 2026111318002855),
+# and --native shows in start's help only when it's on.
+native() {
+	if tt-minecraftd start --help 2>&1 | grep -q -- '--native '; then check "${@}"; else printf 'SKIP %s %s (native mode is off)\n' "${1}" "${2}"; fi
+}
+
 say() { printf '%s\n' "${*}"; }
 has() { grep -q -- "${1}" "${2}" || { say "no '${1}' in ${2}"; return 1; }; }
 counter() { sudo nft -j list counter inet tt_minecraftd "${1}" | python3 -c 'import json,sys; print([c["counter"]["packets"] for c in json.load(sys.stdin)["nftables"] if "counter" in c][0])'; }
@@ -243,73 +249,81 @@ fZfsPool() {
 	[[ -z "$(snaps)" ]]
 }
 
-fZfsStart() {
-	tt-minecraftd start < /dev/null > start.out 2>&1 || { cat start.out; return 1; }
-	local s
-	s="$(newest pre_tt-minecraftd-start)"
-	[[ "${s}" =~ ^[0-9]{8}-[0-9]{6}_pre_tt-minecraftd-start$ ]] || { say "no start snapshot"; snaps; return 1; }
-	# No zfs allow yet, so it went through sudo.
-	hist snapshot | tail -1 | tee /dev/stderr | grep -qF "@${s} [user 0 "
-}
-
-fZfsStop() {
-	tt-minecraftd stop > stop.out 2>&1 || { cat stop.out; return 1; }
-	local s owner
-	s="$(newest post_tt-minecraftd-stop)"
-	[[ -n "${s}" ]] || { say "no stop snapshot"; snaps; return 1; }
-	has 'Saving worlds' "${log}" || return 1
-	# Taken once the worlds were saved and before the trees went back. A clone,
-	# since .zfs automounts from the host's mount namespace.
-	sudo zfs clone -o mountpoint=/mnt/look -o readonly=on "${ds}@${s}" "${pool}/look" || return 1
-	sudo cmp "${dir}/world/level.dat" /mnt/look/world/level.dat && owner="$(sudo stat -c %U /mnt/look/world)"
-	sudo zfs destroy "${pool}/look" || return 1
-	[[ "${owner:-}" == minecraftd ]] || { say "snapshot's world is ${owner:-unreadable}, not the server's"; return 1; }
-	[[ "$(stat -c %U "${dir}/world")" == op ]]
-}
-
-fZfsPrune() {
-	# Old ones of the tool's, and others it must leave. By the schedule, only
-	# 20250102-01 to -04 go: the first, and the last of 2025-01-02's day, week
-	# and month stay.
-	local h gone=() n
-	for h in 01 02 03 04; do gone+=("20250102-${h}0000_pre_tt-minecraftd-start"); done
-	# One fs per zfs snapshot.
-	for n in "${gone[@]}" 20250102-050000_pre_tt-minecraftd-start 20250101-000000_post_tt-minecraftd-stop keepme 20250102-030000_pre_tt-minecraftd-start-x; do
-		sudo zfs snapshot "${ds}@${n}" || return 1
-	done
-	hist destroy > before.out
-	tt-minecraftd start < /dev/null > start.out 2>&1 || { cat start.out; return 1; }
-	hist destroy | grep -vxF -f before.out | tee destroy.out
-	[[ "$(wc -l < destroy.out)" -eq 1 ]] || { say "not one destroy"; return 1; }
-	has "zfs destroy -- ${ds}@$(IFS=,; echo "${gone[*]}") " destroy.out || return 1
-	snaps | tee kept.out
-	for n in 20250101-000000_post_tt-minecraftd-stop 20250102-050000_pre_tt-minecraftd-start keepme 20250102-030000_pre_tt-minecraftd-start-x; do
-		grep -qx "${n}" kept.out || { say "${n} went"; return 1; }
-	done
-	for n in "${gone[@]}"; do ! grep -qx "${n}" kept.out || { say "${n} stayed"; return 1; }; done
-	tt-minecraftd stop > stop.out 2>&1 || { cat stop.out; return 1; }
-}
-
-fZfsAllow() {
-	local s p me
-	me="[user $(id -u) "
-	sudo zfs allow -u op snapshot,destroy,mount "${ds}" || return 1
-	hist destroy > before.out
+# Only update --mc-version snapshots now, which needs a real Paper move.
+fZfsNone() {
 	tt-minecraftd start < /dev/null > start.out 2>&1 || { cat start.out; return 1; }
 	tt-minecraftd stop > stop.out 2>&1 || { cat stop.out; return 1; }
-	s="$(newest pre_tt-minecraftd-start)" p="$(newest post_tt-minecraftd-stop)"
-	hist snapshot | grep -F -e "@${s} " -e "@${p} " | tee allow.out
-	[[ "$(grep -cF "${me}" allow.out)" -eq 2 ]] || { say "history:"; sudo zpool history -l "${pool}" | tail -12; return 1; }
-	# Each prune drops an older one of today's, as op too.
-	hist destroy | grep -vxF -f before.out | tee destroy.out
-	[[ -s destroy.out ]] || { say "no destroy"; return 1; }
-	! grep -vqF "${me}" destroy.out
+	[[ -z "$(snaps)" ]] || { say "snapshots:"; snaps; return 1; }
 }
+
+# Start and stop snapshots went (backlog 2026111318002875).
+# fZfsStart() {
+# 	tt-minecraftd start < /dev/null > start.out 2>&1 || { cat start.out; return 1; }
+# 	local s
+# 	s="$(newest pre_tt-minecraftd-start)"
+# 	[[ "${s}" =~ ^[0-9]{8}-[0-9]{6}_pre_tt-minecraftd-start$ ]] || { say "no start snapshot"; snaps; return 1; }
+# 	# No zfs allow yet, so it went through sudo.
+# 	hist snapshot | tail -1 | tee /dev/stderr | grep -qF "@${s} [user 0 "
+# }
+#
+# fZfsStop() {
+# 	tt-minecraftd stop > stop.out 2>&1 || { cat stop.out; return 1; }
+# 	local s owner
+# 	s="$(newest post_tt-minecraftd-stop)"
+# 	[[ -n "${s}" ]] || { say "no stop snapshot"; snaps; return 1; }
+# 	has 'Saving worlds' "${log}" || return 1
+# 	# Taken once the worlds were saved and before the trees went back. A clone,
+# 	# since .zfs automounts from the host's mount namespace.
+# 	sudo zfs clone -o mountpoint=/mnt/look -o readonly=on "${ds}@${s}" "${pool}/look" || return 1
+# 	sudo cmp "${dir}/world/level.dat" /mnt/look/world/level.dat && owner="$(sudo stat -c %U /mnt/look/world)"
+# 	sudo zfs destroy "${pool}/look" || return 1
+# 	[[ "${owner:-}" == minecraftd ]] || { say "snapshot's world is ${owner:-unreadable}, not the server's"; return 1; }
+# 	[[ "$(stat -c %U "${dir}/world")" == op ]]
+# }
+#
+# fZfsPrune() {
+# 	# Old ones of the tool's, and others it must leave. By the schedule, only
+# 	# 20250102-01 to -04 go: the first, and the last of 2025-01-02's day, week
+# 	# and month stay.
+# 	local h gone=() n
+# 	for h in 01 02 03 04; do gone+=("20250102-${h}0000_pre_tt-minecraftd-start"); done
+# 	# One fs per zfs snapshot.
+# 	for n in "${gone[@]}" 20250102-050000_pre_tt-minecraftd-start 20250101-000000_post_tt-minecraftd-stop keepme 20250102-030000_pre_tt-minecraftd-start-x; do
+# 		sudo zfs snapshot "${ds}@${n}" || return 1
+# 	done
+# 	hist destroy > before.out
+# 	tt-minecraftd start < /dev/null > start.out 2>&1 || { cat start.out; return 1; }
+# 	hist destroy | grep -vxF -f before.out | tee destroy.out
+# 	[[ "$(wc -l < destroy.out)" -eq 1 ]] || { say "not one destroy"; return 1; }
+# 	has "zfs destroy -- ${ds}@$(IFS=,; echo "${gone[*]}") " destroy.out || return 1
+# 	snaps | tee kept.out
+# 	for n in 20250101-000000_post_tt-minecraftd-stop 20250102-050000_pre_tt-minecraftd-start keepme 20250102-030000_pre_tt-minecraftd-start-x; do
+# 		grep -qx "${n}" kept.out || { say "${n} went"; return 1; }
+# 	done
+# 	for n in "${gone[@]}"; do ! grep -qx "${n}" kept.out || { say "${n} stayed"; return 1; }; done
+# 	tt-minecraftd stop > stop.out 2>&1 || { cat stop.out; return 1; }
+# }
+#
+# fZfsAllow() {
+# 	local s p me
+# 	me="[user $(id -u) "
+# 	sudo zfs allow -u op snapshot,destroy,mount "${ds}" || return 1
+# 	hist destroy > before.out
+# 	tt-minecraftd start < /dev/null > start.out 2>&1 || { cat start.out; return 1; }
+# 	tt-minecraftd stop > stop.out 2>&1 || { cat stop.out; return 1; }
+# 	s="$(newest pre_tt-minecraftd-start)" p="$(newest post_tt-minecraftd-stop)"
+# 	hist snapshot | grep -F -e "@${s} " -e "@${p} " | tee allow.out
+# 	[[ "$(grep -cF "${me}" allow.out)" -eq 2 ]] || { say "history:"; sudo zpool history -l "${pool}" | tail -12; return 1; }
+# 	# Each prune drops an older one of today's, as op too.
+# 	hist destroy | grep -vxF -f before.out | tee destroy.out
+# 	[[ -s destroy.out ]] || { say "no destroy"; return 1; }
+# 	! grep -vqF "${me}" destroy.out
+# }
 
 cd "${HOME}" || exit 1
 if [[ "${1:-}" != after-login ]]; then
 	check df680 "setup installs from scratch" fNewInstall
-	check df68j "native start in setup's login says to log in again" fSameLogin
+	native df68j "native start in setup's login says to log in again" fSameLogin
 	# The group setup added counts from the next login, as setup says.
 	exec sudo -u op TERM="${TERM:-xterm}" ZFS_POOL="${pool}" ZFS_FILE="${ZFS_FILE:-}" bash "${0}" after-login "${failed}"
 fi
@@ -318,10 +332,12 @@ if [[ -n "${pool}" ]]; then
 	trap fZfsGone EXIT
 	check df780 "a throwaway pool holds the server's tree" fZfsPool
 	if ((failed == 0)); then
-		check df781 "start snapshots the dataset" fZfsStart
-		check df782 "stop snapshots after the save, before the hand-back" fZfsStop
-		check df783 "a prune destroys only the tool's own, in one destroy" fZfsPrune
-		check df784 "with zfs allow the operator snapshots and prunes without sudo" fZfsAllow
+		check df78y "start and stop take no snapshot" fZfsNone
+		# Start and stop snapshots, the prune, and zfs allow went (backlog 2026111318002875).
+		# check df781 "start snapshots the dataset" fZfsStart
+		# check df782 "stop snapshots after the save, before the hand-back" fZfsStop
+		# check df783 "a prune destroys only the tool's own, in one destroy" fZfsPrune
+		# check df784 "with zfs allow the operator snapshots and prunes without sudo" fZfsAllow
 	fi
 	fZfsGone
 	exit "${failed}"
@@ -336,9 +352,9 @@ check df687 "Geyser STUN answers behind the firewall" fStun
 check df688 "firewall drops and counts the account's local, LAN, and non-web connections" fFirewallOut
 check df689 "stop --warn 10 saves and hands the trees back" fStopWarn
 check df68a "start refuses a changed jar" fRefuseChanged
-check df68b "native start, sandbox, and locked jars" fNativeStart
-check df68c "status, cmd, and console follow a native server" fNativeFollow
-check df68d "stop follows a native server" fNativeStop
+native df68b "native start, sandbox, and locked jars" fNativeStart
+native df68c "status, cmd, and console follow a native server" fNativeFollow
+native df68d "stop follows a native server" fNativeStop
 check df78x "startAtBoot: repair enables the unit, and start and stop go through it" fBoot
 check df68e "setup --adopt a copy of the tree" fAdopt
 check df68f "firewall off removes the unit and table" fFirewallOff

@@ -19,7 +19,6 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
 // Unit is the transient unit the server runs in. tt-minecraftd.service is
@@ -95,9 +94,10 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	default:
 		return fmt.Errorf("%s is already %s", Unit, state)
 	}
-	if err := n.snapshot(ctx, zfs.PreStart); err != nil {
-		return err
-	}
+	// No start snapshot any more, only update --mc-version's (backlog 2026111318002875).
+	// if err := n.snapshot(ctx, zfs.PreStart); err != nil {
+	// 	return err
+	// }
 	warns, err := tree.ToServer(ctx, n.Run, n.Cfg)
 	n.warn(warns)
 	if err != nil {

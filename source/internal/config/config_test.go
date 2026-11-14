@@ -53,7 +53,7 @@ func before() Config {
 
 func TestReadEveryKey(t *testing.T) {
 	defer testid.Line(t, "df5wt")
-	text := `runMode: native
+	text := `runMode: docker
 runUser: mcd
 runGroup: games
 ownerAfterStop: alice
@@ -92,7 +92,7 @@ agentHosts: [CDN.Modrinth.com, ci.example.org]
 		t.Fatalf("warnings: %v", warns)
 	}
 	want := Config{
-		RunMode:           "native",
+		RunMode:           "docker",
 		RunUser:           "mcd",
 		RunGroup:          "games",
 		OwnerAfterStop:    "alice",
@@ -147,7 +147,7 @@ func TestMissingKeysLeaveDefaults(t *testing.T) {
 func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 	defer testid.Line(t, "df5ww")
 	cases := []struct{ line, says string }{
-		{"runMode: lxc", `"lxc" isn't one of: podman, docker, native`},
+		{"runMode: lxc", `"lxc" isn't one of: podman, docker`},
 		{"runMode: [docker, native]", "takes one value"},
 		{"runMode:", "no value"},
 		{"runUser: -root", "isn't a user or group name"},
@@ -191,6 +191,9 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 		{"agentCommand: [bin/ask, --json]", "isn't a full path or a program name"},
 		{"agentHosts: [cdn.modrinth.com, https://github.com]", "isn't a host name"},
 		{"agentHosts: localhost", "isn't a host name"},
+	}
+	if !NativeMode {
+		cases = append(cases, struct{ line, says string }{"runMode: native", `"native" isn't one of: podman, docker`})
 	}
 	for _, tc := range cases {
 		c := before()

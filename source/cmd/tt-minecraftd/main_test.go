@@ -15,9 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,7 +24,6 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/selfupdate"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -101,30 +98,32 @@ func fakePaperMC(t *testing.T) {
 	t.Cleanup(func() { paperAPI = old })
 }
 
+// // --self is deferred (backlog 2026111318002865), so nothing looks up releases.
+//
 // fakeReleases points selfAPI at a stand-in GitHub with release v9.0.0, and
-// counts the lookups.
-func fakeReleases(t *testing.T) *atomic.Int32 {
-	t.Helper()
-	var hits atomic.Int32
-	var srv *httptest.Server
-	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bin := selfupdate.AssetName(runtime.GOARCH)
-		switch r.URL.Path {
-		case "/repo/releases":
-			hits.Add(1)
-			fmt.Fprintf(w, `[{"tag_name":"v9.0.0","assets":[{"name":%q,"browser_download_url":"%s/bin"},{"name":"SHA256SUMS","browser_download_url":"%s/sums"}]}]`, bin, srv.URL, srv.URL)
-		case "/sums":
-			fmt.Fprintf(w, "%s  %s\n", strings.Repeat("ab", 32), bin)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	old := selfAPI
-	selfAPI.Base, selfAPI.Client = srv.URL+"/repo", srv.Client()
-	t.Cleanup(func() { selfAPI = old })
-	return &hits
-}
+// // counts the lookups.
+// func fakeReleases(t *testing.T) *atomic.Int32 {
+// 	t.Helper()
+// 	var hits atomic.Int32
+// 	var srv *httptest.Server
+// 	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		bin := selfupdate.AssetName(runtime.GOARCH)
+// 		switch r.URL.Path {
+// 		case "/repo/releases":
+// 			hits.Add(1)
+// 			fmt.Fprintf(w, `[{"tag_name":"v9.0.0","assets":[{"name":%q,"browser_download_url":"%s/bin"},{"name":"SHA256SUMS","browser_download_url":"%s/sums"}]}]`, bin, srv.URL, srv.URL)
+// 		case "/sums":
+// 			fmt.Fprintf(w, "%s  %s\n", strings.Repeat("ab", 32), bin)
+// 		default:
+// 			http.NotFound(w, r)
+// 		}
+// 	}))
+// 	t.Cleanup(srv.Close)
+// 	old := selfAPI
+// 	selfAPI.Base, selfAPI.Client = srv.URL+"/repo", srv.Client()
+// 	t.Cleanup(func() { selfAPI = old })
+// 	return &hits
+// }
 
 func runArgs(args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
@@ -141,7 +140,7 @@ func TestHelpAboutVersion(t *testing.T) {
 	}{
 		{[]string{"--help"}, []string{"start ", "stop ", "status ", "watch ", "--config PATH", "--set KEY=VALUE"}},
 		{[]string{"-h"}, []string{"Commands:"}},
-		{[]string{"start", "--help"}, []string{"--native ", "--debug ", "--dry-run ", "--foreground ", "--set KEY=VALUE"}},
+		{[]string{"start", "--help"}, []string{"--debug ", "--dry-run ", "--foreground ", "--set KEY=VALUE"}},
 		{[]string{"stop", "--help"}, []string{"--warn N", "--dry-run "}},
 		{[]string{"watch", "--help"}, []string{"--interval N"}},
 		{[]string{"--about"}, []string{"GPL v2 or later"}},
@@ -165,7 +164,7 @@ func TestHelpAboutVersion(t *testing.T) {
 func TestUsageErrors(t *testing.T) {
 	defer testid.Line(t, "df5xk")
 	noDefaultConfig(t)
-	for _, args := range [][]string{
+	bad := [][]string{
 		{},
 		{"launch"},
 		{"start", "--bogus"},
@@ -182,7 +181,11 @@ func TestUsageErrors(t *testing.T) {
 		{"status", "--set", "noSuchKey=1"},
 		{"status", "--set", "runMode=lxc"},
 		{"--config"},
-	} {
+	}
+	if !config.NativeMode {
+		bad = append(bad, []string{"start", "--native"}, []string{"setup", "--native"}, []string{"status", "--set", "runMode=native"})
+	}
+	for _, args := range bad {
 		code, _, errOut := runArgs(args...)
 		if code != exitUsage || errOut == "" {
 			t.Errorf("%q: exit %d, stderr %q; want %d and a message", args, code, errOut, exitUsage)
@@ -201,19 +204,25 @@ func TestOptionsReachConfig(t *testing.T) {
 	if err := os.WriteFile(path, []byte("heapMax: 2G\nrunUser: mcfile\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct {
+	type optCase struct {
 		args              []string
 		mode, user, group string
 		heap              int64
-	}{
+	}
+	cases := []optCase{
 		{[]string{"start"}, "podman", "minecraftd", "minecraftd", 4 << 30},
-		{[]string{"start", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30},
-		{[]string{"start", "--native", "--set", "runMode=docker"}, "docker", "minecraftd", "minecraftd", 4 << 30},
-		{[]string{"start", "--set", "runMode=docker", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30},
+		{[]string{"start", "--set", "runMode=docker"}, "docker", "minecraftd", "minecraftd", 4 << 30},
 		{[]string{"--set", "heapMax=6G", "start", "--set", "runUser=mc"}, "podman", "mc", "mc", 6 << 30},
 		{[]string{"--config", path, "status"}, "podman", "mcfile", "mcfile", 2 << 30},
 		{[]string{"status", "--config=" + path, "--set", "heapMax=3G"}, "podman", "mcfile", "mcfile", 3 << 30},
-	} {
+	}
+	if config.NativeMode {
+		cases = append(cases,
+			optCase{[]string{"start", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30},
+			optCase{[]string{"start", "--native", "--set", "runMode=docker"}, "docker", "minecraftd", "minecraftd", 4 << 30},
+			optCase{[]string{"start", "--set", "runMode=docker", "--native"}, "native", "minecraftd", "minecraftd", 4 << 30})
+	}
+	for _, c := range cases {
 		var errOut bytes.Buffer
 		inv, code, done := prepare(c.args, &bytes.Buffer{}, &errOut)
 		if done {
@@ -479,7 +488,7 @@ func TestSetup(t *testing.T) {
 	noDefaultConfig(t)
 	noHostChecks(t)
 	fakePaperMC(t)
-	hits := fakeReleases(t)
+	// hits := fakeReleases(t)
 	_, took := noHostRunner(t)
 	var again []string
 	old := asRoot
@@ -487,7 +496,7 @@ func TestSetup(t *testing.T) {
 	t.Cleanup(func() { asRoot = old })
 
 	code, out, _ := runArgs("setup", "--help")
-	for _, want := range []string{"--yes ", "--dry-run ", "--adopt PATH", "--accept-eula ", "--native "} {
+	for _, want := range []string{"--yes ", "--dry-run ", "--adopt PATH", "--accept-eula "} {
 		if code != exitOK || !strings.Contains(out, want) {
 			t.Errorf("setup --help lacks %q: %q", want, out)
 		}
@@ -510,8 +519,8 @@ func TestSetup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "server.properties")); err == nil {
 		t.Error("a dry run wrote server.properties")
 	}
-	if !strings.Contains(out, "Updating:") || hits.Load() != 0 {
-		t.Errorf("setup's update looked for a release %d times:\n%s", hits.Load(), out)
+	if !strings.Contains(out, "Updating:") {
+		t.Errorf("setup didn't update:\n%s", out)
 	}
 	// setup, and its own update.
 	if *took != 2 {
@@ -525,7 +534,7 @@ func TestUpdate(t *testing.T) {
 	defer testid.Line(t, "df671")
 	noDefaultConfig(t)
 	fakePaperMC(t)
-	hits := fakeReleases(t)
+	// hits := fakeReleases(t)
 	_, took := noHostRunner(t)
 	var again []string
 	old := asRoot
@@ -533,10 +542,13 @@ func TestUpdate(t *testing.T) {
 	t.Cleanup(func() { asRoot = old })
 
 	code, out, _ := runArgs("update", "--help")
-	for _, want := range []string{"--self ", "--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
+	for _, want := range []string{"--paper ", "--plugins ", "--image ", "--yes ", "--dry-run "} {
 		if code != exitOK || !strings.Contains(out, want) {
 			t.Errorf("update --help lacks %q: %q", want, out)
 		}
+	}
+	if strings.Contains(out, "--self") {
+		t.Errorf("update --help has the deferred --self: %q", out)
 	}
 	if os.Geteuid() != 0 {
 		if code, _, msg := runArgs("update", "--paper", "--yes"); code != exitOK || !reflect.DeepEqual(again, []string{"update", "--paper", "--yes"}) {
@@ -559,17 +571,22 @@ func TestUpdate(t *testing.T) {
 	if target, _ := os.Readlink(filepath.Join(dir, "paper.jar")); target != "paper-26.3-244.jar" {
 		t.Errorf("a dry run moved paper.jar to %q", target)
 	}
-	if !strings.Contains(out, "Move tt-minecraftd from "+version+" to v9.0.0") || !strings.Contains(out, "would download tt-minecraftd v9.0.0 and rename it over /") || hits.Load() != 1 {
-		t.Errorf("dry run, %d lookups: stdout %q", hits.Load(), out)
+	if strings.Contains(out, "tt-minecraftd v") {
+		t.Errorf("a plain update looked at tt-minecraftd releases: %q", out)
 	}
-
-	// Only --self needs no server folder.
-	code, out, msg = runArgs("update", "--self", "--dry-run", "--set=serverDir="+filepath.Join(dir, "none"))
-	if code != exitOK || !strings.Contains(out, "to v9.0.0") || strings.Contains(out, "Paper") {
-		t.Errorf("--self: exit %d, stdout %q, stderr %q", code, out, msg)
-	}
-	if *took != 2 {
-		t.Errorf("update took the stand-in runner %d times, not 2", *took)
+	// --self is deferred (backlog 2026111318002865).
+	// if !strings.Contains(out, "Move tt-minecraftd from "+version+" to v9.0.0") || !strings.Contains(out, "would download tt-minecraftd v9.0.0 and rename it over /") || hits.Load() != 1 {
+	// 	t.Errorf("dry run, %d lookups: stdout %q", hits.Load(), out)
+	// }
+	//
+	// // Only --self needs no server folder.
+	// code, out, msg = runArgs("update", "--self", "--dry-run", "--set=serverDir="+filepath.Join(dir, "none"))
+	// if code != exitOK || !strings.Contains(out, "to v9.0.0") || strings.Contains(out, "Paper") {
+	// 	t.Errorf("--self: exit %d, stdout %q, stderr %q", code, out, msg)
+	// }
+	// Was 2 with the --self run.
+	if *took != 1 {
+		t.Errorf("update took the stand-in runner %d times, not 1", *took)
 	}
 }
 

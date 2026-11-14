@@ -238,6 +238,11 @@ func TestNewInstall(t *testing.T) {
 
 func TestRuntimePick(t *testing.T) {
 	defer testid.Line(t, "df65e")
+	// A no to Podman falls back to native mode only while it's on.
+	noWant, noErr := "native", ""
+	if !config.NativeMode {
+		noWant, noErr = "", "needs Podman or Docker"
+	}
 	for _, c := range []struct {
 		name    string
 		tools   []string
@@ -252,7 +257,7 @@ func TestRuntimePick(t *testing.T) {
 		{name: "docker only", tools: []string{"docker"}, want: "docker"},
 		{name: "podman, no catatonit", tools: []string{"podman", "apt-get"}, want: "podman", apt: "apt-get install -y catatonit"},
 		{name: "neither, yes", tools: []string{"apt-get"}, answers: "y\ny\n", ask: true, want: "podman", apt: "apt-get install -y podman catatonit"},
-		{name: "neither, no", tools: []string{"apt-get"}, answers: "n\ny\n", ask: true, want: "native"},
+		{name: "neither, no", tools: []string{"apt-get"}, answers: "n\ny\n", ask: true, want: noWant, err: noErr},
 		{name: "neither, --yes", tools: []string{"apt-get"}, want: "podman", apt: "apt-get install -y podman catatonit"},
 		{name: "neither, no apt", err: "neither Podman nor Docker"},
 		{name: "given", tools: []string{"podman"}, sets: []string{"runMode=docker"}, want: "docker"},

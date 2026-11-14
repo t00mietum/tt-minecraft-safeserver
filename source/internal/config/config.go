@@ -119,13 +119,24 @@ func joinInts(nums []int) string {
 	return strings.Join(parts, ", ")
 }
 
+// NativeMode lets runMode take native. Off while native mode is deferred, per
+// backlog 2026111318002855; its code is still built and tested.
+const NativeMode = false
+
+func runModes() []string {
+	if NativeMode {
+		return []string{"podman", "docker", "native"}
+	}
+	return []string{"podman", "docker"}
+}
+
 // A setter reads one key and stores it only when the value is good.
 type setter func(doc *shcl.Document, path string) error
 
 // setters maps each key, folded the way shcl folds it, to its setter.
 func (c *Config) setters() map[string]setter {
 	byName := map[string]setter{
-		"runMode":           choice(&c.RunMode, "podman", "docker", "native"),
+		"runMode":           choice(&c.RunMode, runModes()...),
 		"runUser":           text(&c.RunUser, checkAccount),
 		"runGroup":          text(&c.RunGroup, checkAccount),
 		"ownerAfterStop":    text(&c.OwnerAfterStop, checkAccount),
