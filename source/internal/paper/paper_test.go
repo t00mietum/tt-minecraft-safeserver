@@ -4,6 +4,8 @@
 package paper
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -269,5 +271,62 @@ func TestOlder(t *testing.T) {
 	}
 	if IsVersion("26.3/../x") || !IsVersion("26.3-rc-3") {
 		t.Error("IsVersion")
+	}
+}
+
+// paperJar is a jar laid out like Paper's, with main as its Main-Class.
+func paperJar(t *testing.T, main, version string) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	for name, text := range map[string]string{
+		"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\r\nMain-Class: " + main + "\r\n",
+		"version.json":         `{"id": "` + version + `", "name": "` + version + `"}`,
+	} {
+		w, err := z.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+// Claims reads the version from a Paper jar only, and Point links paper.jar.
+func TestClaimsAndPoint(t *testing.T) {
+	defer testid.Line(t, "df791")
+	dir := t.TempDir()
+	for _, c := range []struct {
+		jar  []byte
+		want string
+	}{
+		{paperJar(t, "io.papermc.paperclip.Main", "26.4"), "26.4"},
+		{paperJar(t, "net.minecraft.server.Main", "26.4"), ""},
+		{paperJar(t, "io.papermc.paperclip.Main", "../26.4"), ""},
+		{[]byte("not a jar"), ""},
+	} {
+		file := filepath.Join(dir, "x.jar")
+		if err := os.WriteFile(file, c.jar, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(file) // #nosec G304 -- the test's own file
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := Claims(f); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
+		_ = f.Close()
+	}
+	if err := Point(dir, Name("26.4", 12)); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(dir, "paper.jar")); err != nil || target != "paper-26.4-12.jar" {
+		t.Errorf("paper.jar: %q %v", target, err)
 	}
 }

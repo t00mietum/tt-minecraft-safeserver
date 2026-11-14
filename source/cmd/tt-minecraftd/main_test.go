@@ -690,6 +690,41 @@ func TestUpdateAgent(t *testing.T) {
 	}
 }
 
+// update --paper asks the agent too, when PaperMC's lookup fails.
+func TestUpdateAgentPaper(t *testing.T) {
+	defer testid.Line(t, "df795")
+	if os.Geteuid() == 0 {
+		t.Skip("the agent doesn't run as root")
+	}
+	noDefaultConfig(t)
+	noHostRunner(t)
+	fakePaperMC(t)
+	dir := t.TempDir()
+	server := filepath.Join(dir, "server")
+	if err := os.Mkdir(server, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ask := filepath.Join(dir, "ask")
+	if err := os.WriteFile(ask, []byte("#!/bin/sh\nwhile read -r _; do :; done\necho '{\"jars\": []}'\n"), 0o700); err != nil { // #nosec G306 -- the test's own agent
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.shcl")
+	if err := os.WriteFile(cfg, []byte("serverDir: "+server+"\nagent: command\nagentCommand: ["+ask+"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var answer []byte
+	old := asRootAndWait
+	asRootAndWait = func(args []string) error {
+		answer, _ = os.ReadFile(strings.TrimPrefix(args[len(args)-1], "--agent-answer=")) // #nosec G304 -- the test's own temp file
+		return nil
+	}
+	t.Cleanup(func() { asRootAndWait = old })
+	code, out, msg := runArgs("update", "--paper", "--mc-version", "26.4", "--config", cfg)
+	if code != exitOK || !strings.Contains(out, "Asking the update agent about Paper for Minecraft 26.4.") || !strings.Contains(string(answer), `"findPaper":"26.4"`) {
+		t.Errorf("exit %d, answer %s\nstdout %q\nstderr %q", code, answer, out, msg)
+	}
+}
+
 func TestBuildNumber(t *testing.T) {
 	defer testid.Line(t, "df785")
 	for _, c := range []struct {

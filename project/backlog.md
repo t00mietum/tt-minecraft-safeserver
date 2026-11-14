@@ -22,6 +22,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- update with no part named stops at the image's Java lookup when PaperMC is down
+	- ID: 2026111318335938
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 20261113-183359
+	- Opened by:
+	- Related IDs: 2026111210034308
+	- Requirements: With PaperMC's API down and agent set, the agent's Paper find is used, but the image step still asks PaperMC which Java the version needs, and that failure stops the whole update. `--image` could skip with a warning, or keep the current Java when the version doesn't change.
+
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -78,7 +88,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Pre-next-cut.
 	- Progress log:
 		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
-		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is queued.
+		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is done too.
 	- Decisions:
 		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
 		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
@@ -137,7 +147,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Update agent: Paper fallback and the --mc-version report
 	- ID: 2026111210034308
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261112-100343
 	- Opened by:
@@ -149,6 +159,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Avg
 	- Decisions:
 		- 20261113: Raised to High, so the agent work comes before more coded sources.
+		- 20261113: A failed check on the agent's Paper build stops the update, as a failed PaperMC download does, rather than going on as a plugin's does. A no to its own yes keeps Paper as it was, and the rest goes on.
+		- 20261113: The Paper find needs a SHA-256, since PaperMC always publishes one. A jar counts as Paper by its main class `io.papermc.paperclip.Main` and the `id` in its `version.json`, checked against a real 26.3 build.
+		- 20261113: With no `paper.jar` and no `--mc-version`, the version isn't known, so a failed lookup still stops the update.
+		- 20261113: The report covers every approved plugin in the tree, known sources included, but not Paper's builds. A plugin the agent leaves out shows as not known.
+		- 20261113: The operator's run leaves a Paper lookup error other than PaperMC's to the root run, since the operator may not be able to read the server folder.
+		- 20261113: `--image`'s Java lookup still asks PaperMC, so `update` with no part named still stops when PaperMC is down. Filed as 2026111318335938.
+		- Swept: `pluginLookup`, `AskAgent`, and `Do` share `agentOn` and `lookup`; Replay covers jars, Paper, and the report; main's agent switch covers `--paper`; design.md's update and Update agent and README's Update agent say this now.
+	- Actual effort: Avg
+	- Progress log:
+		- 20261113: When PaperMC's lookup fails and agent is set, the agent is asked for Paper's newest stable build of the known version. Its build is held to agentHosts and a SHA-256, the hash has to be on its hash page, and the download has to be a Paper server jar for that version. It needs its own yes, even with `--yes`, then it's approved and `paper.jar` points at it.
+		- 20261113: Before `--mc-version`, the agent says which approved plugins have a build for the new version. The report is shown after the plan, before the move's question, and changes nothing.
+		- 20261113: Everything goes to the agent in one question per run. `update --paper` now asks the agent as the operator too, and the hand-off file holds the Paper and report answers.
+		- Verified: df790 to df795 pass, and so does the quick gate on both temp folders, plus race tests on update, agent, and paper. Each fails with its check taken out: the own yes, the Paper jar check, its version, the SHA-256 match, the hash page, the agent's version and host checks, the replay's version and hash match, the quiet operator lookup, the report shown and asked, and `--paper` going to the agent.
+	- Test case: df790, df791, df792, df793, df794, df795
+	- Branch: nov14-2026111210034308
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
+	- Closed: 20261113-183424
 
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143

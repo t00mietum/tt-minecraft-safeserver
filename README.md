@@ -88,6 +88,8 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 `update --plugins` knows where to get Paper, Geyser, and Floodgate. For your other plugins it can ask an AI agent where the newer builds are. The agent only suggests. `tt-minecraftd` downloads and checks each jar it finds, and you say yes to each one yourself, even with `--yes`. It's off until `agent` is set in `/etc/tt-minecraftd/config.shcl`. [design.md](project/design.md#update-agent) has the details.
 
+- When PaperMC's download API can't be reached, the agent can find the Paper build too, checked the same way. Before `update --mc-version`, it says which of your plugins have a build for the new version. That report changes nothing.
+
 - Run `tt-minecraftd update` as yourself, not with sudo. It asks the agent as you, then runs itself through sudo. Started as root, it skips the agent and says so.
 
 - An API key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.

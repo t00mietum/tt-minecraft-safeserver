@@ -29,9 +29,12 @@ import (
 // AgentAnswer is what the operator's run got from the agent, handed to the
 // root run in a file. The root run checks it all again.
 type AgentAnswer struct {
-	Asked  []agent.Jar  `json:"asked"`
-	Answer agent.Answer `json:"answer"`
-	Error  string       `json:"error,omitempty"`
+	Asked     []agent.Jar  `json:"asked"`
+	FindPaper string       `json:"findPaper,omitempty"`
+	MoveTo    string       `json:"moveTo,omitempty"`
+	MoveAsked []agent.Jar  `json:"moveAsked,omitempty"`
+	Answer    agent.Answer `json:"answer"`
+	Error     string       `json:"error,omitempty"`
 }
 
 // maxAnswerFile caps the hand-off file. The agent's reply is capped at 1 MiB.
@@ -59,20 +62,31 @@ func ReadAgentAnswer(file string) (AgentAnswer, error) {
 }
 
 // Replay answers the root run with what the agent said, for the jars both
-// runs asked about with the same hash.
+// runs asked about with the same hash, and for Paper and the move report
+// when both asked about the same version.
 func (a AgentAnswer) Replay(_ context.Context, q agent.Question) (agent.Answer, error) {
 	if a.Error != "" {
 		return agent.Answer{}, errors.New(a.Error)
 	}
-	both := func(name string) bool {
-		i := slices.IndexFunc(q.Jars, func(j agent.Jar) bool { return j.Path == name })
-		k := slices.IndexFunc(a.Asked, func(j agent.Jar) bool { return j.Path == name })
-		return i >= 0 && k >= 0 && q.Jars[i].SHA256 == a.Asked[k].SHA256
+	both := func(asked, mine []agent.Jar, name string) bool {
+		i := slices.IndexFunc(mine, func(j agent.Jar) bool { return j.Path == name })
+		k := slices.IndexFunc(asked, func(j agent.Jar) bool { return j.Path == name })
+		return i >= 0 && k >= 0 && mine[i].SHA256 == asked[k].SHA256
 	}
 	var ans agent.Answer
 	for _, s := range a.Answer.Jars {
-		if both(s.Jar) {
+		if both(a.Asked, q.Jars, s.Jar) {
 			ans.Jars = append(ans.Jars, s)
+		}
+	}
+	if q.FindPaper != "" && q.FindPaper == a.FindPaper {
+		ans.Paper = a.Answer.Paper
+	}
+	if q.MoveTo != "" && q.MoveTo == a.MoveTo {
+		for _, m := range a.Answer.Move {
+			if both(a.MoveAsked, q.Plugins, m.Jar) {
+				ans.Move = append(ans.Move, m)
+			}
 		}
 	}
 	return ans, nil
@@ -89,24 +103,38 @@ func Live(a agent.Asker) func(context.Context, agent.Question) (agent.Answer, er
 	}
 }
 
-// AskAgent asks Agent about the jars no known source covers, for the
-// operator's run to hand to the root one. Its lookups print nothing, since
-// the root run does them again and prints them then.
+// AskAgent asks Agent about the jars no known source covers, Paper when
+// PaperMC's lookup failed, and the plugins before a move, for the operator's
+// run to hand to the root one. Its lookups print nothing, since the root run
+// does them again and prints them then.
 func (u *Update) AskAgent(ctx context.Context) (AgentAnswer, error) {
 	out := u.Out
 	u.Out = io.Discard
-	_, asks, err := u.pluginLookup(ctx)
+	l, err := u.lookup(ctx, u.parts(), true)
 	u.Out = out
-	if err != nil || len(asks) == 0 {
+	if err != nil {
 		return AgentAnswer{}, err
 	}
-	q := u.question(asks)
-	fmt.Fprintf(u.Out, "Asking the update agent about %s. This can take a few minutes.\n", count(len(q.Jars), "jar"))
+	q := u.fullQuestion(l)
+	if q.Empty() {
+		return AgentAnswer{}, nil
+	}
+	var about []string
+	if len(q.Jars) > 0 {
+		about = append(about, count(len(q.Jars), "jar"))
+	}
+	if q.FindPaper != "" {
+		about = append(about, "Paper for Minecraft "+q.FindPaper)
+	}
+	if q.MoveTo != "" {
+		about = append(about, "which plugins have a build for Minecraft "+q.MoveTo)
+	}
+	fmt.Fprintf(u.Out, "Asking the update agent about %s. This can take a few minutes.\n", strings.Join(about, ", and "))
 	ans, err := u.Agent(ctx, q)
 	if ctx.Err() != nil {
 		return AgentAnswer{}, ctx.Err()
 	}
-	a := AgentAnswer{Asked: q.Jars, Answer: ans}
+	a := AgentAnswer{Asked: q.Jars, FindPaper: q.FindPaper, MoveTo: q.MoveTo, MoveAsked: q.Plugins, Answer: ans}
 	if err != nil {
 		a.Error = err.Error()
 	}
@@ -145,20 +173,10 @@ type agentStep struct {
 	found agent.Suggestion
 }
 
-// agentLookup asks the agent about asks, and reports what it said that
-// won't go in the plan.
-func (u *Update) agentLookup(ctx context.Context, asks []plugins.Approved) []agentStep {
+// agentSteps are the jars in asks that the agent found newer builds of. It
+// reports what it said that won't go in the plan.
+func (u *Update) agentSteps(asks []plugins.Approved, q agent.Question, ans agent.Answer) []agentStep {
 	if len(asks) == 0 {
-		return nil
-	}
-	if u.Agent == nil {
-		fmt.Fprintf(u.Out, "%-7s %s\n", "NOTE", u.AgentNote)
-		return nil
-	}
-	q := u.question(asks)
-	ans, err := u.Agent(ctx, q)
-	if err != nil {
-		fmt.Fprintf(u.Out, "%-7s the update agent: %v\n", "FAILED", err)
 		return nil
 	}
 	c := agent.Check(ans, q.Jars, u.Cfg.AgentHosts)
@@ -279,6 +297,75 @@ func claimedName(dirfd int, name string) string {
 	defer f.Close()
 	n, _ := plugins.Claims(f)
 	return n
+}
+
+// agentPaper is the Paper build the agent found when PaperMC's lookup
+// failed. ok is false when it wasn't asked or didn't answer, which leaves
+// PaperMC's error to stop the update, as with no agent.
+func (u *Update) agentPaper(pf *paperFailed, ans agent.Answer, ok bool) (*paperStep, error) {
+	if !ok {
+		return nil, pf
+	}
+	p, err := agent.CheckPaper(ans, pf.version, u.Cfg.AgentHosts)
+	if err != nil {
+		return nil, fmt.Errorf("%w, and %v", pf, err)
+	}
+	fmt.Fprintf(u.Out, "warning: %v, so the update agent's find is used\n", pf)
+	if !pf.move && pf.cur != nil && !pf.cur.Gone && p.Build <= pf.cur.ID {
+		fmt.Fprintf(u.Out, "%-7s Paper %s build %d is the newest stable build the update agent found\n", "OK", pf.cur.Version, pf.cur.ID)
+		return nil, nil
+	}
+	b := paper.Build{Version: p.Version, ID: p.Build, Name: paper.Name(p.Version, p.Build), SHA256: p.SHA256, URL: p.URL}
+	return &paperStep{from: pf.cur, to: b, move: pf.move, found: p}, nil
+}
+
+// getAgentPaper checks the Paper build the agent found, then asks for its own
+// yes. A failed check stops the update, as a failed Paper download does.
+func (u *Update) getAgentPaper(ctx context.Context, s paperStep) (size int64, use bool, err error) {
+	f := s.found
+	if err := u.hashOnPage(ctx, f.HashFrom, f.SHA256); err != nil {
+		return 0, false, fmt.Errorf("the update agent's Paper %s build %d: %w; not used", s.to.Version, s.to.ID, err)
+	}
+	dir := u.Cfg.ServerDir
+	dirfd, err := openUnder(dir, "")
+	if err != nil {
+		return 0, false, err
+	}
+	defer syscall.Close(dirfd)
+	got, err := u.fetcher().Stage(ctx, dirfd, dir, s.to.Name, f.URL, download.MaxJar)
+	if err != nil {
+		return 0, false, err
+	}
+	claims := ""
+	if file, err := got.Open(); err == nil {
+		claims = paper.Claims(file)
+		_ = file.Close() // only read from
+	}
+	switch {
+	case got.SHA256 != f.SHA256:
+		err = errors.New("its SHA-256 doesn't match the one on its hash page")
+	case claims == "":
+		err = errors.New("the download isn't a Paper server jar")
+	case claims != s.to.Version:
+		err = fmt.Errorf("the download is Paper for Minecraft %s, not %s", claims, s.to.Version)
+	}
+	if err != nil {
+		got.Drop()
+		return 0, false, fmt.Errorf("the update agent's Paper %s build %d: %w; not used", s.to.Version, s.to.ID, err)
+	}
+	fmt.Fprintf(u.Out, "\nPaper %s build %d, from %s\n  %d bytes, SHA-256 %s\n", s.to.Version, s.to.ID, f.URL, got.Size, got.SHA256)
+	if !u.ask(fmt.Sprintf("Use it, and point paper.jar at %s? [y/n] ", s.to.Name)) {
+		got.Drop()
+		fmt.Fprintf(u.Out, "%-7s Paper: kept as it was\n", "SKIPPED")
+		return 0, false, nil
+	}
+	if err := got.Keep(); err != nil {
+		return 0, false, err
+	}
+	if err := paper.Point(dir, s.to.Name); err != nil {
+		return 0, false, err
+	}
+	return got.Size, true, nil
 }
 
 // getAgentJar checks a jar the agent found, then asks for its own yes, which

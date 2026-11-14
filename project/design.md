@@ -283,6 +283,8 @@ Common:  --config PATH, --set KEY=VALUE
 		- It asks once, with or without `--yes`, and the question says what can't be undone.
 		- The snapshot comes after the yes and before anything changes, and a failed one stops the update. With no `zfsDataset`, it warns to back up the server folder first.
 		- It won't move to a version older than the one `paper.jar` is on. Going back is a rollback to the snapshot.
+		- With `agent` set, the AI agent says first which approved plugins have a build for the new version. See [Update agent](#update-agent).
+	- With `agent` set, a failed PaperMC lookup goes to the AI agent, rather than stopping the update.
 
 - `--plugins` updates each plugin with a known source in the approved list, such as Geyser, Floodgate, Modrinth, or Hangar. It shows the old and new versions, checks the hash from the source, and approves the new jar.
 	- A jar is up to date when its approved hash is the source's newest. The old version is what the jar's own `plugin.yml` says.
@@ -733,10 +735,15 @@ cicd/                        build, test, and release scripts
 
 ### Update agent
 
-- An AI agent can help `update --plugins` find new builds. It's off until `agent` is set.
+- An AI agent can help `update --plugins` and `--paper` find new builds. It's off until `agent` is set.
 	- Known sources come first: PaperMC for Paper, GeyserMC for Geyser and Floodgate, and any added later. The agent is asked about the approved jars they don't cover, and about one whose known source's lookup failed, such as after an API change.
 	- Before `--mc-version`, it also reports which approved plugins have a build for the new version, and which don't. Its report is shown, and changes nothing.
+		- It's shown after the plan, before the move's question. A plugin the agent says nothing about is shown as not known.
 	- When PaperMC's lookup fails, the agent can find the Paper build instead, with the same checks below.
+		- It's asked for the newest stable build of the version `paper.jar` is on, or of `--mc-version`'s. With neither, the version isn't known, so a failed lookup still stops the update.
+		- The build needs a SHA-256, since PaperMC always publishes one. The download has to be a Paper server jar for that Minecraft version, by its main class and its `version.json`.
+		- It needs its own yes, even with `--yes`. A failed check stops the update with `paper.jar` as it was, the same as a failed download from PaperMC.
+	- Everything for one run goes to the agent in one question, since each can take minutes.
 
 - Kinds of agent:
 	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio.

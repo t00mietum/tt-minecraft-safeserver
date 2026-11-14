@@ -401,7 +401,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		return err
 	}
 	parts := inv.opts.parts
-	agentOn := inv.cfg.Agent != "" && inv.cfg.Agent != "none" && (parts == updatepkg.Parts{} || parts.Plugins)
+	agentOn := inv.cfg.Agent != "" && inv.cfg.Agent != "none" && (parts == updatepkg.Parts{} || parts.Plugins || parts.Paper)
 	switch {
 	case inv.opts.agentAnswer != "" && (root || inv.opts.dryRun):
 		a, err := updatepkg.ReadAgentAnswer(inv.opts.agentAnswer)
