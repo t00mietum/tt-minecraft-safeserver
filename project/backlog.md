@@ -47,6 +47,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
 		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
 		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
+	- Stand-in: none (20261113). The remaining check is a real phone and console on the home Wi-Fi. df797 already covers the firewall side in a namespace.
 	- Test case: df797
 	- Branch: nov14-2026111111065829
 	- Commit: fb7097b
