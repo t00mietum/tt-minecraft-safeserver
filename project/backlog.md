@@ -77,7 +77,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Connect the service to an AI agent to update the game programs and add-ons
 	- ID: 2026111207010610
 	- Type: Feature
-	- Status: Started
+	- Status: Done
 	- Priority: High
 	- Opened: 20261112-070106
 	- Opened by: t00mietum
@@ -99,6 +99,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
 		- 20261113: Scope, approval, and key handling kept as picked. New coded sources wait: Modrinth and Hangar (2026111117404480) is Deferred, and the agent covers those jars. PaperMC and GeyserMC stay as code, since their hashes need no trust.
 		- 20261113: The agent work goes first. 2026111210034308 is raised to High, ahead of Bedrock LAN and the NixOS module.
+	- Test case: its children's: 2026111210034308: df790, df791, df792, df793, df794, df795; 2026111210033639: df75x, df75y, df75z, df760, df761, df762, df763, df764, df765, df5wt, df5ww, df5x2, df5x6; 2026111210033649: df766, df767, df769, df76a, df76b, df761, df76c (skipped without `TT_MINECRAFTD_LIVE_AGENT`); 2026111210034298: df76h, df76j, df76k, df76m, df76n (root host)
+	- Closed: 20261113-183543
 
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
