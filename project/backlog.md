@@ -186,19 +186,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
 	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
 
-- NixOS module
-	- ID: 2026111111065855
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Add a flake with a NixOS module for the account, Docker, the config file, the firewall unit, and the boot unit.
-		- On NixOS, `setup`, `repair`, and `update` check the system parts and print module settings, rather than change them.
-	- 2026-11-12: Run modes now take Podman (default), Docker, or native, so the Docker lines here mean Podman or Docker.
-
 - Release-install script
 	- ID: 2026111111070761
 	- Type: Feature
@@ -242,18 +229,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
 
-- setup and repair offer zfs allow for snapshots
-	- ID: 2026111211050654
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261112-110506
-	- Opened by:
-	- Prereq IDs: 2026111112264283
-	- Requirements:
-		- With `zfsDataset` set, `setup` offers `zfs allow` for snapshot, destroy, and mount on the dataset to the operator, per design.md's ZFS snapshots, so snapshots don't need sudo.
-		- `repair` reports it when it's missing.
-
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
@@ -268,6 +243,30 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux.
+
+- Simplify: defer native mode, update --self, and NixOS; snapshot only before a version move
+	- ID: 2026111318002875
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 20261113-180028
+	- Opened by: t00mietum
+	- Related IDs: 2026111318002855 2026111318002865 2026111111065855 2026111211050654
+	- Requirements:
+		- Native mode is off by a constant, so `runMode: native` and `--native` are refused. Its code stays and is still tested.
+		- `--self` and the NixOS checks are commented out, with a short reason.
+		- ZFS snapshots are taken only before `--mc-version`, with no pruning.
+	- Progress log:
+		- 20261113: Native mode is off by `config.NativeMode`. `runMode: native` warns and uses the default, `--native` is gone from start and setup, and setup stops on a no to Podman. Tests of the flag and value follow the constant, and the native code's own tests still run.
+		- 20261113: `update --self` is commented out at its entry points: the flag, setup's leaving it out, and main's wiring. A plain update leaves it out. The self-update code and its tests stay.
+		- 20261113: There was no NixOS code outside `--self`, so nothing else changed for it. design.md marks NixOS, native mode, and `--self` as deferred.
+		- 20261113: ZFS: only `update --mc-version` snapshots. Start and stop snapshots and the prune are commented out. The root host's ZFS run checks that start and stop take none, in place of the 4 old checks.
+		- Verified: quick gate passes. With the constant on, the config, setup, and command tests pass and `--native` shows; with native let through while it's off, df5ww and df5xk fail. df78z fails with a snapshot put back into stop.
+		- Verified: root host run passes, with the 4 native checks shown as SKIP. The ZFS run passes df780 and df78y, and the test pool is gone after.
+	- Branch: simplify
+	- Test case: df78z, df78y (root host), df5ww, df5xk, df65e, df77p, df77m, df671
+	- Acceptance signoff: Self-closed: each part does what was asked, and its tests pass.
+	- Closed: 20261113-181530
 
 - TestSetup and TestUpdate reach the host's own runner and account files
 	- ID: 2026111312221899
@@ -2145,6 +2144,46 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
 	- Closed: 20261111-133545
 
+- update --self
+	- ID: 2026111318002865
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 20261113-180028
+	- Opened by: t00mietum
+	- Related IDs: 2026111117302995
+	- Requirements:
+		- `update --self` replaces the binary with its newest GitHub release, per design.md's update.
+	- Decisions:
+		- 20261113: Deferred to cut complexity. Packages and the install script update the binary, and a packaged binary shouldn't be replaced behind the package manager's back. The code is commented out.
+
+- Native mode
+	- ID: 2026111318002855
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 20261113-180028
+	- Opened by: t00mietum
+	- Requirements:
+		- Run Java under a sandboxed transient systemd unit in tmux, with no container runtime, per design.md's Run modes.
+	- Decisions:
+		- 20261113: Deferred to cut complexity. The code stays and is tested, but a constant keeps `runMode: native` and `--native` off. Container mode covers the goals.
+
+- NixOS module
+	- ID: 2026111111065855
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Add a flake with a NixOS module for the account, Docker, the config file, the firewall unit, and the boot unit.
+		- On NixOS, `setup`, `repair`, and `update` check the system parts and print module settings, rather than change them.
+	- Decisions:
+		- 20261113: Deferred to cut complexity, until a NixOS user turns up. setup and repair never had NixOS code; the only NixOS case is in `update --self`, which is deferred too.
+	- 2026-11-12: Run modes now take Podman (default), Docker, or native, so the Docker lines here mean Podman or Docker.
+
 - update --plugins: Modrinth and Hangar sources
 	- ID: 2026111117404480
 	- Type: Feature
@@ -2171,6 +2210,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions:
 		- MCXboxBroadcast, when this gets picked up. It needs a spare Microsoft account, never the main one.
 		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
+
+- setup and repair offer zfs allow for snapshots
+	- ID: 2026111211050654
+	- Type: Feature
+	- Status: Canceled
+	- Priority: Low
+	- Opened: 20261112-110506
+	- Opened by:
+	- Prereq IDs: 2026111112264283
+	- Requirements:
+		- With `zfsDataset` set, `setup` offers `zfs allow` for snapshot, destroy, and mount on the dataset to the operator, per design.md's ZFS snapshots, so snapshots don't need sudo.
+		- `repair` reports it when it's missing.
+	- Decisions:
+		- 20261113: Canceled. Snapshots are taken only before `--mc-version` now, which is rare and runs through sudo anyway.
 
 ## Template
 

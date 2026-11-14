@@ -71,7 +71,7 @@ func TestLoadLayersFileThenOptions(t *testing.T) {
 	defer testid.Line(t, "df5x7")
 	asOperator(t, "alice", "")
 	path := writeConfig(t, "heapMax: 8G\ngamePort: 25570\nrunUser: mcd\n")
-	c, warns := mustLoad(t, path, Option{"gamePort", "25580"}, Option{"RUNMODE", "Native"}, Option{"allowFrom", "[lan, 203.0.113.7]"})
+	c, warns := mustLoad(t, path, Option{"gamePort", "25580"}, Option{"RUNMODE", "Docker"}, Option{"allowFrom", "[lan, 203.0.113.7]"})
 	if len(warns) != 0 {
 		t.Fatalf("warnings: %v", warns)
 	}
@@ -80,7 +80,7 @@ func TestLoadLayersFileThenOptions(t *testing.T) {
 	want.HeapMin = gib
 	want.MemCap = 11 * gib
 	want.GamePort = 25580
-	want.RunMode = "native"
+	want.RunMode = "docker"
 	want.RunUser = "mcd"
 	want.RunGroup = "mcd"
 	want.OwnerAfterStop = "alice"

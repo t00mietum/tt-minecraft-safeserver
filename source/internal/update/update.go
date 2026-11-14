@@ -115,7 +115,8 @@ func (u *Update) Do(ctx context.Context) error {
 	}
 	parts := u.Parts
 	if parts == (Parts{}) {
-		parts = Parts{Self: true, Paper: true, Plugins: true, Image: true}
+		// Self is left out while --self is deferred (backlog 2026111318002865).
+		parts = Parts{Paper: true, Plugins: true, Image: true}
 	}
 	if parts != (Parts{Self: true}) {
 		if _, err := os.Stat(u.Cfg.ServerDir); err != nil {

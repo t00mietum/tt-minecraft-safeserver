@@ -20,7 +20,6 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
 // Kit is what both modes share: the host, the console, and the config.
@@ -34,8 +33,8 @@ type Kit struct {
 	Root        bool
 	DryRun      bool
 	Sleep       func(time.Duration)
-	// Now names the snapshots. Nil is time.Now.
-	Now func() time.Time
+	// Now named the start and stop snapshots, which are gone.
+	// Now func() time.Time
 	// Boot is set when the boot unit is enabled for this config, so start and
 	// stop go through systemctl. Inside the unit it's never set.
 	Boot   bool
@@ -173,21 +172,21 @@ func (k *Kit) checkFirewall(ctx context.Context) error {
 	return nil
 }
 
-// snapshot takes a snapshot of zfsDataset, when it's set, and prunes. See
-// design.md, ZFS snapshots.
-func (k *Kit) snapshot(ctx context.Context, kind string) error {
-	if k.Cfg.ZfsDataset == "" {
-		return nil
-	}
-	now := time.Now
-	if k.Now != nil {
-		now = k.Now
-	}
-	s := zfs.Snapper{Run: k.Run, Dataset: k.Cfg.ZfsDataset, Root: k.Root}
-	warns, err := s.Take(ctx, kind, now())
-	k.warn(warns)
-	return err
-}
+// // snapshot takes a snapshot of zfsDataset, when it's set, and prunes. See
+// // design.md, ZFS snapshots.
+// func (k *Kit) snapshot(ctx context.Context, kind string) error {
+// 	if k.Cfg.ZfsDataset == "" {
+// 		return nil
+// 	}
+// 	now := time.Now
+// 	if k.Now != nil {
+// 		now = k.Now
+// 	}
+// 	s := zfs.Snapper{Run: k.Run, Dataset: k.Cfg.ZfsDataset, Root: k.Root}
+// 	warns, err := s.Take(ctx, kind, now())
+// 	k.warn(warns)
+// 	return err
+// }
 
 func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 	k.say("Waiting for the server to load, up to %s.", k.Cfg.StartTimeout)
@@ -236,7 +235,7 @@ func (k *Kit) stop(ctx context.Context, e engine, warn int) error {
 		return err
 	}
 	if k.Boot {
-		// The unit's ExecStop is stop, which saves and snapshots as root.
+		// The unit's ExecStop is stop, which saves as root.
 		if _, err := k.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"systemctl", "stop", boot.UnitName}}); err != nil {
 			return err
 		}
@@ -259,8 +258,9 @@ func (k *Kit) stop(ctx context.Context, e engine, warn int) error {
 			return err
 		}
 	}
-	// The trees go back even without the snapshot.
-	return errors.Join(k.snapshot(ctx, zfs.PostStop), k.handBack(ctx))
+	// No stop snapshot any more (backlog 2026111318002875).
+	// return errors.Join(k.snapshot(ctx, zfs.PostStop), k.handBack(ctx))
+	return k.handBack(ctx)
 }
 
 // startUnit is start when the boot unit is enabled. The checks that can

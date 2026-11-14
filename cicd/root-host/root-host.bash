@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs the hand tests that need root, against a real Paper server, in a
 # throwaway Debian container with systemd and a real sudo: setup, --adopt,
-# rootful Podman, native mode, and the firewall. See checks.bash.
+# rootful Podman, native mode when it's on, and the firewall. See checks.bash.
 # Needs docker that can run --privileged, and the internet.
 #
 # --zfs runs setup and then the ZFS snapshot checks instead, on a throwaway

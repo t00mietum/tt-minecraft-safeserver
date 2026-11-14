@@ -72,7 +72,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 
 - Its own firewall table limits who can connect to the game ports, and stops the server from opening connections to the LAN or to local services.
 
-- It runs on Debian and NixOS, and can start the server at boot through a systemd unit.
+- It runs on Debian, and can start the server at boot through a systemd unit. NixOS support is deferred.
 
 - How players connect is in [how-to-connect.md](../how-to-connect.md).
 
@@ -98,6 +98,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 	- Hand the server tree to the service account before a start, and back to the operator after a stop.
 	- Use the same commands as `tt-monerod-safeserver`, so both tools work the same way.
 	- Run on Debian first, then NixOS.
+		- NixOS is deferred until someone running it asks.
 	- Start at boot.
 
 - Non-goals:
@@ -112,6 +113,7 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 - The host runs Debian or NixOS, on amd64 or arm64. Both use systemd.
 
 - On NixOS, the system parts are declared in a NixOS module, rather than changed by `setup`. See [NixOS](#nixos).
+	- Deferred for now.
 
 - The operator has sudo. Container mode needs Podman or Docker, but not the `docker` group.
 
@@ -120,14 +122,14 @@ Design, requirements, and direction. The active pre-v1.0.0 bug/feature task list
 ## Commands
 
 ~~~text
-tt-minecraftd start   [--native] [--debug] [--dry-run] [--foreground]
+tt-minecraftd start   [--debug] [--dry-run] [--foreground]
 tt-minecraftd stop    [--warn N] [--dry-run]
 tt-minecraftd status
 tt-minecraftd watch   [--interval N]
 tt-minecraftd console
 tt-minecraftd cmd     <server command>
 tt-minecraftd setup   [--yes] [--dry-run] [--adopt PATH] [--accept-eula] [setup options]
-tt-minecraftd update  [--yes] [--dry-run] [--self] [--paper] [--plugins] [--image] [--mc-version V]
+tt-minecraftd update  [--yes] [--dry-run] [--paper] [--plugins] [--image] [--mc-version V]
 tt-minecraftd repair  [--dry-run] [--check] [--approve-plugins]
 tt-minecraftd --help | --about | --version
 Common:  --config PATH, --set KEY=VALUE
@@ -159,11 +161,9 @@ Common:  --config PATH, --set KEY=VALUE
 
 5. With `firewall` on, check through sudo that the tool's nftables table is loaded. Refuse to start without it.
 
-6. Take a ZFS snapshot, when a dataset is configured, and prune old ones.
+6. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
 
-7. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
-
-8. Launch in the configured mode. Then wait until the log says the server is done loading, or `startTimeout` runs out. When the process died, print the end of its log and exit 1.
+7. Launch in the configured mode. Then wait until the log says the server is done loading, or `startTimeout` runs out. When the process died, print the end of its log and exit 1.
 
 - `--debug` runs the server in the foreground with its console attached.
 
@@ -177,9 +177,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 3. Send the `stop` console command, so Paper saves the worlds and kicks the players with a message. Wait up to `stopTimeout` seconds. Send SIGTERM if it's still up, and SIGKILL after another 30 seconds.
 
-4. Take a ZFS snapshot now that the worlds are closed.
-
-5. Hand the trees back to the operator.
+4. Hand the trees back to the operator.
 
 ### status and watch
 
@@ -260,16 +258,18 @@ Common:  --config PATH, --set KEY=VALUE
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
 	- Before `repair`, with `bedrock` on, it downloads and approves Geyser or Floodgate when one is missing, as in step 7, since `repair` only reports them.
 
-- It sets `runMode` to `podman` when Podman is installed, and to `docker` when only Docker is. With neither, it offers to install Podman and `catatonit` through apt, or to use native mode. It never installs Docker.
-	- A `runMode` given with `--set` or `--native` skips the pick. `--yes` takes Podman.
+- It sets `runMode` to `podman` when Podman is installed, and to `docker` when only Docker is. With neither, it offers to install Podman and `catatonit` through apt, and stops on a no. It never installs Docker.
+	- A `runMode` given with `--set` skips the pick. `--yes` takes Podman.
+	- While native mode is on, a no to Podman picks native mode, and `--native` skips the pick too.
 
-- On NixOS it skips steps 2, 9, 11, and 12. It checks those parts instead, and prints the module settings for whatever is missing.
+- NixOS is deferred. When it comes back, on NixOS it skips steps 2, 9, 11, and 12. It checks those parts instead, and prints the module settings for whatever is missing.
 
 ### update
 
 - Needs root, and asks first unless `--yes` is given. When a part isn't named, it updates all of them.
 
 - `--self` gets the latest `tt-minecraft-safeserver` release from GitHub, checks its SHA-256 sum, and replaces the running binary in one rename.
+	- Deferred. The packages and the install script update the binary, and a packaged binary shouldn't be replaced behind the package manager's back. The code stays, and the flag is commented out.
 	- A release holds `tt-minecraftd-linux-amd64` and `tt-minecraftd-linux-arm64`, plus `SHA256SUMS` in `sha256sum`'s format. The new build has to match its line there, and its `--version` has to name the release, before it's renamed over the old one. It keeps the old one's owner, group, and mode.
 	- A pre-release is only taken by a build that's a pre-release itself. Drafts are skipped, and it never goes back to an older version.
 	- It needs no server folder. `setup` leaves it out of the update it runs on an existing install, since the binary setup runs is the one it installs.
@@ -301,7 +301,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - A running server is left alone. It uses the new files on its next start.
 
-- On NixOS, `--self` only prints what to change, since it comes from the Nix store. So does a binary run from the Nix store on another distro.
+- With `--self` back, on NixOS it only prints what to change, since it comes from the Nix store. So does a binary run from the Nix store on another distro.
 
 ### repair
 
@@ -348,13 +348,13 @@ source/internal/props/       server.properties and the YAML files, read and fix
 source/internal/plugins/     jar hashes and the approved list
 source/internal/launch/      container and native modes, console
 source/internal/tree/        ownership hand-off
-source/internal/zfs/         snapshots and pruning
+source/internal/zfs/         the update --mc-version snapshot
 source/internal/firewall/    nftables rules and their unit
 source/internal/fetch/       downloads and hash checks
 source/internal/update/
 source/internal/repair/
 source/internal/boot/        systemd unit
-nix/                         NixOS module and flake
+nix/                         NixOS module and flake, deferred
 project/                     design, backlog, and notes
 cicd/                        build, test, and release scripts
 ~~~
@@ -393,6 +393,7 @@ cicd/                        build, test, and release scripts
 	- Go builds one static binary, and its standard library has nearly all of that. `tt-monerod-safeserver` is in Go too, so code can move between them.
 
 - There are 3 run modes: Podman, Docker, and native. A container is the default, the same as in `tt-monerod-safeserver`.
+	- Native mode is deferred. A constant in the config code keeps `runMode: native` and `--native` off, while its code is still built and tested. What this file says about native mode is for when it comes back.
 	- A plugin runs with the same access as the server. In a container it can only see the server tree. [Why a container](#why-a-container) has more.
 	- Native mode is for a dedicated VM, where the VM already keeps the server away from everything else, or a host with neither runtime.
 	- Native mode uses systemd's sandbox options rather than a bare tmux session as in `tt-monerod-safeserver`. They give most of what the container does for little extra code.
@@ -431,7 +432,7 @@ cicd/                        build, test, and release scripts
 - The operator gets sudo for single commands, rather than running the whole tool as root.
 
 - Start at boot uses a systemd unit that runs `tt-minecraftd start --foreground` as root, rather than a unit that runs Java directly.
-	- The checks, snapshots, and ownership hand-off then work the same way at boot as by hand.
+	- The checks and ownership hand-off then work the same way at boot as by hand.
 
 - On NixOS, a NixOS module declares the account, Podman or Docker, the config file, the firewall unit, and the boot unit.
 	- NixOS has its own `services.minecraft-server` module. It runs vanilla, without plugins, the container, or the checks.
@@ -482,7 +483,7 @@ cicd/                        build, test, and release scripts
 
 6. Start at boot.
 
-7. The NixOS module.
+7. The NixOS module. Deferred.
 
 8. Build and release scripts, and an install one-liner.
 
@@ -508,7 +509,7 @@ cicd/                        build, test, and release scripts
 - The approved plugin list is `/etc/tt-minecraftd/plugins.shcl`, owned by root. It's stored outside the server tree, so the server can't change it.
 	- It sits beside the config, so a second config given with `--config` gets its own list.
 
-- Settings come from the defaults in the table below, then the file, then the command line. `--native` sets `runMode`, and `--set` sets any key.
+- Settings come from the defaults in the table below, then the file, then the command line. `--set` sets any key, and `--native` sets `runMode` while native mode is on.
 	- A key whose default comes from another one, such as `runGroup`, follows that key wherever it was set.
 	- An option is checked the same way as the file. A bad one is an error rather than a warning, since it was typed just now.
 
@@ -525,7 +526,7 @@ cicd/                        build, test, and release scripts
 
 | Key                 | Default                           | Notes
 | :---                | :---                              | :---
-| `runMode`           | `podman`                          | `podman`, `docker`, or `native`. `setup` picks one
+| `runMode`           | `podman`                          | `podman` or `docker`, and `native` once it's back. `setup` picks one
 | `runUser`           | `minecraftd`
 | `runGroup`          | same as `runUser`                 | Stays the group before and after a run
 | `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`, else the account it runs as, unless that's root
@@ -582,7 +583,7 @@ cicd/                        build, test, and release scripts
 | :---                                    | :---
 | Parsing, checks, `status`, `watch`      | operator
 | Read the firewall table                 | operator through sudo
-| ZFS snapshot and prune                  | operator through `zfs allow`, else sudo
+| ZFS snapshot                            | operator through `zfs allow`, else sudo
 | Change tree ownership                   | operator through sudo
 | Container run, attach, stop, and logs   | operator through sudo
 | `systemd-run` and tmux in native mode   | operator through sudo
@@ -851,7 +852,7 @@ cicd/                        build, test, and release scripts
 	- It starts after `network-online.target`. In Docker mode it also waits for `docker.service`. Podman has no service to wait for.
 	- With `firewall` on, it requires `tt-minecraftd-firewall.service`, so the server never starts at boot without the rules.
 
-	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some for the snapshot after.
+	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
 	- The unit runs the tool from `/usr/local/bin`, where `setup` puts it, with `--config` when the config isn't the default one.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
 	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.
@@ -860,6 +861,8 @@ cicd/                        build, test, and release scripts
 	- It doesn't stop a server the unit runs. That server keeps going until the next `stop`.
 
 ### NixOS
+
+- Deferred until someone running NixOS asks. None of this is built.
 
 - The repo has a flake with a NixOS module. It declares:
 	- The service account and group.
@@ -872,20 +875,13 @@ cicd/                        build, test, and release scripts
 
 ### ZFS snapshots
 
-- With `zfsDataset` set, `start` takes `<YYYYmmDD-HHMMSS>_pre_tt-minecraftd-start`, and `stop` takes `<YYYYmmDD-HHMMSS>_post_tt-minecraftd-stop` after the worlds are saved.
-	- A failed snapshot stops a start before the trees change hands. At `stop` the trees still go back, and the error is shown.
-	- A `stop` that finds the server already down takes none, since nothing changed since the last one.
-	- `update --mc-version` takes `<YYYYmmDD-HHMMSS>_pre_tt-minecraftd-mc-version` before Paper moves. The prune counts it with the others.
-
-- Old ones get pruned on a grandfather-father-son schedule. The ones kept are the first, the newest 3, and the last of each of the last 7 days, 4 weeks, and 6 months.
-	- Only snapshots that match the tool's name pattern are touched.
-	- Days, weeks, and months count only the ones that have a snapshot, so a server left off for a while keeps its history. Weeks are ISO weeks, and the time in the name is what counts.
-	- The prune runs after every snapshot, `stop`'s too. A failed prune only warns.
+- With `zfsDataset` set, `update --mc-version` takes `<YYYYmmDD-HHMMSS>_pre_tt-minecraftd-mc-version` before Paper moves, since worlds can't go back to an older version.
+	- Moves are rare, so nothing is pruned.
+	- `start` and `stop` used to take snapshots too, pruned on a grandfather-father-son schedule. That was dropped, since a host on ZFS usually runs its own auto-snapshots, and only a version move can't be undone.
 
 - Snapshots on the same pool aren't a backup. Copying them off of the host, such as with `zfs send`, is up to the host's own backup.
 
-- `setup` offers `zfs allow` for snapshot, destroy, and mount on the dataset, so this works without sudo.
-	- Each change is tried as the operator first, then through sudo, so whatever `zfs allow` grants is used, by user, group, or set.
+- The snapshot is tried as the operator first, then through sudo, so a `zfs allow` the host grants is used. `setup` doesn't offer one.
 
 ### UI
 

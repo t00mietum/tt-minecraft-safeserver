@@ -292,8 +292,16 @@ func (s *Setup) pickRuntime(context.Context) (string, error) {
 		return "podman", nil
 	case launch.Installed("docker"):
 		return "docker", nil
-	case !launch.Installed("apt-get"):
+	case !launch.Installed("apt-get") && config.NativeMode:
 		return "", errors.New("neither Podman nor Docker is installed; install Podman and catatonit, or give --native")
+	case !launch.Installed("apt-get"):
+		return "", errors.New("neither Podman nor Docker is installed; install Podman and catatonit")
+	case !config.NativeMode:
+		fmt.Fprintln(s.Out, "\nNeither Podman nor Docker is installed. Podman runs the server in a container, which keeps it away from the rest of the host.")
+		if s.confirm("Install Podman and catatonit through apt? [y/n] ") {
+			return "podman", nil
+		}
+		return "", errors.New("nothing changed; setup needs Podman or Docker")
 	}
 	fmt.Fprintln(s.Out, "\nNeither Podman nor Docker is installed. Podman runs the server in a container, which keeps it away from the rest of the host. Native mode runs it in a systemd sandbox instead, which is less.")
 	if s.confirm("Install Podman and catatonit through apt? n uses native mode [y/n] ") {

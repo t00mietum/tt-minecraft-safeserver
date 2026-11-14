@@ -35,7 +35,6 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/selfupdate"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	setuppkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/setup"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -70,9 +69,9 @@ type options struct {
 	acceptEULA bool
 	// parts are update's --paper and the like. None named means all.
 	parts updatepkg.Parts
-	// keepSelf leaves --self out of an update that names no part, for
-	// setup, since the binary it runs is the one it installs.
-	keepSelf bool
+	// keepSelf left --self out of setup's update. --self is deferred
+	// (backlog 2026111318002865).
+	// keepSelf bool
 	// line is cmd's console command.
 	line string
 	// agentAnswer is the file update's operator run left the agent's answer
@@ -90,10 +89,12 @@ type command struct {
 
 var commands = []command{
 	{"start", "Check the settings and start the server", func(fs *flag.FlagSet, o *options) {
-		fs.BoolFunc("native", "Run in native mode, the same as --set runMode=native", func(string) error {
-			o.sets = append(o.sets, config.Option{Key: "runMode", Value: "native"})
-			return nil
-		})
+		if config.NativeMode {
+			fs.BoolFunc("native", "Run in native mode, the same as --set runMode=native", func(string) error {
+				o.sets = append(o.sets, config.Option{Key: "runMode", Value: "native"})
+				return nil
+			})
+		}
 		fs.BoolVar(&o.debug, "debug", false, "Run in the foreground with the console attached")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the commands that would change something, and run none of them")
 		fs.BoolVar(&o.foreground, "foreground", false, "Stay attached until the server exits, for the boot unit")
@@ -108,17 +109,20 @@ var commands = []command{
 		fs.BoolVar(&o.approve, "approve-plugins", false, "Show each new or changed jar, and ask whether to approve it")
 	}},
 	{"setup", "Install the server, or adopt a server folder", func(fs *flag.FlagSet, o *options) {
-		fs.BoolFunc("native", "Use native mode, the same as --set runMode=native", func(string) error {
-			o.sets = append(o.sets, config.Option{Key: "runMode", Value: "native"})
-			return nil
-		})
+		if config.NativeMode {
+			fs.BoolFunc("native", "Use native mode, the same as --set runMode=native", func(string) error {
+				o.sets = append(o.sets, config.Option{Key: "runMode", Value: "native"})
+				return nil
+			})
+		}
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things. The EULA still needs a yes or --accept-eula")
 		fs.BoolVar(&o.dryRun, "dry-run", false, "Print the plan and the commands, and change nothing")
 		fs.StringVar(&o.adopt, "adopt", "", "Take over the server folder at `PATH` as it is")
 		fs.BoolVar(&o.acceptEULA, "accept-eula", false, "Accept the Minecraft EULA, "+settings.EULAURL)
 	}},
 	{"update", "Get newer builds. A running server uses them from its next start", func(fs *flag.FlagSet, o *options) {
-		fs.BoolVar(&o.parts.Self, "self", false, "Replace tt-minecraftd with its newest release from GitHub. On NixOS, say what to change")
+		// --self is deferred: packages and the install script update the binary (backlog 2026111318002865).
+		// fs.BoolVar(&o.parts.Self, "self", false, "Replace tt-minecraftd with its newest release from GitHub. On NixOS, say what to change")
 		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
 		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
 		fs.BoolVar(&o.parts.Image, "image", false, "Pull the newest build of the image's tag, check its Java, and pin its digest in the config")
@@ -333,7 +337,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 			again := inv
 			again.cfg = *c
 			again.opts.yes = true
-			again.opts.keepSelf = true
+			// again.opts.keepSelf = true
 			return update(ctx, again, in, w, root)
 		},
 	}
@@ -342,36 +346,36 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 
 var userAgent = "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
 
-// paperAPI, geyserAPI, and selfAPI are vars so tests don't reach the real
-// ones.
+// paperAPI and geyserAPI are vars so tests don't reach the real ones.
 var (
 	paperAPI  = paper.API{UserAgent: userAgent}
 	geyserAPI = geyser.API{UserAgent: userAgent}
-	selfAPI   = selfupdate.API{UserAgent: userAgent}
+	// selfAPI   = selfupdate.API{UserAgent: userAgent} // --self is deferred
 )
 
-// running is the binary to replace, past any link to it, so the link still
-// works after. "" when it can't be found.
-func running() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		return resolved
-	}
-	return exe
-}
+// // running is the binary to replace, past any link to it, so the link still
+// // works after. "" when it can't be found.
+// func running() string {
+// 	exe, err := os.Executable()
+// 	if err != nil {
+// 		return ""
+// 	}
+// 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+// 		return resolved
+// 	}
+// 	return exe
+// }
 
 // update needs root, so it runs itself again through sudo, unless it's a dry
 // run. With agent set, the agent is asked first, as the operator, and its
 // answer goes to the root run in a file. See design.md's Update agent.
 func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
-	exe := running()
-	var self updatepkg.SelfSource = selfAPI
-	if inv.opts.keepSelf {
-		self = nil
-	}
+	// --self is deferred (backlog 2026111318002865).
+	// exe := running()
+	// var self updatepkg.SelfSource = selfAPI
+	// if inv.opts.keepSelf {
+	// 	self = nil
+	// }
 	u := &updatepkg.Update{
 		Cfg:         &inv.cfg,
 		ConfigPath:  inv.configPath,
@@ -383,14 +387,14 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		Out:         w,
 		Paper:       paperAPI,
 		Geyser:      geyserAPI,
-		Self:        self,
-		Exe:         exe,
-		Version:     version,
-		NixOS:       selfupdate.FromNix(exe),
-		Run:         hostRunner(inv.opts.dryRun),
-		Fetch:       download.Client{UserAgent: userAgent},
-		MCVersion:   inv.opts.mcVersion,
-		Root:        root,
+		// Self:        self,
+		// Exe:         exe,
+		// Version:     version,
+		// NixOS:       selfupdate.FromNix(exe),
+		Run:       hostRunner(inv.opts.dryRun),
+		Fetch:     download.Client{UserAgent: userAgent},
+		MCVersion: inv.opts.mcVersion,
+		Root:      root,
 	}
 	// Before sudo asks for a password.
 	if err := u.Check(); err != nil {

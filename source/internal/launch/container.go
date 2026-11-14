@@ -18,7 +18,6 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
 // Container is the name and the label of the one container this tool runs.
@@ -195,9 +194,10 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 	}
-	if err := d.snapshot(ctx, zfs.PreStart); err != nil {
-		return err
-	}
+	// No start snapshot any more, only update --mc-version's (backlog 2026111318002875).
+	// if err := d.snapshot(ctx, zfs.PreStart); err != nil {
+	// 	return err
+	// }
 	warns, err := tree.ToServer(ctx, d.Run, d.Cfg)
 	d.warn(warns)
 	if err != nil {
