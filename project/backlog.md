@@ -294,7 +294,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - First release
 	- ID: 2026111111070774
 	- Type: Task
-	- Status: Queued
+	- Status: Stalled
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -302,6 +302,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
 	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
+	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
 
 - Move the first server over
 	- ID: 2026111111070787
