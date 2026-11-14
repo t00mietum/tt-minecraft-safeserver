@@ -58,9 +58,7 @@
 
 tt-minecraft-safeserver runs a Paper Minecraft server for friends and family under its own unprivileged account, in a locked-down container. Its tool, `tt-minecraftd`, starts, stops, sets up, and updates the server, and puts the safe settings back in place before every start.
 
-<!-- The first release run draws assets/demo.gif. Uncomment this then.
 <p align="center"><img src="assets/demo.gif" alt="tt-minecraftd showing its version, the server status, and the unsafe settings that stop a start"></p>
--->
 
 <!-- TOC ignore:true -->
 ## Table of contents
