@@ -323,7 +323,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
-	- Status: Waiting on signoff
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261111-110708
 	- Opened by: t00mietum
@@ -346,6 +346,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-14: install-dev.bash at the repo root installs what's missing of git, ca-certificates, golang-go, and docker.io through apt (through sudo when needed), then clones main into ./tt-minecraft-safeserver or --dir. It states its plan and asks first, and --yes skips that. A re-run skips what's there and leaves an existing clone alone. It ends by printing how to build and run cicd/cicd.bash --gate. README's new Developing section has the curl and wget one-liners.
 	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note, as install.bash does.
 	- Verified: df799 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the module check on an existing folder, the final Go version check, the no answer at the prompt, the NixOS refusal, the no-sudo refusal, the git check, or the Go floor each fails it.
+	- Closed: 20261113-190843
+	- 2026-11-14: Closed under the standing close policy. Docker by default fits the gate's container, and the 3 calls are in questions.md as Check entries.
 
 - Simplify: defer native mode, update --self, and NixOS; snapshot only before a version move
 	- ID: 2026111318002875
