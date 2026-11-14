@@ -5,6 +5,8 @@
 ##	Purpose:
 ##		- Runs the merge gate before a push to main, and stops the push if it fails.
 ##		- A push to main whose commits change only the paths in cicd/docs-only-paths skips the gate.
+##		- So does a push of the commit that cicd/cicd.bash --merge-gate last passed on, with a clean tree.
+##		  A gate run inside the hook takes long enough that GitHub can drop the push's connection.
 ##		  A push to dev or a feature branch is never held up.
 ##		- Install with: ln -s ../../cicd/hooks/pre-push .git/hooks/pre-push
 ##		- CICD_MERGE_GATE_CMD names another command to run in place of the gate, for a test.
@@ -44,7 +46,11 @@ while read -r _ localSha remoteRef remoteSha; do
 		printf 'pre-push: only docs change on main, so the merge gate is skipped\n' >&2
 		continue
 	fi
-	printf 'pre-push: running the merge gate before the push to main\n' >&2
+	if [[ "$(cat "${root}/cicd/artifacts/merge-gate-passed" 2>/dev/null || true)" == "${localSha}" ]]; then
+		printf "pre-push: the merge gate already passed on %s, so it's skipped\n" "${localSha:0:12}" >&2
+		continue
+	fi
+	printf 'pre-push: running the merge gate before the push to main. If the push then fails with no message, run cicd/cicd.bash --merge-gate first, then push.\n' >&2
 	"${gate[@]}" || { printf 'pre-push: the merge gate failed, so nothing was pushed\n' >&2; exit 1; }
 done
 exit 0
@@ -52,3 +58,4 @@ exit 0
 
 ##	History:
 ##		- 2026-11-12: Created.
+##		- 2026-11-14: Skips the gate for the commit a merge gate already passed on.

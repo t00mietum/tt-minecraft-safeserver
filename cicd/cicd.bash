@@ -890,6 +890,18 @@ done
 fSection "Summary"
 for s in "${stepList[@]}"; do fEcho_Clean "  ${stepResult[${s}]:-?}  ${stepTitle[${s}]}"; done
 for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || fEcho_Clean "  off   ${stepTitle[${s}]} (${stepOff[${s}]})"; done
+## A whole merge gate that passed on a clean tree leaves its commit for the pre-push hook, which
+## skips a second run. A 14-minute gate inside the hook lets the git host drop the push's connection.
+if [[ "${mode}" == merge ]]; then
+	gateWhole=1
+	for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" || "${stepOff[${s}]}" == "not part of the merge run" ]] || gateWhole=0; done
+	if ((gateWhole)) && [[ -z "$(git status --porcelain 2>/dev/null)" ]]; then
+		mkdir -p -- "${root}/cicd/artifacts" && git rev-parse HEAD > "${root}/cicd/artifacts/merge-gate-passed"
+		fEcho_Clean "Merge gate passed on $(git rev-parse --short HEAD); a push of that commit to main skips it"
+	else
+		fEcho_Clean "Merge gate passed, but on a dirty tree or with steps off, so a push to main runs it again"
+	fi
+fi
 fSection "${APP_NAME} CI/CD: done."
 fEcho_Clean
 
@@ -902,3 +914,4 @@ fEcho_Clean
 ##		- 2026-11-13: soak step: the main actions over and over, heap and goroutines at round N against 2N.
 ##		- 2026-11-13: CodeQL step: the pinned Go bundle over the tracked Go files, cached outside the repo.
 ##		- 2026-11-13: demo step: the README's CLI demo gif, kept GFS-rotated, and committed only at a release.
+##		- 2026-11-14: a whole merge gate on a clean tree records its commit, for the pre-push hook.
