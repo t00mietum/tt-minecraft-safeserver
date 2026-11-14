@@ -89,7 +89,8 @@ EOF_SETUP
 touch "${stateDir}/reached"
 echo "work folder: ${target}:${remoteDir}"
 
-tar -c -C "${root}" source project -C "$(dirname -- "${binDir}")" "$(basename -- "${binDir}")" \
+## The installer tests read the scripts from the repo root.
+tar -c -C "${root}" source project install.bash install-dev.bash -C "$(dirname -- "${binDir}")" "$(basename -- "${binDir}")" \
 	| ssh "${sshOpts[@]}" "${target}" tar -x -C "${remoteDir}" || { echo "arm64-tests: copy to ${target} failed" >&2; exit 1; }
 
 ## One package at a time, from its own folder, as go test runs it.
@@ -118,3 +119,4 @@ exit "${rc}"
 
 ##	History:
 ##		- 2026-11-13: Created.
+##		- 2026-11-14: Sends install.bash and install-dev.bash too.
