@@ -22,27 +22,35 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- update with no part named stops at the image's Java lookup when PaperMC is down
-	- ID: 2026111318335938
-	- Type: Bug
-	- Status: Done
-	- Severity: Low
-	- Opened: 20261113-183359
-	- Opened by:
-	- Related IDs: 2026111210034308
-	- Requirements: With PaperMC's API down and agent set, the agent's Paper find is used, but the image step still asks PaperMC which Java the version needs, and that failure stops the whole update. `--image` could skip with a warning, or keep the current Java when the version doesn't change.
-	- Actual cause [Bug]: The image step's Java lookup always stopped the update on error, even when agent was set and the agent had covered PaperMC's Paper lookup.
-	- Actual fix [Bug]: With agent set, a failed Java lookup skips --image with a SKIPPED line, and the rest goes on. --image named alone still stops with the error, and without agent nothing changed.
-	- Actual effort: Low
-	- Branch: nov14-2026111318335938
-	- Test case: df796
-	- Acceptance signoff: Self-closed: its test passes, per the standing close policy.
-	- Closed: 20261113-183959
+- Bedrock LAN discovery
+	- ID: 2026111111065829
+	- Type: Task
+	- Status: Waiting on signoff
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711 2026111113015461
+	- Requirements:
+		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
+		- Fix `how-to-connect.md` if they don't.
+	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
+	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
+		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
+		- Verified: df797 loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, df797 fails.
+		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
+		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
 	- Decisions:
-		- 20261113: Skip with a note rather than keep the current image's Java as the floor, since that needs the old image on disk and another container run, and skipping changes nothing. Logged as a Check: entry.
-		- 20261113: Only with agent set, since without it a failed PaperMC or plugin source lookup stops the update by design. --image alone still fails, so asking for only that part never ends quietly with nothing done.
-		- Swept: imageLookup is the only Java caller; paperVersion's NewestVersion fallback runs only with no paper.jar, where a failed Paper lookup still stops the update per 2026111210034308. design.md's update and Update agent and README's Update agent say this now.
-	- Verified: df796 fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
+		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
+		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
+		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
+	- Test case: df797
+	- Branch: nov14-2026111111065829
+	- Commit: fb7097b
+	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
@@ -61,6 +69,50 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
 		- GPL v2 or later.
 	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
+
+- Let Bedrock LAN discovery through, once Geyser answers it
+	- ID: 2026111318485184
+	- Type: Feature
+	- Status: Stalled
+		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
+	- Priority: Avg
+	- Opened: 20261113-184851
+	- Opened by:
+	- Parent ID: 2026111111065829
+	- Requirements:
+		- When a released Geyser answers LAN discovery on UDP 7551, decide whether to turn it on. It's off by default in Geyser's pull request, and it loosens the login check for LAN joins.
+		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
+		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
+		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
+
+- First release
+	- ID: 2026111111070774
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868, 2026111111070761
+	- Requirements:
+		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
+	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
+
+- Move the first server over
+	- ID: 2026111111070787
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Move the existing server to the new account and tool with `setup --adopt`.
+		- Approve the plugins that are there now.
+		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
+		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
+		- Retire the old start, stop, and manage scripts after it runs clean.
+	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
 
 - CICD gaps: record a CLI demo gif for the README
 	- ID: 2026111311485862
@@ -85,6 +137,76 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
 		- Skipped without the build container, since it writes under /etc and /srv.
 		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
+
+- Live server has the whitelist off while it's open to the internet
+	- ID: 2026111111065671
+	- Type: Bug
+	- Status: Queued
+	- Prereq IDs: 2026111111070787
+	- Severity: Critical
+	- Opened: 20261111-110656
+	- Opened by: t00mietum
+	- Incorrect behavior [Bug]:
+		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
+	- Expected behavior [Bug]:
+		- Only whitelisted players can join, Java and Bedrock both.
+	- Possible cause [Bug]:
+		- The old scripts never set it, and nothing checks it.
+	- Note:
+		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
+		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
+	- Progress log:
+		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
+		- 2026-11-12: Got the list, 1 Java and 1 Bedrock player, kept in the private notes. The console commands are written up. Waits on them being run on the live server, and on a check of Geyser's `auth-type` there, which decides `fwhitelist` or `whitelist` for the Bedrock player.
+		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
+		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
+		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
+
+- CICD reset: CICD process gaps
+	- ID: 2026111219111143
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261112-191111
+	- Opened by:
+	- Related IDs: 2026111111065868
+	- Requirements:
+		- What else in the CICD process this project doesn't do yet and should.
+		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
+	- Progress log:
+		- Native fuzz tests for the parsers that read operator and download input: the shcl config, the plugin list, the settings files, and the update agent's answer.
+		- A soak test that loops the main actions headless and compares the heap and goroutines at rounds N and 2N.
+		- CodeQL from a pinned local CLI, built from a clean tree. It applies, since the repo is GPL and public on GitHub.
+		- A demo gif for the README, CLI only.
+		- Profiling is skipped on purpose for now: the tool starts and stops a server and holds no hot loop. Revisit if `status --watch` grows one.
+		- Reproducible builds are checked, so README can say so.
+		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
+		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
+		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done. The README line waits on signoff, and the demo gif is Stalled until the first release.
+	- Branch: nov13
+	- Test case: n/a: pipeline step.
+
+- update with no part named stops at the image's Java lookup when PaperMC is down
+	- ID: 2026111318335938
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 20261113-183359
+	- Opened by:
+	- Related IDs: 2026111210034308
+	- Requirements: With PaperMC's API down and agent set, the agent's Paper find is used, but the image step still asks PaperMC which Java the version needs, and that failure stops the whole update. `--image` could skip with a warning, or keep the current Java when the version doesn't change.
+	- Actual cause [Bug]: The image step's Java lookup always stopped the update on error, even when agent was set and the agent had covered PaperMC's Paper lookup.
+	- Actual fix [Bug]: With agent set, a failed Java lookup skips --image with a SKIPPED line, and the rest goes on. --image named alone still stops with the error, and without agent nothing changed.
+	- Actual effort: Low
+	- Branch: nov14-2026111318335938
+	- Test case: df796
+	- Acceptance signoff: Self-closed: its test passes, per the standing close policy.
+	- Closed: 20261113-183959
+	- Decisions:
+		- 20261113: Skip with a note rather than keep the current image's Java as the floor, since that needs the old image on disk and another container run, and skipping changes nothing. Logged as a Check: entry.
+		- 20261113: Only with agent set, since without it a failed PaperMC or plugin source lookup stops the update by design. --image alone still fails, so asking for only that part never ends quietly with nothing done.
+		- Swept: imageLookup is the only Java caller; paperVersion's NewestVersion fallback runs only with no paper.jar, where a failed Paper lookup still stops the update per 2026111210034308. design.md's update and Update agent and README's Update agent say this now.
+	- Verified: df796 fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
 
 - Connect the service to an AI agent to update the game programs and add-ons
 	- ID: 2026111207010610
@@ -113,30 +235,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261113: The agent work goes first. 2026111210034308 is raised to High, ahead of Bedrock LAN and the NixOS module.
 	- Test case: its children's: 2026111210034308: df790, df791, df792, df793, df794, df795; 2026111210033639: df75x, df75y, df75z, df760, df761, df762, df763, df764, df765, df5wt, df5ww, df5x2, df5x6; 2026111210033649: df766, df767, df769, df76a, df76b, df761, df76c (skipped without `TT_MINECRAFTD_LIVE_AGENT`); 2026111210034298: df76h, df76j, df76k, df76m, df76n (root host)
 	- Closed: 20261113-183543
-
-- Live server has the whitelist off while it's open to the internet
-	- ID: 2026111111065671
-	- Type: Bug
-	- Status: Queued
-	- Prereq IDs: 2026111111070787
-	- Severity: Critical
-	- Opened: 20261111-110656
-	- Opened by: t00mietum
-	- Incorrect behavior [Bug]:
-		- `white-list` and `enforce-whitelist` are both off, and players already join from the internet. Anyone with a Java account who finds the address can join.
-	- Expected behavior [Bug]:
-		- Only whitelisted players can join, Java and Bedrock both.
-	- Possible cause [Bug]:
-		- The old scripts never set it, and nothing checks it.
-	- Note:
-		- Before it's turned on, every current player has to be on the whitelist, Bedrock players included, or they get locked out.
-		- The server tree is outside this repo, so the edit needs an OK or gets done by hand. `tt-minecraftd` will force it on from then on.
-	- Progress log:
-		- 2026-11-11: Waiting for the list of Java usernames and Bedrock gamertags.
-		- 2026-11-12: Got the list, 1 Java and 1 Bedrock player, kept in the private notes. The console commands are written up. Waits on them being run on the live server, and on a check of Geyser's `auth-type` there, which decides `fwhitelist` or `whitelist` for the Bedrock player.
-		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
-		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
-		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
 
 - update
 	- ID: 2026111111065803
@@ -191,75 +289,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
 	- Closed: 20261113-183424
 
-- CICD reset: CICD process gaps
-	- ID: 2026111219111143
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261112-191111
-	- Opened by:
-	- Related IDs: 2026111111065868
-	- Requirements:
-		- What else in the CICD process this project doesn't do yet and should.
-		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
-	- Progress log:
-		- Native fuzz tests for the parsers that read operator and download input: the shcl config, the plugin list, the settings files, and the update agent's answer.
-		- A soak test that loops the main actions headless and compares the heap and goroutines at rounds N and 2N.
-		- CodeQL from a pinned local CLI, built from a clean tree. It applies, since the repo is GPL and public on GitHub.
-		- A demo gif for the README, CLI only.
-		- Profiling is skipped on purpose for now: the tool starts and stops a server and holds no hot loop. Revisit if `status --watch` grows one.
-		- Reproducible builds are checked, so README can say so.
-		- shellcheck and markdownlint run from the host, not the image, and are only compared against recorded versions.
-		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
-		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done. The README line waits on signoff, and the demo gif is Stalled until the first release.
-	- Branch: nov13
-	- Test case: n/a: pipeline step.
-
-- Bedrock LAN discovery
-	- ID: 2026111111065829
-	- Type: Task
-	- Status: Waiting on signoff
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711 2026111113015461
-	- Requirements:
-		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
-		- Fix `how-to-connect.md` if they don't.
-	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
-	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
-	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
-		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
-		- Verified: df797 loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, df797 fails.
-		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
-		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
-	- Decisions:
-		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
-		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
-		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
-	- Test case: df797
-	- Branch: nov14-2026111111065829
-	- Commit: fb7097b
-	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
-
-- Let Bedrock LAN discovery through, once Geyser answers it
-	- ID: 2026111318485184
-	- Type: Feature
-	- Status: Stalled
-		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
-	- Priority: Avg
-	- Opened: 20261113-184851
-	- Opened by:
-	- Parent ID: 2026111111065829
-	- Requirements:
-		- When a released Geyser answers LAN discovery on UDP 7551, decide whether to turn it on. It's off by default in Geyser's pull request, and it loosens the login check for LAN joins.
-		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
-		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
-		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
-
 - Release-install script
 	- ID: 2026111111070761
 	- Type: Feature
@@ -290,35 +319,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df798
 	- Acceptance signoff: Self-closed: tested against a stand-in release. A run against the real first release is part of 2026111111070774.
 	- Closed: 20261113-190056
-
-- First release
-	- ID: 2026111111070774
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868, 2026111111070761
-	- Requirements:
-		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
-	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
-	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
-
-- Move the first server over
-	- ID: 2026111111070787
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Move the existing server to the new account and tool with `setup --adopt`.
-		- Approve the plugins that are there now.
-		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
-		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
-		- Retire the old start, stop, and manage scripts after it runs clean.
-	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
 
 - Dev-environment install script
 	- ID: 2026111111070800
