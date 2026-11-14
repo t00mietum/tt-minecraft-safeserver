@@ -67,13 +67,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
 		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
-	- Needs hand testing: An account that isn't whitelisted is refused. And whether the phone session that timed out after 42 s was closed on purpose.
+	- Needs hand testing: An account that isn't whitelisted is refused.
 	- Test case: repair --check as root (all OK), and a status ping to the home domain from outside, through the router forward
 	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
 	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
 	- 2026-11-14: Moved with setup --adopt on v1.0.0-alpha.1. The server runs in Podman as minecraftd, with the firewall table loaded. Java answers from the internet and the LAN. Details and the one config line left for a hand copy are in details.md.
 	- 2026-11-14: The old server scripts are archived and trashed. 3 more past players were whitelisted.
 	- 2026-11-14: A Bedrock phone joined over the internet with a Floodgate login and its whitelisted UUID, into the existing world.
+	- 2026-11-14: The phone session ended because the player left. The bindIP line is in the config, and a root repair --check passes but for the 0600 false alarm.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
@@ -131,6 +132,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: It compares the installed binary's SHA-256 with the release's SHA256SUMS, and replaces it when they differ.
 	- Progress log:
 		- 2026-11-14: Seen in the live move. A build from 2026-11-12 was left in place, and the release binary was installed by hand after setup.
+
+- repair --check fails while the server runs on files the server writes as 0600
+	- ID: 2026111412081476
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261114-120814
+	- Opened by:
+	- Incorrect behavior [Bug]: With the server running, the check fails on level.dat, player data, spark temp files and Geyser's nethernet/identity.pem. Java creates temp files as 0600 whatever the umask, and Paper saves by temp file and rename.
+	- Expected behavior [Bug]: The running check flags only files other accounts can reach, or the wrong owner. Modes tighter than ug+rwX pass.
+	- Progress log:
+		- 2026-11-14: Seen on b23 after the move. Nothing other accounts can read.
 
 - setup --adopt leaves the Floodgate key readable by others, and its own check then fails
 	- ID: 2026111410134562
