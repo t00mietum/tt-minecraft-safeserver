@@ -163,6 +163,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
 		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
 
+- start doesn't catch a link in the server tree that won't resolve in the container
+	- ID: 2026111409374443
+	- Type: Bug
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261114-093744
+	- Opened by:
+	- Incorrect behavior [Bug]: The container mounts each tree at its resolved path, so a link such as world -> .../worlds/current/world dangles inside it when current is itself a link. Paper may then make a new, empty world.
+	- Expected behavior [Bug]: start refuses, and names the link and the path it would need, or repair offers to point it at the resolved path.
+	- Progress log:
+		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
+
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143
 	- Type: Task
@@ -186,6 +198,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done. The README line waits on signoff, and the demo gif is Stalled until the first release.
 	- Branch: nov13
 	- Test case: n/a: pipeline step.
+
+- Installer tests fail on the arm64 box
+	- ID: 2026111409374434
+	- Type: Bug
+	- Status: Done
+	- Priority: High
+	- Opened: 20261114-093744
+	- Opened by:
+	- Possible cause [Bug]: The arm64 step copied only source and project to the box, and both tests read the scripts from the repo root.
+	- Progress log:
+		- 2026-11-14: Failed the merge gate before the first push to main. arm64-tests.bash now sends install.bash and install-dev.bash too. Both tests failed in that gate run and pass in the arm64 step since.
+	- Test case: df798, df799 on vmDebARM64 (the arm64 step)
 
 - update with no part named stops at the image's Java lookup when PaperMC is down
 	- ID: 2026111318335938
