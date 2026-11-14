@@ -87,6 +87,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The API key comes from the operator's environment, never the config, which everyone can read.
 		- `--yes` doesn't cover a jar the agent found, the same as `--mc-version`.
 		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
+		- 20261113: Scope, approval, and key handling kept as picked. New coded sources wait: Modrinth and Hangar (2026111117404480) is Deferred, and the agent covers those jars. PaperMC and GeyserMC stay as code, since their hashes need no trust.
+		- 20261113: The agent work goes first. 2026111210034308 is raised to High, ahead of Bedrock LAN and the NixOS module.
 
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
@@ -128,6 +130,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
 	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) is done too. 2026111117404480 (Modrinth and Hangar sources) is queued.
+
+- Update agent: Paper fallback and the --mc-version report
+	- ID: 2026111210034308
+	- Type: Feature
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261112-100343
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Prereq IDs: 2026111210034298 2026111117302963
+	- Requirements:
+		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
+		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
+	- Estimated effort: Avg
+	- Decisions:
+		- 20261113: Raised to High, so the agent work comes before more coded sources.
 
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143
@@ -224,20 +242,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
 
-- Update agent: Paper fallback and the --mc-version report
-	- ID: 2026111210034308
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261112-100343
-	- Opened by:
-	- Parent ID: 2026111207010610
-	- Prereq IDs: 2026111210034298 2026111117302963
-	- Requirements:
-		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
-		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
-	- Estimated effort: Avg
-
 - setup and repair offer zfs allow for snapshots
 	- ID: 2026111211050654
 	- Type: Feature
@@ -249,18 +253,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements:
 		- With `zfsDataset` set, `setup` offers `zfs allow` for snapshot, destroy, and mount on the dataset to the operator, per design.md's ZFS snapshots, so snapshots don't need sudo.
 		- `repair` reports it when it's missing.
-
-- update --plugins: Modrinth and Hangar sources
-	- ID: 2026111117404480
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261111-174044
-	- Opened by:
-	- Parent ID: 2026111111065803
-	- Prereq IDs: 2026111117302973
-	- Requirements:
-		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
 
 - Dev-environment install script
 	- ID: 2026111111070800
@@ -351,6 +343,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: n/a: pipeline step. Watched to fail: a missing test binary on the box failed the box's run, and a missing tool, an unknown box, and a busy box each gave SKIP.
 	- Acceptance signoff: Self-closed: the step ran on the box and put the VM back, and each skip and fail case was run.
 	- Closed: 20261113-114525
+	- Note: 20261113: The host lock draft is left in the upstream folder. The held place expires after 5 minutes, and the script is outside this project.
 
 - CICD gaps: fuzz the parsers that read operator and download input
 	- ID: 2026111311485816
@@ -506,6 +499,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The build it replaced stays, as with any `--paper`, so the old version's jar is there for a rollback.
 		- design.md's update and ZFS snapshots say this now. The choices are a `Check:` entry in questions.md.
 		- Swept: `paperVersion` (the image's Java check) follows the new version; setup's Update step passes no `--mc-version`; `zfs.Take` and `Doomed` both go through the one `ours` pattern.
+		- 20261113: Kept as picked. One question is clearer than 2, and refusing a move back is safer than a warning, since the snapshot is the way back.
 	- Branch: nov13-2026111117302963
 	- Test case: df78j, df78k, df78m, df78n
 	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
@@ -537,6 +531,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- setup and repair enable the unit and never start it. With `startAtBoot` off, repair runs `systemctl disable`, not `--now`, so a running server keeps going. design.md updated.
 		- Docker mode adds `Wants=` and `After=docker.service`. With the firewall on it has `Requires=` and `After=` on the firewall unit.
 		- Swept: both modes check `Boot` right after refusing other servers, and stop is shared in `Kit.stop`. setup on an existing install gets check 13 through `repair.After`. `status.BootUnit` and `setup.BinPath` now come from `boot`. Main tests stub `bootServes` in TestMain.
+		- 20261113: Kept as picked. `systemctl start` returning at once is what systemd users expect. `disable` without `--now` never stops a server someone is playing on.
 	- Closed: 20261113
 	- Verified: 20261113, df78x passed in the round's --backlog-run-full (root host checks step), with all 13 steps passing.
 
@@ -813,6 +808,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- A link to the binary is followed, and the file it points at is replaced, so the link still works.
 		- The code is `source/internal/selfupdate`, one of the shared parts design.md lists for `tt-safeserver`.
 		- Swept: every `Parts` literal, setup's call to update, the help text, and design.md's update and CLI lines.
+		- 20261113: Release layout kept. The release step already writes these names and `SHA256SUMS`, and `verify-release.bash` reads the same layout.
 	- Branch: r1112b
 	- Test case: df77g, df77h, df77j, df77k, df77m, df671, df65m
 	- Acceptance signoff: Self-closed: tested against a stand-in release server, with a real swap of a binary on disk. A run against the real first release is part of 2026111111070774.
@@ -944,6 +940,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `download.Stage` writes the temp file and gives both hashes, and `Into` now uses it, so the checks aren't written twice. `plugins.Claims` gives the name a jar says it has.
 		- README's CLI flags were checked against `codex` 0.163.0 and `gemini` 0.59.0's help, not run against a subscription. README says to check them against the CLI's docs.
 		- Swept: `Into`'s callers in `paper` and `geyser` pass their tests; `about` and `Claims` share one reader; `update`'s other callers (setup's Update step) run as root and get the note.
+		- 20261113: The kept file name stays. One entry per plugin means a stale jar can't load beside the new one, and an agent's find never rewrites the approved list's names.
 	- Branch: r1112b
 	- Test case: df76h, df76j, df76k, df76m, df76n (root host)
 	- Closed: 20261112-103705
@@ -2147,6 +2144,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1111, repair-sudo
 	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
 	- Closed: 20261111-133545
+
+- update --plugins: Modrinth and Hangar sources
+	- ID: 2026111117404480
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 20261111-174044
+	- Opened by:
+	- Parent ID: 2026111111065803
+	- Prereq IDs: 2026111117302973
+	- Requirements:
+		- `update --plugins` knows Modrinth and Hangar sources, per design.md, and approving a jar from one of them can record its source.
+	- Decisions:
+		- 20261113: Deferred. The update agent covers jars with no coded source, so the agent work comes first. Pick this up if the agent proves not enough for Modrinth or Hangar jars.
 
 - Consoles over the internet
 	- ID: 2026111111065842

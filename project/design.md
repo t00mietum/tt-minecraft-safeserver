@@ -288,6 +288,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- A jar is up to date when its approved hash is the source's newest. The old version is what the jar's own `plugin.yml` says.
 	- A newest build with another file name is left for the operator, since both jars would load. So is an approved jar that isn't in the tree any more.
 	- GeyserMC's sources are the ones known so far. A jar with another source is listed as skipped.
+		- Modrinth and Hangar sources wait until the agent work is done. Until then the agent covers their jars.
 	- With `agent` set, it also asks an AI agent about each approved jar that has no known source, or whose source's lookup failed. Each jar the agent finds needs its own yes, even with `--yes`. See [Update agent](#update-agent).
 
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
