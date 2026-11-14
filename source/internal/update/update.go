@@ -97,7 +97,21 @@ type paperStep struct {
 	// move is --mc-version's: to another Minecraft version, or from one
 	// that isn't known.
 	move bool
+	// found is the update agent's, when PaperMC's lookup failed.
+	found *agent.PaperBuild
 }
+
+// paperFailed is PaperMC's lookup failing for a known Minecraft version,
+// which the update agent can cover.
+type paperFailed struct {
+	version string
+	cur     *paper.Linked
+	move    bool
+	err     error
+}
+
+func (e *paperFailed) Error() string { return e.err.Error() }
+func (e *paperFailed) Unwrap() error { return e.err }
 
 // pluginStep is a newer build of an approved plugin with a known source.
 type pluginStep struct {
@@ -113,44 +127,61 @@ func (u *Update) Do(ctx context.Context) error {
 	if err := u.Check(); err != nil {
 		return err
 	}
-	parts := u.Parts
-	if parts == (Parts{}) {
-		// Self is left out while --self is deferred (backlog 2026111318002865).
-		parts = Parts{Paper: true, Plugins: true, Image: true}
-	}
+	parts := u.parts()
 	if parts != (Parts{Self: true}) {
 		if _, err := os.Stat(u.Cfg.ServerDir); err != nil {
 			return fmt.Errorf("no server folder: %w", err)
 		}
 	}
-	var plan []string
-	var ps *paperStep
-	var err error
-	if parts.Paper {
-		if ps, err = u.paperLookup(ctx); err != nil {
-			return err
-		}
-		if ps != nil && ps.move && u.Cfg.ZfsDataset != "" {
-			plan = append(plan, fmt.Sprintf("Take a ZFS snapshot of %s first.", u.Cfg.ZfsDataset))
-		}
-		if ps != nil {
-			plan = append(plan, ps.plan())
+	l, err := u.lookup(ctx, parts, false)
+	if err != nil {
+		return err
+	}
+	// One question covers everything the agent is asked, since each can
+	// take minutes.
+	q := u.fullQuestion(l)
+	var ans agent.Answer
+	var askErr error
+	asked := false
+	switch {
+	case q.Empty():
+	case u.Agent == nil:
+		fmt.Fprintf(u.Out, "%-7s %s\n", "NOTE", u.AgentNote)
+	default:
+		ans, askErr = u.Agent(ctx, q)
+		asked = true
+		if askErr != nil {
+			fmt.Fprintf(u.Out, "%-7s the update agent: %v\n", "FAILED", askErr)
 		}
 	}
-	var steps []pluginStep
-	var found []agentStep
-	if parts.Plugins {
-		var asks []plugins.Approved
-		if steps, asks, err = u.pluginLookup(ctx); err != nil {
+	ok := asked && askErr == nil
+	ps := l.ps
+	if l.failed != nil {
+		if ps, err = u.agentPaper(l.failed, ans, ok); err != nil {
 			return err
 		}
-		for _, s := range steps {
-			plan = append(plan, s.plan())
-		}
-		found = u.agentLookup(ctx, asks)
-		for _, s := range found {
-			plan = append(plan, s.plan(u.DryRun))
-		}
+	}
+	var plan []string
+	if ps != nil && ps.move && u.Cfg.ZfsDataset != "" {
+		plan = append(plan, fmt.Sprintf("Take a ZFS snapshot of %s first.", u.Cfg.ZfsDataset))
+	}
+	if ps != nil {
+		plan = append(plan, ps.plan())
+	}
+	steps := l.steps
+	for _, s := range steps {
+		plan = append(plan, s.plan())
+	}
+	var found []agentStep
+	if ok {
+		found = u.agentSteps(l.asks, q, ans)
+	}
+	for _, s := range found {
+		plan = append(plan, s.plan(u.DryRun))
+	}
+	var report []agent.MoveNote
+	if ok && q.MoveTo != "" {
+		report = agent.CheckMove(ans, q.Plugins)
 	}
 	var is *imageStep
 	if parts.Image {
@@ -174,6 +205,9 @@ func (u *Update) Do(ctx context.Context) error {
 		return nil
 	}
 	fmt.Fprintf(u.Out, "\nupdate will:\n  - %s\n\n", strings.Join(plan, "\n  - "))
+	if len(report) > 0 {
+		showReport(u.Out, q.MoveTo, report)
+	}
 	move := ps != nil && ps.move
 	if move && u.Cfg.ZfsDataset == "" {
 		fmt.Fprintf(u.Out, "warning: zfsDataset isn't set, so there's no snapshot to go back to. Back up %s first.\n", u.Cfg.ServerDir)
@@ -224,6 +258,120 @@ func (u *Update) Do(ctx context.Context) error {
 		fmt.Fprintln(u.Out, "A running server goes on with what it started with, and uses the new builds from its next start.")
 	}
 	return nil
+}
+
+// parts are the ones to update, with none named meaning all.
+func (u *Update) parts() Parts {
+	if u.Parts == (Parts{}) {
+		// Self is left out while --self is deferred (backlog 2026111318002865).
+		return Parts{Paper: true, Plugins: true, Image: true}
+	}
+	return u.Parts
+}
+
+// agentOn tells whether agent is set, though Agent may be nil in a run that
+// started as root.
+func (u *Update) agentOn() bool { return u.Agent != nil || u.AgentNote != "" }
+
+// lookups is what's found before the agent is asked anything.
+type lookups struct {
+	ps *paperStep
+	// failed is PaperMC's lookup, for the agent to cover.
+	failed *paperFailed
+	steps  []pluginStep
+	// asks are the jars for the agent, per pluginLookup.
+	asks []plugins.Approved
+	// moveTo is --mc-version's, and report the plugins the agent says have
+	// a build for it or not.
+	moveTo string
+	report []plugins.Approved
+}
+
+// lookup finds what parts need. The operator's run is quiet, and leaves a
+// failed Paper lookup other than PaperMC's to the root run, since it may not
+// be able to read the server folder.
+func (u *Update) lookup(ctx context.Context, parts Parts, quiet bool) (*lookups, error) {
+	var l lookups
+	var err error
+	if parts.Paper {
+		l.ps, err = u.paperLookup(ctx)
+		var pf *paperFailed
+		switch {
+		case errors.As(err, &pf) && u.agentOn():
+			l.failed = pf
+			if pf.move {
+				l.moveTo = pf.version
+			}
+		case err != nil && !quiet:
+			return nil, err
+		case l.ps != nil && l.ps.move:
+			l.moveTo = l.ps.to.Version
+		}
+	}
+	if parts.Plugins {
+		if l.steps, l.asks, err = u.pluginLookup(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if l.moveTo != "" && u.agentOn() {
+		l.report = u.movePlugins()
+	}
+	return &l, nil
+}
+
+// movePlugins are the approved plugins in the tree, for the agent's report
+// before --mc-version.
+func (u *Update) movePlugins() []plugins.Approved {
+	approved, _, err := plugins.ReadApproved(u.PluginsFile)
+	if err != nil {
+		return nil
+	}
+	var in []plugins.Approved
+	for _, a := range approved {
+		if paper.IsBuild(a.Name) {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(a.Name))); err == nil {
+			in = append(in, a)
+		}
+	}
+	return in
+}
+
+// fullQuestion is everything the agent is asked in one run.
+func (u *Update) fullQuestion(l *lookups) agent.Question {
+	q := u.question(l.asks)
+	if l.failed != nil {
+		q.FindPaper = l.failed.version
+	}
+	if len(l.report) > 0 {
+		q.MoveTo, q.Plugins = l.moveTo, u.question(l.report).Jars
+	}
+	return q
+}
+
+// showReport shows what the agent said about the plugins before a move.
+func showReport(w io.Writer, version string, notes []agent.MoveNote) {
+	fmt.Fprintf(w, "The update agent's report on the approved plugins for Minecraft %s. It changes nothing.\n", version)
+	for _, n := range notes {
+		var what string
+		switch n.Has {
+		case agent.HasYes:
+			what = "has a build"
+			if n.Version != "" {
+				what += ", " + n.Version
+			}
+		case agent.HasNo:
+			what = "has no build yet"
+		default:
+			what = "not known"
+		}
+		if n.Notes != "" {
+			what += ". " + n.Notes
+		}
+		fmt.Fprintf(w, "  - %s: %s\n", n.Jar, what)
+	}
+	fmt.Fprintln(w)
 }
 
 // paperVersion is the Minecraft version the server runs once this update is
@@ -278,14 +426,14 @@ func (u *Update) paperLookup(ctx context.Context) (*paperStep, error) {
 			return nil, fmt.Errorf("can't get Paper: %w", err)
 		}
 	}
+	move := u.MCVersion != "" && (cur == nil || cur.Version != version)
 	b, err := u.Paper.NewestStable(ctx, version)
 	if err != nil && u.MCVersion != "" {
-		return nil, fmt.Errorf("can't get Paper for Minecraft %s: %w", version, err)
+		return nil, &paperFailed{version, cur, move, fmt.Errorf("can't get Paper for Minecraft %s: %w", version, err)}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("can't get Paper: %w", err)
+		return nil, &paperFailed{version, cur, move, fmt.Errorf("can't get Paper: %w", err)}
 	}
-	move := u.MCVersion != "" && (cur == nil || cur.Version != version)
 	if !move && cur != nil && !cur.Gone && b.ID <= cur.ID {
 		fmt.Fprintf(u.Out, "%-7s Paper %s build %d is the newest stable build\n", "OK", cur.Version, cur.ID)
 		return nil, nil
@@ -319,6 +467,12 @@ func (u *Update) snapshot(ctx context.Context) error {
 
 func (s paperStep) plan() string {
 	how := "check its SHA-256, approve it, and point paper.jar at it"
+	if f := s.found; f != nil {
+		how = fmt.Sprintf("check its SHA-256 %s is on %s, check the download's SHA-256 and that it's Paper for Minecraft %s, ask before using it, then approve it and point paper.jar at it. The update agent found it on %s, since PaperMC's lookup failed", f.SHA256, f.HashFrom, s.to.Version, hostOf(f.URL))
+		if f.Notes != "" {
+			how += ". The agent's notes: " + f.Notes
+		}
+	}
 	switch {
 	case s.from == nil:
 		return fmt.Sprintf("Download Paper %s build %d, %s.", s.to.Version, s.to.ID, how)
@@ -332,12 +486,23 @@ func (s paperStep) plan() string {
 
 func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 	dir := u.Cfg.ServerDir
-	if u.DryRun {
+	switch {
+	case u.DryRun && s.found != nil:
+		fmt.Fprintf(u.Out, "would check Paper's hash page, download %s into %s, check it, and ask before using it\n", s.to.Name, dir)
+		return nil
+	case u.DryRun:
 		fmt.Fprintf(u.Out, "would download %s into %s, approve it, and point paper.jar at it\n", s.to.Name, dir)
 		return nil
-	}
-	if err := u.Paper.Install(ctx, dir, s.to); err != nil {
-		return err
+	case s.found != nil:
+		size, use, err := u.getAgentPaper(ctx, s)
+		if err != nil || !use {
+			return err
+		}
+		s.to.Size = size
+	default:
+		if err := u.Paper.Install(ctx, dir, s.to); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintf(u.Out, "%-7s Paper %s build %d downloaded, and its SHA-256 matches; paper.jar points at %s\n", "FIXED", s.to.Version, s.to.ID, s.to.Name)
 	// start pins the build paper.jar points at, like a plugin.
@@ -373,7 +538,7 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 	for _, w := range warns {
 		fmt.Fprintf(u.Out, "warning: %s\n", w)
 	}
-	agentOn := u.Agent != nil || u.AgentNote != ""
+	agentOn := u.agentOn()
 	for _, a := range approved {
 		file := filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(a.Name))
 		_, statErr := os.Lstat(file)

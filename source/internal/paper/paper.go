@@ -6,9 +6,13 @@
 package paper
 
 import (
+	"archive/zip"
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -222,6 +226,85 @@ func (a API) Install(ctx context.Context, serverDir string, b Build) error {
 		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
 	}
 	return link(dirfd, serverDir, b.Name, st)
+}
+
+// Point makes paper.jar in serverDir a link to name, a build already there,
+// owned like the folder.
+func Point(serverDir, name string) error {
+	dirfd, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
+	}
+	defer syscall.Close(dirfd)
+	var st syscall.Stat_t
+	if err := syscall.Fstat(dirfd, &st); err != nil {
+		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
+	}
+	return link(dirfd, serverDir, name, st)
+}
+
+// Name is a build's file name, as PaperMC gives it.
+func Name(version string, build int) string {
+	return "paper-" + version + "-" + strconv.Itoa(build) + ".jar"
+}
+
+// paperclip is the Main-Class of every Paper server jar.
+const paperclip = "io.papermc.paperclip.Main"
+
+// Claims is the Minecraft version a jar says it's Paper for, from its
+// version.json, or "" when it isn't a Paper server jar.
+func Claims(f *os.File) string {
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		return ""
+	}
+	z, err := zip.NewReader(f, fi.Size())
+	if err != nil {
+		return ""
+	}
+	var main, version string
+	for _, e := range z.File {
+		switch e.Name {
+		case "META-INF/MANIFEST.MF":
+			main = manifestMain(e)
+		case "version.json":
+			version = versionID(e)
+		}
+	}
+	if main != paperclip || !versionText.MatchString(version) {
+		return ""
+	}
+	return version
+}
+
+func manifestMain(e *zip.File) string {
+	rc, err := e.Open()
+	if err != nil {
+		return ""
+	}
+	defer rc.Close()
+	sc := bufio.NewScanner(io.LimitReader(rc, 64<<10))
+	for sc.Scan() {
+		if v, ok := strings.CutPrefix(sc.Text(), "Main-Class:"); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func versionID(e *zip.File) string {
+	rc, err := e.Open()
+	if err != nil {
+		return ""
+	}
+	defer rc.Close()
+	var v struct {
+		ID string `json:"id"`
+	}
+	if json.NewDecoder(io.LimitReader(rc, 64<<10)).Decode(&v) != nil {
+		return ""
+	}
+	return v.ID
 }
 
 // link makes paper.jar a link to name, replacing what's there in one rename.

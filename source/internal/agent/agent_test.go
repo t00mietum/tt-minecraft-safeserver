@@ -219,3 +219,66 @@ func TestSuggestAsksAndChecks(t *testing.T) {
 		t.Error("an answer with no JSON passed")
 	}
 }
+
+// Paper's find is held to the version asked for, a SHA-256, and agentHosts.
+// The move report keeps only the jars asked about. Both parts of the prompt
+// show only when asked.
+func TestPaperAndMoveReport(t *testing.T) {
+	defer testid.Line(t, "df790")
+	q := Question{Minecraft: "26.3", Paper: "249", FindPaper: "26.4", MoveTo: "26.4", Plugins: asked}
+	p := Prompt(q)
+	if !strings.Contains(p, `"paper": {"version"`) || !strings.Contains(p, `"moveReport": [{"jar"`) || !strings.Contains(p, `"findPaperFor": "26.4"`) {
+		t.Errorf("prompt:\n%s", p)
+	}
+	if p := Prompt(Question{Minecraft: "26.3", Jars: asked}); strings.Contains(p, "findPaperFor") || strings.Contains(p, "moveReport") {
+		t.Errorf("a jars-only prompt asks about Paper or a move:\n%s", p)
+	}
+	if !(Question{Minecraft: "26.3", MoveTo: "26.4"}).Empty() || (Question{FindPaper: "26.4"}).Empty() {
+		t.Error("Empty")
+	}
+
+	reply := `Found it: {"paper": {"version": "26.4", "build": 12, "url": "https://fill-data.papermc.io/v1/objects/x/paper-26.4-12.jar", "sha256": "` + strings.ToUpper(sum256) + `", "hashFrom": "https://fill.papermc.io/v3/projects/paper/versions/26.4/builds", "notes": "first stable\u001b[2J"}, "moveReport": [{"jar": "plugins/Chunky.jar", "hasBuild": "Yes", "version": "1.5"}, {"jar": "plugins/Other.jar", "hasBuild": "yes"}]}`
+	a, err := Parse(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := CheckPaper(a, "26.4", hosts)
+	if err != nil || got.Build != 12 || got.SHA256 != sum256 || got.Notes != "first stable[2J" {
+		t.Errorf("good build: %+v %v", got, err)
+	}
+	bad := map[string]func(p *PaperBuild){
+		"no stable Paper":   func(p *PaperBuild) { p.URL = "" },
+		"for Minecraft":     func(p *PaperBuild) { p.Version = "26.3" },
+		"no build number":   func(p *PaperBuild) { p.Build = 0 },
+		"has no SHA-256":    func(p *PaperBuild) { p.SHA256 = "" },
+		"Paper download":    func(p *PaperBuild) { p.URL = "https://evil.example/paper.jar" },
+		"Paper hash page":   func(p *PaperBuild) { p.HashFrom = "http://fill.papermc.io/x" },
+		"didn't answer":     nil,
+		"SHA-256, which Pa": func(p *PaperBuild) { p.SHA256 = sum512 },
+	}
+	for want, change := range bad {
+		b := *a.Paper
+		ans := Answer{Paper: &b}
+		if change == nil {
+			ans.Paper = nil
+		} else {
+			change(&b)
+		}
+		if got, err := CheckPaper(ans, "26.4", hosts); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %+v %v", want, got, err)
+		}
+	}
+
+	notes := CheckMove(a, asked)
+	want := []MoveNote{{Jar: "plugins/LuckPerms-Bukkit.jar", Has: HasUnknown}, {Jar: "plugins/Chunky.jar", Has: HasYes, Version: "1.5"}}
+	if !reflect.DeepEqual(notes, want) {
+		t.Errorf("report %+v", notes)
+	}
+	a.Move = []MoveNote{{Jar: "plugins/Chunky.jar", Has: "maybe"}, {Jar: "plugins/LuckPerms-Bukkit.jar", Has: "no", Notes: "not yet"}}
+	if n := CheckMove(a, asked); n[0].Has != HasNo || n[0].Notes != "not yet" || n[1].Has != HasUnknown {
+		t.Errorf("report %+v", n)
+	}
+	if _, err := Parse(`{"moveReport": []}`); err != nil {
+		t.Errorf("a report alone: %v", err)
+	}
+}

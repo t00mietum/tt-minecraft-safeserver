@@ -93,17 +93,17 @@ Both editions play on the same server, in the same world.
 
 ### Bedrock at home
 
-- Open the Friends tab. The server should show up under LAN Games by itself. Pick it to join.
+- Add the server on the Servers tab as above, with the home address such as `192.168.1.50` and port `19132`.
 
-- When it doesn't show up, add it on the Servers tab as above, with the home address such as `192.168.1.50` and port `19132`.
+- The server doesn't show up under LAN Games on the Friends tab yet, so don't wait for it there.
 
 ## Bedrock on a console
 
-- At home, consoles join the same way as other Bedrock devices. Open the Friends tab, and pick the server under LAN Games.
+- Xbox, PlayStation, and Switch don't let you add a server by its address, and the server doesn't show up under LAN Games yet. So for now, consoles need BedrockConnect, at home or away.
 
-- At home or away, a console that uses BedrockConnect can join from its server list. Type the server's domain name and port `19132` there.
+- A console that uses BedrockConnect can join from its server list. Type the server's domain name and port `19132` there.
 
-- Without BedrockConnect, consoles can't join from outside the home yet. Xbox, PlayStation, and Switch don't let you add a server by its address. A later version of tt-minecraft-safeserver may let consoles join through the Friends tab instead.
+- A later version of tt-minecraft-safeserver may let consoles join through the Friends tab instead.
 
 ## When it doesn't work
 
@@ -112,7 +112,7 @@ Both editions play on the same server, in the same world.
 | "You are not white-listed on this server"                 | Ask to be added. Bedrock players need their gamertag added, not a Java username
 | "Outdated client" or "Outdated server"                    | Update Minecraft, or ask which version the server runs
 | "Can't connect to server" or "Unable to connect to world" | Check the address and port. Turn off any VPN. Try again in a few minutes, in case the server is restarting
-| The server doesn't show under LAN Games                   | Make sure you're on the home Wi-Fi, not mobile data or a guest network. Then add it by its home address
+| The server doesn't show under LAN Games                   | That's expected for now. Add it by its home address on the Servers tab
 | "Failed to verify username" on Java                       | Restart the Minecraft Launcher and sign in again
 | You were kicked with "Server closed"                      | The server is restarting. Wait a minute and join again
 

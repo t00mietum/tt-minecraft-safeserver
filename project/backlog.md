@@ -22,6 +22,36 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Bedrock LAN discovery
+	- ID: 2026111111065829
+	- Type: Task
+	- Status: Waiting on signoff
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711 2026111113015461
+	- Requirements:
+		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
+		- Fix `how-to-connect.md` if they don't.
+	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
+	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
+		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
+		- Verified: df797 loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, df797 fails.
+		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
+		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
+	- Decisions:
+		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
+		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
+		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
+	- Test case: df797
+	- Branch: nov14-2026111111065829
+	- Commit: fb7097b
+	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
+
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
@@ -39,6 +69,50 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
 		- GPL v2 or later.
 	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
+
+- Let Bedrock LAN discovery through, once Geyser answers it
+	- ID: 2026111318485184
+	- Type: Feature
+	- Status: Stalled
+		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
+	- Priority: Avg
+	- Opened: 20261113-184851
+	- Opened by:
+	- Parent ID: 2026111111065829
+	- Requirements:
+		- When a released Geyser answers LAN discovery on UDP 7551, decide whether to turn it on. It's off by default in Geyser's pull request, and it loosens the login check for LAN joins.
+		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
+		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
+		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
+
+- First release
+	- ID: 2026111111070774
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868, 2026111111070761
+	- Requirements:
+		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
+	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
+
+- Move the first server over
+	- ID: 2026111111070787
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Move the existing server to the new account and tool with `setup --adopt`.
+		- Approve the plugins that are there now.
+		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
+		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
+		- Retire the old start, stop, and manage scripts after it runs clean.
+	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
 
 - CICD gaps: record a CLI demo gif for the README
 	- ID: 2026111311485862
@@ -64,32 +138,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Skipped without the build container, since it writes under /etc and /srv.
 		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
 
-- Connect the service to an AI agent to update the game programs and add-ons
-	- ID: 2026111207010610
-	- Type: Feature
-	- Status: Started
-	- Priority: High
-	- Opened: 20261112-070106
-	- Opened by: t00mietum
-	- Requirements:
-		- Ability to connect the service to an AI agent, for the purpose of updating the game programs and add-ons, which would otherwise be very brittle if hard-coded.
-		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
-	- Note:
-		- Pre-next-cut.
-	- Progress log:
-		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
-		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is queued.
-	- Decisions:
-		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
-		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
-		- Kinds: `openai` (cloud hosts and local servers), `anthropic`, and `command` (subscription CLIs), since those cover nearly every agent.
-		- It runs as the operator, before `update` runs itself through sudo. A run that starts as root skips it with a note.
-		- The API key comes from the operator's environment, never the config, which everyone can read.
-		- `--yes` doesn't cover a jar the agent found, the same as `--mc-version`.
-		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
-		- 20261113: Scope, approval, and key handling kept as picked. New coded sources wait: Modrinth and Hangar (2026111117404480) is Deferred, and the agent covers those jars. PaperMC and GeyserMC stay as code, since their hashes need no trust.
-		- 20261113: The agent work goes first. 2026111210034308 is raised to High, ahead of Bedrock LAN and the NixOS module.
-
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
@@ -113,39 +161,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
 		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
 		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
-
-- update
-	- ID: 2026111111065803
-	- Type: Feature
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111112163174
-	- Requirements:
-		- Update the tool from GitHub releases.
-		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
-		- Update plugins that have a known source, and approve the new jars.
-		- Refresh the pinned container image.
-	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
-	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
-	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) is done too. 2026111117404480 (Modrinth and Hangar sources) is queued.
-
-- Update agent: Paper fallback and the --mc-version report
-	- ID: 2026111210034308
-	- Type: Feature
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261112-100343
-	- Opened by:
-	- Parent ID: 2026111207010610
-	- Prereq IDs: 2026111210034298 2026111117302963
-	- Requirements:
-		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
-		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
-	- Estimated effort: Avg
-	- Decisions:
-		- 20261113: Raised to High, so the agent work comes before more coded sources.
 
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143
@@ -171,25 +186,113 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: nov13
 	- Test case: n/a: pipeline step.
 
-- Bedrock LAN discovery
-	- ID: 2026111111065829
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
+- update with no part named stops at the image's Java lookup when PaperMC is down
+	- ID: 2026111318335938
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 20261113-183359
+	- Opened by:
+	- Related IDs: 2026111210034308
+	- Requirements: With PaperMC's API down and agent set, the agent's Paper find is used, but the image step still asks PaperMC which Java the version needs, and that failure stops the whole update. `--image` could skip with a warning, or keep the current Java when the version doesn't change.
+	- Actual cause [Bug]: The image step's Java lookup always stopped the update on error, even when agent was set and the agent had covered PaperMC's Paper lookup.
+	- Actual fix [Bug]: With agent set, a failed Java lookup skips --image with a SKIPPED line, and the rest goes on. --image named alone still stops with the error, and without agent nothing changed.
+	- Actual effort: Low
+	- Branch: nov14-2026111318335938
+	- Test case: df796
+	- Acceptance signoff: Self-closed: its test passes, per the standing close policy.
+	- Closed: 20261113-183959
+	- Decisions:
+		- 20261113: Skip with a note rather than keep the current image's Java as the floor, since that needs the old image on disk and another container run, and skipping changes nothing. Logged as a Check: entry.
+		- 20261113: Only with agent set, since without it a failed PaperMC or plugin source lookup stops the update by design. --image alone still fails, so asking for only that part never ends quietly with nothing done.
+		- Swept: imageLookup is the only Java caller; paperVersion's NewestVersion fallback runs only with no paper.jar, where a failed Paper lookup still stops the update per 2026111210034308. design.md's update and Update agent and README's Update agent say this now.
+	- Verified: df796 fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
+
+- Connect the service to an AI agent to update the game programs and add-ons
+	- ID: 2026111207010610
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-070106
+	- Opened by: t00mietum
+	- Requirements:
+		- Ability to connect the service to an AI agent, for the purpose of updating the game programs and add-ons, which would otherwise be very brittle if hard-coded.
+		- The agent can be a cloud API, locally hosted, or a cloud subscription model via CLI.
+	- Note:
+		- Pre-next-cut.
+	- Progress log:
+		- 2026-11-12: Designed in design.md's Update agent, with rows in the config, privilege model, security, and direction decisions.
+		- 2026-11-12: Split into 4 children. 2026111210033639 (config keys, answer format, command kind), 2026111210033649 (OpenAI and Anthropic APIs, with fetch), and 2026111210034298 (`update --plugins` asks the agent) are done. 2026111210034308 (Paper fallback and the `--mc-version` report) is done too.
+	- Decisions:
+		- Known sources stay as code and go first. The agent covers the approved jars they don't, and a failed lookup. It only suggests; the tool checks each jar and a person approves it.
+		- It can only suggest a new build of an approved jar, never add or remove a plugin, or touch the config or settings.
+		- Kinds: `openai` (cloud hosts and local servers), `anthropic`, and `command` (subscription CLIs), since those cover nearly every agent.
+		- It runs as the operator, before `update` runs itself through sudo. A run that starts as root skips it with a note.
+		- The API key comes from the operator's environment, never the config, which everyone can read.
+		- `--yes` doesn't cover a jar the agent found, the same as `--mc-version`.
+		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
+		- 20261113: Scope, approval, and key handling kept as picked. New coded sources wait: Modrinth and Hangar (2026111117404480) is Deferred, and the agent covers those jars. PaperMC and GeyserMC stay as code, since their hashes need no trust.
+		- 20261113: The agent work goes first. 2026111210034308 is raised to High, ahead of Bedrock LAN and the NixOS module.
+	- Test case: its children's: 2026111210034308: df790, df791, df792, df793, df794, df795; 2026111210033639: df75x, df75y, df75z, df760, df761, df762, df763, df764, df765, df5wt, df5ww, df5x2, df5x6; 2026111210033649: df766, df767, df769, df76a, df76b, df761, df76c (skipped without `TT_MINECRAFTD_LIVE_AGENT`); 2026111210034298: df76h, df76j, df76k, df76m, df76n (root host)
+	- Closed: 20261113-183543
+
+- update
+	- ID: 2026111111065803
+	- Type: Feature
+	- Status: Done
+	- Priority: High
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711 2026111113015461
+	- Prereq IDs: 2026111112163174
 	- Requirements:
-		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
-		- Fix `how-to-connect.md` if they don't.
-	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
-	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
-	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
+		- Update the tool from GitHub releases.
+		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
+		- Update plugins that have a known source, and approve the new jars.
+		- Refresh the pinned container image.
+	- Test case: its children's: 2026111117302963: df78j, df78k, df78m, df78n; 2026111117302995: df77g, df77h, df77j, df77k, df77m, df671, df65m; 2026111117302950: df66x, df66y, df66z, df670, df671; 2026111117302973: df672, df671; 2026111117302985: df67p, df67q, df67r, df67s, df671; 2026111117404480: none named
+	- Closed: 20261113-182023
+	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
+	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
+	- 2026-11-12: Split into 6 children: 2026111117302950 (the command and `--paper`), 2026111117302973 (`--plugins`), 2026111117302985 (`--image`), and 2026111117302995 (`--self`) are done. 2026111117302963 (`--mc-version`, after ZFS snapshots) is done too. 2026111117404480 (Modrinth and Hangar sources) is queued.
+	- 2026-11-14: Closed from its children. update --self (2026111117302995) and Modrinth and Hangar sources (2026111117404480) are deferred, so the GitHub releases line waits with them.
+
+- Update agent: Paper fallback and the --mc-version report
+	- ID: 2026111210034308
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261112-100343
+	- Opened by:
+	- Parent ID: 2026111207010610
+	- Prereq IDs: 2026111210034298 2026111117302963
+	- Requirements:
+		- When PaperMC's lookup fails, the agent finds the Paper build, with the same checks, per design.md's Update agent.
+		- Before `--mc-version`, the agent reports which approved plugins have a build for the new version.
+	- Estimated effort: Avg
+	- Decisions:
+		- 20261113: Raised to High, so the agent work comes before more coded sources.
+		- 20261113: A failed check on the agent's Paper build stops the update, as a failed PaperMC download does, rather than going on as a plugin's does. A no to its own yes keeps Paper as it was, and the rest goes on.
+		- 20261113: The Paper find needs a SHA-256, since PaperMC always publishes one. A jar counts as Paper by its main class `io.papermc.paperclip.Main` and the `id` in its `version.json`, checked against a real 26.3 build.
+		- 20261113: With no `paper.jar` and no `--mc-version`, the version isn't known, so a failed lookup still stops the update.
+		- 20261113: The report covers every approved plugin in the tree, known sources included, but not Paper's builds. A plugin the agent leaves out shows as not known.
+		- 20261113: The operator's run leaves a Paper lookup error other than PaperMC's to the root run, since the operator may not be able to read the server folder.
+		- 20261113: `--image`'s Java lookup still asks PaperMC, so `update` with no part named still stops when PaperMC is down. Filed as 2026111318335938.
+		- Swept: `pluginLookup`, `AskAgent`, and `Do` share `agentOn` and `lookup`; Replay covers jars, Paper, and the report; main's agent switch covers `--paper`; design.md's update and Update agent and README's Update agent say this now.
+	- Actual effort: Avg
+	- Progress log:
+		- 20261113: When PaperMC's lookup fails and agent is set, the agent is asked for Paper's newest stable build of the known version. Its build is held to agentHosts and a SHA-256, the hash has to be on its hash page, and the download has to be a Paper server jar for that version. It needs its own yes, even with `--yes`, then it's approved and `paper.jar` points at it.
+		- 20261113: Before `--mc-version`, the agent says which approved plugins have a build for the new version. The report is shown after the plan, before the move's question, and changes nothing.
+		- 20261113: Everything goes to the agent in one question per run. `update --paper` now asks the agent as the operator too, and the hand-off file holds the Paper and report answers.
+		- Verified: df790 to df795 pass, and so does the quick gate on both temp folders, plus race tests on update, agent, and paper. Each fails with its check taken out: the own yes, the Paper jar check, its version, the SHA-256 match, the hash page, the agent's version and host checks, the replay's version and hash match, the quiet operator lookup, the report shown and asked, and `--paper` going to the agent.
+	- Test case: df790, df791, df792, df793, df794, df795
+	- Branch: nov14-2026111210034308
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
+	- Closed: 20261113-183424
 
 - Release-install script
 	- ID: 2026111111070761
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -200,39 +303,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux. It installs the binary, and `setup` does the rest.
+		- No --target option. setup and the boot unit both expect /usr/local/bin, so a user install wouldn't work.
+		- It always runs setup, a re-run included, since setup on an existing install runs repair and update. A current binary isn't downloaded again.
+		- --yes skips only the installer's prompt. Setup options go after --, such as -- --yes --accept-eula.
+		- curl or wget, since minimal Debian often has only wget. The answer comes from /dev/tty when the script arrives on a pipe.
+		- MIT, as helper scripts usually are, rather than the project's GPL.
+		- Tested by sourcing it with the install folder, os-release, and terminal paths pointed at a stand-in, on a PATH with stand-in curl, wget, uname, and sudo. No test-only option in the script.
 	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
-
-- First release
-	- ID: 2026111111070774
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868, 2026111111070761
-	- Requirements:
-		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
-	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
-
-- Move the first server over
-	- ID: 2026111111070787
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Move the existing server to the new account and tool with `setup --adopt`.
-		- Approve the plugins that are there now.
-		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
-		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
-		- Retire the old start, stop, and manage scripts after it runs clean.
+	- 2026-11-14: install.bash at the repo root finds the newest release through the GitHub API, checks the binary for this CPU against SHA256SUMS, installs it as /usr/local/bin/tt-minecraftd (through sudo when needed), and runs tt-minecraftd setup. It states its plan and asks first, and --yes skips that. README's Installing section has the curl and wget one-liners.
+	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note.
+	- Verified: df798 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the hash check, the version sort, the no answer at the prompt, the NixOS refusal, or the temp cleanup each fails it.
+	- Verified: against the live API with no release yet, it says there's no stable release to install yet.
+	- Branch: nov14-2026111111070761
+	- Commit: d63a876
+	- Test case: df798
+	- Acceptance signoff: Self-closed: tested against a stand-in release. A run against the real first release is part of 2026111111070774.
+	- Closed: 20261113-190056
 
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261111-110708
 	- Opened by: t00mietum
@@ -243,6 +334,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Target OS: Debian, NixOS
 	- Decisions:
 		- It's Bash only, since both targets are Linux.
+		- docker.io is installed by default, since cicd/cicd.bash runs staticcheck, gosec, and the other pinned tools in its container. --no-docker skips it. Adding the account to the docker group is left to the user, with the command printed, since that group is the same as root.
+		- An existing folder counts as the clone when it's a git checkout whose go.mod names this module, so a fork's clone counts. An empty folder is used. Anything else is refused before any change.
+		- golang-go is installed when there's no Go 1.21 or newer, since those fetch the version go.mod asks for. When apt's Go is still older, such as bookworm's 1.19, it finishes the rest and fails at the end with where to get a newer Go.
+		- No --release or --target options. It always clones main, and installs nothing outside apt and the clone.
+		- MIT, like install.bash. Tested the same way: sourced with os-release, the terminal, and the CA file pointed at stand-ins, on a PATH with stand-in uname, sudo, apt-get, git, go, and docker.
+	- Branch: nov14-2026111111070800
+	- Commit: 337a7a0
+	- Test case: df799 TestInstallDevScript
+	- Needs a look at README's new Developing section, and at the docker default (see the Check: entry in questions.md).
+	- 2026-11-14: install-dev.bash at the repo root installs what's missing of git, ca-certificates, golang-go, and docker.io through apt (through sudo when needed), then clones main into ./tt-minecraft-safeserver or --dir. It states its plan and asks first, and --yes skips that. A re-run skips what's there and leaves an existing clone alone. It ends by printing how to build and run cicd/cicd.bash --gate. README's new Developing section has the curl and wget one-liners.
+	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note, as install.bash does.
+	- Verified: df799 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the module check on an existing folder, the final Go version check, the no answer at the prompt, the NixOS refusal, the no-sudo refusal, the git check, or the Go floor each fails it.
+	- Closed: 20261113-190843
+	- 2026-11-14: Closed under the standing close policy. Docker by default fits the gate's container, and the 3 calls are in questions.md as Check entries.
 
 - Simplify: defer native mode, update --self, and NixOS; snapshot only before a version move
 	- ID: 2026111318002875

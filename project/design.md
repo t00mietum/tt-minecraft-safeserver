@@ -283,6 +283,8 @@ Common:  --config PATH, --set KEY=VALUE
 		- It asks once, with or without `--yes`, and the question says what can't be undone.
 		- The snapshot comes after the yes and before anything changes, and a failed one stops the update. With no `zfsDataset`, it warns to back up the server folder first.
 		- It won't move to a version older than the one `paper.jar` is on. Going back is a rollback to the snapshot.
+		- With `agent` set, the AI agent says first which approved plugins have a build for the new version. See [Update agent](#update-agent).
+	- With `agent` set, a failed PaperMC lookup goes to the AI agent, rather than stopping the update.
 
 - `--plugins` updates each plugin with a known source in the approved list, such as Geyser, Floodgate, Modrinth, or Hangar. It shows the old and new versions, checks the hash from the source, and approves the new jar.
 	- A jar is up to date when its approved hash is the source's newest. The old version is what the jar's own `plugin.yml` says.
@@ -294,6 +296,7 @@ Common:  --config PATH, --set KEY=VALUE
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
 	- It follows the tag in `image`, such as `25-jre`. It never moves to another tag. An image pinned by digest with no tag is skipped, since there's nothing to follow.
 	- The Java needed comes from the PaperMC API, for the Minecraft version the server runs once the update is done.
+		- With `agent` set, a failed Java lookup skips `--image` with a note, so PaperMC being down doesn't stop the other parts. When `--image` is the only part named, it stops the update.
 	- The pull waits for the go-ahead, since that's what finds the new digest. So a dry run shows the pull but not the digest.
 	- The pin is the tag's own digest, the one for every arch, so the config works on another machine too. `java -version` runs in a container with no network, locked down like the server's.
 	- A Java that's too old leaves the config as it was, and names a newer tag to use. Only the `image` line in the config changes; the other lines stay as written.
@@ -733,10 +736,16 @@ cicd/                        build, test, and release scripts
 
 ### Update agent
 
-- An AI agent can help `update --plugins` find new builds. It's off until `agent` is set.
+- An AI agent can help `update --plugins` and `--paper` find new builds. It's off until `agent` is set.
 	- Known sources come first: PaperMC for Paper, GeyserMC for Geyser and Floodgate, and any added later. The agent is asked about the approved jars they don't cover, and about one whose known source's lookup failed, such as after an API change.
 	- Before `--mc-version`, it also reports which approved plugins have a build for the new version, and which don't. Its report is shown, and changes nothing.
+		- It's shown after the plan, before the move's question. A plugin the agent says nothing about is shown as not known.
 	- When PaperMC's lookup fails, the agent can find the Paper build instead, with the same checks below.
+		- It's asked for the newest stable build of the version `paper.jar` is on, or of `--mc-version`'s. With neither, the version isn't known, so a failed lookup still stops the update.
+		- The build needs a SHA-256, since PaperMC always publishes one. The download has to be a Paper server jar for that Minecraft version, by its main class and its `version.json`.
+		- It needs its own yes, even with `--yes`. A failed check stops the update with `paper.jar` as it was, the same as a failed download from PaperMC.
+		- The agent isn't asked which Java the version needs. `--image` is skipped instead, per [update](#update).
+	- Everything for one run goes to the agent in one question, since each can take minutes.
 
 - Kinds of agent:
 	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio.
@@ -788,7 +797,11 @@ cicd/                        build, test, and release scripts
 	- Built-in signaling is plain HTTP unless Geyser is given a certificate. The game asks players to trust the server the first time they join.
 	- To find the home's public address for players over the internet, Geyser asks public STUN servers: `stun.cloudflare.com` on UDP 3478 and `stun.l.google.com` on UDP 19302. See [Firewall](#firewall).
 
-- On the LAN, Bedrock clients find the server by itself, under Friends, LAN Games. That includes consoles. Geyser has to listen on all addresses for that, since a socket that's bound to one address doesn't get broadcasts.
+- On the LAN, the server doesn't show under Friends, LAN Games, on any device. Players at home add it by its LAN address instead, which consoles can't do. See [Needs more thought](#needs-more-thought).
+	- Bedrock 26.60 and later look for LAN games with an encrypted broadcast to UDP port 7551, every 2 seconds. Nothing goes to `bedrockPort`.
+	- Geyser 2.12.1 doesn't answer on 7551. An open Geyser pull request adds that, off by default, with a second UDP port for LAN joins.
+	- The firewall drops the server's answers to a broadcast as it stands. See [Firewall](#firewall). The same goes for the old RakNet search on `bedrockPort`, which the pinned `transport` turns off anyway.
+	- Geyser has to listen on all addresses for any of this, since a socket that's bound to one address doesn't get broadcasts.
 
 - Over the internet, phones, tablets, and Bedrock on PCs can add the server by address and port. Consoles can't add a server by address. See [Needs more thought](#needs-more-thought).
 
@@ -833,6 +846,7 @@ cicd/                        build, test, and release scripts
 		- Its own game ports are allowed. Geyser sends to its own Bedrock port over loopback, and its STUN lookup gets no answer when those are dropped.
 		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
+		- That includes the server's answer to a LAN client's broadcast. Conntrack keys the client's packet on the broadcast address, so an answer from the server's own address isn't a reply. An answer to a client that asked the server's address directly still goes out.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
 		- With `bedrock` on, UDP to ports 3478 and 19302 is allowed too, for Geyser's STUN lookup. Without it, players over the internet get only the server's LAN address, and can't connect.
 		- NetherNet's connection checks from the server to a player's own addresses count as new connections, and get dropped unless they're replies. The player's checks to the server still set up the connection.
@@ -931,7 +945,7 @@ cicd/                        build, test, and release scripts
 
 ## Needs more thought
 
-- Consoles can't join over the internet yet, since Xbox, PlayStation, and Switch can't add a server by address. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
+- Consoles can't join over the internet yet, since Xbox, PlayStation, and Switch can't add a server by address. Until Geyser answers LAN discovery, they can't find it at home either. The usual ways around it are the MCXboxBroadcast Geyser extension, which shows the server in the Friends tab through an Xbox account, and BedrockConnect, which needs a DNS change on each console. A phone app or PC program on the console's own network can also show the server under LAN Games. MCXboxBroadcast needs the least from players, but a spare Xbox account's login has to be stored on the server, and may need more outbound access than `egress` set to `web` allows. It's the pick for a later release. Until then, a console that uses BedrockConnect can join from anywhere.
 
 - Behind a tunnel, every player shows up as coming from localhost, unless the tunnel supports the PROXY protocol. IP bans and the per-address rate limit then don't work.
 	- `proxy-protocol` is forced off for now. Turning it on safely needs the firewall to let only the tunnel's agent reach `gamePort`.

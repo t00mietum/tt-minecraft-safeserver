@@ -71,6 +71,8 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 - [Features](#features)
 - [Update agent](#update-agent)
 - [Installing](#installing)
+	- [Direct stable and dev install script](#direct-stable-and-dev-install-script)
+- [Developing](#developing)
 - [Building from source](#building-from-source)
 - [Copyright and license](#copyright-and-license)
 
@@ -87,6 +89,8 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 ## Update agent
 
 `update --plugins` knows where to get Paper, Geyser, and Floodgate. For your other plugins it can ask an AI agent where the newer builds are. The agent only suggests. `tt-minecraftd` downloads and checks each jar it finds, and you say yes to each one yourself, even with `--yes`. It's off until `agent` is set in `/etc/tt-minecraftd/config.shcl`. [design.md](project/design.md#update-agent) has the details.
+
+- When PaperMC's download API can't be reached, the agent can find the Paper build too, checked the same way. The container image isn't refreshed then, since only PaperMC says which Java a version needs. Before `update --mc-version`, it says which of your plugins have a build for the new version. That report changes nothing.
 
 - Run `tt-minecraftd update` as yourself, not with sudo. It asks the agent as you, then runs itself through sudo. Started as root, it skips the agent and says so.
 
@@ -134,6 +138,40 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 - `--set agent=none` skips the agent for one run, and `update --plugins --dry-run` shows what it suggests without downloading anything.
 
 ## Installing
+
+### Direct stable and dev install script
+
+For Debian and its derivatives, on amd64 or arm64. It finds the newest release, checks the binary against the release's `SHA256SUMS`, puts it in `/usr/local/bin/tt-minecraftd`, and runs `tt-minecraftd setup`, which does the rest.
+
+~~~bash
+bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
+~~~
+
+Or with wget:
+
+~~~bash
+bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
+~~~
+
+It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces an older binary, and setup on an existing install runs `repair` and `update`.
+
+NixOS isn't supported yet.
+
+## Developing
+
+On Debian and its derivatives, this sets up a dev environment in `./tt-minecraft-safeserver`. It installs what's missing of git, Go, and docker through apt, then clones the main branch.
+
+~~~bash
+bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash)
+~~~
+
+Or with wget:
+
+~~~bash
+bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash)
+~~~
+
+It shows its plan and asks before it changes anything. Add `--help` to the end of the line for its options. When it's done, it prints how to build, and how to run the checks a change has to pass, with `cicd/cicd.bash --gate`.
 
 ## Building from source
 

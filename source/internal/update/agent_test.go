@@ -16,11 +16,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -53,6 +55,8 @@ type agentRig struct {
 	newJar  []byte
 	page    string
 	fetched []string
+	// extra are more files the host serves, by path.
+	extra map[string][]byte
 }
 
 func newAgentRig(t *testing.T, answers string) *agentRig {
@@ -78,6 +82,10 @@ func newAgentRig(t *testing.T, answers string) *agentRig {
 		case "/sums":
 			_, _ = w.Write([]byte(a.page))
 		default:
+			if b, ok := a.extra[r.URL.Path]; ok {
+				_, _ = w.Write(b)
+				return
+			}
 			http.NotFound(w, r)
 		}
 	}))
@@ -293,5 +301,265 @@ func TestAgentHandOff(t *testing.T) {
 	a.err = errors.New("no reply")
 	if ans, err := a.u.AskAgent(ctx); err != nil || ans.Error != "no reply" {
 		t.Errorf("failed agent: %+v %v", ans, err)
+	}
+}
+
+// paperJarBytes is a jar laid out like Paper's, with main as its Main-Class.
+func paperJarBytes(t *testing.T, main, version string) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	for _, f := range [][2]string{
+		{"META-INF/MANIFEST.MF", "Manifest-Version: 1.0\nMain-Class: " + main + "\n"},
+		{"version.json", `{"id": "` + version + `"}`},
+	} {
+		w, err := z.Create(f[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(f[1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+// newPaperAgentRig has PaperMC failing, and the agent finding build 249 on
+// example.com.
+func newPaperAgentRig(t *testing.T, answers string) *agentRig {
+	t.Helper()
+	a := newAgentRig(t, answers)
+	a.u.Parts = Parts{Paper: true}
+	a.p.err = errors.New("no network")
+	jar := paperJarBytes(t, "io.papermc.paperclip.Main", "26.3")
+	a.extra = map[string][]byte{"/paper-26.3-249.jar": jar, "/builds": []byte(`[{"id":249,"sha256":"` + sumOfBytes(jar) + `"}]`)}
+	a.answer = agent.Answer{Paper: &agent.PaperBuild{Version: "26.3", Build: 249, URL: "https://example.com/paper-26.3-249.jar", SHA256: sumOfBytes(jar), HashFrom: "https://example.com/builds"}}
+	return a
+}
+
+func (a *agentRig) linked(t *testing.T) string {
+	t.Helper()
+	target, _ := os.Readlink(filepath.Join(a.dir, "paper.jar"))
+	return target
+}
+
+// When PaperMC's lookup fails, the agent's Paper build is checked like a
+// plugin's, and needs its own yes even with --yes. Each failed check stops
+// the update with paper.jar as it was.
+func TestAgentPaper(t *testing.T) {
+	defer testid.Line(t, "df792")
+	ctx := context.Background()
+	kept := []string{"paper-26.3-240.jar", "paper-26.3-244.jar", "paper.jar", "plugins"}
+
+	a := newPaperAgentRig(t, "y\n")
+	a.u.Yes = true
+	if err := a.u.Do(ctx); err != nil {
+		t.Fatalf("%v\n%s", err, a.out)
+	}
+	if len(a.asked) != 1 || a.asked[0].FindPaper != "26.3" || len(a.asked[0].Jars) != 0 || a.asked[0].MoveTo != "" {
+		t.Errorf("asked %+v", a.asked)
+	}
+	for _, want := range []string{"warning: can't get Paper: no network, so the update agent's find is used", "from build 244 to build 249", "The update agent found it on example.com", "Use it, and point paper.jar at paper-26.3-249.jar? [y/n]", "FIXED   paper-26.3-249.jar approved", "older builds removed: paper-26.3-240.jar"} {
+		if !strings.Contains(a.out.String(), want) {
+			t.Errorf("no %q:\n%s", want, a.out)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(a.dir, "paper.jar")); err != nil || !bytes.Equal(b, a.extra["/paper-26.3-249.jar"]) || a.linked(t) != "paper-26.3-249.jar" {
+		t.Errorf("paper.jar links to %q: %v", a.linked(t), err)
+	}
+	list, _, err := plugins.ReadApproved(a.u.PluginsFile)
+	if err != nil || !slices.ContainsFunc(list, func(p plugins.Approved) bool {
+		return p.Name == "paper-26.3-249.jar" && p.SHA256 == a.answer.Paper.SHA256
+	}) {
+		t.Errorf("approved %+v %v", list, err)
+	}
+
+	a = newPaperAgentRig(t, "")
+	a.u.Yes = true
+	if err := a.u.Do(ctx); err != nil || a.linked(t) != "paper-26.3-244.jar" || !strings.Contains(a.out.String(), "SKIPPED Paper: kept as it was") || !slices.Equal(a.files(), kept) {
+		t.Errorf("--yes alone: %v %q\n%s", err, a.files(), a.out)
+	}
+
+	failures := []struct {
+		name, want string
+		change     func(a *agentRig)
+	}{
+		{"hash not on its page", "the hash isn't on https://example.com/builds", func(a *agentRig) { a.extra["/builds"] = []byte("nothing") }},
+		{"hash doesn't match", "SHA-256 doesn't match", func(a *agentRig) {
+			a.answer.Paper.SHA256 = sumOf("other")
+			a.extra["/builds"] = []byte(sumOf("other"))
+		}},
+		{"not Paper", "isn't a Paper server jar", func(a *agentRig) {
+			jar := paperJarBytes(t, "x.Main", "26.3")
+			a.extra["/paper-26.3-249.jar"], a.answer.Paper.SHA256, a.extra["/builds"] = jar, sumOfBytes(jar), []byte(sumOfBytes(jar))
+		}},
+		{"other version", "Paper for Minecraft 26.4, not 26.3", func(a *agentRig) {
+			jar := paperJarBytes(t, "io.papermc.paperclip.Main", "26.4")
+			a.extra["/paper-26.3-249.jar"], a.answer.Paper.SHA256, a.extra["/builds"] = jar, sumOfBytes(jar), []byte(sumOfBytes(jar))
+		}},
+		{"other host", "can't get Paper: no network, and the update agent's Paper download host other.example isn't in agentHosts", func(a *agentRig) {
+			a.answer.Paper.URL = "https://other.example/paper.jar"
+		}},
+		{"agent failed", "can't get Paper: no network", func(a *agentRig) { a.err = errors.New("no reply") }},
+		{"no agent", "can't get Paper: no network", func(a *agentRig) { a.u.Agent = nil }},
+		{"no answer", "the update agent didn't answer about Paper", func(a *agentRig) { a.answer.Paper = nil }},
+	}
+	for _, f := range failures {
+		a = newPaperAgentRig(t, "y\ny\n")
+		f.change(a)
+		err := a.u.Do(ctx)
+		if err == nil || !strings.Contains(err.Error(), f.want) || a.linked(t) != "paper-26.3-244.jar" || !slices.Equal(a.files(), kept) {
+			t.Errorf("%s: %v %q\n%s", f.name, err, a.files(), a.out)
+		}
+	}
+
+	a = newPaperAgentRig(t, "")
+	a.answer.Paper.Build = 244
+	if err := a.u.Do(ctx); err != nil || !strings.Contains(a.out.String(), "OK      Paper 26.3 build 244 is the newest stable build the update agent found") {
+		t.Errorf("nothing newer: %v\n%s", err, a.out)
+	}
+
+	a = newPaperAgentRig(t, "")
+	a.u.DryRun = true
+	if err := a.u.Do(ctx); err != nil || len(a.fetched) > 0 || !strings.Contains(a.out.String(), "would check Paper's hash page, download paper-26.3-249.jar") {
+		t.Errorf("dry run: %v, fetched %q\n%s", err, a.fetched, a.out)
+	}
+}
+
+// Before --mc-version the agent says which approved plugins have a build for
+// the new version. It's shown before the question, and changes nothing.
+func TestAgentMoveReport(t *testing.T) {
+	defer testid.Line(t, "df793")
+	ctx := context.Background()
+	report := "The update agent's report on the approved plugins for Minecraft 26.4. It changes nothing.\n  - plugins/Chunky.jar: has no build yet. waiting on 26.4\n"
+
+	a := newAgentRig(t, "n\n")
+	a.u.Parts, a.u.MCVersion = Parts{Paper: true}, "26.4"
+	a.answer = agent.Answer{Move: []agent.MoveNote{{Jar: "plugins/Chunky.jar", Has: "no", Notes: "waiting on 26.4"}, {Jar: "plugins/Other.jar", Has: "yes"}}}
+	err := a.u.Do(ctx)
+	out := a.out.String()
+	if err == nil || len(a.asked) != 1 || a.asked[0].MoveTo != "26.4" || len(a.asked[0].Plugins) != 1 || a.asked[0].Plugins[0].About != "Chunky 1.0" || a.asked[0].FindPaper != "" {
+		t.Errorf("asked %+v: %v", a.asked, err)
+	}
+	if i, k := strings.Index(out, report), strings.Index(out, "Go ahead, and move to 26.4?"); i < 0 || k < i || strings.Contains(out, "Other.jar") {
+		t.Errorf("report:\n%s", out)
+	}
+	if !bytes.Equal(a.jar(t), jarBytes(t, "Chunky", "1.0")) || a.linked(t) != "paper-26.3-244.jar" {
+		t.Error("the report changed something")
+	}
+
+	// No move, nothing to ask.
+	a = newAgentRig(t, "n\n")
+	a.u.Parts = Parts{Paper: true}
+	_ = a.u.Do(ctx)
+	if len(a.asked) != 0 {
+		t.Errorf("asked without a move: %+v", a.asked)
+	}
+
+	a = newAgentRig(t, "")
+	a.u.Parts, a.u.MCVersion, a.u.DryRun = Parts{Paper: true}, "26.4", true
+	a.answer = agent.Answer{Move: []agent.MoveNote{{Jar: "plugins/Chunky.jar", Has: "yes", Version: "1.2"}}}
+	if err := a.u.Do(ctx); err != nil || !strings.Contains(a.out.String(), "  - plugins/Chunky.jar: has a build, 1.2\n") {
+		t.Errorf("dry run: %v\n%s", err, a.out)
+	}
+
+	a = newAgentRig(t, "n\n")
+	a.u.Parts, a.u.MCVersion = Parts{Paper: true}, "26.4"
+	a.u.Agent, a.u.AgentNote = nil, "not asked as root"
+	_ = a.u.Do(ctx)
+	if !strings.Contains(a.out.String(), "NOTE    not asked as root") || strings.Contains(a.out.String(), "report") {
+		t.Errorf("as root:\n%s", a.out)
+	}
+}
+
+// Paper and the move report go through the hand-off too, and the root run
+// uses them only for the same version, and the same plugin hashes.
+func TestAgentHandOffPaperAndMove(t *testing.T) {
+	defer testid.Line(t, "df794")
+	ctx := context.Background()
+	a := newPaperAgentRig(t, "")
+	a.u.MCVersion = "26.4"
+	a.answer.Paper.Version = "26.4"
+	a.answer.Move = []agent.MoveNote{{Jar: "plugins/Chunky.jar", Has: "yes"}}
+	ans, err := a.u.AskAgent(ctx)
+	if err != nil || ans.FindPaper != "26.4" || ans.MoveTo != "26.4" || len(ans.MoveAsked) != 1 || !strings.Contains(a.out.String(), "Asking the update agent about Paper for Minecraft 26.4, and which plugins have a build for Minecraft 26.4.") {
+		t.Fatalf("asked: %+v %v\n%s", ans, err, a.out)
+	}
+	b, _ := json.Marshal(ans)
+	file := filepath.Join(t.TempDir(), "answer.json")
+	if err := os.WriteFile(file, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	back, err := ReadAgentAnswer(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := agent.Question{FindPaper: "26.4", MoveTo: "26.4", Plugins: slices.Clone(ans.MoveAsked)}
+	if got, err := back.Replay(ctx, q); err != nil || got.Paper == nil || got.Paper.Build != 249 || len(got.Move) != 1 {
+		t.Errorf("replay: %+v %v", got, err)
+	}
+	q.FindPaper, q.MoveTo = "26.5", "26.5"
+	if got, _ := back.Replay(ctx, q); got.Paper != nil || len(got.Move) != 0 {
+		t.Errorf("another version was answered: %+v", got)
+	}
+	q.MoveTo = "26.4"
+	q.Plugins[0].SHA256 = sumOf("changed since")
+	if got, _ := back.Replay(ctx, q); len(got.Move) != 0 {
+		t.Errorf("a changed jar was answered: %+v", got)
+	}
+
+	// The operator may not be able to read paper.jar. That's left to the
+	// root run, and the plugins are still asked about.
+	a = newAgentRig(t, "")
+	a.u.Parts = Parts{}
+	if err := os.Remove(filepath.Join(a.dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.dir, "paper.jar"), []byte("plain"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ans, err := a.u.AskAgent(ctx); err != nil || len(ans.Asked) != 1 {
+		t.Errorf("unreadable paper.jar: %+v %v", ans, err)
+	}
+}
+
+// With agent set and PaperMC down, the image's Java lookup fails too. That
+// skips --image rather than stopping the rest, unless it's the only part.
+func TestAgentPaperDownImage(t *testing.T) {
+	defer testid.Line(t, "df796")
+	ctx := context.Background()
+	setup := func(t *testing.T, parts Parts) (*agentRig, *host.Fake) {
+		a := newPaperAgentRig(t, "y\n")
+		a.u.Yes = true
+		a.u.Parts = parts
+		a.u.Cfg.RunMode = "podman"
+		a.u.Cfg.Image = oldPin
+		fake := &host.Fake{}
+		a.u.Run = fake
+		return a, fake
+	}
+	skip := "SKIPPED image: can't get the Java version Paper 26.3 needs: no network, so it stays as it is"
+
+	a, fake := setup(t, Parts{})
+	if err := a.u.Do(ctx); err != nil {
+		t.Fatalf("%v\n%s", err, a.out)
+	}
+	if !strings.Contains(a.out.String(), skip) || a.linked(t) != "paper-26.3-249.jar" || len(fake.Ran) != 0 || a.u.Cfg.Image != oldPin {
+		t.Errorf("no part named: linked %q, ran %q\n%s", a.linked(t), fake.Lines(), a.out)
+	}
+
+	a, _ = setup(t, Parts{Image: true})
+	if err := a.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't get the Java version Paper 26.3 needs") || strings.Contains(a.out.String(), "SKIPPED image") {
+		t.Errorf("--image alone: %v\n%s", err, a.out)
+	}
+
+	// Without agent, PaperMC down still stops the update.
+	a, _ = setup(t, Parts{Image: true, Plugins: true})
+	a.u.Agent = nil
+	if err := a.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't get the Java version Paper 26.3 needs") {
+		t.Errorf("no agent: %v\n%s", err, a.out)
 	}
 }
