@@ -199,6 +199,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: nov13
 	- Test case: n/a: pipeline step.
 
+- A push to main loses its connection while the pre-push merge gate runs
+	- ID: 2026111409494415
+	- Type: Bug
+	- Status: Done
+	- Priority: High
+	- Opened: 20261114-094944
+	- Opened by:
+	- Possible cause [Bug]: git opens the connection before the hook runs, and the 14-minute gate leaves it idle, so GitHub drops it and the push ends with no message.
+	- Progress log:
+		- 2026-11-14: A whole merge gate on a clean tree now records its commit, and the hook skips the gate for a push of that commit. Run cicd/cicd.bash --merge-gate, then push.
+	- Test case: none with an ID. The hook was run by hand with a stand-in gate, both ways: the passed commit skips it, another commit runs it.
+
 - Installer tests fail on the arm64 box
 	- ID: 2026111409374434
 	- Type: Bug
