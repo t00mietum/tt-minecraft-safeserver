@@ -25,12 +25,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update with no part named stops at the image's Java lookup when PaperMC is down
 	- ID: 2026111318335938
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: Low
 	- Opened: 20261113-183359
 	- Opened by:
 	- Related IDs: 2026111210034308
 	- Requirements: With PaperMC's API down and agent set, the agent's Paper find is used, but the image step still asks PaperMC which Java the version needs, and that failure stops the whole update. `--image` could skip with a warning, or keep the current Java when the version doesn't change.
+	- Actual cause [Bug]: The image step's Java lookup always stopped the update on error, even when agent was set and the agent had covered PaperMC's Paper lookup.
+	- Actual fix [Bug]: With agent set, a failed Java lookup skips --image with a SKIPPED line, and the rest goes on. --image named alone still stops with the error, and without agent nothing changed.
+	- Actual effort: Low
+	- Branch: nov14-2026111318335938
+	- Test case: df796
+	- Acceptance signoff: Self-closed: its test passes, per the standing close policy.
+	- Closed: 20261113-183959
+	- Decisions:
+		- 20261113: Skip with a note rather than keep the current image's Java as the floor, since that needs the old image on disk and another container run, and skipping changes nothing. Logged as a Check: entry.
+		- 20261113: Only with agent set, since without it a failed PaperMC or plugin source lookup stops the update by design. --image alone still fails, so asking for only that part never ends quietly with nothing done.
+		- Swept: imageLookup is the only Java caller; paperVersion's NewestVersion fallback runs only with no paper.jar, where a failed Paper lookup still stops the update per 2026111210034308. design.md's update and Update agent and README's Update agent say this now.
+	- Verified: df796 fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242

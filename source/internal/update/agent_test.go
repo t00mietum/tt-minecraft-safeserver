@@ -22,6 +22,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -522,5 +523,43 @@ func TestAgentHandOffPaperAndMove(t *testing.T) {
 	}
 	if ans, err := a.u.AskAgent(ctx); err != nil || len(ans.Asked) != 1 {
 		t.Errorf("unreadable paper.jar: %+v %v", ans, err)
+	}
+}
+
+// With agent set and PaperMC down, the image's Java lookup fails too. That
+// skips --image rather than stopping the rest, unless it's the only part.
+func TestAgentPaperDownImage(t *testing.T) {
+	defer testid.Line(t, "df796")
+	ctx := context.Background()
+	setup := func(t *testing.T, parts Parts) (*agentRig, *host.Fake) {
+		a := newPaperAgentRig(t, "y\n")
+		a.u.Yes = true
+		a.u.Parts = parts
+		a.u.Cfg.RunMode = "podman"
+		a.u.Cfg.Image = oldPin
+		fake := &host.Fake{}
+		a.u.Run = fake
+		return a, fake
+	}
+	skip := "SKIPPED image: can't get the Java version Paper 26.3 needs: no network, so it stays as it is"
+
+	a, fake := setup(t, Parts{})
+	if err := a.u.Do(ctx); err != nil {
+		t.Fatalf("%v\n%s", err, a.out)
+	}
+	if !strings.Contains(a.out.String(), skip) || a.linked(t) != "paper-26.3-249.jar" || len(fake.Ran) != 0 || a.u.Cfg.Image != oldPin {
+		t.Errorf("no part named: linked %q, ran %q\n%s", a.linked(t), fake.Lines(), a.out)
+	}
+
+	a, _ = setup(t, Parts{Image: true})
+	if err := a.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't get the Java version Paper 26.3 needs") || strings.Contains(a.out.String(), "SKIPPED image") {
+		t.Errorf("--image alone: %v\n%s", err, a.out)
+	}
+
+	// Without agent, PaperMC down still stops the update.
+	a, _ = setup(t, Parts{Image: true, Plugins: true})
+	a.u.Agent = nil
+	if err := a.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "can't get the Java version Paper 26.3 needs") {
+		t.Errorf("no agent: %v\n%s", err, a.out)
 	}
 }

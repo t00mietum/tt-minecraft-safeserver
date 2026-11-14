@@ -296,6 +296,7 @@ Common:  --config PATH, --set KEY=VALUE
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
 	- It follows the tag in `image`, such as `25-jre`. It never moves to another tag. An image pinned by digest with no tag is skipped, since there's nothing to follow.
 	- The Java needed comes from the PaperMC API, for the Minecraft version the server runs once the update is done.
+		- With `agent` set, a failed Java lookup skips `--image` with a note, so PaperMC being down doesn't stop the other parts. When `--image` is the only part named, it stops the update.
 	- The pull waits for the go-ahead, since that's what finds the new digest. So a dry run shows the pull but not the digest.
 	- The pin is the tag's own digest, the one for every arch, so the config works on another machine too. `java -version` runs in a container with no network, locked down like the server's.
 	- A Java that's too old leaves the config as it was, and names a newer tag to use. Only the `image` line in the config changes; the other lines stay as written.
@@ -743,6 +744,7 @@ cicd/                        build, test, and release scripts
 		- It's asked for the newest stable build of the version `paper.jar` is on, or of `--mc-version`'s. With neither, the version isn't known, so a failed lookup still stops the update.
 		- The build needs a SHA-256, since PaperMC always publishes one. The download has to be a Paper server jar for that Minecraft version, by its main class and its `version.json`.
 		- It needs its own yes, even with `--yes`. A failed check stops the update with `paper.jar` as it was, the same as a failed download from PaperMC.
+		- The agent isn't asked which Java the version needs. `--image` is skipped instead, per [update](#update).
 	- Everything for one run goes to the agent in one question, since each can take minutes.
 
 - Kinds of agent:

@@ -62,7 +62,14 @@ func (u *Update) imageLookup(ctx context.Context, paperVersion func() (string, e
 	}
 	java, err := u.Paper.Java(ctx, version)
 	if err != nil {
-		return nil, fmt.Errorf("can't get the Java version Paper %s needs: %w", version, err)
+		err = fmt.Errorf("can't get the Java version Paper %s needs: %w", version, err)
+		// With agent set, PaperMC being down doesn't stop the other parts,
+		// so it doesn't stop them here either. Asked for alone, it fails.
+		if u.agentOn() && u.parts() != (Parts{Image: true}) {
+			fmt.Fprintf(u.Out, "%-7s image: %v, so it stays as it is\n", "SKIPPED", err)
+			return nil, nil
+		}
+		return nil, err
 	}
 	return &imageStep{runtime: rt, repo: repo, tag: tag, paper: version, java: java}, nil
 }
