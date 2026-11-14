@@ -7,6 +7,7 @@
 
 [![License: GPL v2+](https://img.shields.io/badge/License-GPLv2%2B-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
 ![Lifecycle: Alpha](https://img.shields.io/badge/Lifecycle-Alpha-orange)
+[![Release](https://img.shields.io/github/v/release/t00mietum/tt-minecraft-safeserver?include_prereleases&sort=semver)](https://github.com/t00mietum/tt-minecraft-safeserver/releases)
 ![Support](https://img.shields.io/badge/Support-Maintained-brightgreen)
 ![Status: Passing](https://img.shields.io/badge/Status-Passing-brightgreen)
 
@@ -80,11 +81,35 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 
 ## Why
 
+A server for a few friends usually starts as a script and a port forward. Bots scan the internet for open Minecraft servers all day, and join any that have the whitelist off. A plugin jar that goes bad can do whatever the server's account can, and that account often has sudo.
+
+`tt-minecraftd` runs the server as an account that can't do much else, and checks the settings and the plugin jars before every start. Its firewall rules decide who can reach the game ports, and keep the server off the rest of your LAN.
+
+It's built for one Paper server on Debian, for people you know. If you run a modded server, a proxy network, or a big public server, this isn't the tool for you.
+
 ## How to connect
 
 Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to-connect.md](how-to-connect.md).
 
 ## Features
+
+- The server runs as `minecraftd`, which has no sudo and isn't in the `docker` group. It runs in a locked-down Podman or Docker container with only the server tree mounted.
+
+- `start` checks the safe settings first: online mode, the whitelist, no RCON or query port, and no proxy settings. When one is off, it refuses and names the setting, and `repair` puts it back.
+
+- Plugin jars are pinned by SHA-256 and mounted read-only. A jar that changed or showed up since it was approved stops the start.
+
+- The tool keeps its own nftables table. It limits who can reach the game ports and how fast one address can join, and blocks the server from opening connections to the LAN or to local services.
+
+- Bedrock players on phones, tablets, and consoles join through Geyser and Floodgate. Setup downloads and checks both.
+
+- `setup` installs from scratch, or takes over an existing server folder with `--adopt`. `repair` checks the install and fixes what drifted.
+
+- `update` gets new Paper, Geyser, and Floodgate builds, checks each against its published hash, and keeps the Paper build it replaced. `--mc-version` moves to a new Minecraft version, after a ZFS snapshot when the world is on ZFS.
+
+- `console` attaches to the server console, and `cmd` sends one command and prints the answer. `status` and `watch` need no sudo.
+
+- A systemd unit can start the server at boot.
 
 ## Update agent
 
