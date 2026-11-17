@@ -153,7 +153,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 1. Load and check the config. Refuse when a Paper server is already running, under any account. That includes one the old scripts started.
 
-2. Get sudo once, up front, with `sudo -v`.
+2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules.
 
 3. Check the safe settings in `server.properties` and the other server files. Refuse when one is wrong, and name the setting and `repair` as the fix. See [Safe server settings](#safe-server-settings).
 
@@ -186,6 +186,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- The Minecraft and Paper versions, and players online. Those come from a server list ping on localhost, so they don't need RCON or query.
 	- Memory use against the cap.
 	- What listens on the game ports, and how many connections each has.
+		- Geyser opens its UDP socket on `bedrockPort` only while a Bedrock player joins. With none listening, `status` says it opens on a join, rather than reading like a fault.
 	- The firewall drop counters. A rising outbound count means something in the server tried to connect where it shouldn't.
 		- Reading them needs root. Run as root, such as with sudo, `status` shows them, and otherwise it says so in one line. It never runs sudo itself, so the output doesn't change with sudo's cache.
 	- The whitelist size and the list of ops.
@@ -245,6 +246,7 @@ Common:  --config PATH, --set KEY=VALUE
 		- It takes each one's newest build for Paper from GeyserMC's download API at `download.geysermc.org`, and checks the jar's SHA-256 against it. They go in `plugins/`, which setup makes when it's missing.
 		- Each jar goes on the approved list with its source, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 approves it with the same source.
 		- Step 6 writes Geyser's `config.yml` with only the safe keys, before its first start. Geyser keeps them and adds the rest of its settings. Floodgate's config is left to its first start, and `repair` sets the Floodgate key's mode after that.
+		- On an adopted tree that has a Floodgate key already, setup takes other accounts' access to it away here, as `repair` does.
 		- The lookup happens before the plan is shown, along with Paper's.
 	8. Approves the plugin jars that are there, after listing each one with its hash.
 		- A new jar in `plugins/` whose file name and `plugin.yml` name both start with `geyser` or `floodgate` gets GeyserMC's source, shown in the list, as `repair --approve-plugins` gives it.
@@ -260,6 +262,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - It sets `runMode` to `podman` when Podman is installed, and to `docker` when only Docker is. With neither, it offers to install Podman and `catatonit` through apt, and stops on a no. It never installs Docker.
 	- A `runMode` given with `--set` skips the pick. `--yes` takes Podman.
+	- With Podman picked and `catatonit` missing, setup installs it through apt. Without apt, it stops before any change and says to install it first. The same goes for Podman when `runMode` gives it and it's missing.
 	- While native mode is on, a no to Podman picks native mode, and `--native` skips the pick too.
 
 - NixOS is deferred. When it comes back, on NixOS it skips steps 2, 9, 11, and 12. It checks those parts instead, and prints the module settings for whatever is missing.
@@ -324,6 +327,7 @@ Common:  --config PATH, --set KEY=VALUE
 	4. The server tree exists, and so does `paper.jar`.
 	5. Ownership and modes match whether the server runs.
 		- Modes are only checked while it runs, since `stop` hands back ownership and leaves the modes.
+		- Only access for other accounts counts. A mode tighter than `ug+rwX` passes, since Java makes its temp files 0600 whatever the umask, and Paper saves by temp file and rename.
 	6. The safe settings are in place.
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.
@@ -595,7 +599,7 @@ cicd/                        build, test, and release scripts
 | `start --foreground` from the boot unit | root, from systemd
 | The server                              | the service account
 
-- All sudo happens in the foreground, right after one `sudo -v`. Sudo never runs inside a detached session.
+- All sudo happens in the foreground, right after the one sudo check `start` makes up front. Sudo never runs inside a detached session.
 
 ### Why a container
 
@@ -626,7 +630,8 @@ cicd/                        build, test, and release scripts
 
 - Container mode runs `podman` or `docker` through sudo, and the container under the service account's uid and gid. Both get the same flags:
 	- `--read-only`, and a tmpfs on `/tmp`. The tmpfs allows exec, since Netty and other libraries extract native code there and load it.
-	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work.
+	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work. The working folder is `serverDir`'s real path.
+		- A link in a tree that works on the host but goes through a path the container doesn't have, such as a link to another link outside the trees, stops `start`. It names the link and the path to point it at.
 	- `paper.jar` and each plugin and Geyser extension jar mounted read-only over their own paths.
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
@@ -661,6 +666,8 @@ cicd/                        build, test, and release scripts
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
 
 - In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in container mode.
+
+- Root's own changes inside a tree go through folder handles that don't follow links, since the server account can put a link anywhere it writes. That covers the safe settings, a refused jar, and the Floodgate key's mode. A link on the way is refused.
 
 - A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
 

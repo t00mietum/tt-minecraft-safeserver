@@ -56,8 +56,17 @@ var catatonitCheck = Check{
 		if HasCatatonit() {
 			return nil, nil
 		}
-		return []Finding{{Problem: "catatonit isn't installed, so Podman can't start the container; apt-get install catatonit adds it"}}, nil
+		return []Finding{{Problem: "catatonit isn't installed, so Podman can't start the container; " + adds("catatonit")}}, nil
 	},
+}
+
+// adds says how to install pkg: through apt where there is one, else the
+// distro's own way.
+func adds(pkg string) string {
+	if launch.Installed("apt-get") {
+		return "apt-get install " + pkg + " adds it"
+	}
+	return "the distro's " + pkg + " package adds it"
 }
 
 // HasCatatonit tells whether catatonit is where Podman looks, or on PATH.

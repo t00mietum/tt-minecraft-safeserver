@@ -176,13 +176,13 @@ Or with wget:
 bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
 ~~~
 
-It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces an older binary, and setup on an existing install runs `repair` and `update`.
+It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`.
 
-NixOS isn't supported yet.
+On another distro with systemd, add `--any-distro` to the end of the line. Then nothing gets installed through a package manager, so Podman and catatonit, or Docker, and nftables have to be installed already. NixOS isn't supported yet.
 
 ## Developing
 
-On Debian and its derivatives, this sets up a dev environment in `./tt-minecraft-safeserver`. It installs what's missing of git, Go, and docker through apt, then clones the main branch.
+On Debian and its derivatives, this sets up a dev environment in `./tt-minecraft-safeserver`. It installs what's missing of git and Go through apt, then clones the main branch. Docker or Podman has to be there already, since the checks run in a container. Add `--install-docker` to have it install docker too.
 
 ~~~bash
 bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash)
@@ -195,6 +195,8 @@ bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safese
 ~~~
 
 It shows its plan and asks before it changes anything. Add `--help` to the end of the line for its options. When it's done, it prints how to build, and how to run the checks a change has to pass, with `cicd/cicd.bash --gate`.
+
+On another distro, `--any-distro` installs nothing, and checks that git, Go 1.21 or newer, and docker or Podman are there.
 
 ## Building from source
 

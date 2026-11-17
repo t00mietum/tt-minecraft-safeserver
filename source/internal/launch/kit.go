@@ -79,6 +79,12 @@ func (k *Kit) sudoUp(ctx context.Context) error {
 	if k.Root || k.sudoed {
 		return nil
 	}
+	// sudo -v wants every matching rule to be NOPASSWD, so it can ask even
+	// when sudo -n works, and fails with no terminal.
+	if _, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-n", "true"}, Look: true, Quiet: true}); err == nil {
+		k.sudoed = true
+		return nil
+	}
 	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Tty: true})
 	k.sudoed = err == nil
 	return err

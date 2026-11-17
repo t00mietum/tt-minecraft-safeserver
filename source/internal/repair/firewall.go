@@ -72,7 +72,7 @@ func (h *Host) put(ctx context.Context, path, text string) error {
 
 func (h *Host) firewallOn(ctx context.Context) ([]Finding, error) {
 	if !h.hasNft() {
-		return []Finding{{Problem: "nftables isn't installed, so the firewall can't load; apt-get install nftables adds it"}}, nil
+		return []Finding{{Problem: "nftables isn't installed, so the firewall can't load; " + adds("nftables")}}, nil
 	}
 	rulesPath, unitPath, resolvPath := h.fwFiles()
 	conf, err := os.ReadFile(resolvPath) // #nosec G304 -- resolv.conf

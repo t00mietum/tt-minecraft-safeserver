@@ -22,6 +22,7 @@ type installRig struct {
 	t                         *testing.T
 	bin, rel, dest, log, tty  string
 	osRelease, arch, bashPath string
+	systemd, sys              string
 	releases                  []rigRelease
 }
 
@@ -64,12 +65,13 @@ func newInstallRig(t *testing.T, fetcher string) *installRig {
 	t.Helper()
 	dir := t.TempDir()
 	r := &installRig{t: t, bin: filepath.Join(dir, "bin"), rel: filepath.Join(dir, "rel"), dest: filepath.Join(dir, "usr-local-bin"),
-		log: filepath.Join(dir, "log"), tty: filepath.Join(dir, "tty"), osRelease: filepath.Join(dir, "os-release"), arch: "x86_64"}
+		log: filepath.Join(dir, "log"), tty: filepath.Join(dir, "tty"), osRelease: filepath.Join(dir, "os-release"), arch: "x86_64",
+		systemd: filepath.Join(dir, "run-systemd-system"), sys: filepath.Join(dir, "sys")}
 	var err error
 	if r.bashPath, err = exec.LookPath("bash"); err != nil {
 		t.Skip("no bash")
 	}
-	for _, d := range []string{r.bin, r.rel, r.dest} {
+	for _, d := range []string{r.bin, r.rel, r.dest, r.systemd, r.sys} {
 		if err := os.Mkdir(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -150,7 +152,9 @@ func (r *installRig) run(args ...string) (string, int) {
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; shift 4; fMain "$@"`, "rig", script, r.dest, r.osRelease, r.tty}, args...)
+	// catatonit and nft are looked for in r.sys only, so the host's don't count.
+	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; systemdDir="$5"; catatonitPaths="$6/catatonit"; nftPaths="$6/nft"; shift 6; fMain "$@"`,
+		"rig", script, r.dest, r.osRelease, r.tty, r.systemd, r.sys}, args...)
 	// #nosec G204 -- test runs the repo's own script
 	cmd := exec.Command(r.bashPath, all...)
 	tmp := r.t.TempDir()
@@ -166,6 +170,23 @@ func (r *installRig) run(args ...string) (string, int) {
 		r.t.Fatal(err)
 	}
 	return string(out), code
+}
+
+// have puts what setup would otherwise get through apt in place: podman
+// and docker on PATH, catatonit and nft where the script looks, or with
+// "bin/" on PATH.
+func (r *installRig) have(what ...string) {
+	r.t.Helper()
+	for _, w := range what {
+		switch {
+		case w == "podman" || w == "docker":
+			r.script(w, "#!/bin/sh\n")
+		case strings.HasPrefix(w, "bin/"):
+			r.script(strings.TrimPrefix(w, "bin/"), "#!/bin/sh\n")
+		default:
+			r.write(filepath.Join(r.sys, w), "x\n")
+		}
+	}
 }
 
 func (r *installRig) logText() string {
@@ -244,7 +265,7 @@ func TestInstallScript(t *testing.T) {
 			t.Fatal("first run failed")
 		}
 		out, code := r.run("--yes")
-		if code != 0 || strings.Contains(r.logText(), "releases/download") || !strings.Contains(r.logText(), "setup") {
+		if code != 0 || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || !strings.Contains(r.logText(), "setup") {
 			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
 		}
 		if !strings.Contains(out, "already v1.0.0") {
@@ -271,6 +292,36 @@ func TestInstallScript(t *testing.T) {
 		}
 	})
 
+	t.Run("a local build with the release's version is replaced", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		local := strings.ReplaceAll(strings.ReplaceAll(rigExe, "@BASH@", r.bashPath), "@TAG@", "v1.0.0") + "# dogfood\n"
+		r.write(dest, local)
+		if err := os.Chmod(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out, code := r.run("--yes")
+		got, _ := os.ReadFile(dest)
+		want, _ := os.ReadFile(filepath.Join(r.rel, "v1.0.0", "tt-minecraftd-linux-amd64"))
+		if code != 0 || string(got) != string(want) || !strings.Contains(out, "replacing a v1.0.0 build that isn't the release's") {
+			t.Fatalf("code %d, kept the local build %t\n%s\n%s", code, string(got) == local, out, r.logText())
+		}
+		if !strings.Contains(r.logText(), "setup") {
+			t.Errorf("setup didn't run:\n%s", r.logText())
+		}
+	})
+
+	t.Run("SHA256SUMS without this CPU's build stops before the prompt", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(filepath.Join(r.rel, "v1.0.0", "SHA256SUMS"), strings.Repeat("0", 64)+"  tt-minecraftd-linux-arm64\n")
+		out, code := r.run()
+		if code == 0 || r.installed() != "" || !strings.Contains(out, "doesn't list tt-minecraftd-linux-amd64") || strings.Contains(out, "Go ahead?") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
 	t.Run("a wrong sum installs nothing and skips setup", func(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish(rigRelease{tag: "v1.0.0", badSum: true})
@@ -293,7 +344,7 @@ func TestInstallScript(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish(rigRelease{tag: "v1.0.0"})
 		out, code := r.run()
-		if code == 0 || r.installed() != "" || strings.Contains(r.logText(), "releases/download") || strings.Contains(r.logText(), "setup") {
+		if code == 0 || r.installed() != "" || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || strings.Contains(r.logText(), "setup") {
 			t.Fatalf("empty answer went ahead: code %d\n%s\n%s", code, out, r.logText())
 		}
 		r.write(r.tty, "y\n")
@@ -333,6 +384,7 @@ func TestInstallScript(t *testing.T) {
 		for name, c := range map[string]struct{ osRelease, arch, want string }{
 			"NixOS":       {"ID=nixos\n", "x86_64", "NixOS isn't supported yet"},
 			"Fedora":      {"ID=fedora\nID_LIKE=\"rhel centos fedora\"\n", "x86_64", "only Debian"},
+			"Fedora hint": {"ID=fedora\n", "x86_64", "--any-distro skips this check"},
 			"no os file":  {"", "x86_64", "only Debian"},
 			"32-bit ARM":  {"ID=debian\n", "armv7l", "no build for CPU 'armv7l'"},
 			"Ubuntu":      {"ID=ubuntu\nID_LIKE=debian\n", "x86_64", ""},
@@ -356,6 +408,61 @@ func TestInstallScript(t *testing.T) {
 			if code == 0 || !strings.Contains(out, c.want) || r.logText() != "" || r.installed() != "" {
 				t.Errorf("%s: code %d\n%s\n%s", name, code, out, r.logText())
 			}
+		}
+	})
+
+	t.Run("no systemd is refused before any download", func(t *testing.T) {
+		for _, args := range [][]string{{"--yes"}, {"--yes", "--any-distro"}} {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			r.have("docker", "nft")
+			if err := os.Remove(r.systemd); err != nil {
+				t.Fatal(err)
+			}
+			out, code := r.run(args...)
+			if code == 0 || !strings.Contains(out, "needs systemd") || r.logText() != "" || r.installed() != "" {
+				t.Errorf("%v: code %d\n%s\n%s", args, code, out, r.logText())
+			}
+		}
+	})
+
+	t.Run("--any-distro takes another distro once what setup needs is there", func(t *testing.T) {
+		for name, c := range map[string]struct {
+			have []string
+			want string
+		}{
+			"Podman, catatonit, nft": {[]string{"podman", "catatonit", "nft"}, ""},
+			"catatonit on PATH":      {[]string{"podman", "bin/catatonit", "nft"}, ""},
+			"Docker, nft":            {[]string{"docker", "nft"}, ""},
+			"Podman, no catatonit":   {[]string{"podman", "docker", "nft"}, "missing: catatonit"},
+			"no runtime":             {[]string{"catatonit", "nft"}, "missing: Podman and catatonit, or Docker. "},
+			"no nft":                 {[]string{"docker"}, "missing: nftables"},
+			"nothing":                {nil, "missing: Podman and catatonit, or Docker, nftables"},
+		} {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			r.write(r.osRelease, "ID=fedora\nID_LIKE=\"rhel centos fedora\"\n")
+			r.have(c.have...)
+			out, code := r.run("--yes", "--any-distro", "--", "--yes")
+			if c.want == "" {
+				if code != 0 || r.installed() != "v1.0.0" || !strings.Contains(r.logText(), "setup --yes\n") || !strings.Contains(out, "--any-distro installs nothing") {
+					t.Errorf("%s: code %d\n%s\n%s", name, code, out, r.logText())
+				}
+				continue
+			}
+			if code == 0 || !strings.Contains(out, c.want) || r.logText() != "" || r.installed() != "" {
+				t.Errorf("%s: code %d\n%s\n%s", name, code, out, r.logText())
+			}
+		}
+	})
+
+	t.Run("--any-distro still refuses NixOS", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(r.osRelease, "ID=nixos\n")
+		r.have("docker", "nft")
+		if out, code := r.run("--yes", "--any-distro"); code == 0 || !strings.Contains(out, "NixOS isn't supported yet") || r.logText() != "" {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
 		}
 	})
 

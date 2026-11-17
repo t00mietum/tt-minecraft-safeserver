@@ -194,3 +194,59 @@ func TestRefuse(t *testing.T) {
 		t.Error("moved paper")
 	}
 }
+
+// Refuse runs as root, so a link the server planted in the way is refused,
+// and the jar and the link's target stay as they were.
+func TestRefuseLinks(t *testing.T) {
+	defer testid.Line(t, "df79a")
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.Local)
+	empty := func(t *testing.T, dir string) {
+		t.Helper()
+		if got, _ := os.ReadDir(dir); len(got) != 0 {
+			t.Errorf("%s has %d files", dir, len(got))
+		}
+	}
+
+	dir, outside := t.TempDir(), t.TempDir()
+	put(t, filepath.Join(dir, "plugins", "bad.jar"), "bad")
+	if err := os.Symlink(outside, filepath.Join(dir, RefusedDir)); err != nil {
+		t.Fatal(err)
+	}
+	if dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now); err == nil {
+		t.Errorf("moved through a linked %s to %s", RefusedDir, dest)
+	}
+	empty(t, outside)
+	if _, err := os.Stat(filepath.Join(dir, "plugins", "bad.jar")); err != nil {
+		t.Error(err)
+	}
+
+	dir, outside = t.TempDir(), t.TempDir()
+	put(t, filepath.Join(outside, "bad.jar"), "bad")
+	if err := os.Symlink(outside, filepath.Join(dir, "plugins")); err != nil {
+		t.Fatal(err)
+	}
+	if dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now); err == nil {
+		t.Errorf("moved out of a linked plugins/ to %s", dest)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "bad.jar")); err != nil {
+		t.Error(err)
+	}
+
+	// A jar that's a link goes as the link, and a new folder is ug+rwx.
+	dir = t.TempDir()
+	put(t, filepath.Join(outside, "target.jar"), "x")
+	put(t, filepath.Join(dir, "plugins", "a.jar"), "a")
+	if err := os.Symlink(filepath.Join(outside, "target.jar"), filepath.Join(dir, "plugins", "link.jar")); err != nil {
+		t.Fatal(err)
+	}
+	dest, err := Refuse(dir, Jar{Name: "plugins/link.jar"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(dest); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("%s isn't the link: %v", dest, err)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, RefusedDir)); err != nil || fi.Mode().Perm() != 0o770 {
+		t.Errorf("%s: %v %v", RefusedDir, fi.Mode(), err)
+	}
+}

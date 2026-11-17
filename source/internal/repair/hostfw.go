@@ -98,9 +98,10 @@ func ufwMissing(ctx context.Context, h *Host) ([]port, error) {
 		if strings.HasPrefix(line, "Default:") && strings.Contains(line, "allow (incoming)") {
 			return nil, nil
 		}
+		// verbose always names the direction; ALLOW OUT and ALLOW FWD don't let players in
 		f := strings.Fields(line)
 		for i, word := range f {
-			if word == "ALLOW" && i > 0 {
+			if word == "ALLOW" && i > 0 && i+1 < len(f) && f[i+1] == "IN" {
 				specs = append(specs, f[:i]...)
 				break
 			}

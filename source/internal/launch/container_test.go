@@ -40,6 +40,8 @@ type rig struct {
 	states  []string
 	log     string
 	tables  string
+	// sudoFree makes sudo -n work, as a NOPASSWD rule or a cached login does.
+	sudoFree bool
 }
 
 func newRig(t *testing.T) *rig {
@@ -120,6 +122,8 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 		return []byte(g.log), nil
 	case c.Args[0] == "nft":
 		return []byte(g.tables), nil
+	case host.Quote(c.Args) == "sudo -n true" && !g.sudoFree:
+		return nil, errors.New("sudo: a password is required")
 	}
 	return nil, nil
 }
@@ -171,6 +175,40 @@ func TestDockerStart(t *testing.T) {
 	}
 	if !strings.Contains(g.out.String(), "The server is up.") {
 		t.Errorf("output %q", g.out.String())
+	}
+}
+
+// start tries sudo -n first, quietly and without the terminal, and asks with
+// sudo -v only when that fails. A NOPASSWD rule beside password rules passes
+// sudo -n but not sudo -v.
+func TestStartSudoNoPassword(t *testing.T) {
+	defer testid.Line(t, "df79e")
+	for _, free := range []bool{true, false} {
+		g := newRig(t)
+		g.sudoFree = free
+		g.states = []string{"exited", "running"}
+		g.log = "[12:00:09 INFO]: Done (8.1s)! For help, type \"help\"\n"
+		if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+			t.Fatal(err)
+		}
+		tries, asks := 0, 0
+		for _, c := range g.r.Ran {
+			switch host.Quote(c.Args) {
+			case "sudo -n true":
+				tries++
+				if !c.Look || !c.Quiet || c.Tty {
+					t.Errorf("sudo -n true ran as %+v", c)
+				}
+			case "sudo -v":
+				asks++
+				if !c.Tty {
+					t.Errorf("sudo -v ran without the terminal")
+				}
+			}
+		}
+		if wantAsks := map[bool]int{true: 0, false: 1}[free]; tries != 1 || asks != wantAsks {
+			t.Errorf("sudo -n works %v: tried %d, asked %d, want 1 and %d", free, tries, asks, wantAsks)
+		}
 	}
 }
 
@@ -608,7 +646,8 @@ func TestFindContainer(t *testing.T) {
 	if g.d.Runtime != "docker" || !strings.Contains(g.out.String(), "under docker, not podman") {
 		t.Errorf("stop stayed on %q: %q", g.d.Runtime, g.out.String())
 	}
-	for _, c := range g.r.Ran[2:] {
+	// sudo -n true, sudo -v, then the podman look that finds nothing.
+	for _, c := range g.r.Ran[3:] {
 		if c.Args[0] == "podman" {
 			t.Errorf("asked podman after finding docker's: %q", g.r.Lines())
 			break

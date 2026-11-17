@@ -72,9 +72,9 @@ func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
 	name := strings.Join(geyserDirs, "/") + "/" + geyserFile
 	d, there := top, true
 	for _, sub := range geyserDirs {
-		next, err := d.sub(sub)
+		next, err := d.Sub(sub)
 		if isNotExist(err) && fix {
-			next, err = d.mkdir(sub)
+			next, err = d.Mkdir(sub, nil)
 		}
 		if isNotExist(err) {
 			there = false
@@ -83,14 +83,14 @@ func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer next.close()
+		defer next.Close()
 		d = next
 	}
 	var text []byte
 	var st *syscall.Stat_t
 	if there {
 		var err error
-		text, st, err = d.read(geyserFile)
+		text, st, err = d.Read(geyserFile)
 		if err != nil && !isNotExist(err) {
 			return nil, err
 		}
@@ -122,5 +122,5 @@ func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
 	if !fix || len(problems) == 0 {
 		return problems, nil
 	}
-	return problems, d.write(geyserFile, []byte(strings.Join(lines, "\n")), st)
+	return problems, d.Write(geyserFile, []byte(strings.Join(lines, "\n")), st)
 }

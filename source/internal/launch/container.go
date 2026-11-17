@@ -273,8 +273,14 @@ func (d *Boxed) runArgs() ([]string, error) {
 		"--memory", memCap, "--memory-swap", memCap,
 		"--oom-score-adj", "1000",
 		"--init", "--interactive", "--tty",
-		"--workdir", c.ServerDir,
 	}
+	// serverDir may be a link, which the container wouldn't have.
+	work, err := filepath.EvalSymlinks(c.ServerDir)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--workdir", work)
+	var trees []string
 	for _, t := range c.OwnerTrees {
 		real, err := filepath.EvalSymlinks(t)
 		if err != nil {
@@ -284,6 +290,7 @@ func (d *Boxed) runArgs() ([]string, error) {
 		if args, err = appendMount(args, real, false); err != nil {
 			return nil, err
 		}
+		trees = append(trees, real)
 	}
 	jars, err := LockedJars(c.ServerDir)
 	if err != nil {
@@ -293,6 +300,9 @@ func (d *Boxed) runArgs() ([]string, error) {
 		if args, err = appendMount(args, j, true); err != nil {
 			return nil, err
 		}
+	}
+	if err := boxLinks(trees, append(slices.Clone(trees), jars...)); err != nil {
+		return nil, err
 	}
 	args = append(args, c.Image, "sh", "-c", Wrapper, "sh")
 	return append(args, server.JavaArgs(c, "java")...), nil

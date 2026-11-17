@@ -323,7 +323,24 @@ func TestOwnershipCheck(t *testing.T) {
 	if err := os.Chmod(filepath.Join(h.Cfg.ServerDir, "world", "open.txt"), 0o664); err != nil {
 		t.Fatal(err)
 	}
-	hasAll(t, "running, open file", look(t, h, ownershipCheck), "has 1 file with modes other than ug+rwX,o-rwx [fix]")
+	hasAll(t, "running, open file", look(t, h, ownershipCheck), "has 1 file other accounts can reach [fix]")
+
+	// Running, files and folders tighter than ug+rwX, as Java and Paper leave them, pass.
+	h, _ = ownHost(t, true, "running")
+	for _, p := range []string{"level.dat_new", "spark.tmp"} {
+		if err := os.WriteFile(filepath.Join(h.Cfg.ServerDir, "world", p), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(h.Cfg.ServerDir, "world", "nethernet"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.Cfg.ServerDir, "world", "nethernet", "identity.pem"), nil, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, ownershipCheck); len(got) != 0 {
+		t.Errorf("running, tight modes: %q", got)
+	}
 
 	// Stopped, the trees go back to the operator.
 	h, _ = ownHost(t, true, "")
@@ -351,7 +368,7 @@ func TestOwnershipCheck(t *testing.T) {
 	}
 	h.Cfg.RunMode = "docker"
 	f.Reply = func(host.Cmd) ([]byte, error) { return []byte("running\n"), nil }
-	hasAll(t, "docker, open jar", look(t, h, ownershipCheck), "has 1 file with modes")
+	hasAll(t, "docker, open jar", look(t, h, ownershipCheck), "has 1 file other accounts can reach")
 
 	h.Cfg.OwnerTrees = append(h.Cfg.OwnerTrees, filepath.Join(filepath.Dir(h.Cfg.ServerDir), "gone"))
 	hasAll(t, "missing tree", look(t, h, ownershipCheck), "tree "+filepath.Join(filepath.Dir(h.Cfg.ServerDir), "gone")+" is missing")
@@ -385,14 +402,69 @@ func TestBedrockCheck(t *testing.T) {
 	if err := os.Chmod(key, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := fixAll(t, h, f, bedrockCheck); !reflect.DeepEqual(got, []string{"sudo chmod o-rwx -- " + key}) {
-		t.Errorf("open key: %q", got)
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("open key ran %q", got)
+	}
+	if fi, err := os.Stat(key); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Errorf("open key, fixed: %v %v", fi.Mode(), err)
 	}
 	if err := os.Chmod(key, 0o640); err != nil {
 		t.Fatal(err)
 	}
 	if got := look(t, h, bedrockCheck); len(got) != 0 {
 		t.Errorf("closed key: %q", got)
+	}
+}
+
+// The key's mode is changed as root, so a link on the way to it isn't
+// followed.
+func TestBedrockKeyLinks(t *testing.T) {
+	defer testid.Line(t, "df79b")
+	h, f := testHost(t, "", "", nil)
+	h.Cfg.Bedrock = true
+	plugins := filepath.Join(h.Cfg.ServerDir, "plugins")
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "key.pem")
+	for _, file := range []string{filepath.Join(plugins, "Geyser-Spigot.jar"), filepath.Join(plugins, "floodgate-spigot.jar"), secret} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(secret, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(outside, filepath.Join(plugins, "floodgate")); err != nil {
+		t.Fatal(err)
+	}
+	got := look(t, h, bedrockCheck)
+	hasAll(t, "linked folder", got, filepath.Join(plugins, "floodgate")+" is a link")
+	if strings.Contains(strings.Join(got, "\n"), "[fix]") {
+		t.Errorf("linked folder has a fix: %q", got)
+	}
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("linked folder ran %q", got)
+	}
+
+	if err := os.Remove(filepath.Join(plugins, "floodgate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(plugins, "floodgate"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(plugins, "floodgate", "key.pem")); err != nil {
+		t.Fatal(err)
+	}
+	hasAll(t, "linked key", look(t, h, bedrockCheck), "key.pem is a link")
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("linked key ran %q", got)
+	}
+
+	if fi, err := os.Stat(secret); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Errorf("the link's target changed: %v %v", fi.Mode(), err)
 	}
 }
 
@@ -465,6 +537,8 @@ func TestPodmanChecks(t *testing.T) {
 	t.Cleanup(func() { catatonitPaths = was })
 	dir := t.TempDir()
 	catatonitPaths = []string{filepath.Join(dir, "catatonit")}
+	hasAll(t, "no catatonit, no apt", look(t, h, catatonitCheck), "catatonit isn't installed", "the distro's catatonit package adds it")
+	launch.Installed = func(name string) bool { return name == "apt-get" }
 	hasAll(t, "no catatonit", look(t, h, catatonitCheck), "catatonit isn't installed", "apt-get install catatonit")
 	if err := os.WriteFile(catatonitPaths[0], nil, 0o755); err != nil {
 		t.Fatal(err)
@@ -548,6 +622,12 @@ func TestHostFirewallCheck(t *testing.T) {
 	want := []string{"ufw is active and doesn't let players in on 19132/tcp; sudo ufw allow 19132/tcp adds it"}
 	if got := look(t, h, hostFirewallCheck); !reflect.DeepEqual(got, want) {
 		t.Errorf("ufw: %q", got)
+	}
+	// an outgoing or forward rule for the port doesn't let players in
+	ufw = "Status: active\nDefault: deny (incoming), allow (outgoing)\n\nTo                         Action      From\n--                         ------      ----\n25565/tcp                  ALLOW OUT   Anywhere\n19132                      ALLOW FWD   Anywhere\n19132/udp on eth0          ALLOW IN    Anywhere\n"
+	hasAll(t, "ufw out and fwd", look(t, h, hostFirewallCheck), "on 25565/tcp;", "on 19132/tcp;")
+	if got := look(t, h, hostFirewallCheck); len(got) != 2 {
+		t.Errorf("ufw out and fwd: %q", got)
 	}
 	ufw = "Status: active\nDefault: allow (incoming), allow (outgoing)\n"
 	if got := look(t, h, hostFirewallCheck); len(got) != 0 {

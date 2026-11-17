@@ -106,7 +106,7 @@ func scan(c *config.Config, fix bool) ([]Problem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer top.close()
+	defer top.Close()
 	problems, err := scanProperties(top, propertyRules(c), fix)
 	if err != nil {
 		return problems, err
@@ -144,7 +144,7 @@ func joinName(dir, file string) string {
 const propertiesFile = "server.properties"
 
 func scanProperties(top dir, rules []rule, fix bool) ([]Problem, error) {
-	text, st, err := top.read(propertiesFile)
+	text, st, err := top.Read(propertiesFile)
 	missingFile := isNotExist(err)
 	if err != nil && !missingFile {
 		return nil, err
@@ -166,24 +166,24 @@ func scanProperties(top dir, rules []rule, fix bool) ([]Problem, error) {
 	for _, p := range problems {
 		props.set(p.Key, p.Want)
 	}
-	return problems, top.write(propertiesFile, props.bytes(), st)
+	return problems, top.Write(propertiesFile, props.bytes(), st)
 }
 
 func scanYAML(top dir, list []yamlSetting, fix bool) ([]Problem, error) {
 	d := top
 	if list[0].dir != "" {
-		sub, err := top.sub(list[0].dir)
+		sub, err := top.Sub(list[0].dir)
 		if isNotExist(err) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		defer sub.close()
+		defer sub.Close()
 		d = sub
 	}
 	name := joinName(list[0].dir, list[0].file)
-	text, st, err := d.read(list[0].file)
+	text, st, err := d.Read(list[0].file)
 	if isNotExist(err) {
 		return nil, nil
 	}
@@ -207,5 +207,5 @@ func scanYAML(top dir, list []yamlSetting, fix bool) ([]Problem, error) {
 	if !fix || len(problems) == 0 {
 		return problems, nil
 	}
-	return problems, d.write(list[0].file, []byte(strings.Join(lines, "\n")), st)
+	return problems, d.Write(list[0].file, []byte(strings.Join(lines, "\n")), st)
 }

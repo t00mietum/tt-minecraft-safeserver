@@ -139,9 +139,9 @@ func (r *devRig) cloned(dir string) bool {
 func TestInstallDevScript(t *testing.T) {
 	defer testid.Line(t, "df799")
 
-	t.Run("a bare box gets every package, then the clone", func(t *testing.T) {
+	t.Run("a bare box gets every package with --install-docker, then the clone", func(t *testing.T) {
 		r := newDevRig(t)
-		out, code := r.run("--yes")
+		out, code := r.run("--yes", "--install-docker")
 		dir := filepath.Join(r.home, "tt-minecraft-safeserver")
 		lg := r.logText()
 		if code != 0 || !r.cloned(dir) {
@@ -204,8 +204,8 @@ func TestInstallDevScript(t *testing.T) {
 			t.Fatal(err)
 		}
 		r.write(filepath.Join(other, "go.mod"), "module example.com/other\n")
-		// docker gone, so the refusal has to come before apt.
-		_ = os.Remove(filepath.Join(r.bin, "docker"))
+		// git gone, so the refusal has to come before apt.
+		_ = os.Remove(filepath.Join(r.bin, "git"))
 		out, code := r.run("--yes", "--dir", other)
 		if code == 0 || r.logText() != "" || !strings.Contains(out, "isn't a clone") {
 			t.Errorf("other: code %d\n%s\n%s", code, out, r.logText())
@@ -240,6 +240,7 @@ func TestInstallDevScript(t *testing.T) {
 
 	t.Run("no at the prompt changes nothing, yes goes ahead", func(t *testing.T) {
 		r := newDevRig(t)
+		r.script("docker", "#!/bin/sh\n")
 		out, code := r.run()
 		if code == 0 || r.logText() != "" || !strings.Contains(out, "Nothing was changed") {
 			t.Fatalf("empty answer went ahead: code %d\n%s\n%s", code, out, r.logText())
@@ -261,7 +262,7 @@ func TestInstallDevScript(t *testing.T) {
 		}
 		r := newDevRig(t)
 		_ = os.Remove(filepath.Join(r.bin, "sudo"))
-		out, code := r.run("--yes")
+		out, code := r.run("--yes", "--install-docker")
 		if code == 0 || r.logText() != "" || !strings.Contains(out, "there's no sudo") {
 			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
 		}
@@ -271,11 +272,13 @@ func TestInstallDevScript(t *testing.T) {
 		for name, c := range map[string]struct{ osRelease, want string }{
 			"NixOS":       {"ID=nixos\n", "NixOS isn't supported yet"},
 			"Fedora":      {"ID=fedora\nID_LIKE=\"rhel centos fedora\"\n", "only Debian"},
+			"Fedora hint": {"ID=fedora\n", "--any-distro skips this check"},
 			"no os file":  {"", "only Debian"},
 			"Ubuntu":      {"ID=ubuntu\nID_LIKE=debian\n", ""},
 			"Mint, quote": {"ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n", ""},
 		} {
 			r := newDevRig(t)
+			r.script("docker", "#!/bin/sh\n")
 			if c.osRelease == "" {
 				r.osRelease = filepath.Join(t.TempDir(), "gone")
 			} else {
@@ -294,6 +297,69 @@ func TestInstallDevScript(t *testing.T) {
 		}
 	})
 
+	t.Run("no docker or podman is refused unless asked to install docker", func(t *testing.T) {
+		r := newDevRig(t)
+		r.have("1.24.4")
+		_ = os.Remove(filepath.Join(r.bin, "docker"))
+		out, code := r.run("--yes")
+		if code == 0 || r.logText() != "" || !strings.Contains(out, "docker or podman is needed") || !strings.Contains(out, "--install-docker") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+		out, code = r.run("--yes", "--install-docker")
+		if code != 0 || !strings.Contains(r.logText(), "--no-install-recommends docker.io\n") || !strings.Contains(out, "usermod -aG docker tester") {
+			t.Fatalf("--install-docker: code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
+	t.Run("podman counts, with a note on the docker command", func(t *testing.T) {
+		r := newDevRig(t)
+		r.have("1.24.4")
+		_ = os.Remove(filepath.Join(r.bin, "docker"))
+		r.script("podman", "#!/bin/sh\n")
+		out, code := r.run("--yes", "--install-docker")
+		if code != 0 || strings.Contains(r.logText(), "apt-get") || !strings.Contains(out, "podman-docker") || strings.Contains(out, "usermod") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
+	t.Run("a docker this account can't use gets the group note, podman-docker doesn't", func(t *testing.T) {
+		r := newDevRig(t)
+		r.have("1.24.4")
+		r.script("docker", "#!/bin/sh\n[ \"$1\" = info ] && exit 1\nexit 0\n")
+		if out, code := r.run("--yes"); code != 0 || !strings.Contains(out, "usermod -aG docker tester") {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+		r.script("docker", "#!/bin/sh\n[ \"$1\" = --version ] && echo 'podman version 5.4.2'\nexit 1\n")
+		if out, code := r.run("--yes"); code != 0 || strings.Contains(out, "usermod") {
+			t.Fatalf("podman-docker: code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("--any-distro installs nothing and checks what's there", func(t *testing.T) {
+		r := newDevRig(t)
+		r.write(r.osRelease, "ID=fedora\nID_LIKE=\"rhel centos fedora\"\n")
+		out, code := r.run("--yes", "--any-distro")
+		if code == 0 || r.logText() != "" || !strings.Contains(out, "missing: git, Go 1.21 or newer, docker or podman.") {
+			t.Fatalf("bare: code %d\n%s\n%s", code, out, r.logText())
+		}
+		r.have("1.19.8")
+		if out, code := r.run("--yes", "--any-distro"); code == 0 || r.logText() != "" || !strings.Contains(out, "missing: Go 1.21 or newer.") {
+			t.Fatalf("old Go: code %d\n%s\n%s", code, out, r.logText())
+		}
+		// No Debian CA file either, since its path is apt's.
+		r.have("1.24.4")
+		_ = os.Remove(r.ca)
+		out, code = r.run("--yes", "--any-distro")
+		if code != 0 || strings.Contains(r.logText(), "apt-get") || !r.cloned(filepath.Join(r.home, "tt-minecraft-safeserver")) || !strings.Contains(out, "--any-distro installs nothing") {
+			t.Fatalf("all there: code %d\n%s\n%s", code, out, r.logText())
+		}
+		r.write(r.osRelease, "ID=nixos\n")
+		_ = os.Remove(filepath.Join(r.bin, "docker"))
+		if out, code := r.run("--yes", "--any-distro", "--no-docker"); code != 0 {
+			t.Fatalf("NixOS, --no-docker: code %d\n%s", code, out)
+		}
+	})
+
 	t.Run("options", func(t *testing.T) {
 		r := newDevRig(t)
 		if out, code := r.run("--bogus"); code != 2 || r.logText() != "" {
@@ -302,8 +368,13 @@ func TestInstallDevScript(t *testing.T) {
 		if out, code := r.run("--version"); code != 0 || !strings.Contains(out, "dev installer v") {
 			t.Errorf("--version: code %d\n%s", code, out)
 		}
-		if out, code := r.run("--help"); code != 0 || !strings.Contains(out, "--no-docker") {
+		if out, code := r.run("--help"); code != 0 || !strings.Contains(out, "--no-docker") || !strings.Contains(out, "--any-distro") {
 			t.Errorf("--help: code %d\n%s", code, out)
+		}
+		for _, args := range [][]string{{"--install-docker", "--no-docker"}, {"--install-docker", "--any-distro"}} {
+			if out, code := r.run(args...); code != 2 || r.logText() != "" {
+				t.Errorf("%v: code %d\n%s", args, code, out)
+			}
 		}
 	})
 }

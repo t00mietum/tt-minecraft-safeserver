@@ -33,6 +33,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-07: Left open from the Paper 26.3 update, done before this repo. TreeCapitator 1.0 and AntiCreeper 5.1 have no updates but load. Sleeping uses the players_sleeping_percentage game rule, at 0, in place of OnePlayerSleep.
 		- 2026-11-17: Logs since 11-07 show TreeCapitator 1.0 enabled with only the legacy api-version warning, and no plugin errors. Chopping and sleeping still need a player in game.
 	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
+	- Stand-in: none (20261117). Only a player in the game can judge tree felling, leaf decay and the sleep vote.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
@@ -72,10 +73,73 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
+- setup runs apt-get for catatonit on a box without apt
+	- ID: 2026111714065925
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Severity: Low
+	- Opened: 20261117-140659
+	- Opened by:
+	- Related IDs: 2026111713320657
+	- Incorrect behavior [Bug]: On a box with Podman, no catatonit, and no apt, setup's install step still runs apt-get install catatonit, and fails on the missing command. repair's catatonit and nftables messages also name apt-get.
+	- Expected behavior [Bug]: Without apt, setup stops before any change and says catatonit has to be installed first, as its runtime pick does for Podman itself.
+	- Reproduced [Bug]: 20261117, in setup's test rig: with Podman, no catatonit and no apt, setup asked to go ahead and ran apt-get update, the account steps, the tree, and the rest. `runMode=podman` with neither Podman nor apt did the same.
+	- Cause [Bug]: packages() checked for apt only for nftables, and nothing checked it before install.
+	- Actual fix [Bug]: setup stops before the plan when Podman or catatonit is missing and there's no apt-get, and says to install it first. repair's catatonit and nftables findings name apt-get only when it's there, and the distro's package otherwise.
+	- Test case: df79g (no apt: no catatonit, or Podman given, stops before any command or prompt; a missing nft alone still goes to the firewall step), df66g and df64h's repair asserts (hint with and without apt)
+	- Verified: df79g fails on the code before the fix, with every setup command run, and passes after. The backlog quick run passed.
+	- Swept: setup's packages(), pickRuntime() (already checked apt) and firewall step; repair's catatonit and nftables findings. No other apt-get call in Go code. design.md's setup section says so.
+	- Decisions:
+		- A missing nft without apt still stops setup at the firewall step, as design.md's step 9 says, rather than up front. Only the packages install would fail on are checked early.
+		- The check runs in dry runs too, since the install would fail the same way.
+		- 20261117: df66g's no-nft assert and the catatonit assert in repair's container test now expect "the distro's ... package adds it" with no apt-get, and keep the old apt-get text with apt-get there.
+	- Branch: nov17-2026111714065925
+	- Commit: 50f4429
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-141400
+
+- Installers: Docker or Podman as a prerequisite, and an option for other distros
+	- ID: 2026111713320657
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070800, 2026111111070761, 2026111318335938
+	- Requirements:
+		- install-dev.bash treats Docker or Podman as a prerequisite, and installs one only when a flag asks it to try.
+		- It still prints the command that adds the account to the docker or podman group, rather than running it.
+		- install.bash and install-dev.bash get an option for distros they don't support, such as non-Debian ones. With it they install nothing through any package manager and only check that what they need is already there, such as docker.
+		- systemd stays a hard requirement.
+		- From t00mietum's answers on 20261117 to the Check entries for 2026111111070800 and 2026111318335938.
+	- Estimated effort: Avg
+	- Closed reason: Done
+	- Actual effort: Avg
+	- Branch: nov17-2026111713320657
+	- Commit: 5bbac35
+	- Test case: df799 (no docker or podman refused unless --install-docker; podman counts; group note when docker info fails; --any-distro), df798 (no systemd refused; --any-distro checks Podman and catatonit or Docker, and nftables; NixOS still refused)
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy. The option names are a Check: entry in questions.md.
+	- Closed: 20261117-140819
+	- Progress log:
+		- 2026-11-17: install-dev.bash refuses before any change when there's no docker or podman, unless --install-docker (docker.io through apt) or --no-docker. Both installers take --any-distro, which skips the distro check, installs nothing, and checks what's needed first. install.bash checks for systemd in every mode. README's Installing and Developing sections say so.
+		- Verified: df798 and df799 pass in the quick gate, and under Bash 3.2 with busybox tools. Both fail on the scripts before this change. Taking out the systemd check, the catatonit check, the docker info check, or the podman-docker check each fails them.
+		- 2026-11-17: df799's bare-box, prompt, no-sudo, and distro cases now give --install-docker or a stand-in docker, since a bare box is refused without one. Its folder-refusal case takes git away in place of docker, so the refusal still has to come before apt.
+		- Swept: setup's own apt use without apt is filed as 2026111714065925. No other script calls the installers.
+	- Decisions:
+		- install.bash checks for Podman plus catatonit, or Docker, and nftables under --any-distro, since those are what setup would get through apt. Podman is checked first, as setup picks it first.
+		- The systemd check (/run/systemd/system) runs in every mode of install.bash, since setup needs it everywhere. install-dev.bash doesn't check it, since building and testing don't need it.
+		- install.bash still refuses NixOS under --any-distro, since its /etc comes from its own config. install-dev.bash allows it, since nothing it does depends on the distro.
+		- install-dev.bash's --any-distro doesn't check the CA file, since its path is Debian's; a missing bundle shows as a failed clone.
+		- --install-docker installs docker.io, as the old default did. With only Podman, a note says cicd/cicd.bash calls docker, which podman-docker adds.
+		- The docker group command now also shows when docker was there already and docker info fails for this account, since cicd then runs on the box without saying so.
+
 - Refusing a plugin follows a link in the server tree
 	- ID: 2026111709090977
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261117-090909
@@ -85,11 +149,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/plugins/approve.go.
 		- 2026-11-17: Next, with 2026111709090967 and 2026111409374443, ahead of the move bugs. The fix is the same for all 3: folder handles opened without following links.
+		- Verified: df79a fails on the old code and passes with the fix, df5z3 still passes, and the quick gate passes. A trace on ZFS 2.3.9 showed renameat2 with RENAME_NOREPLACE taken, and EEXIST on the second move.
+		- The root-only chown of a new plugins-refused ran only in its non-root form here. The same call is the settings package's, which the root host check covers.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79a on the old code: a linked plugins-refused took the jar into the link's target, and a linked plugins/ let the jar be moved out of the folder it links to.
+	- Actual cause [Bug]: Refuse used path calls as root (stat, mkdir, lstat, rename), and each one follows a link the server account can plant.
+	- Actual fix [Bug]: Refuse opens serverDir, the jar's folder, plugins/ and plugins-refused/ as folder handles without following links, makes plugins-refused with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST. The handle code moved out of the settings package into source/internal/linksafe, which settings now uses too.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: df79a, df5z3
+	- Acceptance signoff: Self-closed: df79a fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- A new plugins-refused is now mode 0770, per design.md's Tree ownership. It was 0750 less the umask.
+		- On a filesystem that refuses the RENAME_NOREPLACE flag (EINVAL), the move checks the name and does a plain rename. A race there only replaces a file in a folder the server can already write.
+		- Swept: every root write in the tree. paper.Point, paper.Prune, download, geyser's plugins folder and the settings package already use folder handles or unlink a name right under serverDir. tree.ToServer's chown -R doesn't follow links. update/image.go and setup's config are under /etc.
 
 - repair's Floodgate key fix follows a link in the server tree
 	- ID: 2026111709090967
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261117-090909
@@ -99,11 +178,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/repair/files.go, bedrockCheck.
 		- 2026-11-17: Next, with 2026111709090977 and 2026111409374443, ahead of the move bugs. 2026111410134562 (the Floodgate key after setup --adopt) goes through the same fix.
+		- Verified: df79b fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-17: df5zg (TestBedrockCheck) expected the fix to run sudo chmod o-rwx on the key. It now expects no command, and the key at 0640, since the mode changes through the handle.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79b on the old code: with plugins/floodgate a link to another folder, repair offered and ran chmod o-rwx on the key in the link's target.
+	- Actual cause [Bug]: The check used lstat on the whole path, which follows a linked floodgate folder, and the fix ran chmod on the path later, as root.
+	- Actual fix [Bug]: The check and the fix each open plugins, floodgate and key.pem from serverDir without following links, check it's a plain file, and change the mode through that handle with fchmod. A link on the way is reported, with no fix.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: df79b, df5zg
+	- Acceptance signoff: Self-closed: df79b fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- The fix keeps the key's other mode bits and clears only other accounts' access, the same as chmod o-rwx.
+		- Swept: bedrockCheck is the only repair fix that changes a file inside the tree by path. ownershipCheck goes through tree.ToServer and ToOperator, with chown -R on the real tree path.
 
 - start doesn't catch a link in the server tree that won't resolve in the container
 	- ID: 2026111409374443
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261114-093744
@@ -113,11 +206,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
 		- 2026-11-17: Next, with the 2 newer link bugs 2026111709090977 and 2026111709090967.
+		- Verified: df79c fails on the old code and passes with the fix, and the quick gate passes.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79c on the old code: with world linked through worlds/current, itself a link, start went on and ran the container.
+	- Actual cause [Bug]: The container has only the trees, each at its real path, and nothing checked that the links in them still resolve there.
+	- Actual fix [Bug]: Container start walks each tree, resolves every link the way the container would, with only the mounts and the folders above them there, and refuses with the link and the real path to point it at. The container's working folder is now serverDir's real path too.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: df79c
+	- Acceptance signoff: Self-closed: df79c fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- start refuses, the first of the 2 fixes the item gives. A repair fix that rewrites the operator's links was left out, since the right target isn't always the real path.
+		- A link that dangles on the host too is left alone, since the container didn't cause it. A link to a path in the image, such as /usr, counts as not resolving.
+		- A folder the walk can't read is skipped, so the check never stops a start that worked before for that reason alone.
+		- The check is in the container start path, so with the boot unit enabled its refusal shows in the journal, not on the terminal.
+		- serverDir given as a link set a working folder the container didn't have. It's the same kind of bug, so the fix is here.
+		- Native mode isn't checked. It sees the whole host read-only, apart from ProtectHome, and it's deferred.
+		- Swept: Boxed.runArgs is the one place mounts are built. Native's ReadWritePaths uses the same real paths.
 
 - install.bash keeps a dev build that has the release's version
 	- ID: 2026111410134543
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261114-101345
@@ -126,11 +237,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: It compares the installed binary's SHA-256 with the release's SHA256SUMS, and replaces it when they differ.
 	- Progress log:
 		- 2026-11-14: Seen in the live move. A build from 2026-11-12 was left in place, and the release binary was installed by hand after setup.
+		- 2026-11-17: Verified: df798 fails on the unfixed script (the 2 new cases) and passes after, under Bash 5 and under Bash 3.2 with busybox tools. Quick gate passed.
+		- 2026-11-17: df798's 'current binary' and 'no at the prompt' cases checked the log for any releases/download fetch. They now check for the binary's fetch only, since SHA256SUMS is fetched before the plan.
+		- Swept: install-dev.bash installs no release binary. update --self (deferred) also goes by version, but it only moves to a newer release, so a local build is kept there by design.
+	- Closed reason: Done
+	- Reproduced [Bug]: Yes. df798's new case, with a local build that reports the release's version, kept it on the unfixed script.
+	- Actual cause [Bug]: The installed binary counted as current when its --version matched the release tag.
+	- Actual fix [Bug]: install.bash fetches the release's SHA256SUMS before its plan, and leaves the binary alone only when its SHA-256 matches. Otherwise it downloads, checks, and replaces it. The plan says when it replaces a build with the release's version.
+	- Branch: nov17-2026111410134543
+	- Commit: 153ab6f
+	- Test case: df798 (a local build with the release's version is replaced; SHA256SUMS without this CPU's build stops before the prompt)
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Closed: 20261117-134702
+	- Decisions:
+		- SHA256SUMS is fetched before the plan and prompt, so the plan can say whether the binary is current. It's a read, so 'Nothing was changed' still holds after a no.
+		- README's update line now says it replaces a binary that doesn't match the newest release's SHA256SUMS, rather than an older binary.
 
 - repair counts an outgoing ufw rule as opening the game port
 	- ID: 2026111709090987
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-090909
@@ -139,22 +265,50 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: only ALLOW IN rules count.
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/repair/hostfw.go.
+		- Verified: df5zm fails on the old code and passes with the fix, and the quick gate passes.
+	- Decisions:
+		- LIMIT IN rules still don't count as open, as before.
+		- Swept: ufwMissing is the only ufw rule reader. firewalld's --list-ports gives only inbound ports.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df5zm on the old code: with only ALLOW OUT and ALLOW FWD rules for the game ports, the check reported nothing.
+	- Actual cause [Bug]: ufwMissing took the port spec of any line with ALLOW in it, whatever the direction after it.
+	- Actual fix [Bug]: Only a line whose action is ALLOW IN counts. ufw status verbose always names the direction.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: df5zm
+	- Acceptance signoff: Self-closed: df5zm fails on the old code and passes now.
+	- Closed: 20261117-135211
 
 - status says nothing listens on the Bedrock UDP port, which is normal while no Bedrock player is on
 	- ID: 2026111412275169
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-122751
 	- Opened by:
 	- Incorrect behavior [Bug]: Geyser opens its NetherNet UDP socket only during a join, so status reads like a fault when idle.
 	- Expected behavior [Bug]: status says the UDP port opens per join, or checks only the TCP signaling port.
+	- Actual cause [Bug]: status printed the same line for every port with no listener, Bedrock UDP included.
+	- Actual fix [Bug]: With no Bedrock UDP listener, status says the port opens when a Bedrock player joins. A listener still shows as before, and a missing TCP listener still says nothing listens. design.md updated.
+	- Test case: df79f
+	- Branch: nov17-2026111412275169
+	- Commit: 4f32385
+	- Needs hand testing: No
+	- Stand-in: none (20261117). The wording is a matter of taste.
+	- Decisions:
+		- Kept the UDP line, worded as normal when idle, rather than dropping UDP from status. A listener during a join still shows.
+		- The claim that Geyser opens UDP only per join wasn't checked here. A throwaway server on 20261111 listed UDP right after start, so the line stays factual either way.
+		- Swept: the Bedrock UDP port is the only per-join socket status reads. The game port and Bedrock TCP keep the nothing listens line.
+	- Verified: df79f fails without the change and passes with it. Quick gate passed.
+	- Closed reason: Done
+	- Acceptance signoff: Self-closed 20261117 under the standing close policy. The line is plain, true whether or not Geyser holds UDP open, and df79f pins it.
+	- Closed: 2026-11-17
 
 - repair --check fails while the server runs on files the server writes as 0600
 	- ID: 2026111412081476
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-120814
@@ -163,22 +317,51 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: The running check flags only files other accounts can reach, or the wrong owner. Modes tighter than ug+rwX pass.
 	- Progress log:
 		- 2026-11-14: Seen on b23 after the move. Nothing other accounts can read.
+		- Verified: df5zf fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-17: df5zf's two mode asserts expected "with modes other than ug+rwX,o-rwx" and now expect "other accounts can reach", the new message.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df5zf on the old code: with the server running, a 0600 temp file, a 0700 folder and a 0400 file in it were reported as 4 files with the wrong modes.
+	- Actual cause [Bug]: The running check wanted every file at least ug+rw and every folder ug+x, so any tighter mode failed.
+	- Actual fix [Bug]: While the server runs, the check flags only files other accounts can reach, plus the wrong owner as before. Its message says so.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: df5zf
+	- Acceptance signoff: Self-closed: df5zf fails on the old code and passes now.
+	- Closed: 20261117-135211
+	- Decisions:
+		- A tighter mode can keep the operator's group out of a file while the server runs. That is left alone, since Java and Paper make such files on every save, and start hands the trees over with ug+rwX again.
+		- design.md's repair section says only access for other accounts counts.
+		- Swept: walkTree is the only mode check on the trees. start's handover still sets ug+rwX,o-rwx.
 
 - setup --adopt leaves the Floodgate key readable by others, and its own check then fails
 	- ID: 2026111410134562
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-101345
 	- Opened by:
 	- Incorrect behavior [Bug]: On an adopted tree, plugins/floodgate/key.pem stayed 0644, and setup ended with its repair --check failing on it. repair fixed it.
 	- Expected behavior [Bug]: setup sets the key's mode before its check, as repair does.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79d on the old code: after setup --adopt, a 0644 key stayed 0644. The linksafe change to repair's key fix (1b3d301) didn't reach setup.
+	- Actual cause [Bug]: setup hands an adopted tree to the operator with chown only, and none of its steps ran repair's Floodgate key fix before the final check.
+	- Actual fix [Bug]: On an adopted tree with bedrock on, setup runs the Floodgate key part of repair's check, with its fix, after the Geyser and Floodgate step. A dry run shows it as a PLAN line.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: df79d
+	- Acceptance signoff: Self-closed: df79d fails on the old code and passes now.
+	- Closed: 20261117-135211
+	- Verified: df79d fails with the new step taken out and passes with it, and the quick gate passes. The key goes through the same handle-based fchmod as repair, so a link on the way is refused.
+	- Decisions:
+		- repair exports FloodgateKeyCheck, the key part of its Geyser and Floodgate check, so setup doesn't report jars it may not have downloaded yet in a dry run.
+		- design.md's setup step 7 says so.
+		- Swept: a new tree has no key yet, and setup on an existing install runs repair, which has the fix already.
 
 - start's sudo -v asks for a password where a NOPASSWD rule sits beside password rules
 	- ID: 2026111410134553
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-101345
@@ -187,6 +370,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Try sudo -n true first, then sudo -v.
 	- Progress log:
 		- 2026-11-14: Seen in the live move on b23. sudo tt-minecraftd start worked around it.
+		- Verified: df79e fails with the sudo -n try taken out, and passes with it in. Quick gate passed.
+		- Not tried against a real sudoers file with mixed rules, since that needs root.
+	- Closed reason: Done
+	- Actual cause [Bug]: start asked for sudo with sudo -v alone, which prompts unless every matching sudoers rule is NOPASSWD.
+	- Actual fix [Bug]: start tries sudo -n true first, quietly and without the terminal, and runs sudo -v only when that fails. design.md updated.
+	- Test case: df79e
+	- Branch: nov17-2026111412275169
+	- Commit: 4f32385
+	- Acceptance signoff: Self-closed: the fix is what the item asked for, and df79e passes.
+	- Closed: 20261117-135809
+	- Decisions:
+		- sudo -n true is a look, so --dry-run runs it too, and prints sudo -v only when it fails.
+		- 20261117: df64g TestFindContainer skips the first 3 commands, not 2, since start now runs sudo -n true first.
+		- Swept: kit.go's sudoUp is the only sudo -v. Every start, stop, console and boot path goes through it. attach's sudo -n relies on it as before.
 
 - Keep the server's DNS name current when the home address changes
 	- ID: 2026111412275159
@@ -439,6 +636,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261113: Skip with a note rather than keep the current image's Java as the floor, since that needs the old image on disk and another container run, and skipping changes nothing. Logged as a Check: entry.
 		- 20261113: Only with agent set, since without it a failed PaperMC or plugin source lookup stops the update by design. --image alone still fails, so asking for only that part never ends quietly with nothing done.
 		- Swept: imageLookup is the only Java caller; paperVersion's NewestVersion fallback runs only with no paper.jar, where a failed Paper lookup still stops the update per 2026111210034308. design.md's update and Update agent and README's Update agent say this now.
+		- 20261117: t00mietum confirmed the call. The answer also asked for an installer option on other distros, filed as its own item.
 	- Verified: df796 fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
 
 - Connect the service to an AI agent to update the game programs and add-ons
@@ -546,6 +744,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- curl or wget, since minimal Debian often has only wget. The answer comes from /dev/tty when the script arrives on a pipe.
 		- MIT, as helper scripts usually are, rather than the project's GPL.
 		- Tested by sourcing it with the install folder, os-release, and terminal paths pointed at a stand-in, on a PATH with stand-in curl, wget, uname, and sudo. No test-only option in the script.
+		- 20261117: t00mietum confirmed system only. User install filed as a Deferred item.
 	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
 	- 2026-11-14: install.bash at the repo root finds the newest release through the GitHub API, checks the binary for this CPU against SHA256SUMS, installs it as /usr/local/bin/tt-minecraftd (through sudo when needed), and runs tt-minecraftd setup. It states its plan and asks first, and --yes skips that. README's Installing section has the curl and wget one-liners.
 	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note.
@@ -577,6 +776,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- golang-go is installed when there's no Go 1.21 or newer, since those fetch the version go.mod asks for. When apt's Go is still older, such as bookworm's 1.19, it finishes the rest and fails at the end with where to get a newer Go.
 		- No --release or --target options. It always clones main, and installs nothing outside apt and the clone.
 		- MIT, like install.bash. Tested the same way: sourced with os-release, the terminal, and the CA file pointed at stand-ins, on a PATH with stand-in uname, sudo, apt-get, git, go, and docker.
+		- 20261117: t00mietum's answer to the Check entry: Docker or Podman should be a prerequisite, with a flag to try installing it. Printing the group command is OK. Follow-up filed as its own item.
 	- Branch: nov14-2026111111070800
 	- Commit: 337a7a0
 	- Test case: df799 TestInstallDevScript
@@ -2559,6 +2759,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1111, repair-sudo
 	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
 	- Closed: 20261111-133545
+
+- install.bash: install for one user, without root
+	- ID: 2026111713320666
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070761
+	- Requirements:
+		- An install into the user's own folders, beside the system install. t00mietum on 20261117: system only is OK for now, and user setup can be a deferred item.
 
 - update --self
 	- ID: 2026111318002865

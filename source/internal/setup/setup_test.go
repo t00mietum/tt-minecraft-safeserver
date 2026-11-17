@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -289,6 +290,45 @@ func TestRuntimePick(t *testing.T) {
 	}
 }
 
+// Without apt, a missing catatonit, or Podman given with --set, stops setup
+// before it changes anything, as the runtime pick does.
+func TestNoAptPackages(t *testing.T) {
+	defer testid.Line(t, "df79g")
+	for _, c := range []struct {
+		name  string
+		tools []string
+		sets  []string
+		want  string
+	}{
+		{name: "no catatonit", tools: []string{"podman"}, want: "catatonit isn't installed"},
+		{name: "podman given", sets: []string{"runMode=podman"}, want: "podman and catatonit aren't installed"},
+	} {
+		r := newRig(t, c.tools, "", c.sets...)
+		r.s.Yes, r.s.AcceptEULA = true, true
+		err := r.s.Do(context.Background())
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "install it first") && !strings.Contains(err.Error(), "install them first") {
+			t.Errorf("%s: error %v, want %q", c.name, err, c.want)
+		}
+		if ran := r.ran(); slices.ContainsFunc(ran, func(s string) bool { return !strings.HasPrefix(s, "ps ") }) {
+			t.Errorf("%s: ran commands before refusing:\n%s", c.name, strings.Join(ran, "\n"))
+		}
+		if strings.Contains(r.out.String(), "Go ahead") {
+			t.Errorf("%s: asked to go ahead before refusing:\n%s", c.name, r.out)
+		}
+		if _, err := os.Stat(r.server); err == nil {
+			t.Errorf("%s: server folder made", c.name)
+		}
+	}
+
+	// A missing nft alone is still the firewall step's to report.
+	r := newRig(t, []string{"podman", "catatonit"}, "")
+	r.nft = false
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil && strings.Contains(err.Error(), "install it first") {
+		t.Errorf("no nft refused up front: %v", err)
+	}
+}
+
 // A fresh image has no package lists, and install alone finds nothing.
 func TestAptUpdateFirst(t *testing.T) {
 	defer testid.Line(t, "df67t")
@@ -418,6 +458,52 @@ func TestAdoptGeyserSource(t *testing.T) {
 	}
 	if !strings.Contains(r.out.String(), "says:   Geyser-Spigot 2.12.1\n  source: "+r.geyser.Source("geyser")+"\n") {
 		t.Errorf("plan doesn't show the source:\n%s", r.out)
+	}
+}
+
+// An adopted tree's Floodgate key loses other accounts' access before the
+// final check, as repair gives it. A dry run leaves it as it is.
+func TestAdoptFloodgateKey(t *testing.T) {
+	defer testid.Line(t, "df79d")
+	for _, dry := range []bool{true, false} {
+		r := newRig(t, []string{"docker"}, "", "bedrock=true")
+		r.s.Yes, r.s.DryRun = true, dry
+		old := filepath.Join(r.dir, "old", "paper")
+		if err := os.MkdirAll(filepath.Join(old, "plugins", "floodgate"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		for name, text := range map[string]string{"paper.jar": "jar", "eula.txt": "eula=true\n"} {
+			if err := os.WriteFile(filepath.Join(old, name), []byte(text), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeJar(t, filepath.Join(old, "plugins", "Geyser-Spigot.jar"), "name: Geyser-Spigot\nversion: 2.12.1\n")
+		writeJar(t, filepath.Join(old, "plugins", "floodgate-spigot.jar"), "name: floodgate\nversion: 2.2.5\n")
+		key := filepath.Join(old, "plugins", "floodgate", "key.pem")
+		if err := os.WriteFile(key, []byte("key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(key, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r.s.Adopt = old
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("dry %v: %v\n%s", dry, err, r.out)
+		}
+		fi, err := os.Stat(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, mode := "FIXED", os.FileMode(0o640)
+		if dry {
+			state, mode = "PLAN", 0o644
+		}
+		if fi.Mode().Perm() != mode {
+			t.Errorf("dry %v: key is %04o, want %04o", dry, fi.Mode().Perm(), mode)
+		}
+		if want := fmt.Sprintf("%-7s %s can only be read by its owner and group now\n", state, key); !strings.Contains(r.out.String(), want) {
+			t.Errorf("dry %v: no %q in:\n%s", dry, want, r.out)
+		}
 	}
 }
 
