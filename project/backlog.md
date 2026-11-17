@@ -205,8 +205,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: The DDNS job now sets the game name's A record through the API after each address update, only when the address differs. Its first hourly run found the record and left it unchanged.
 	- Decisions: After each address update, the DDNS job also sets the game name's A record through the DNS host's REST API.
 	- Decided against: A CNAME from the game name to the domain. The domain has an IPv6 record for another host that can't be deleted, so IPv6 clients, often phones, would reach the wrong host (2026-11-17).
-	- Test case: n/a: the job is outside this repo. The update was checked against a stand-in API, and the lookup by a live run.
-	- Acceptance signoff: Self-closed: the live run read the real record, and the stand-in run sent the expected update.
+	- Test case: n/a: the job is outside this repo. A live run sent the current address and left the record as it was.
+	- Acceptance signoff: Self-closed: the live update returned 200, and the record read back the same.
 	- Closed: 20261117-110300
 
 - Let the server answer Bedrock LAN discovery through the firewall
