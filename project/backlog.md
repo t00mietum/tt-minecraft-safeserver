@@ -76,7 +76,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111412275159
 	- Type: Task
 	- Status: Stalled
-		- Held for: the record change in the DNS host's panel, by hand.
+		- Held for: a go-ahead to change the DDNS job's host, and where its API key is kept there.
 	- Target version: v1.0.0-beta.1
 	- Opened: 20261114-122751
 	- Opened by: JC
@@ -86,7 +86,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Held for: an API key from the DNS host.
 		- 2026-11-14: The 2 old per-edition names can be deleted, since a phone has joined through the shared name.
 		- 2026-11-17: The DNS host's API key is in hand, so it's no longer held.
-	- Decisions: The game name becomes a CNAME to the domain, which the DDNS job already keeps current, so no API work is needed. The domain's SRV record points at the domain itself, since an SRV target shouldn't be an alias (t00mietum, 2026-11-17).
+	- Decisions: After each address update, the DDNS job also sets the game name's A record through the DNS host's REST API.
+	- Decided against: A CNAME from the game name to the domain. The domain has an IPv6 record for another host that can't be deleted, so IPv6 clients, often phones, would reach the wrong host (2026-11-17).
 
 - Refusing a plugin follows a link in the server tree
 	- ID: 2026111709090977
