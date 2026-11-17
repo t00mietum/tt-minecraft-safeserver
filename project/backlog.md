@@ -2641,9 +2641,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 	- The ID is the local time to the hundredth of a second. Opened is when it was written down, which may differ. (Use a keyboard macro and possibly something like project 'zuid' to generate.)
 
-	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Canceled means it still applies but was decided against. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Closed means no more work is planned, and Closed reason says why.
+	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Canceled means it still applies but was decided against, and it needs no reason. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Closed means no more work is planned, and Closed reason says why.
 
-	- Closed reason values: Done means the work is finished. Duplicate means another item covers it, and Superseded means a newer item replaces it. Both name that item in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is. Moot means something else changed that made it irrelevant.
+	- Closed reason values: Done means the work is finished. Duplicate means another item covers it, and Superseded means a newer item replaces it. Both name that item in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is, and the item has to say why. Moot means something else changed that made it irrelevant.
 
 	- Target version is the release an item is meant for. Every open item has one, and so does every item closed since the last release.
 
