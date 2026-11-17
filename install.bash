@@ -160,11 +160,17 @@ fMain(){
 	local asset="${exeName}-linux-${arch}"
 	local url="${dlBase}/${tag}/${asset}"
 	local destPath="${destDir}/${exeName}"
-	local haveVer="" current=0 useSudo=0
+	local sums want
+	## Fetched before the plan, since a local build can carry the release's version and only its bytes tell them apart.
+	sums="$(fFetch "${dlBase}/${tag}/SHA256SUMS")" || fDie "download failed: SHA256SUMS for ${tag}"
+	want="$(awk -v f="${asset}" '$2 == f || $2 == "*" f { print $1; exit }' <<< "${sums}")"
+	[[ "${want}" =~ ^[0-9a-f]{64}$ ]] || fDie "SHA256SUMS for ${tag} doesn't list ${asset}"
+	local haveVer="" haveSum="" current=0 useSudo=0
 	if [[ -x "${destPath}" ]]; then
 		## "tt-minecraftd v1.0.0-alpha.1 build df7q6 (2026-11-12)", then the copyright.
 		haveVer="$("${destPath}" --version 2> /dev/null || true)"; haveVer="${haveVer%%$'\n'*}"; haveVer="${haveVer#"${exeName} "}"; haveVer="${haveVer%% *}"
-		[[ "${haveVer}" != "${tag}" ]] || current=1
+		if [[ -r "${destPath}" ]]; then haveSum="$(sha256sum < "${destPath}" || true)"; haveSum="${haveSum%% *}"; fi
+		[[ "${haveSum}" != "${want}" ]] || current=1
 	fi
 	if ((! current)) && [[ "$(id -u)" != 0 ]] && ! { [[ -d "${destDir}" && -w "${destDir}" ]] && { [[ ! -e "${destPath}" ]] || [[ -w "${destPath}" ]]; }; }; then
 		useSudo=1
@@ -175,12 +181,14 @@ fMain(){
 	fEcho "Plan"
 	fEcho_Clean "    Release ....: ${tag}${note}"
 	if ((current)); then
-		fEcho_Clean "    Install ....: ${destPath} is already ${tag}, so it's left as is"
+		fEcho_Clean "    Install ....: ${destPath} is already ${tag}, matching SHA256SUMS, so it's left as is"
 	else
 		fEcho_Clean "    Download ...: ${url}"
 		fEcho_Clean "    Check ......: SHA-256 against the release's SHA256SUMS"
-		local how=""; if ((useSudo)); then how=", through sudo"; fi
-		fEcho_Clean "    Install ....: ${destPath}${haveVer:+ (replacing ${haveVer})}${how}"
+		local how="" was="${haveVer:+ (replacing ${haveVer})}"
+		if ((useSudo)); then how=", through sudo"; fi
+		if [[ "${haveVer}" == "${tag}" ]]; then was=" (replacing a ${tag} build that isn't the release's)"; fi
+		fEcho_Clean "    Install ....: ${destPath}${was}${how}"
 	fi
 	fEcho_Clean "    Then .......: ${exeName} setup${setupArgs[0]+ ${setupArgs[*]}}, which shows its own plan and asks again"
 	echo
@@ -198,12 +206,9 @@ fMain(){
 
 		fEcho "Downloading ${asset} ${tag}"
 		fFetch "${url}" "${work}/${asset}" || fDie "download failed: ${url}"
-		fFetch "${dlBase}/${tag}/SHA256SUMS" "${work}/SHA256SUMS" || fDie "download failed: SHA256SUMS for ${tag}"
 
 		fEcho "Checking SHA-256"
-		local want got
-		want="$(awk -v f="${asset}" '$2 == f || $2 == "*" f { print $1; exit }' "${work}/SHA256SUMS")"
-		[[ -n "${want}" ]] || fDie "SHA256SUMS for ${tag} doesn't list ${asset}"
+		local got
 		got="$(sha256sum < "${work}/${asset}")"; got="${got%% *}"
 		[[ "${got}" == "${want}" ]] || fDie "${asset} doesn't match SHA256SUMS (listed ${want}, got ${got}). Nothing was installed."
 
@@ -230,7 +235,7 @@ fMain(){
 	echo
 }
 
-## Takes out only the 2 files it fetched and the folder it made, under the temp folder it named.
+## Takes out only the file it fetched and the folder it made, under the temp folder it named.
 ## A failed cleanup doesn't change how the run ended.
 fWorkGone(){
 	local w="${__installWork:-}" r="${__installTmpRoot:-}"
@@ -238,7 +243,7 @@ fWorkGone(){
 	case "${w}" in
 		"${r}"/tt-minecraftd-install.?*)
 			if [[ -d "${w}" && ! -L "${w}" && "${w}" != *..* ]]; then
-				rm -f -- "${w}/${__installAsset:-x}" "${w}/SHA256SUMS" || true
+				rm -f -- "${w}/${__installAsset:-x}" || true
 				rmdir -- "${w}" || true
 			fi ;;
 	esac
@@ -250,3 +255,4 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 
 ##	History:
 ##		- 2026-11-14: Created.
+##		- 2026-11-17: A binary counts as current only when its SHA-256 matches the release's, not its version.

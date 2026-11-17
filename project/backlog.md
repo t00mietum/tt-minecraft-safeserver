@@ -192,7 +192,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - install.bash keeps a dev build that has the release's version
 	- ID: 2026111410134543
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261114-101345
@@ -201,6 +201,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: It compares the installed binary's SHA-256 with the release's SHA256SUMS, and replaces it when they differ.
 	- Progress log:
 		- 2026-11-14: Seen in the live move. A build from 2026-11-12 was left in place, and the release binary was installed by hand after setup.
+		- 2026-11-17: Verified: df798 fails on the unfixed script (the 2 new cases) and passes after, under Bash 5 and under Bash 3.2 with busybox tools. Quick gate passed.
+		- 2026-11-17: df798's 'current binary' and 'no at the prompt' cases checked the log for any releases/download fetch. They now check for the binary's fetch only, since SHA256SUMS is fetched before the plan.
+		- Swept: install-dev.bash installs no release binary. update --self (deferred) also goes by version, but it only moves to a newer release, so a local build is kept there by design.
+	- Closed reason: Done
+	- Reproduced [Bug]: Yes. df798's new case, with a local build that reports the release's version, kept it on the unfixed script.
+	- Actual cause [Bug]: The installed binary counted as current when its --version matched the release tag.
+	- Actual fix [Bug]: install.bash fetches the release's SHA256SUMS before its plan, and leaves the binary alone only when its SHA-256 matches. Otherwise it downloads, checks, and replaces it. The plan says when it replaces a build with the release's version.
+	- Branch: nov17-2026111410134543
+	- Commit: 153ab6f
+	- Test case: df798 (a local build with the release's version is replaced; SHA256SUMS without this CPU's build stops before the prompt)
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Closed: 20261117-134702
+	- Decisions:
+		- SHA256SUMS is fetched before the plan and prompt, so the plan can say whether the binary is current. It's a read, so 'Nothing was changed' still holds after a no.
+		- README's update line now says it replaces a binary that doesn't match the newest release's SHA256SUMS, rather than an older binary.
 
 - repair counts an outgoing ufw rule as opening the game port
 	- ID: 2026111709090987

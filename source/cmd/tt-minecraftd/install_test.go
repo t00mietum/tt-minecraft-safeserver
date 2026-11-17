@@ -244,7 +244,7 @@ func TestInstallScript(t *testing.T) {
 			t.Fatal("first run failed")
 		}
 		out, code := r.run("--yes")
-		if code != 0 || strings.Contains(r.logText(), "releases/download") || !strings.Contains(r.logText(), "setup") {
+		if code != 0 || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || !strings.Contains(r.logText(), "setup") {
 			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
 		}
 		if !strings.Contains(out, "already v1.0.0") {
@@ -271,6 +271,36 @@ func TestInstallScript(t *testing.T) {
 		}
 	})
 
+	t.Run("a local build with the release's version is replaced", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		local := strings.ReplaceAll(strings.ReplaceAll(rigExe, "@BASH@", r.bashPath), "@TAG@", "v1.0.0") + "# dogfood\n"
+		r.write(dest, local)
+		if err := os.Chmod(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out, code := r.run("--yes")
+		got, _ := os.ReadFile(dest)
+		want, _ := os.ReadFile(filepath.Join(r.rel, "v1.0.0", "tt-minecraftd-linux-amd64"))
+		if code != 0 || string(got) != string(want) || !strings.Contains(out, "replacing a v1.0.0 build that isn't the release's") {
+			t.Fatalf("code %d, kept the local build %t\n%s\n%s", code, string(got) == local, out, r.logText())
+		}
+		if !strings.Contains(r.logText(), "setup") {
+			t.Errorf("setup didn't run:\n%s", r.logText())
+		}
+	})
+
+	t.Run("SHA256SUMS without this CPU's build stops before the prompt", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(filepath.Join(r.rel, "v1.0.0", "SHA256SUMS"), strings.Repeat("0", 64)+"  tt-minecraftd-linux-arm64\n")
+		out, code := r.run()
+		if code == 0 || r.installed() != "" || !strings.Contains(out, "doesn't list tt-minecraftd-linux-amd64") || strings.Contains(out, "Go ahead?") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
 	t.Run("a wrong sum installs nothing and skips setup", func(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish(rigRelease{tag: "v1.0.0", badSum: true})
@@ -293,7 +323,7 @@ func TestInstallScript(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish(rigRelease{tag: "v1.0.0"})
 		out, code := r.run()
-		if code == 0 || r.installed() != "" || strings.Contains(r.logText(), "releases/download") || strings.Contains(r.logText(), "setup") {
+		if code == 0 || r.installed() != "" || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || strings.Contains(r.logText(), "setup") {
 			t.Fatalf("empty answer went ahead: code %d\n%s\n%s", code, out, r.logText())
 		}
 		r.write(r.tty, "y\n")

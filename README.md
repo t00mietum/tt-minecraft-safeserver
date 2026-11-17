@@ -176,7 +176,7 @@ Or with wget:
 bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
 ~~~
 
-It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces an older binary, and setup on an existing install runs `repair` and `update`.
+It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`.
 
 NixOS isn't supported yet.
 
