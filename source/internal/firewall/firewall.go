@@ -28,6 +28,9 @@ const (
 	// rconPort is Minecraft's default. RCON is forced off, so the port only
 	// gets a drop in case something opens it anyway.
 	rconPort = 25575
+	// discoveryPort is where Bedrock 26.60 and later broadcast to find LAN
+	// games, from any port of their own.
+	discoveryPort = 7551
 )
 
 // lan is what allowFrom's lan means, and what the server can't reach.
@@ -111,6 +114,10 @@ func Rules(c *config.Config, dns []netip.Addr) string {
 		}
 		w("\tset %s {\n\t\ttype %s\n\t\tflags dynamic,timeout\n\t\ttimeout 2m\n\t\tsize 65536\n\t}\n", n, typ)
 	}
+	if c.Bedrock {
+		// Who broadcast for LAN games lately. Clients repeat it every 2 s.
+		w("\tset seek4 {\n\t\ttype ipv4_addr . inet_service\n\t\tflags dynamic,timeout\n\t\ttimeout 10s\n\t\tsize 4096\n\t}\n")
+	}
 	for _, n := range []string{"in_refused", "in_flood", "in_closed", "out_local", "out_lan", "out_web"} {
 		w("\tcounter %s {\n\t}\n", n)
 	}
@@ -118,6 +125,13 @@ func Rules(c *config.Config, dns []netip.Addr) string {
 	w("\tchain input {")
 	w("\t\ttype filter hook input priority filter; policy accept;")
 	w("\t\tiifname \"lo\" accept")
+	if c.Bedrock {
+		from := "ip saddr @lan4"
+		if !anyone {
+			from += " ip saddr @allow4"
+		}
+		w("\t\tmeta pkttype broadcast udp dport %d %s update @seek4 { ip saddr . udp sport }", discoveryPort, from)
+	}
 	w("\t\tct state != new accept")
 	w("\t\ttcp dport %d jump players", c.GamePort)
 	if c.Bedrock {
@@ -159,6 +173,11 @@ func Rules(c *config.Config, dns []netip.Addr) string {
 		w("\t\toifname \"lo\" meta l4proto { tcp, udp } th dport %d accept", c.BedrockPort)
 	}
 	w("\t\toifname \"lo\" counter name out_local goto refuse")
+	if c.Bedrock {
+		// Conntrack keys a broadcast on the broadcast address, so the answer
+		// to it is a new packet. Only the address and port that asked get one.
+		w("\t\tudp sport %d ip daddr . udp dport @seek4 accept", discoveryPort)
+	}
 	w("\t\tip daddr @lan4 counter name out_lan goto refuse")
 	w("\t\tip6 daddr @lan6 counter name out_lan goto refuse")
 	if c.Egress == "web" {

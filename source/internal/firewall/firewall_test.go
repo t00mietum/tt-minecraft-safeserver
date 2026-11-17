@@ -77,13 +77,15 @@ func TestRules(t *testing.T) {
 				"tcp dport { 80, 443 } accept",
 				"udp dport { 3478, 19302 } accept",
 				"counter name out_web goto refuse",
+				"meta pkttype broadcast udp dport 7551 ip saddr @lan4 ip saddr @allow4 update @seek4 { ip saddr . udp sport }",
+				"udp sport 7551 ip daddr . udp dport @seek4 accept",
 			}, nil},
 		{"any, open", []string{"any"}, "open", true,
-			[]string{"th dport 19132 jump players", "ip daddr @lan4 counter name out_lan goto refuse"},
+			[]string{"th dport 19132 jump players", "ip daddr @lan4 counter name out_lan goto refuse", "udp dport 7551 ip saddr @lan4 update @seek4"},
 			[]string{"@allow4", "set allow4", "dport { 80, 443 }", "3478", "out_web goto"}},
 		{"no bedrock", []string{"lan"}, "web", false,
 			[]string{"tcp dport { 80, 443 } accept"},
-			[]string{"19132", "3478"}},
+			[]string{"19132", "3478", "7551", "seek4"}},
 		{"addresses", []string{"lan", "203.0.113.7", "198.51.100.0/24", "2001:db8::/32", "10.1.2.3"}, "web", true,
 			[]string{
 				"192.168.0.0/16, 203.0.113.7, 198.51.100.0/24, 10.1.2.3 }",
@@ -128,6 +130,10 @@ func TestRules(t *testing.T) {
 	rules := Rules(&c, dns)
 	if strings.Index(rules, "th dport 53 ip daddr @dns4 accept") > strings.Index(rules, `oifname "lo"`) {
 		t.Error("DNS comes after the loopback drop")
+	}
+	// The answer to a LAN discovery broadcast comes before the LAN drop.
+	if strings.Index(rules, "udp sport 7551") > strings.Index(rules, "out_lan goto refuse") {
+		t.Error("discovery answer comes after the LAN drop")
 	}
 
 	c.GamePort, c.BedrockPort = 25575, 25576
