@@ -8,6 +8,8 @@
 ##		  /usr/local/bin, and runs `tt-minecraftd setup`, which does the rest.
 ##		- States its plan and asks first. Re-running it is safe: a current binary is left alone,
 ##		  and setup on an existing install runs repair and update.
+##		- With --any-distro it runs on other distros, and first checks that what setup would
+##		  install through apt is already there.
 ##	Syntax:
 ##		bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash) [options] [-- setup options]
 ##		  See fUsage below.
@@ -31,6 +33,11 @@ dlBase="https://github.com/${repo}/releases/download"
 destDir="/usr/local/bin"
 osRelease="/etc/os-release"
 ttyDev="/dev/tty"
+## There only when systemd is what booted the box.
+systemdDir="/run/systemd/system"
+## Where setup looks for them, as repair does.
+catatonitPaths="/usr/libexec/podman/catatonit /usr/bin/catatonit"
+nftPaths="/usr/sbin/nft /sbin/nft"
 
 fEcho(){       printf '[ %s ]\n' "$*"; }
 fEcho_Clean(){ printf '%s\n' "$*"; }
@@ -43,6 +50,9 @@ Usage:
 	bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash) [options] [-- setup options]
 Options:
 	--release stable|dev ... stable = newest release (default), dev = newest including pre-releases
+	--any-distro ........... for a distro this doesn't support. Nothing gets installed through a
+	                         package manager, so Podman and catatonit, or Docker, and nftables
+	                         have to be there already.
 	-y|--yes ............... skip this installer's prompt (setup still asks its own questions)
 	--version .............. print this installer's version
 	-h|--help .............. this help
@@ -50,10 +60,18 @@ Options:
 Notes:
 	- Options take "--name value" or "--name=value".
 	- Installs to /usr/local/bin/tt-minecraftd, through sudo when needed, then runs tt-minecraftd setup.
-	- Debian and its derivatives only for now. The CPU is detected; builds exist for amd64 and arm64.
+	- Debian and its derivatives, or another distro with --any-distro. The CPU is detected; builds
+	  exist for amd64 and arm64.
 	- With no stable release yet, stable takes the newest pre-release.
-	- Needs curl or wget, and sha256sum.
+	- Needs systemd, curl or wget, and sha256sum.
 EOF
+}
+
+## fAnyFile "PATH PATH...". Paths have no spaces.
+fAnyFile(){
+	local p
+	for p in $1; do [[ -f "${p}" ]] && return 0; done
+	return 1
 }
 
 ## Tag, then 1 for a pre-release. The API puts one field per line, and drafts aren't public, but skip them anyway.
@@ -99,14 +117,15 @@ fAsk(){
 }
 
 fMain(){
-	local release="stable" assumeYes=0 setupArgs=()
+	local release="stable" assumeYes=0 anyDistro=0 setupArgs=()
 	while (($#)); do case "$1" in
-		--release)   release="${2:-}"; shift; (($#)) && shift ;;
-		--release=*) release="${1#*=}"; shift ;;
-		-y|--yes)    assumeYes=1; shift ;;
-		--version)   echo "${exeName} installer v${installerVersion}"; return 0 ;;
-		-h|--help)   fUsage; return 0 ;;
-		--)          shift; setupArgs=("$@"); break ;;
+		--release)    release="${2:-}"; shift; (($#)) && shift ;;
+		--release=*)  release="${1#*=}"; shift ;;
+		--any-distro) anyDistro=1; shift ;;
+		-y|--yes)     assumeYes=1; shift ;;
+		--version)    echo "${exeName} installer v${installerVersion}"; return 0 ;;
+		-h|--help)    fUsage; return 0 ;;
+		--)           shift; setupArgs=("$@"); break ;;
 		*) printf '[ ERROR: unknown option: %s (try --help) ]\n' "$1" >&2; return 2 ;;
 	esac; done
 	[[ "${release}" == stable || "${release}" == dev ]] || { printf '[ ERROR: --release takes stable or dev ]\n' >&2; return 2; }
@@ -120,14 +139,16 @@ fMain(){
 		osId="$(awk -F= '$1 == "ID" { gsub(/"/, "", $2); print $2 }' "${osRelease}")"
 		osLike="$(awk -F= '$1 == "ID_LIKE" { gsub(/"/, "", $2); print $2 }' "${osRelease}")"
 	fi
+	## NixOS stays out even with --any-distro, since its /etc is built from its own config.
 	case "${osId}" in
 		debian) : ;;
 		nixos) fDie "NixOS isn't supported yet. Its module is planned for a later release." ;;
-		*) case " ${osLike} " in
+		*) if ((! anyDistro)); then case " ${osLike} " in
 			*" debian "*) : ;;
-			*) fDie "only Debian and its derivatives are supported for now, since setup installs packages through apt (this is '${osId:-unknown}')" ;;
-		esac ;;
+			*) fDie "only Debian and its derivatives are supported for now, since setup installs packages through apt (this is '${osId:-unknown}'). --any-distro skips this check, and then what setup needs has to be installed already." ;;
+		esac; fi ;;
 	esac
+	[[ -d "${systemdDir}" ]] || fDie "${exeName} needs systemd, and it isn't running here"
 	local arch
 	case "$(uname -m)" in
 		x86_64|amd64)  arch="amd64" ;;
@@ -139,6 +160,18 @@ fMain(){
 	elif command -v wget > /dev/null; then fetcher=wget
 	else fDie "curl or wget is needed"; fi
 	command -v sha256sum > /dev/null || fDie "sha256sum is needed"
+
+	## What setup would get through apt. It takes Podman over Docker when both are there.
+	if ((anyDistro)); then
+		local missing=""
+		if command -v podman > /dev/null; then
+			fAnyFile "${catatonitPaths}" || command -v catatonit > /dev/null || missing="${missing}, catatonit (Podman's container init)"
+		elif ! command -v docker > /dev/null; then
+			missing="${missing}, Podman and catatonit, or Docker"
+		fi
+		fAnyFile "${nftPaths}" || missing="${missing}, nftables (for the firewall)"
+		[[ -z "${missing}" ]] || fDie "--any-distro installs nothing, and this box is missing: ${missing#, }. Install it with this distro's package manager, then run this again."
+	fi
 
 	## Which release.
 	fEcho "Looking up the newest ${release} release"
@@ -180,6 +213,7 @@ fMain(){
 	## The plan.
 	fEcho "Plan"
 	fEcho_Clean "    Release ....: ${tag}${note}"
+	if ((anyDistro)); then fEcho_Clean "    Packages ...: none, since --any-distro installs nothing, and what setup needs is here"; fi
 	if ((current)); then
 		fEcho_Clean "    Install ....: ${destPath} is already ${tag}, matching SHA256SUMS, so it's left as is"
 	else
@@ -256,3 +290,4 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##	History:
 ##		- 2026-11-14: Created.
 ##		- 2026-11-17: A binary counts as current only when its SHA-256 matches the release's, not its version.
+##		- 2026-11-17: Added --any-distro, and a systemd check.

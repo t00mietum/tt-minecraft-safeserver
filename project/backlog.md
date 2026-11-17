@@ -22,6 +22,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- setup runs apt-get for catatonit on a box without apt
+	- ID: 2026111714065925
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Severity: Low
+	- Opened: 20261117-140659
+	- Opened by:
+	- Related IDs: 2026111713320657
+	- Incorrect behavior [Bug]: On a box with Podman, no catatonit, and no apt, setup's install step still runs apt-get install catatonit, and fails on the missing command. repair's catatonit and nftables messages also name apt-get.
+	- Expected behavior [Bug]: Without apt, setup stops before any change and says catatonit has to be installed first, as its runtime pick does for Podman itself.
+	- Reproduced [Bug]: No. Read only, from setup's packages(): the catatonit line has no apt check, unlike the nftables one.
+
 - install.bash: install for one user, without root
 	- ID: 2026111713320666
 	- Type: Feature
@@ -36,7 +49,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Installers: Docker or Podman as a prerequisite, and an option for other distros
 	- ID: 2026111713320657
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-133206
@@ -49,6 +62,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- systemd stays a hard requirement.
 		- From t00mietum's answers on 20261117 to the Check entries for 2026111111070800 and 2026111318335938.
 	- Estimated effort: Avg
+	- Closed reason: Done
+	- Actual effort: Avg
+	- Branch: nov17-2026111713320657
+	- Commit: 5bbac35
+	- Test case: df799 (no docker or podman refused unless --install-docker; podman counts; group note when docker info fails; --any-distro), df798 (no systemd refused; --any-distro checks Podman and catatonit or Docker, and nftables; NixOS still refused)
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy. The option names are a Check: entry in questions.md.
+	- Closed: 20261117-140819
+	- Progress log:
+		- 2026-11-17: install-dev.bash refuses before any change when there's no docker or podman, unless --install-docker (docker.io through apt) or --no-docker. Both installers take --any-distro, which skips the distro check, installs nothing, and checks what's needed first. install.bash checks for systemd in every mode. README's Installing and Developing sections say so.
+		- Verified: df798 and df799 pass in the quick gate, and under Bash 3.2 with busybox tools. Both fail on the scripts before this change. Taking out the systemd check, the catatonit check, the docker info check, or the podman-docker check each fails them.
+		- 2026-11-17: df799's bare-box, prompt, no-sudo, and distro cases now give --install-docker or a stand-in docker, since a bare box is refused without one. Its folder-refusal case takes git away in place of docker, so the refusal still has to come before apt.
+		- Swept: setup's own apt use without apt is filed as 2026111714065925. No other script calls the installers.
+	- Decisions:
+		- install.bash checks for Podman plus catatonit, or Docker, and nftables under --any-distro, since those are what setup would get through apt. Podman is checked first, as setup picks it first.
+		- The systemd check (/run/systemd/system) runs in every mode of install.bash, since setup needs it everywhere. install-dev.bash doesn't check it, since building and testing don't need it.
+		- install.bash still refuses NixOS under --any-distro, since its /etc comes from its own config. install-dev.bash allows it, since nothing it does depends on the distro.
+		- install-dev.bash's --any-distro doesn't check the CA file, since its path is Debian's; a missing bundle shows as a failed clone.
+		- --install-docker installs docker.io, as the old default did. With only Podman, a note says cicd/cicd.bash calls docker, which podman-docker adds.
+		- The docker group command now also shows when docker was there already and docker info fails for this account, since cicd then runs on the box without saying so.
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
