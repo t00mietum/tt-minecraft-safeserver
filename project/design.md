@@ -800,8 +800,8 @@ cicd/                        build, test, and release scripts
 - On the LAN, the server doesn't show under Friends, LAN Games, on any device. Players at home add it by its LAN address instead, which consoles can't do. See [Needs more thought](#needs-more-thought).
 	- Bedrock 26.60 and later look for LAN games with an encrypted broadcast to UDP port 7551, every 2 seconds. Nothing goes to `bedrockPort`.
 	- Geyser 2.12.1 doesn't answer on 7551. An open Geyser pull request adds that, off by default, with a second UDP port for LAN joins.
-	- The firewall drops the server's answers to a broadcast as it stands. See [Firewall](#firewall). The same goes for the old RakNet search on `bedrockPort`, which the pinned `transport` turns off anyway.
-	- Geyser has to listen on all addresses for any of this, since a socket that's bound to one address doesn't get broadcasts.
+	- The firewall lets the server answer a broadcast on 7551, to the LAN address and port that sent it. See [Firewall](#firewall). The old RakNet search on `bedrockPort` still gets no answer, and the pinned `transport` turns it off anyway.
+	- A socket bound to one address doesn't get broadcasts. In that pull request, discovery has its own address setting, all addresses by default, so `bindIP` doesn't get in its way.
 
 - Over the internet, phones, tablets, and Bedrock on PCs can add the server by address and port. Consoles can't add a server by address. See [Needs more thought](#needs-more-thought).
 
@@ -851,6 +851,7 @@ cicd/                        build, test, and release scripts
 		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
 		- That includes the server's answer to a LAN client's broadcast. Conntrack keys the client's packet on the broadcast address, so an answer from the server's own address isn't a reply. An answer to a client that asked the server's address directly still goes out.
+		- With `bedrock` on, Bedrock LAN discovery is the exception. A LAN address in `allowFrom` that broadcasts to UDP 7551 is remembered for 10 seconds, with the port it sent from. The server may send from 7551 to that address and port only. Clients broadcast every 2 seconds, so a client that's still looking stays on the list.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
 		- With `bedrock` on, UDP to ports 3478 and 19302 is allowed too, for Geyser's STUN lookup. Without it, players over the internet get only the server's LAN address, and can't connect.
 		- NetherNet's connection checks from the server to a player's own addresses count as new connections, and get dropped unless they're replies. The player's checks to the server still set up the connection.

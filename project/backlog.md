@@ -65,6 +65,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
 		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
 		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
+	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
+	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
+	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
 - Keep the server's DNS name current when the home address changes
 	- ID: 2026111412275159
@@ -145,6 +148,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Try sudo -n true first, then sudo -v.
 	- Progress log:
 		- 2026-11-14: Seen in the live move on b23. sudo tt-minecraftd start worked around it.
+
+- Let the server answer Bedrock LAN discovery through the firewall
+	- ID: 2026111708582431
+	- Type: Enhancement
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261117-085824
+	- Opened by: t00mietum
+	- Parent ID: 2026111318485184
+	- Requirements: Let the server's answers from UDP 7551 reach the LAN addresses in allowFrom, ahead of the LAN drop.
+	- Decisions: Only an address and port that broadcast to 7551 in the last 10 seconds get an answer from 7551. Clients broadcast from any port, so a plain rule on the source port would let the server send anything to the whole LAN.
+	- Branch: lan-discovery
+	- Verified: 2026-11-17: df797 gets the 7551 broadcast answer with the rules loaded, and an unasked send from 7551 to a LAN host is refused. It failed on the old rules. df66c checks the rules with nft for every mix. Quick gate passed.
+	- Test case: df797, df66c
+	- Acceptance signoff: Self-closed: its tests failed before and pass after.
+	- Closed: 20261117-085824
 
 - Bedrock LAN discovery
 	- ID: 2026111111065829

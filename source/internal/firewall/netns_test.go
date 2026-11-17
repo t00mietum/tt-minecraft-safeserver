@@ -5,6 +5,7 @@ package firewall
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,8 +23,10 @@ import (
 )
 
 // udpStandIn is the test binary run again inside a network namespace, as
-// "serve <port>..." (answer every datagram to its sender) or "probe
-// <addr:port>" (send one and say whether anything came back).
+// "serve <port>..." (answer every datagram to its sender), "probe
+// <addr:port>" (send one and say whether anything came back), "send <port>
+// <addr:port>" (send one from that port) or "listen <port>" (say whether
+// anything arrives).
 func udpStandIn(args []string) int {
 	if len(args) < 2 {
 		return 2
@@ -50,6 +53,40 @@ func udpStandIn(args []string) int {
 		}
 		fmt.Println("ready")
 		time.Sleep(time.Minute)
+	case "send":
+		if len(args) < 3 {
+			return 2
+		}
+		c, err := net.ListenPacket("udp4", "0.0.0.0:"+args[1])
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		to, err := net.ResolveUDPAddr("udp4", args[2])
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		// An output drop shows up here as EPERM.
+		if _, err := c.WriteTo([]byte("hello"), to); errors.Is(err, syscall.EPERM) {
+			fmt.Println("refused")
+		} else if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+	case "listen":
+		c, err := net.ListenPacket("udp4", "0.0.0.0:"+args[1])
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		fmt.Println("ready")
+		_ = c.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
+		if _, _, err := c.ReadFrom(make([]byte, 512)); err != nil {
+			fmt.Println("none")
+		} else {
+			fmt.Println("heard")
+		}
 	case "probe":
 		lc := net.ListenConfig{Control: func(_, _ string, rc syscall.RawConn) error {
 			var serr error
@@ -87,9 +124,11 @@ func udpStandIn(args []string) int {
 
 // LAN discovery: a client broadcasts, and the server answers it straight
 // back. Conntrack keys the probe on the broadcast address, so the answer
-// from the server's own address isn't a reply. With the rules loaded it's a
-// new packet to the LAN, and out_lan drops it. A unicast probe of the same
-// port still gets its answer. The run without the rules is the control.
+// from the server's own address isn't a reply. With the rules loaded, the
+// answer to a broadcast on 7551 gets out, and one on 19132 is a new packet
+// to the LAN that out_lan drops. A unicast probe still gets its answer, and
+// the server can't send from 7551 to a LAN host that didn't ask. The run
+// without the rules is the control.
 func TestBroadcastAnswer(t *testing.T) {
 	defer testid.Line(t, "df797")
 	if !nftCheck(t, "") {
@@ -115,8 +154,8 @@ func TestBroadcastAnswer(t *testing.T) {
 	if err := os.WriteFile(rules, []byte(Rules(&cfg, nil)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// 7551 is Bedrock's newer LAN discovery port, which Geyser doesn't
-	// answer yet. It isn't a game port, so only the answer is checked.
+	// 19132 is RakNet's old discovery, which Geyser no longer answers with
+	// transport pinned to nethernet.
 	probes := []string{"192.168.77.1:19132", "255.255.255.255:19132", "255.255.255.255:7551"}
 	script := `set -e
 ip link set lo up
@@ -136,12 +175,18 @@ for to in ` + strings.Join(probes, " ") + `; do
 	printf 'probe %s ' "$to"
 	TT_UDP_STANDIN="probe $to" nsenter -t $C -n "$BIN"
 done
+kill $S; wait $S 2>/dev/null || true; S=
+TT_UDP_STANDIN="listen 40000" nsenter -t $C -n "$BIN" > "$LLOG" & L=$!
+while ! grep -q ready "$LLOG"; do sleep 0.01; done
+TT_UDP_STANDIN="send 7551 192.168.77.2:40000" "$BIN"
+wait $L
+printf 'unasked '; tail -n 1 "$LLOG"
 grep got "$LOG" | sort | uniq -c
 [ -z "$RULES" ] || /usr/sbin/nft -j list counters inet
 `
 	for _, load := range []bool{false, true} {
 		cmd := exec.Command("unshare", "-rn", "sh", "-c", script)
-		cmd.Env = append(os.Environ(), "BIN="+bin, "LOG="+filepath.Join(dir, fmt.Sprint("serve-", load, ".log")), "RULES=")
+		cmd.Env = append(os.Environ(), "BIN="+bin, "LOG="+filepath.Join(dir, fmt.Sprint("serve-", load, ".log")), "LLOG="+filepath.Join(dir, fmt.Sprint("listen-", load, ".log")), "RULES=")
 		if load {
 			cmd.Env[len(cmd.Env)-1] = "RULES=" + rules
 		}
@@ -150,9 +195,9 @@ grep got "$LOG" | sort | uniq -c
 			t.Fatalf("loaded %v: %v\n%s", load, err, out)
 		}
 		got := string(out)
-		want := []string{"probe 192.168.77.1:19132 reply", "probe 255.255.255.255:19132 reply", "probe 255.255.255.255:7551 reply"}
+		want := []string{"probe 192.168.77.1:19132 reply", "probe 255.255.255.255:19132 reply", "probe 255.255.255.255:7551 reply", "unasked heard"}
 		if load {
-			want = []string{"probe 192.168.77.1:19132 reply", "probe 255.255.255.255:19132 none", "probe 255.255.255.255:7551 none"}
+			want = []string{"probe 192.168.77.1:19132 reply", "probe 255.255.255.255:19132 none", "probe 255.255.255.255:7551 reply", "unasked none"}
 		}
 		// Every probe reached the server, so what's missing is its answer.
 		want = append(want, "2 got 19132", "1 got 7551")
