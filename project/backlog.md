@@ -246,13 +246,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - status says nothing listens on the Bedrock UDP port, which is normal while no Bedrock player is on
 	- ID: 2026111412275169
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-122751
 	- Opened by:
 	- Incorrect behavior [Bug]: Geyser opens its NetherNet UDP socket only during a join, so status reads like a fault when idle.
 	- Expected behavior [Bug]: status says the UDP port opens per join, or checks only the TCP signaling port.
+	- Actual cause [Bug]: status printed the same line for every port with no listener, Bedrock UDP included.
+	- Actual fix [Bug]: With no Bedrock UDP listener, status says the port opens when a Bedrock player joins. A listener still shows as before, and a missing TCP listener still says nothing listens. design.md updated.
+	- Test case: df79f
+	- Branch: nov17-2026111412275169
+	- Commit: 4f32385
+	- Needs hand testing: On the live server with no Bedrock player on, status shows the line about UDP opening on a join. Judge the wording.
+	- Stand-in: none (20261117). The wording is a matter of taste.
+	- Decisions:
+		- Kept the UDP line, worded as normal when idle, rather than dropping UDP from status. A listener during a join still shows.
+		- The claim that Geyser opens UDP only per join wasn't checked here. A throwaway server on 20261111 listed UDP right after start, so the line stays factual either way.
+		- Swept: the Bedrock UDP port is the only per-join socket status reads. The game port and Bedrock TCP keep the nothing listens line.
+	- Verified: df79f fails without the change and passes with it. Quick gate passed.
 
 - repair --check fails while the server runs on files the server writes as 0600
 	- ID: 2026111412081476
@@ -310,7 +322,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - start's sudo -v asks for a password where a NOPASSWD rule sits beside password rules
 	- ID: 2026111410134553
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-101345
@@ -319,6 +331,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Try sudo -n true first, then sudo -v.
 	- Progress log:
 		- 2026-11-14: Seen in the live move on b23. sudo tt-minecraftd start worked around it.
+		- Verified: df79e fails with the sudo -n try taken out, and passes with it in. Quick gate passed.
+		- Not tried against a real sudoers file with mixed rules, since that needs root.
+	- Closed reason: Done
+	- Actual cause [Bug]: start asked for sudo with sudo -v alone, which prompts unless every matching sudoers rule is NOPASSWD.
+	- Actual fix [Bug]: start tries sudo -n true first, quietly and without the terminal, and runs sudo -v only when that fails. design.md updated.
+	- Test case: df79e
+	- Branch: nov17-2026111412275169
+	- Commit: 4f32385
+	- Acceptance signoff: Self-closed: the fix is what the item asked for, and df79e passes.
+	- Closed: 20261117-135809
+	- Decisions:
+		- sudo -n true is a look, so --dry-run runs it too, and prints sudo -v only when it fails.
+		- 20261117: df64g TestFindContainer skips the first 3 commands, not 2, since start now runs sudo -n true first.
+		- Swept: kit.go's sudoUp is the only sudo -v. Every start, stop, console and boot path goes through it. attach's sudo -n relies on it as before.
 
 - Keep the server's DNS name current when the home address changes
 	- ID: 2026111412275159

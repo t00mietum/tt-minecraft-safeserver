@@ -153,7 +153,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 1. Load and check the config. Refuse when a Paper server is already running, under any account. That includes one the old scripts started.
 
-2. Get sudo once, up front, with `sudo -v`.
+2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules.
 
 3. Check the safe settings in `server.properties` and the other server files. Refuse when one is wrong, and name the setting and `repair` as the fix. See [Safe server settings](#safe-server-settings).
 
@@ -186,6 +186,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- The Minecraft and Paper versions, and players online. Those come from a server list ping on localhost, so they don't need RCON or query.
 	- Memory use against the cap.
 	- What listens on the game ports, and how many connections each has.
+		- Geyser opens its UDP socket on `bedrockPort` only while a Bedrock player joins. With none listening, `status` says it opens on a join, rather than reading like a fault.
 	- The firewall drop counters. A rising outbound count means something in the server tried to connect where it shouldn't.
 		- Reading them needs root. Run as root, such as with sudo, `status` shows them, and otherwise it says so in one line. It never runs sudo itself, so the output doesn't change with sudo's cache.
 	- The whitelist size and the list of ops.
@@ -597,7 +598,7 @@ cicd/                        build, test, and release scripts
 | `start --foreground` from the boot unit | root, from systemd
 | The server                              | the service account
 
-- All sudo happens in the foreground, right after one `sudo -v`. Sudo never runs inside a detached session.
+- All sudo happens in the foreground, right after the one sudo check `start` makes up front. Sudo never runs inside a detached session.
 
 ### Why a container
 

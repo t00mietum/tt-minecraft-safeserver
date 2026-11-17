@@ -207,11 +207,13 @@ func (p *Probe) ports(ctx context.Context) []Line {
 	if err != nil {
 		lines = append(lines, Line{"Ports", "can't list sockets: " + err.Error()})
 	} else {
-		lines = append(lines, portLines(out, "tcp", p.Cfg.GamePort)...)
+		lines = append(lines, portLines(out, "tcp", p.Cfg.GamePort, "")...)
 		if p.Cfg.Bedrock {
-			// NetherNet: signaling on TCP, game traffic on UDP.
-			lines = append(lines, portLines(out, "tcp", p.Cfg.BedrockPort)...)
-			lines = append(lines, portLines(out, "udp", p.Cfg.BedrockPort)...)
+			// NetherNet: signaling on TCP, game traffic on UDP. Geyser opens
+			// the UDP socket per join, so it's normally closed when idle.
+			lines = append(lines, portLines(out, "tcp", p.Cfg.BedrockPort, "")...)
+			lines = append(lines, portLines(out, "udp", p.Cfg.BedrockPort,
+				fmt.Sprintf("udp %d opens when a Bedrock player joins", p.Cfg.BedrockPort))...)
 		}
 		lines[0].Label = "Ports"
 	}
@@ -253,7 +255,8 @@ func (p *Probe) firewall(ctx context.Context) []Line {
 }
 
 // portLines reads ss -H -t -u -a -n: netid, state, queues, local, peer.
-func portLines(ss []byte, proto string, port int) []Line {
+// idle, when set, replaces the line for a port nothing listens on.
+func portLines(ss []byte, proto string, port int, idle string) []Line {
 	want := strconv.Itoa(port)
 	var listen []string
 	conns := 0
@@ -273,7 +276,10 @@ func portLines(ss []byte, proto string, port int) []Line {
 			conns++
 		}
 	}
-	if len(listen) == 0 {
+	switch {
+	case len(listen) == 0 && idle != "":
+		return []Line{{"", idle}}
+	case len(listen) == 0:
 		return []Line{{"", fmt.Sprintf("nothing listens on %s %d", proto, port)}}
 	}
 	text := fmt.Sprintf("%s %s listening", proto, strings.Join(listen, ", "))

@@ -210,6 +210,24 @@ func TestStatusNative(t *testing.T) {
 	}
 }
 
+// Geyser opens the Bedrock UDP socket only while a player joins, so no UDP
+// listener when idle reads as normal. A missing TCP listener still doesn't.
+func TestStatusBedrockIdle(t *testing.T) {
+	defer testid.Line(t, "df79f")
+	g := newRig(t)
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
+	g.replies["ss -H"] = "tcp   LISTEN 0 50  *:25565 *:*\n"
+	out := g.text(t, 0)
+	wantLines(t, out,
+		"Ports:      tcp *:25565 listening, 0 connections",
+		"            nothing listens on tcp 19132",
+		"            udp 19132 opens when a Bedrock player joins",
+	)
+	if strings.Contains(out, "nothing listens on udp") {
+		t.Errorf("idle UDP read as a fault:\n%s", out)
+	}
+}
+
 // Mode gives the server's mode from its cgroup, whatever runMode says.
 func TestProbeMode(t *testing.T) {
 	defer testid.Line(t, "df67y")
