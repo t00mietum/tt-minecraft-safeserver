@@ -22,60 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- Bedrock LAN discovery
-	- ID: 2026111111065829
-	- Type: Task
-	- Status: Waiting on signoff
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711 2026111113015461
-	- Requirements:
-		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
-		- Fix `how-to-connect.md` if they don't.
-	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
-	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
-	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
-		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
-		- Verified: df797 loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, df797 fails.
-		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
-		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
-	- Decisions:
-		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
-		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
-		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
-	- Stand-in: none (20261113). The remaining check is a real phone and console on the home Wi-Fi. df797 already covers the firewall side in a namespace.
-	- Test case: df797
-	- Branch: nov14-2026111111065829
-	- Commit: fb7097b
-	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
-
-- Move the first server over
-	- ID: 2026111111070787
-	- Type: Task
-	- Status: Waiting on signoff
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065776
-	- Requirements:
-		- Move the existing server to the new account and tool with `setup --adopt`.
-		- Approve the plugins that are there now.
-		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
-		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
-		- Retire the old start, stop, and manage scripts after it runs clean.
-	- Needs hand testing: An account that isn't whitelisted is refused.
-	- Test case: repair --check as root (all OK), and a status ping to the home domain from outside, through the router forward
-	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
-	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
-	- 2026-11-14: Moved with setup --adopt on v1.0.0-alpha.1. The server runs in Podman as minecraftd, with the firewall table loaded. Java answers from the internet and the LAN. Details and the one config line left for a hand copy are in details.md.
-	- 2026-11-14: The old server scripts are archived and trashed. 3 more past players were whitelisted.
-	- 2026-11-14: A Bedrock phone joined over the internet with a Floodgate login and its whitelisted UUID, into the existing world.
-	- 2026-11-14: The phone session ended because the player left. The bindIP line is in the config, and a root repair --check passes but for the 0600 false alarm.
-
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -84,6 +30,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Opened by: JC
 	- Progress log:
 		- 2026-11-07: Left open from the Paper 26.3 update, done before this repo. TreeCapitator 1.0 and AntiCreeper 5.1 have no updates but load. Sleeping uses the players_sleeping_percentage game rule, at 0, in place of OnePlayerSleep.
+		- 2026-11-17: Logs since 11-07 show TreeCapitator 1.0 enabled with only the legacy api-version warning, and no plugin errors. Chopping and sleeping still need a player in game.
 	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
 
 - Move shared code to tt-safeserver
@@ -198,6 +145,66 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Try sudo -n true first, then sudo -v.
 	- Progress log:
 		- 2026-11-14: Seen in the live move on b23. sudo tt-minecraftd start worked around it.
+
+- Bedrock LAN discovery
+	- ID: 2026111111065829
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711 2026111113015461
+	- Requirements:
+		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
+		- Fix `how-to-connect.md` if they don't.
+	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
+	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
+		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
+		- Verified: df797 loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, df797 fails.
+		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
+		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
+	- Decisions:
+		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
+		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
+		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
+	- Stand-in: none (20261113). The remaining check is a real phone and console on the home Wi-Fi. df797 already covers the firewall side in a namespace.
+	- Test case: df797
+	- Branch: nov14-2026111111065829
+	- Commit: fb7097b
+	- Verified: 2026-11-17: df797 passes. The live firewall has allowFrom any, input policy accept, and egress web, so a server packet that starts a flow is dropped to the internet as it is to the LAN. The phone that joined over the internet on 2026-11-14 got in that way, so a LAN phone that adds the server by address goes the same path.
+	- Acceptance signoff: Self-closed: LAN Games can't list the server until Geyser answers on 7551, which 2026111318485184 holds. The join by address is pinned by df797 and the live internet join.
+	- Closed: 20261117-084849
+	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
+
+- Move the first server over
+	- ID: 2026111111070787
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065776
+	- Requirements:
+		- Move the existing server to the new account and tool with `setup --adopt`.
+		- Approve the plugins that are there now.
+		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
+		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
+		- Retire the old start, stop, and manage scripts after it runs clean.
+	- Needs hand testing: An account that isn't whitelisted is refused.
+	- Test case: repair --check as root (all OK), a status ping to the home domain from outside, and df5yk, df5ym and df5yj for the whitelist
+	- Verified: 2026-11-17: The live server.properties has white-list, enforce-whitelist and online-mode on. df5yk, df5ym and df5yj pass, so start refuses and repair fixes a server with the whitelist off. Floodgate logins go through the same Java whitelist.
+	- Acceptance signoff: Self-closed: the refusal is Paper's own whitelist check, which the safe settings check keeps on at every start.
+	- Closed: 20261117-084849
+	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
+	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
+	- 2026-11-14: Moved with setup --adopt on v1.0.0-alpha.1. The server runs in Podman as minecraftd, with the firewall table loaded. Java answers from the internet and the LAN. Details and the one config line left for a hand copy are in details.md.
+	- 2026-11-14: The old server scripts are archived and trashed. 3 more past players were whitelisted.
+	- 2026-11-14: A Bedrock phone joined over the internet with a Floodgate login and its whitelisted UUID, into the existing world.
+	- 2026-11-14: The phone session ended because the player left. The bindIP line is in the config, and a root repair --check passes but for the 0600 false alarm.
 
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
