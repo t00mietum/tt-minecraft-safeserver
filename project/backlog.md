@@ -22,80 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- setup runs apt-get for catatonit on a box without apt
-	- ID: 2026111714065925
-	- Type: Bug
-	- Status: Closed
-	- Closed reason: Done
-	- Target version: v1.0.0-beta.1
-	- Severity: Low
-	- Opened: 20261117-140659
-	- Opened by:
-	- Related IDs: 2026111713320657
-	- Incorrect behavior [Bug]: On a box with Podman, no catatonit, and no apt, setup's install step still runs apt-get install catatonit, and fails on the missing command. repair's catatonit and nftables messages also name apt-get.
-	- Expected behavior [Bug]: Without apt, setup stops before any change and says catatonit has to be installed first, as its runtime pick does for Podman itself.
-	- Reproduced [Bug]: 20261117, in setup's test rig: with Podman, no catatonit and no apt, setup asked to go ahead and ran apt-get update, the account steps, the tree, and the rest. `runMode=podman` with neither Podman nor apt did the same.
-	- Cause [Bug]: packages() checked for apt only for nftables, and nothing checked it before install.
-	- Actual fix [Bug]: setup stops before the plan when Podman or catatonit is missing and there's no apt-get, and says to install it first. repair's catatonit and nftables findings name apt-get only when it's there, and the distro's package otherwise.
-	- Test case: df79g (no apt: no catatonit, or Podman given, stops before any command or prompt; a missing nft alone still goes to the firewall step), df66g and df64h's repair asserts (hint with and without apt)
-	- Verified: df79g fails on the code before the fix, with every setup command run, and passes after. The backlog quick run passed.
-	- Swept: setup's packages(), pickRuntime() (already checked apt) and firewall step; repair's catatonit and nftables findings. No other apt-get call in Go code. design.md's setup section says so.
-	- Decisions:
-		- A missing nft without apt still stops setup at the firewall step, as design.md's step 9 says, rather than up front. Only the packages install would fail on are checked early.
-		- The check runs in dry runs too, since the install would fail the same way.
-		- 20261117: df66g's no-nft assert and the catatonit assert in repair's container test now expect "the distro's ... package adds it" with no apt-get, and keep the old apt-get text with apt-get there.
-	- Branch: nov17-2026111714065925
-	- Commit: 50f4429
-	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
-	- Closed: 20261117-141400
-
-- install.bash: install for one user, without root
-	- ID: 2026111713320666
-	- Type: Feature
-	- Status: Deferred
-	- Priority: Low
-	- Opened: 20261117-133206
-	- Opened by:
-	- Related IDs: 2026111111070761
-	- Requirements:
-		- An install into the user's own folders, beside the system install. t00mietum on 20261117: system only is OK for now, and user setup can be a deferred item.
-
-- Installers: Docker or Podman as a prerequisite, and an option for other distros
-	- ID: 2026111713320657
-	- Type: Enhancement
-	- Status: Closed
-	- Target version: v1.0.0-beta.1
-	- Priority: Avg
-	- Opened: 20261117-133206
-	- Opened by:
-	- Related IDs: 2026111111070800, 2026111111070761, 2026111318335938
-	- Requirements:
-		- install-dev.bash treats Docker or Podman as a prerequisite, and installs one only when a flag asks it to try.
-		- It still prints the command that adds the account to the docker or podman group, rather than running it.
-		- install.bash and install-dev.bash get an option for distros they don't support, such as non-Debian ones. With it they install nothing through any package manager and only check that what they need is already there, such as docker.
-		- systemd stays a hard requirement.
-		- From t00mietum's answers on 20261117 to the Check entries for 2026111111070800 and 2026111318335938.
-	- Estimated effort: Avg
-	- Closed reason: Done
-	- Actual effort: Avg
-	- Branch: nov17-2026111713320657
-	- Commit: 5bbac35
-	- Test case: df799 (no docker or podman refused unless --install-docker; podman counts; group note when docker info fails; --any-distro), df798 (no systemd refused; --any-distro checks Podman and catatonit or Docker, and nftables; NixOS still refused)
-	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy. The option names are a Check: entry in questions.md.
-	- Closed: 20261117-140819
-	- Progress log:
-		- 2026-11-17: install-dev.bash refuses before any change when there's no docker or podman, unless --install-docker (docker.io through apt) or --no-docker. Both installers take --any-distro, which skips the distro check, installs nothing, and checks what's needed first. install.bash checks for systemd in every mode. README's Installing and Developing sections say so.
-		- Verified: df798 and df799 pass in the quick gate, and under Bash 3.2 with busybox tools. Both fail on the scripts before this change. Taking out the systemd check, the catatonit check, the docker info check, or the podman-docker check each fails them.
-		- 2026-11-17: df799's bare-box, prompt, no-sudo, and distro cases now give --install-docker or a stand-in docker, since a bare box is refused without one. Its folder-refusal case takes git away in place of docker, so the refusal still has to come before apt.
-		- Swept: setup's own apt use without apt is filed as 2026111714065925. No other script calls the installers.
-	- Decisions:
-		- install.bash checks for Podman plus catatonit, or Docker, and nftables under --any-distro, since those are what setup would get through apt. Podman is checked first, as setup picks it first.
-		- The systemd check (/run/systemd/system) runs in every mode of install.bash, since setup needs it everywhere. install-dev.bash doesn't check it, since building and testing don't need it.
-		- install.bash still refuses NixOS under --any-distro, since its /etc comes from its own config. install-dev.bash allows it, since nothing it does depends on the distro.
-		- install-dev.bash's --any-distro doesn't check the CA file, since its path is Debian's; a missing bundle shows as a failed clone.
-		- --install-docker installs docker.io, as the old default did. With only Podman, a note says cicd/cicd.bash calls docker, which podman-docker adds.
-		- The docker group command now also shows when docker was there already and docker info fails for this account, since cicd then runs on the box without saying so.
-
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -107,6 +33,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-07: Left open from the Paper 26.3 update, done before this repo. TreeCapitator 1.0 and AntiCreeper 5.1 have no updates but load. Sleeping uses the players_sleeping_percentage game rule, at 0, in place of OnePlayerSleep.
 		- 2026-11-17: Logs since 11-07 show TreeCapitator 1.0 enabled with only the legacy api-version warning, and no plugin errors. Chopping and sleeping still need a player in game.
 	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
+	- Stand-in: none (20261117). Only a player in the game can judge tree felling, leaf decay and the sleep vote.
 
 - Move shared code to tt-safeserver
 	- ID: 2026111111303242
@@ -145,6 +72,69 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
+
+- setup runs apt-get for catatonit on a box without apt
+	- ID: 2026111714065925
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Severity: Low
+	- Opened: 20261117-140659
+	- Opened by:
+	- Related IDs: 2026111713320657
+	- Incorrect behavior [Bug]: On a box with Podman, no catatonit, and no apt, setup's install step still runs apt-get install catatonit, and fails on the missing command. repair's catatonit and nftables messages also name apt-get.
+	- Expected behavior [Bug]: Without apt, setup stops before any change and says catatonit has to be installed first, as its runtime pick does for Podman itself.
+	- Reproduced [Bug]: 20261117, in setup's test rig: with Podman, no catatonit and no apt, setup asked to go ahead and ran apt-get update, the account steps, the tree, and the rest. `runMode=podman` with neither Podman nor apt did the same.
+	- Cause [Bug]: packages() checked for apt only for nftables, and nothing checked it before install.
+	- Actual fix [Bug]: setup stops before the plan when Podman or catatonit is missing and there's no apt-get, and says to install it first. repair's catatonit and nftables findings name apt-get only when it's there, and the distro's package otherwise.
+	- Test case: df79g (no apt: no catatonit, or Podman given, stops before any command or prompt; a missing nft alone still goes to the firewall step), df66g and df64h's repair asserts (hint with and without apt)
+	- Verified: df79g fails on the code before the fix, with every setup command run, and passes after. The backlog quick run passed.
+	- Swept: setup's packages(), pickRuntime() (already checked apt) and firewall step; repair's catatonit and nftables findings. No other apt-get call in Go code. design.md's setup section says so.
+	- Decisions:
+		- A missing nft without apt still stops setup at the firewall step, as design.md's step 9 says, rather than up front. Only the packages install would fail on are checked early.
+		- The check runs in dry runs too, since the install would fail the same way.
+		- 20261117: df66g's no-nft assert and the catatonit assert in repair's container test now expect "the distro's ... package adds it" with no apt-get, and keep the old apt-get text with apt-get there.
+	- Branch: nov17-2026111714065925
+	- Commit: 50f4429
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-141400
+
+- Installers: Docker or Podman as a prerequisite, and an option for other distros
+	- ID: 2026111713320657
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070800, 2026111111070761, 2026111318335938
+	- Requirements:
+		- install-dev.bash treats Docker or Podman as a prerequisite, and installs one only when a flag asks it to try.
+		- It still prints the command that adds the account to the docker or podman group, rather than running it.
+		- install.bash and install-dev.bash get an option for distros they don't support, such as non-Debian ones. With it they install nothing through any package manager and only check that what they need is already there, such as docker.
+		- systemd stays a hard requirement.
+		- From t00mietum's answers on 20261117 to the Check entries for 2026111111070800 and 2026111318335938.
+	- Estimated effort: Avg
+	- Closed reason: Done
+	- Actual effort: Avg
+	- Branch: nov17-2026111713320657
+	- Commit: 5bbac35
+	- Test case: df799 (no docker or podman refused unless --install-docker; podman counts; group note when docker info fails; --any-distro), df798 (no systemd refused; --any-distro checks Podman and catatonit or Docker, and nftables; NixOS still refused)
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy. The option names are a Check: entry in questions.md.
+	- Closed: 20261117-140819
+	- Progress log:
+		- 2026-11-17: install-dev.bash refuses before any change when there's no docker or podman, unless --install-docker (docker.io through apt) or --no-docker. Both installers take --any-distro, which skips the distro check, installs nothing, and checks what's needed first. install.bash checks for systemd in every mode. README's Installing and Developing sections say so.
+		- Verified: df798 and df799 pass in the quick gate, and under Bash 3.2 with busybox tools. Both fail on the scripts before this change. Taking out the systemd check, the catatonit check, the docker info check, or the podman-docker check each fails them.
+		- 2026-11-17: df799's bare-box, prompt, no-sudo, and distro cases now give --install-docker or a stand-in docker, since a bare box is refused without one. Its folder-refusal case takes git away in place of docker, so the refusal still has to come before apt.
+		- Swept: setup's own apt use without apt is filed as 2026111714065925. No other script calls the installers.
+	- Decisions:
+		- install.bash checks for Podman plus catatonit, or Docker, and nftables under --any-distro, since those are what setup would get through apt. Podman is checked first, as setup picks it first.
+		- The systemd check (/run/systemd/system) runs in every mode of install.bash, since setup needs it everywhere. install-dev.bash doesn't check it, since building and testing don't need it.
+		- install.bash still refuses NixOS under --any-distro, since its /etc comes from its own config. install-dev.bash allows it, since nothing it does depends on the distro.
+		- install-dev.bash's --any-distro doesn't check the CA file, since its path is Debian's; a missing bundle shows as a failed clone.
+		- --install-docker installs docker.io, as the old default did. With only Podman, a note says cicd/cicd.bash calls docker, which podman-docker adds.
+		- The docker group command now also shows when docker was there already and docker info fails for this account, since cicd then runs on the box without saying so.
 
 - Refusing a plugin follows a link in the server tree
 	- ID: 2026111709090977
@@ -2769,6 +2759,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: r1111, repair-sudo
 	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
 	- Closed: 20261111-133545
+
+- install.bash: install for one user, without root
+	- ID: 2026111713320666
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070761
+	- Requirements:
+		- An install into the user's own folders, beside the system install. t00mietum on 20261117: system only is OK for now, and user setup can be a deferred item.
 
 - update --self
 	- ID: 2026111318002865
