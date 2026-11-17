@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -418,6 +419,52 @@ func TestAdoptGeyserSource(t *testing.T) {
 	}
 	if !strings.Contains(r.out.String(), "says:   Geyser-Spigot 2.12.1\n  source: "+r.geyser.Source("geyser")+"\n") {
 		t.Errorf("plan doesn't show the source:\n%s", r.out)
+	}
+}
+
+// An adopted tree's Floodgate key loses other accounts' access before the
+// final check, as repair gives it. A dry run leaves it as it is.
+func TestAdoptFloodgateKey(t *testing.T) {
+	defer testid.Line(t, "df79d")
+	for _, dry := range []bool{true, false} {
+		r := newRig(t, []string{"docker"}, "", "bedrock=true")
+		r.s.Yes, r.s.DryRun = true, dry
+		old := filepath.Join(r.dir, "old", "paper")
+		if err := os.MkdirAll(filepath.Join(old, "plugins", "floodgate"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		for name, text := range map[string]string{"paper.jar": "jar", "eula.txt": "eula=true\n"} {
+			if err := os.WriteFile(filepath.Join(old, name), []byte(text), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeJar(t, filepath.Join(old, "plugins", "Geyser-Spigot.jar"), "name: Geyser-Spigot\nversion: 2.12.1\n")
+		writeJar(t, filepath.Join(old, "plugins", "floodgate-spigot.jar"), "name: floodgate\nversion: 2.2.5\n")
+		key := filepath.Join(old, "plugins", "floodgate", "key.pem")
+		if err := os.WriteFile(key, []byte("key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(key, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r.s.Adopt = old
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("dry %v: %v\n%s", dry, err, r.out)
+		}
+		fi, err := os.Stat(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, mode := "FIXED", os.FileMode(0o640)
+		if dry {
+			state, mode = "PLAN", 0o644
+		}
+		if fi.Mode().Perm() != mode {
+			t.Errorf("dry %v: key is %04o, want %04o", dry, fi.Mode().Perm(), mode)
+		}
+		if want := fmt.Sprintf("%-7s %s can only be read by its owner and group now\n", state, key); !strings.Contains(r.out.String(), want) {
+			t.Errorf("dry %v: no %q in:\n%s", dry, want, r.out)
+		}
 	}
 }
 

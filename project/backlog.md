@@ -220,7 +220,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair counts an outgoing ufw rule as opening the game port
 	- ID: 2026111709090987
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-090909
@@ -229,6 +229,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: only ALLOW IN rules count.
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/repair/hostfw.go.
+		- Verified: df5zm fails on the old code and passes with the fix, and the quick gate passes.
+	- Decisions:
+		- LIMIT IN rules still don't count as open, as before.
+		- Swept: ufwMissing is the only ufw rule reader. firewalld's --list-ports gives only inbound ports.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df5zm on the old code: with only ALLOW OUT and ALLOW FWD rules for the game ports, the check reported nothing.
+	- Actual cause [Bug]: ufwMissing took the port spec of any line with ALLOW in it, whatever the direction after it.
+	- Actual fix [Bug]: Only a line whose action is ALLOW IN counts. ufw status verbose always names the direction.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: df5zm
+	- Acceptance signoff: Self-closed: df5zm fails on the old code and passes now.
+	- Closed: 20261117-135211
 
 - status says nothing listens on the Bedrock UDP port, which is normal while no Bedrock player is on
 	- ID: 2026111412275169
@@ -244,7 +257,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair --check fails while the server runs on files the server writes as 0600
 	- ID: 2026111412081476
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-120814
@@ -253,17 +266,46 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: The running check flags only files other accounts can reach, or the wrong owner. Modes tighter than ug+rwX pass.
 	- Progress log:
 		- 2026-11-14: Seen on b23 after the move. Nothing other accounts can read.
+		- Verified: df5zf fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-17: df5zf's two mode asserts expected "with modes other than ug+rwX,o-rwx" and now expect "other accounts can reach", the new message.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df5zf on the old code: with the server running, a 0600 temp file, a 0700 folder and a 0400 file in it were reported as 4 files with the wrong modes.
+	- Actual cause [Bug]: The running check wanted every file at least ug+rw and every folder ug+x, so any tighter mode failed.
+	- Actual fix [Bug]: While the server runs, the check flags only files other accounts can reach, plus the wrong owner as before. Its message says so.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: df5zf
+	- Acceptance signoff: Self-closed: df5zf fails on the old code and passes now.
+	- Closed: 20261117-135211
+	- Decisions:
+		- A tighter mode can keep the operator's group out of a file while the server runs. That is left alone, since Java and Paper make such files on every save, and start hands the trees over with ug+rwX again.
+		- design.md's repair section says only access for other accounts counts.
+		- Swept: walkTree is the only mode check on the trees. start's handover still sets ug+rwX,o-rwx.
 
 - setup --adopt leaves the Floodgate key readable by others, and its own check then fails
 	- ID: 2026111410134562
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-101345
 	- Opened by:
 	- Incorrect behavior [Bug]: On an adopted tree, plugins/floodgate/key.pem stayed 0644, and setup ended with its repair --check failing on it. repair fixed it.
 	- Expected behavior [Bug]: setup sets the key's mode before its check, as repair does.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79d on the old code: after setup --adopt, a 0644 key stayed 0644. The linksafe change to repair's key fix (1b3d301) didn't reach setup.
+	- Actual cause [Bug]: setup hands an adopted tree to the operator with chown only, and none of its steps ran repair's Floodgate key fix before the final check.
+	- Actual fix [Bug]: On an adopted tree with bedrock on, setup runs the Floodgate key part of repair's check, with its fix, after the Geyser and Floodgate step. A dry run shows it as a PLAN line.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: df79d
+	- Acceptance signoff: Self-closed: df79d fails on the old code and passes now.
+	- Closed: 20261117-135211
+	- Verified: df79d fails with the new step taken out and passes with it, and the quick gate passes. The key goes through the same handle-based fchmod as repair, so a link on the way is refused.
+	- Decisions:
+		- repair exports FloodgateKeyCheck, the key part of its Geyser and Floodgate check, so setup doesn't report jars it may not have downloaded yet in a dry run.
+		- design.md's setup step 7 says so.
+		- Swept: a new tree has no key yet, and setup on an existing install runs repair, which has the fix already.
 
 - start's sudo -v asks for a password where a NOPASSWD rule sits beside password rules
 	- ID: 2026111410134553

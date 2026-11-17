@@ -245,6 +245,7 @@ Common:  --config PATH, --set KEY=VALUE
 		- It takes each one's newest build for Paper from GeyserMC's download API at `download.geysermc.org`, and checks the jar's SHA-256 against it. They go in `plugins/`, which setup makes when it's missing.
 		- Each jar goes on the approved list with its source, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 approves it with the same source.
 		- Step 6 writes Geyser's `config.yml` with only the safe keys, before its first start. Geyser keeps them and adds the rest of its settings. Floodgate's config is left to its first start, and `repair` sets the Floodgate key's mode after that.
+		- On an adopted tree that has a Floodgate key already, setup takes other accounts' access to it away here, as `repair` does.
 		- The lookup happens before the plan is shown, along with Paper's.
 	8. Approves the plugin jars that are there, after listing each one with its hash.
 		- A new jar in `plugins/` whose file name and `plugin.yml` name both start with `geyser` or `floodgate` gets GeyserMC's source, shown in the list, as `repair --approve-plugins` gives it.
@@ -324,6 +325,7 @@ Common:  --config PATH, --set KEY=VALUE
 	4. The server tree exists, and so does `paper.jar`.
 	5. Ownership and modes match whether the server runs.
 		- Modes are only checked while it runs, since `stop` hands back ownership and leaves the modes.
+		- Only access for other accounts counts. A mode tighter than `ug+rwX` passes, since Java makes its temp files 0600 whatever the umask, and Paper saves by temp file and rename.
 	6. The safe settings are in place.
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.

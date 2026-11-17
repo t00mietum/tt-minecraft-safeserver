@@ -155,6 +155,10 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.getBedrock(ctx, cfg, bedrock); err != nil {
 		return err
 	}
+	s.floodgateKey(ctx, &cfg, report)
+	if failed {
+		return stopped
+	}
 	if err := s.approve(jars); err != nil {
 		return err
 	}
@@ -726,6 +730,32 @@ func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser
 		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", j.Name)
 	}
 	return nil
+}
+
+// floodgateKey takes other accounts' access to the Floodgate key away on an
+// adopted tree, as repair does, since handing the tree to the operator leaves
+// the modes. The final check fails on it otherwise. A dry run only says so.
+func (s *Setup) floodgateKey(ctx context.Context, c *config.Config, report repair.Report) {
+	if s.Adopt == "" || !c.Bedrock {
+		return
+	}
+	h := s.Accounts(c)
+	if !s.DryRun {
+		repair.Run(ctx, h, []repair.Check{repair.FloodgateKeyCheck}, false, report)
+		return
+	}
+	found, err := repair.FloodgateKeyCheck.Look(ctx, h)
+	if err != nil {
+		report("FAILED", repair.FloodgateKeyCheck.Name+": "+err.Error())
+		return
+	}
+	for _, f := range found {
+		if f.Fix == nil {
+			report("FAILED", f.Problem)
+			continue
+		}
+		report("PLAN", f.Fixed)
+	}
 }
 
 // accounts makes the account and group, and puts the operator in it. Under
