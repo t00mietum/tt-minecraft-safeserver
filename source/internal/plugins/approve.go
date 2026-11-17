@@ -17,8 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/yottacore/shcl/source/go/v3"
 )
 
@@ -131,28 +131,13 @@ func yamlNameVersion(r io.Reader) (name, version string) {
 // a jar can't write escape codes to the terminal or disguise its name, and
 // cuts a long value on a character boundary.
 func clean(s string) string {
-	s = strings.Map(func(r rune) rune {
-		switch {
-		case r < 0x20, r >= 0x7f && r < 0xa0,
-			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
-			return -1
-		}
-		return r
-	}, s)
-	if len(s) > 80 {
-		cut := 80
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = s[:cut] + "..."
-	}
-	return s
+	return server.Cut(server.Clean(s), 80)
 }
 
 // Approve writes the hashes of jars into the approved list, adding the ones
 // it doesn't have, and a jar's source when it has one. Other entries,
-// comments, sources, and the operator's own lines stay byte for byte. A new file is made readable by
-// all, so status works without sudo.
+// comments, sources, and the operator's own lines stay byte for byte. A new
+// file is made readable by all, so status works without sudo.
 func Approve(file string, jars []Info) error {
 	doc, st, err := shcl.LoadFileKeepLines(file, shcl.Standard)
 	fresh := st == shcl.FileNotFound

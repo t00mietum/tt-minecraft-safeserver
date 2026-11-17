@@ -22,6 +22,42 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- repair counts an outgoing ufw rule as opening the game port
+	- ID: 2026111709090987
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: ufwMissing takes any line with ALLOW, so an ALLOW OUT or ALLOW FWD rule for 25565 hides the warning that players can't reach the server.
+	- Expected behavior [Bug]: only ALLOW IN rules count.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/repair/hostfw.go.
+
+- Refusing a plugin follows a link in the server tree
+	- ID: 2026111709090977
+	- Type: Bug
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: plugins.Refuse runs as root. A plugins-refused that's a link to a root-owned folder passes the mkdir (it exists), and the rename then moves a jar the server controls into the link's target. The jar's own path can go through a linked plugins folder too, and the lstat then rename check on the name can race.
+	- Expected behavior [Bug]: Refuse works from folder handles opened with O_NOFOLLOW, makes the folder with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/plugins/approve.go.
+
+- repair's Floodgate key fix follows a link in the server tree
+	- ID: 2026111709090967
+	- Type: Bug
+	- Status: Queued
+	- Priority: High
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: repair checks plugins/floodgate/key.pem with lstat, then runs chmod o-rwx on the path as root. The server account can swap the file, or the floodgate folder, for a link in between, and root changes the mode of the link's target.
+	- Expected behavior [Bug]: the fix opens each part with O_NOFOLLOW from the server folder, checks it's a plain file, and changes the mode through that handle, as the settings package does.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/repair/files.go, bedrockCheck.
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task

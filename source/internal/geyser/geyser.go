@@ -112,9 +112,9 @@ func (a API) Latest(ctx context.Context, project string) (Build, error) {
 // Install downloads b into serverDir's plugins folder, making the folder when
 // it's missing, owned like serverDir.
 func (a API) Install(ctx context.Context, serverDir string, b Build) error {
-	top, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	top, err := download.OpenDir(serverDir)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return err
 	}
 	defer syscall.Close(top)
 	dir := serverDir + "/plugins"
@@ -143,15 +143,12 @@ func chownLike(top int, name string) error {
 		if err := syscall.Fstat(top, &st); err != nil {
 			return err
 		}
-		if err := syscall.Fchownat(top, name, int(st.Uid), int(st.Gid), atSymlinkNoFollow); err != nil {
+		if err := syscall.Fchownat(top, name, int(st.Uid), int(st.Gid), download.AtSymlinkNoFollow); err != nil {
 			return err
 		}
 	}
 	return syscall.Fchmodat(top, name, 0o770, 0)
 }
-
-// atSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
-const atSymlinkNoFollow = 0x100
 
 // Project is the GeyserMC project a jar in plugins/ is, when both its file
 // name and the plugin name it claims start with the project's name, or "".

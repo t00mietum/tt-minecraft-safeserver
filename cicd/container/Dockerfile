@@ -1,5 +1,5 @@
 # Build and test image for cicd.bash. The Go image and every tool version come
-# from build args that cicd/config.bash holds, so the image is rebuilt when one
+# from build args set in cicd/config.bash, so the image is rebuilt when one
 # changes and nowhere else.
 ARG GO_IMAGE
 FROM ${GO_IMAGE}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -42,7 +43,7 @@ type Boxed struct {
 	// host's names.
 	IDs func(userName, groupName string) (uid, gid string, err error)
 	// Runtime is podman or docker, or runMode when empty. Stop, console, and
-	// cmd move it to the runtime that holds the container.
+	// cmd move it to the runtime that has the container.
 	Runtime string
 }
 
@@ -55,7 +56,7 @@ var Installed = func(name string) bool {
 	return err == nil
 }
 
-// StartMode holds start's options.
+// StartMode is start's options.
 type StartMode struct {
 	Debug      bool
 	Foreground bool
@@ -86,20 +87,17 @@ func PsArgs(runtime string) []string {
 	return []string{runtime, "ps", "--all", "--filter", "name=^" + Container + "$", "--filter", "label=" + Container, "--format", "{{.State}}"}
 }
 
-// FindContainer gives the runtime that holds the container, and its state.
+// FindContainer gives the runtime that has the container, and its state.
 // runMode's runtime is asked first, then any other that's installed, since
 // the container may be from before a runMode change. A running container
 // wins over a stopped one. Both are "" when there's none.
 func FindContainer(ctx context.Context, r host.Runner, runMode string) (runtime, state string, err error) {
-	for _, rt := range Runtimes {
-		if rt != runMode {
-			continue
-		}
-		if state, err = ContainerState(ctx, r, rt); err != nil || state == "running" {
-			return rt, state, err
+	if slices.Contains(Runtimes, runMode) {
+		if state, err = ContainerState(ctx, r, runMode); err != nil || state == "running" {
+			return runMode, state, err
 		}
 		if state != "" {
-			runtime = rt
+			runtime = runMode
 		}
 	}
 	for _, rt := range Runtimes {
@@ -120,7 +118,7 @@ func FindContainer(ctx context.Context, r host.Runner, runMode string) (runtime,
 	return runtime, state, nil
 }
 
-// locate moves to the runtime that holds the container, when it's not runMode's.
+// locate moves to the runtime that has the container, when it's not runMode's.
 func (d *Boxed) locate(ctx context.Context) error {
 	if err := d.sudoUp(ctx); err != nil {
 		return err
@@ -168,13 +166,7 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 	}
-	if err := d.checkSettings(); err != nil {
-		return err
-	}
-	if err := d.checkPlugins(); err != nil {
-		return err
-	}
-	if err := d.checkFirewall(ctx); err != nil {
+	if err := d.preflight(ctx); err != nil {
 		return err
 	}
 	args, err := d.runArgs()

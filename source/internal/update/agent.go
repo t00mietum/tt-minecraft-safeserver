@@ -269,9 +269,9 @@ func (u *Update) hashOnPage(ctx context.Context, page, sum string) error {
 // openUnder opens the folder rel under serverDir without following links,
 // since the server account may own the tree.
 func openUnder(serverDir, rel string) (int, error) {
-	fd, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	fd, err := download.OpenDir(serverDir)
 	if err != nil {
-		return -1, &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return -1, err
 	}
 	for _, part := range strings.Split(rel, "/") {
 		if part == "" || part == "." {

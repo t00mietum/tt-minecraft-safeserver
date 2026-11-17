@@ -21,7 +21,7 @@ import (
 	"github.com/yottacore/shcl/source/go/v3"
 )
 
-// Config holds the settings. Sizes are in bytes.
+// Config is the settings. Sizes are in bytes.
 type Config struct {
 	RunMode           string
 	RunUser           string

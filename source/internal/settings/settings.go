@@ -166,9 +166,6 @@ func scanProperties(top dir, rules []rule, fix bool) ([]Problem, error) {
 	for _, p := range problems {
 		props.set(p.Key, p.Want)
 	}
-	if missingFile {
-		st = nil
-	}
 	return problems, top.write(propertiesFile, props.bytes(), st)
 }
 

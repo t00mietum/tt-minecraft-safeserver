@@ -107,11 +107,12 @@ var ownershipCheck = Check{
 			}
 		}
 
-		var found, wrong []string
+		var out []Finding
+		var wrong []string
 		for _, t := range c.OwnerTrees {
 			real, err := filepath.EvalSymlinks(t)
 			if err != nil {
-				found = append(found, "tree "+t+" is missing")
+				out = append(out, Finding{Problem: "tree " + t + " is missing"})
 				continue
 			}
 			owners, modes, err := walkTree(real, uint32(u.uid), uint32(g.gid), up, skip)
@@ -124,10 +125,6 @@ var ownershipCheck = Check{
 			if modes > 0 {
 				wrong = append(wrong, fmt.Sprintf("%s has %d %s with modes other than ug+rwX,o-rwx", t, modes, plural(modes, "file")))
 			}
-		}
-		var out []Finding
-		for _, f := range found {
-			out = append(out, Finding{Problem: f})
 		}
 		if len(wrong) == 0 {
 			return out, nil

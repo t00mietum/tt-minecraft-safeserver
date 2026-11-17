@@ -15,9 +15,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // Jar is what the agent is told about one approved jar.
@@ -212,7 +212,7 @@ var (
 	hex128 = regexp.MustCompile(`^[0-9a-f]{128}$`)
 )
 
-// Check holds each suggestion to the jars asked about and to agentHosts. Its
+// Check tests each suggestion against the jars asked about and agentHosts. Its
 // text is cleaned first, since it ends up on the operator's terminal.
 func Check(a Answer, asked []Jar, hosts []string) Checked {
 	var c Checked
@@ -260,8 +260,8 @@ func Check(a Answer, asked []Jar, hosts []string) Checked {
 	return c
 }
 
-// CheckPaper holds the agent's Paper build to the version asked for and to
-// agentHosts. PaperMC always publishes a SHA-256, so one is needed. A nil
+// CheckPaper tests the agent's Paper build against the version asked for
+// and agentHosts. PaperMC always publishes a SHA-256, so one is needed. A nil
 // build with no error means the agent found none.
 func CheckPaper(a Answer, version string, hosts []string) (*PaperBuild, error) {
 	if a.Paper == nil {
@@ -353,22 +353,7 @@ func tidy(s Suggestion) Suggestion {
 // clean drops control characters and the ones that flip text direction, and
 // cuts s to limit bytes on a character boundary.
 func clean(s string, limit int) string {
-	s = strings.TrimSpace(strings.Map(func(r rune) rune {
-		switch {
-		case r < 0x20, r >= 0x7f && r < 0xa0,
-			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
-			return -1
-		}
-		return r
-	}, strings.ToValidUTF8(s, "")))
-	if len(s) <= limit {
-		return s
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "..."
+	return server.Cut(strings.TrimSpace(server.Clean(strings.ToValidUTF8(s, ""))), limit)
 }
 
 // Suggest asks about the jars in q, and checks the answer.

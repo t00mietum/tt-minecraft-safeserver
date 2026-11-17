@@ -63,13 +63,7 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 	}
-	if err := n.checkSettings(); err != nil {
-		return err
-	}
-	if err := n.checkPlugins(); err != nil {
-		return err
-	}
-	if err := n.checkFirewall(ctx); err != nil {
+	if err := n.preflight(ctx); err != nil {
 		return err
 	}
 	jars, err := LockedJars(n.Cfg.ServerDir)

@@ -30,6 +30,7 @@ type Fetcher struct {
 	MaxPage    int64
 	MaxFetches int
 	done       int
+	public     *http.Client // made once, so fetches share connections
 }
 
 const fetchSpec = `{"type": "object", "properties": {"url": {"type": "string", "description": "https address to read"}}, "required": ["url"]}`
@@ -65,7 +66,10 @@ func (f *Fetcher) get(ctx context.Context, address string) (string, error) {
 	req.Header.Set("User-Agent", "tt-minecraftd")
 	client := f.Client
 	if client == nil {
-		client = publicClient()
+		if f.public == nil {
+			f.public = publicClient()
+		}
+		client = f.public
 	}
 	resp, err := client.Do(req) // #nosec G107 G704 -- https only, to public addresses only, see publicOnly
 	if err != nil {

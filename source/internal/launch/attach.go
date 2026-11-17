@@ -43,6 +43,7 @@ type AttachConsole struct {
 	argv []string
 }
 
+// Send types line into the container's console, then detaches.
 func (a AttachConsole) Send(ctx context.Context, line string) error {
 	if err := checkLine(line); err != nil {
 		return err

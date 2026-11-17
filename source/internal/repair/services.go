@@ -5,7 +5,6 @@ package repair
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 
@@ -63,12 +62,7 @@ var catatonitCheck = Check{
 
 // HasCatatonit tells whether catatonit is where Podman looks, or on PATH.
 func HasCatatonit() bool {
-	for _, p := range catatonitPaths {
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return true
-		}
-	}
-	return launch.Installed("catatonit")
+	return anyRegular(catatonitPaths) || launch.Installed("catatonit")
 }
 
 // catatonitPaths are where Podman looks for it, as init_path's default and

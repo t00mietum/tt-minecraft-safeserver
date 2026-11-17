@@ -157,7 +157,7 @@ func (c *Config) derive() []Warning {
 	if c.MemCap == 0 {
 		c.MemCap = c.HeapMax + c.HeapMax/4 + gib
 	}
-	// Geyser's signaling needs bedrockPort over TCP. When Paper holds it,
+	// Geyser's signaling needs bedrockPort over TCP. When Paper listens on it,
 	// Geyser sends Bedrock players through an outside service instead.
 	if c.Bedrock && c.BedrockPort == c.GamePort {
 		port := 19132

@@ -1,8 +1,19 @@
 #!/bin/bash
-# shellcheck disable=SC2329 # check calls each one by name
-# The root steps of the hand tests, run as the operator inside the root-host
-# container. root-host.bash copies this in and runs it. Each check prints
-# PASS or FAIL with its ID; later ones lean on earlier ones.
+
+#  shellcheck disable=SC2329  ## check calls each one by name
+#  shellcheck enable=require-variable-braces  ## Every expansion braced: "${var}", not "$var".
+
+##	Purpose:
+##		- The root steps of the hand tests, run as the operator inside the root-host container.
+##		- root-host.bash copies this in and runs it.
+##		- Each check prints PASS or FAIL with its ID; later ones lean on earlier ones.
+##	History: At bottom of script.
+
+##	Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+##	Licensed under the GNU General Public License v2.0 or later. Full text at:
+##		https://spdx.org/licenses/GPL-2.0-or-later.html
+##	SPDX-License-Identifier: GPL-2.0-or-later
+
 set -uo pipefail
 
 dir=/srv/tt-minecraftd/server
@@ -360,3 +371,9 @@ check df68e "setup --adopt a copy of the tree" fAdopt
 check df68f "firewall off removes the unit and table" fFirewallOff
 check df76n "update asks the agent as the operator, and hands its answer through sudo" fAgentHandOff
 exit "${failed}"
+
+
+##	History:
+##		- 2026-11-12: Created.
+##		- 2026-11-12: Agent hand-off and ZFS snapshot checks.
+##		- 2026-11-13: Boot unit checks. Native checks skip while native mode is off.

@@ -44,6 +44,18 @@ const MaxJSON = 8 << 20
 // MaxJar caps a download, whatever size the API gives.
 const MaxJar = 512 << 20
 
+// AtSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
+const AtSymlinkNoFollow = 0x100
+
+// OpenDir opens a folder for the *at calls.
+func OpenDir(dir string) (int, error) {
+	fd, err := syscall.Open(dir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, &fs.PathError{Op: "open", Path: dir, Err: err}
+	}
+	return fd, nil
+}
+
 // SHA256Hex is a hash as the APIs give it, once lower-cased.
 var SHA256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 

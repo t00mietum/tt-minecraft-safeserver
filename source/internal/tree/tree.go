@@ -58,8 +58,8 @@ func handOver(ctx context.Context, r host.Runner, trees []string, user, group st
 	return warns, nil
 }
 
-// realTree follows links, so chown -R changes the tree and not just a link to
-// it, and the depth check sees where the link really goes.
+// realTree follows links, so chown -R changes the tree and not only a link to
+// it, and the depth check sees where the link points.
 func realTree(t string) (string, error) {
 	if err := checkDepth(t); err != nil {
 		return "", err

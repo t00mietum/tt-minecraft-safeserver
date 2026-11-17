@@ -69,7 +69,7 @@ func geyserAuthPath(lines []string) []string {
 }
 
 func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
-	name := strings.Join(append(geyserDirs[:len(geyserDirs):len(geyserDirs)], geyserFile), "/")
+	name := strings.Join(geyserDirs, "/") + "/" + geyserFile
 	d, there := top, true
 	for _, sub := range geyserDirs {
 		next, err := d.sub(sub)

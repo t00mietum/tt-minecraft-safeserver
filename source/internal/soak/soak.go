@@ -18,7 +18,8 @@ import (
 // Env is the rounds per half, for the soak tests. They skip when it's unset.
 const Env = "TT_MINECRAFTD_SOAK"
 
-// Slack is what a soak may grow by between the 2 samples without failing.
+// HeapSlack and GoroutineSlack are what a soak may grow by between the 2
+// samples without failing.
 // Per round, it's tiny once N is in the hundreds.
 var (
 	HeapSlack      uint64 = 1 << 20
@@ -92,7 +93,7 @@ func (r Result) String() string {
 		r.Rounds, 2*r.Rounds, r.Half.Heap, r.Double.Heap, r.Half.Goroutines, r.Double.Goroutines)
 }
 
-// Rounds is the the rounds per half from Env, or a skip when it isn't set.
+// Rounds is the rounds per half from Env, or a skip when it isn't set.
 func Rounds(t testing.TB) int {
 	t.Helper()
 	v := os.Getenv(Env)
