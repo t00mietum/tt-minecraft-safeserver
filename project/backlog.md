@@ -22,6 +22,34 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- install.bash: install for one user, without root
+	- ID: 2026111713320666
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070761
+	- Requirements:
+		- An install into the user's own folders, beside the system install. t00mietum on 20261117: system only is OK for now, and user setup can be a deferred item.
+
+- Installers: Docker or Podman as a prerequisite, and an option for other distros
+	- ID: 2026111713320657
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070800, 2026111111070761, 2026111318335938
+	- Requirements:
+		- install-dev.bash treats Docker or Podman as a prerequisite, and installs one only when a flag asks it to try.
+		- It still prints the command that adds the account to the docker or podman group, rather than running it.
+		- install.bash and install-dev.bash get an option for distros they don't support, such as non-Debian ones. With it they install nothing through any package manager and only check that what they need is already there, such as docker.
+		- systemd stays a hard requirement.
+		- From t00mietum's answers on 20261117 to the Check entries for 2026111111070800 and 2026111318335938.
+	- Estimated effort: Avg
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -439,6 +467,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261113: Skip with a note rather than keep the current image's Java as the floor, since that needs the old image on disk and another container run, and skipping changes nothing. Logged as a Check: entry.
 		- 20261113: Only with agent set, since without it a failed PaperMC or plugin source lookup stops the update by design. --image alone still fails, so asking for only that part never ends quietly with nothing done.
 		- Swept: imageLookup is the only Java caller; paperVersion's NewestVersion fallback runs only with no paper.jar, where a failed Paper lookup still stops the update per 2026111210034308. design.md's update and Update agent and README's Update agent say this now.
+		- 20261117: t00mietum confirmed the call. The answer also asked for an installer option on other distros, filed as its own item.
 	- Verified: df796 fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
 
 - Connect the service to an AI agent to update the game programs and add-ons
@@ -546,6 +575,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- curl or wget, since minimal Debian often has only wget. The answer comes from /dev/tty when the script arrives on a pipe.
 		- MIT, as helper scripts usually are, rather than the project's GPL.
 		- Tested by sourcing it with the install folder, os-release, and terminal paths pointed at a stand-in, on a PATH with stand-in curl, wget, uname, and sudo. No test-only option in the script.
+		- 20261117: t00mietum confirmed system only. User install filed as a Deferred item.
 	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
 	- 2026-11-14: install.bash at the repo root finds the newest release through the GitHub API, checks the binary for this CPU against SHA256SUMS, installs it as /usr/local/bin/tt-minecraftd (through sudo when needed), and runs tt-minecraftd setup. It states its plan and asks first, and --yes skips that. README's Installing section has the curl and wget one-liners.
 	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note.
@@ -577,6 +607,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- golang-go is installed when there's no Go 1.21 or newer, since those fetch the version go.mod asks for. When apt's Go is still older, such as bookworm's 1.19, it finishes the rest and fails at the end with where to get a newer Go.
 		- No --release or --target options. It always clones main, and installs nothing outside apt and the clone.
 		- MIT, like install.bash. Tested the same way: sourced with os-release, the terminal, and the CA file pointed at stand-ins, on a PATH with stand-in uname, sudo, apt-get, git, go, and docker.
+		- 20261117: t00mietum's answer to the Check entry: Docker or Podman should be a prerequisite, with a flag to try installing it. Printing the group command is OK. Follow-up filed as its own item.
 	- Branch: nov14-2026111111070800
 	- Commit: 337a7a0
 	- Test case: df799 TestInstallDevScript
