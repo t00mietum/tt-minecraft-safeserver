@@ -45,6 +45,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Refuse works from folder handles opened with O_NOFOLLOW, makes the folder with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST.
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/plugins/approve.go.
+		- 2026-11-17: Next, with 2026111709090967 and 2026111409374443, ahead of the move bugs. The fix is the same for all 3: folder handles opened without following links.
 
 - repair's Floodgate key fix follows a link in the server tree
 	- ID: 2026111709090967
@@ -57,6 +58,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: the fix opens each part with O_NOFOLLOW from the server folder, checks it's a plain file, and changes the mode through that handle, as the settings package does.
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/repair/files.go, bedrockCheck.
+		- 2026-11-17: Next, with 2026111709090977 and 2026111409374443, ahead of the move bugs. 2026111410134562 (the Floodgate key after setup --adopt) goes through the same fix.
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
@@ -128,6 +130,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: start refuses, and names the link and the path it would need, or repair offers to point it at the resolved path.
 	- Progress log:
 		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
+		- 2026-11-17: Next, with the 2 newer link bugs 2026111709090977 and 2026111709090967.
 
 - install.bash keeps a dev build that has the release's version
 	- ID: 2026111410134543
