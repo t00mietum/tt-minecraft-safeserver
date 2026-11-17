@@ -73,6 +73,696 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
+- Root opens a device or pipe that a link in plugins/ points to, before it checks the file kind
+	- ID: 2026111715274815
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: The server account can make `plugins/x.jar` a link to a device such as `/dev/watchdog`. repair, setup, update and a boot start open it as root to hash it, and only check that it's a regular file afterwards. Opening a device runs its driver. With a hardware watchdog, an open and close without the stop byte can reboot the host, and with startAtBoot on that repeats at every boot. Any other device link makes start and repair fail with the driver's error.
+	- Expected behavior [Bug]: Root refuses anything in the tree that isn't a regular file before it opens it for reading.
+	- Reproduced [Bug]: 2026-11-17: a link to `/dev/tty` with no controlling terminal made `Sum` and `CheckJars` fail with the driver's own error. The watchdog reboot wasn't tried.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 1. Detail in detail_backlog.md.
+	- Origin: ba0f959 status and watch, 9058841 plugin pinning. Not seen by an earlier round. Confirmed for the open, Plausible for the reboot. Same class as 2026111709090977, whose fix covered root writes but not reads.
+	- Sweep: Every caller of `plugins.Sums.Sum` and `plugins.Describe`: launch/kit.go, main.go repairPlugins, setup.go, update.go, status.go and update/agent.go.
+
+- geyser sets the mode of a new plugins folder through a link
+	- ID: 2026111715274830
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: When setup or repair makes `plugins/` for Geyser, `chownLike` sets mode 0770 with a call that follows links. If the server account swaps the new folder for a link first, root sets the link's target to 0770, which could be `/etc/passwd`. The chown just before it doesn't follow links.
+	- Expected behavior [Bug]: The mode is set through the folder handle, as `linksafe.Mkdir` does.
+	- Reproduced [Bug]: 2026-11-17: with `plugins` already a link to a 0644 file, `chownLike` left the file at 0770.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 2. Detail in detail_backlog.md.
+	- Origin: 9f30908 setup gets geyser and floodgate. The sweep of 2026111709090977 listed geyser's plugins folder as safe and missed it. Confirmed.
+	- Sweep: selfupdate.go has the same call, in deferred code and a folder only root can write.
+
+- A serverDir with glob characters in its path skips every plugin check
+	- ID: 2026111715274846
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: `plugins.Jars` finds jars with a glob that reads `[`, `*` or `?` in serverDir as a pattern, so a serverDir such as `/srv/mc[1]` finds no jars. start then passes the jar check with 0 jars, and no jar gets a read-only mount. config allows such a path.
+	- Expected behavior [Bug]: Jars lists the folder without reading serverDir as a pattern.
+	- Reproduced [Bug]: 2026-11-17: an unapproved jar under `mc[1]/plugins` gave 0 jars and a passing check.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 3. Detail in detail_backlog.md.
+	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
+
+- The safe settings check misses proxy settings written in YAML flow style or as a repeated key
+	- ID: 2026111715274861
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: `proxies: {velocity: {enabled: true}}` passes the check, and so does `bungeecord: false` followed by `bungeecord: true`. The reader counts a key it can't find as safe, and keeps the first copy of a key. Paper's YAML reader reads flow style and keeps the last copy. design.md calls proxy forwarding the most common takeover.
+	- Expected behavior [Bug]: A settings file the reader can't follow counts as a problem, or the reader reads both forms the way Paper does.
+	- Reproduced [Bug]: 2026-11-17: both files passed `Check` in a test. Paper reading them as on is Plausible.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 4. Detail in detail_backlog.md.
+	- Origin: 91ac8da safe server settings check on start. Not seen before. Confirmed on the tool side.
+	- Sweep: The Geyser config reader in settings/geyser.go.
+
+- Text from the server tree and from download servers reaches the terminal with escape codes intact
+	- ID: 2026111715274877
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: Jar file names, the `paper.jar` link text, the ping's version name and player sample in status, the log tail of a server that died while loading, link paths in start's link check, and a download server's HTTP status text are all printed raw. The server account or a plugin controls most of them. An escape code can rewrite the line an operator is approving in `repair --approve-plugins`, or write to the clipboard. style_guide.md says such text goes through `server.Clean`.
+	- Expected behavior [Bug]: All of it goes through `server.Clean`, or names with control characters are refused where they're read.
+	- Reproduced [Bug]: 2026-11-17: tests showed raw ESC bytes in `CheckJars`, `paper.Current`, status output, start's log tail and a download error.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 5. Detail in detail_backlog.md.
+	- Origin: ba0f959, 9058841, 6d1da22, 3a04d86, 1b3d301 and 9f30908. Same class as 2026111311594944, which fixed player names and log lines. Confirmed.
+	- Sweep: plugins/check.go, paper.Current, status.go ping and plugin lines, launch/kit.go jar lines and log tail, launch/links.go, main.go repairPlugins, setup.go plan and approval lines, update.go plan, download.go and agent/api.go status errors.
+
+- The firewall lets the server reach LAN hosts on IPv6 global addresses, and send multicast
+	- ID: 2026111715274893
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: The outbound LAN block covers only `fc00::/7` and `fe80::/10` for IPv6. On a home LAN with IPv6, the router, NAS and printers have global addresses on the host's own prefix. The server can reach them on 80 and 443 under egress `web`, and on any port under `open`. Under `open` it can also send multicast such as SSDP. design.md Security says the server can't open connections to the LAN.
+	- Expected behavior [Bug]: The host's on-link IPv6 prefixes, multicast and broadcast are blocked too, with the `seek4` answer kept ahead of that.
+	- Reproduced [Bug]: 2026-11-17: rendered rules loaded in a network namespace let a connect to a global address on the local prefix through, while a ULA was refused.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 6. Detail in detail_backlog.md.
+	- Origin: 88f3d3f firewall rules file and unit. Not seen before. Confirmed.
+
+- start accepts any loaded firewall table, even one written for an older config
+	- ID: 2026111715274909
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `checkFirewall` only asks whether the table exists. After a change to allowFrom, egress, joinRateLimit, runUser or bedrock, or a `start --set` of one of them, start runs on the old rules with no warning. A new runUser isn't filtered outbound at all, and a newly on Bedrock port has no rate limit or loopback allowance.
+	- Expected behavior [Bug]: start compares the rules file with the rules the config gives, and refuses on a mismatch, naming repair.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 7. Detail in detail_backlog.md.
+	- Origin: 88f3d3f firewall rules file and unit. Not seen before. Plausible.
+
+- repair on a second config removes or rewrites the main config's boot unit and firewall
+	- ID: 2026111715274925
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: There's one boot unit and one rules file for every config. `repair --config` on a second config with startAtBoot off disables and deletes the unit that runs the main config, and with it on rewrites the unit for the second config. The same repair rewrites the rules file with the second config's ports, or removes the table when its firewall is off. design.md says a second config starts and stops by itself.
+	- Expected behavior [Bug]: repair leaves a unit or rules file that belongs to another config alone, and says which config it belongs to.
+	- Reproduced [Bug]: 2026-11-17: a test wrote the unit for config A, then ran the boot check for config B, and its fix disabled and removed the unit.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 8. Detail in detail_backlog.md.
+	- Origin: cb5f7cf start at boot, 4b8af66 setup and repair install the firewall. Not seen before. Confirmed.
+	- Sweep: repair/boot.go and repair/firewall.go.
+
+- The update agent's answer is ignored when the reply repeats the question first
+	- ID: 2026111715274941
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `agent.Parse` takes the first JSON object with a jars, paper or moveReport key. The question and the format sample both have a jars key. When a model restates the question before its answer, update prints that the agent found nothing newer for every jar and exits 0. When it restates the sample, every jar gets no answer.
+	- Expected behavior [Bug]: Parse skips a restated question or sample, or takes the last match.
+	- Reproduced [Bug]: 2026-11-17: a test reply that quoted the question before the answer gave 0 updates.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 9. Detail in detail_backlog.md.
+	- Origin: 53a6bb3 agent config keys. Not seen before. Confirmed.
+	- Sweep: The same rule picks paper and moveReport.
+
+- Ctrl-C does nothing during a stop --warn countdown, then stop fails with the server still up
+	- ID: 2026111715274958
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: The warning wait is a plain sleep that ignores Ctrl-C. Ctrl-C 5 seconds into `stop --warn 300` waits about 4 minutes, then the next console send fails with "context canceled". Players were told the server stops, and it doesn't. Ctrl-C during `cmd` exits 0.
+	- Expected behavior [Bug]: Ctrl-C ends the countdown at once, tells players the stop is off, and exits 1.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 10. Detail in detail_backlog.md.
+	- Origin: 3a04d86 native mode start and stop, 5c5b023 console and cmd. Not seen before. Plausible.
+	- Sweep: attach.go reports a Ctrl-C as a detach timeout.
+
+- At boot, a server slower to load than startTimeout gets stopped again
+	- ID: 2026111715274978
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `start --foreground` exits 1 when the load takes longer than startTimeout, 300 seconds by default, and says it's still running. systemd then runs ExecStop, which stops the server. So a big world or a slow host never comes up at boot. The container's exit code is also ignored, so a crash ends the unit as a clean exit.
+	- Expected behavior [Bug]: In foreground a slow load is a warning, and the run goes on to wait. The container's exit code becomes the tool's.
+	- Reproduced [Bug]: No. Read, with systemd's documented ExecStop behavior.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 11. Detail in detail_backlog.md.
+	- Origin: 3a04d86 native mode start and stop, 58531cc podman mode. Not seen before. Plausible.
+	- Sweep: native.go has the same timeout.
+
+- A docs-only push to main skips the merge gate, but the gate's tests read design.md
+	- ID: 2026111715274995
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `cicd/docs-only-paths` counts `project/design.md` as docs. The config tests parse its settings table, and markdownlint checks it. A push to main that only edits that table, or adds a lint error, goes through with no gate, and the next gate on main fails on code nobody touched.
+	- Expected behavior [Bug]: design.md isn't docs-only, or a docs-only push still runs markdownlint and the config tests.
+	- Reproduced [Bug]: No. Read against the glob and the 2 tests that read the file.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 12. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed by reading.
+
+- The reproducible-build check rebuilds from the same folder and cache, so it can't fail
+	- ID: 2026111715275010
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The second build uses the same source folder and the same Go cache, with only a different output folder, so it only links again. README says it builds twice from 2 folders. A build that isn't reproducible would still pass. Only verify-release.bash does a real rebuild.
+	- Expected behavior [Bug]: The second build runs from a copy of the tree at another path, with an empty cache.
+	- Reproduced [Bug]: 2026-11-17: `go build -x` run twice on a copy did no compiling the second time.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 13. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline, README line d3387c1. Not seen before. Confirmed.
+
+- The merge gate can pass while a step checked nothing
+	- ID: 2026111715275026
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The gate-passed marker is written even when the root host, ZFS, vulnerability, CodeQL or arm64 steps were skipped, or shellcheck and markdownlint fell back to a warning. The pre-push hook then skips the gate. Any govulncheck error that isn't a finding reads as offline and is skipped. The format step runs the host's gofmt, and with no gofmt on PATH it says clean. HEAD is read when the run ends, not when it starts.
+	- Expected behavior [Bug]: The marker needs every step to pass, apart from an arm64 skip, on the HEAD the run started with. Other govulncheck and gofmt errors fail their steps.
+	- Reproduced [Bug]: 2026-11-17: the format step's line with gofmt off PATH printed clean. The rest was read.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 14. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline, bca305e gate marker. Not seen before. Confirmed for gofmt, Plausible for the rest.
+	- Sweep: cicd/cicd.bash gate summary, vuln step and format step.
+
+- The .deb and .rpm packages install to /usr/bin, but setup and the boot unit run /usr/local/bin
+	- ID: 2026111715275041
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: setup copies the binary to `/usr/local/bin`, which comes first on PATH and is what the boot unit runs. A later package upgrade replaces only `/usr/bin`, so the operator and the boot unit keep the old build. design.md names the packages as a way to update.
+	- Expected behavior [Bug]: A package install and upgrade change the binary that the operator and the boot unit run.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 15. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Plausible.
+
+- The root host ZFS checks force-destroy any pool ZFS_POOL names, even one the name check refused
+	- ID: 2026111715275056
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: `fZfsPool` refuses a pool not named `ttmcss-test-*`, but the exit trap's `fZfsGone` runs `zpool destroy -f` on any name that exists. It runs in a privileged container that sees the host's pools. A hand run of checks.bash with ZFS_POOL set to a real pool would destroy it. root-host.bash checks the name, and checks.bash doesn't.
+	- Expected behavior [Bug]: fZfsGone refuses any pool not named `ttmcss-test-*`.
+	- Reproduced [Bug]: No. Read only, on purpose.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 16. Detail in detail_backlog.md.
+	- Origin: 684bd24 root-host --zfs. Not seen before. Plausible.
+
+- Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
+	- ID: 2026111715275425
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
+	- Note: No. Paper's loader wasn't checked.
+	- Origin: 9058841 plugin pinning. Not seen before. Plausible.
+
+- how-to-connect's Bedrock whitelist example loses its quotes
+	- ID: 2026111715275073
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The shell strips the quotes in `tt-minecraftd cmd fwhitelist add "Some Gamertag"`, and cmd joins its words with spaces. Floodgate gets the gamertag as 2 words.
+	- Expected behavior [Bug]: The doc gives a form that reaches Floodgate quoted, or cmd quotes a word that has a space.
+	- Reproduced [Bug]: No. Floodgate's parsing wasn't checked.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 17. Detail in detail_backlog.md.
+	- Origin: 69af57e binary name. Not seen before. Plausible.
+
+- update --paper deletes the build it replaced when paper.jar links to ./name or a full path
+	- ID: 2026111715275089
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The keep list holds the link text, such as `./paper-26.3-249.jar`, which never equals a file name in the folder. So `paper.Prune` removes the build it was meant to keep, though the plan says the last 2 builds stay.
+	- Expected behavior [Bug]: Prune keeps the build paper.jar pointed to, however the link is written.
+	- Reproduced [Bug]: 2026-11-17: a test with `paper.jar -> ./paper-26.3-249.jar` removed both builds.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 18. Detail in detail_backlog.md.
+	- Origin: 6d1da22. Not seen before. Confirmed.
+
+- repair makes a missing group but leaves the account's primary group wrong until the next run
+	- ID: 2026111715275105
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: With the account there and its group missing, repair makes the group and says nothing about the account's primary group. Only the next run finds it, so setup's final check fails.
+	- Expected behavior [Bug]: One run makes the group and moves the account to it.
+	- Reproduced [Bug]: 2026-11-17: a test with that passwd and group found only the missing group.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 19. Detail in detail_backlog.md.
+	- Origin: b42345a repair checks. Not seen before. Confirmed.
+
+- repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
+	- ID: 2026111715275121
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: `ufw limit 25565/tcp`, `ufw allow from 192.168.0.0/16` and a rule for `19132,25565/tcp` each count as missing. repair exits 1, setup's final check fails, and the suggested command adds a duplicate rule.
+	- Expected behavior [Bug]: Those rule forms count as letting players in.
+	- Reproduced [Bug]: 2026-11-17: a test with that ufw output reported all 3 ports missing.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 20. Detail in detail_backlog.md.
+	- Origin: b42345a repair checks, a80d620 repair fixes. Related to 2026111709090987. Confirmed.
+
+- setup --dry-run plans firewall rules that the real run can't write
+	- ID: 2026111715275137
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: With no nft and no apt-get, the dry run plans the rules and the unit. The real run fails because nftables isn't installed, and stops before it writes the config.
+	- Expected behavior [Bug]: The dry run reports the same failure as the real run.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 21. Detail in detail_backlog.md.
+	- Origin: 4b8af66. Related to 2026111714065925. Plausible.
+
+- setup on an existing install doesn't refuse while the server runs
+	- ID: 2026111715275153
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: design.md says setup refuses while a Paper server runs. That check runs only for a new install. On an existing one, setup downloads Geyser and Floodgate into the live server's plugins folder as root, then runs repair and update.
+	- Expected behavior [Bug]: setup refuses on an existing install too, or design.md limits the rule to a new install.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 22. Detail in detail_backlog.md.
+	- Origin: b21d65f setup install steps. Not seen before. Plausible.
+
+- repair counts a Paper started by hand as runUser as the tool's own
+	- ID: 2026111715275170
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
+	- Expected behavior [Bug]: repair tells them apart the way status does.
+	- Reproduced [Bug]: No. Read only. df5zk pins the uid-only rule.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
+	- Origin: b42345a repair checks. Not seen before. Plausible.
+
+- cmd's stop and restart guard misses namespaced forms such as minecraft:stop
+	- ID: 2026111715275187
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: `checkCmd` accepts `minecraft:stop`, `bukkit:restart` and `execute run stop`. Each stops the server without handing the trees back, which design.md says cmd prevents.
+	- Expected behavior [Bug]: cmd refuses those forms too.
+	- Reproduced [Bug]: 2026-11-17: `checkCmd` passed each form in a test. Paper running them is Plausible.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 24. Detail in detail_backlog.md.
+	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed for the check.
+
+- watch --interval with a huge value panics
+	- ID: 2026111715275203
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `watch --interval 9300000000` overflows the duration, and the ticker panics with a stack trace and exit 2.
+	- Expected behavior [Bug]: A value that large is refused with a plain message.
+	- Reproduced [Bug]: 2026-11-17: ran a build with an empty config.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 25. Detail in detail_backlog.md.
+	- Origin: ba0f959 status and watch. Not seen before. Confirmed.
+
+- console counts any exit 1 as a detach
+	- ID: 2026111715275221
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `attachDetached` treats any exit 1 as a detach. sudo exits 1 after failed password tries, and Docker exits 1 on its own errors. Either one prints that the server is still running and exits 0, though the operator never attached. cmd's own check also reads stderr.
+	- Expected behavior [Bug]: console counts a detach only from what Docker says on a detach.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 26. Detail in detail_backlog.md.
+	- Origin: 5c5b023 console and cmd. Not seen before. Plausible.
+
+- A start that fails after the hand-off leaves the trees with the service account
+	- ID: 2026111715275237
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: After the trees go to the service account, a failed create, start or load returns without handing them back, and the error doesn't say to run stop. `--debug` hands them back.
+	- Expected behavior [Bug]: start hands the trees back when it fails before the server is up, or the error says how to get them back.
+	- Reproduced [Bug]: 2026-11-17: a test made create fail. The chown to the service account ran, and no hand-back did.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 27. Detail in detail_backlog.md.
+	- Origin: 6fb7ece container create and start. Not seen before. Confirmed.
+	- Sweep: native.go has the same path.
+
+- Two jar links to the same file give the same mount twice, and start fails
+	- ID: 2026111715275253
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `LockedJars` drops duplicates only against paper.jar. With 2 plugin jars linking to one file, the same mount destination is passed twice, and Docker refuses it.
+	- Expected behavior [Bug]: Each file is mounted once.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 28. Detail in detail_backlog.md.
+	- Origin: ba09f6c docker mode start and stop. Not seen before. Plausible.
+
+- start --dry-run says it would run sudo -v, then sudo asks for a password anyway
+	- ID: 2026111715275268
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
+	- Expected behavior [Bug]: sudo -v runs in dry run too, since it changes nothing.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
+	- Origin: 3a04d86. Related to 2026111410134553. Plausible.
+
+- An API agent's key goes along when its URL redirects to another host
+	- ID: 2026111715275284
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: The API client follows redirects. On a 307 or 308 to another host, Go sends the POST again with custom headers, so the anthropic kind's `x-api-key` and the prompt go to the new host. Go also allows a redirect from https to http.
+	- Expected behavior [Bug]: The API client doesn't follow redirects.
+	- Reproduced [Bug]: 2026-11-17: a 307 from one test server to another delivered the key.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 30. Detail in detail_backlog.md.
+	- Origin: 91a46c8 API agent kinds. Not seen before. Confirmed.
+
+- From a root shell, ownerAfterStop becomes root
+	- ID: 2026111715275300
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: With `SUDO_USER=root` or `USER=root`, ownerAfterStop defaults to root, so stop hands the trees to root, and repair offers to add root to the server group. design.md's table says the default is the operator unless that's root.
+	- Expected behavior [Bug]: The default skips root.
+	- Reproduced [Bug]: 2026-11-17: a test with `USER=root` and with `SUDO_USER=root` got root.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 31. Detail in detail_backlog.md.
+	- Origin: 715f9b3 config defaults, c076344. Not seen before. Confirmed.
+
+- A checked download can be changed by the folder's owner before it's renamed into place
+	- ID: 2026111715275315
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The hash is taken while the file is written, then the temp file is given to the folder's owner at 0660. It waits through the name check and the operator's yes. While the server runs, server code can rewrite it, and the changed bytes then replace the good jar. start refuses them later, so the good jar is lost but nothing runs.
+	- Expected behavior [Bug]: The temp file stays root-owned and 0600 until just before the rename.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 32. Detail in detail_backlog.md.
+	- Origin: 9f30908, cfd6be9. Not seen before. Plausible.
+
+- IPv4-mapped addresses in allowFrom and bindIP load without a warning and never match
+	- ID: 2026111715275330
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: `allowFrom: [::ffff:10.0.0.1]` is kept as IPv6, goes in the IPv6 set, and never matches the IPv4 client. That client is blocked, with no warning. bindIP keeps the mapped form too.
+	- Expected behavior [Bug]: Mapped addresses are read as IPv4, or warned about.
+	- Reproduced [Bug]: 2026-11-17: a config probe kept the mapped form. The firewall side was read.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 33. Detail in detail_backlog.md.
+	- Origin: e3a0636 shcl config reader. Not seen before. Confirmed for config.
+
+- test-id.bash misses root host checks run through native, so their IDs can be reused
+	- ID: 2026111715275346
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The ID list only reads lines that start with `check`, so df68j, df68b, df68c and df68d aren't listed. A Go test that reuses one passes `--check`, and a check ID used twice in checks.bash is hidden too.
+	- Expected behavior [Bug]: Every test ID in checks.bash is listed and checked for reuse.
+	- Reproduced [Bug]: 2026-11-17: `--list` left them out, and a fake tree that reused df68b passed `--check`.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 34. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+
+- A quick run leaves a stale SHA256SUMS beside new binaries in the release folder
+	- ID: 2026111715275362
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The build step writes binaries into the release version's folder in every mode, but only the package step writes SHA256SUMS, and a quick run skips it. Dev builds then sit beside sums that don't match them.
+	- Expected behavior [Bug]: The sums are written with the binaries, or the stale file is removed.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 35. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Plausible.
+
+- install-dev.bash --dir=~/path makes a folder named ~
+	- ID: 2026111715275377
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: Bash doesn't expand `~` after `--dir=`, so the path becomes a folder literally named `~` under the current folder. Cleaning that up with `rm -rf ~` would delete the home folder.
+	- Expected behavior [Bug]: A leading `~/` is read as the home folder, or refused.
+	- Reproduced [Bug]: 2026-11-17: `echo --dir=~/x` printed it unexpanded.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 36. Detail in detail_backlog.md.
+	- Origin: d701e7a dev install. Not seen before. Confirmed.
+
+- README and design.md say things the code doesn't do
+	- ID: 2026111715275393
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: README says `update --plugins` knows where to get Paper, which is `--paper`. README says start takes a ZFS snapshot when the world is on ZFS, but snapshots need zfsDataset set and only `update --mc-version` takes one now. design.md Software stack expects a YAML package, which go.mod doesn't have. design.md Testing leaves out the root host checks, fuzz, soak, race tests, CodeQL and the arm64 run.
+	- Expected behavior [Bug]: Each line says what the code does.
+	- Reproduced [Bug]: No. Read against the code.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 37. Detail in detail_backlog.md.
+	- Origin: cfd6be9, d8add81, b097820. Not seen before. Confirmed by reading.
+
+- start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
+	- ID: 2026111715275408
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Incorrect behavior [Bug]: A link such as `world -> /etc/hostname` gets told it needs to point at `/etc/hostname`, which is where it points. A folder the operator can't read hides its links, and the check passes.
+	- Expected behavior [Bug]: A link out of the trees is called that, and a folder that can't be read is reported.
+	- Reproduced [Bug]: 2026-11-17: a test showed both.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 38. Detail in detail_backlog.md.
+	- Origin: 1b3d301 link fixes. Follows 2026111409374443. Confirmed.
+
+- Give linksafe tests of its own
+	- ID: 2026111715275441
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Link refusal at each step, the rename fallback, temp file cleanup on error, and Mkdir's chown are only tested through callers. Its coverage is 50 to 60 percent, and it's the code root relies on in the server tree.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
+	- Origin: Not seen before.
+
+- Keep the join rate limit working when its address set fills
+	- ID: 2026111715275456
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: The per-address sets hold 65536 addresses for 2 minutes. A flood of spoofed SYNs fills them, and then no new address is limited at all, so a real bot flood goes through.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 41. Detail in detail_backlog.md.
+	- Note: 2026-11-17: a size-2 set in a namespace limited only the first 2 addresses.
+	- Origin: 88f3d3f. Not seen before. Confirmed.
+
+- Hold the agent's download redirects to agentHosts
+	- ID: 2026111715275472
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Only the agent's first URL is checked against agentHosts. A redirect can take the download to any public https host, while the plan says the jar was found on the first one.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 42. Detail in detail_backlog.md.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before. Plausible.
+
+- Refuse NAT64 and 6to4 forms of LAN addresses in the agent's fetch, and don't tell the model which address was refused
+	- ID: 2026111715275500
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: fetch lets through NAT64 and 6to4 forms of LAN addresses and a few reserved ranges. A refused fetch tells the model the address a name resolved to, which design.md says the agent shouldn't learn.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 43. Detail in detail_backlog.md.
+	- Note: 2026-11-17: each address passed the check in a test.
+	- Origin: 91a46c8. Not seen before. Confirmed.
+
+- Send the vendor API key only to the vendor's own host
+	- ID: 2026111715275517
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before.
+
+- Add a README section on using the server after setup
+	- ID: 2026111715275532
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
+	- Origin: Not seen before.
+
+- Have install.bash always install the binary owned by root
+	- ID: 2026111715275548
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: When `/usr/local/bin` or the old binary is writable by the user, it installs without sudo, and the file stays user-owned. setup's sudo run and the boot unit then run a file the operator account can change. repair doesn't check it.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 46. Detail in detail_backlog.md.
+	- Note: No.
+	- Origin: 9d7cb3e install script. Not seen before. Plausible.
+
 - setup runs apt-get for catatonit on a box without apt
 	- ID: 2026111714065925
 	- Type: Bug
@@ -2837,6 +3527,33 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions:
 		- MCXboxBroadcast, when this gets picked up. It needs a spare Microsoft account, never the main one.
 		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
+
+- Code review 20261117: observations not filed
+	- ID: 2026111715280984
+	- Type: Task
+	- Status: Canceled
+	- Opened: 20261117-152809
+	- Opened by:
+	- Decided against: Unchecked Close in plugins/approve.go, plugins/check.go, repair/files.go and update/agent.go. Each file is only read.
+	- Decided against: The unused uid and gid starting values in linksafe.go. Both branches set them.
+	- Decided against: No unit test for paper.fchownatNoFollow. It doesn't follow the temp link, and the root host check covers paper.jar.
+	- Decided against: linksafe.Write keeping setuid and setgid bits from the old file. The new file has the old file's owner, so nothing is gained.
+	- Decided against: chmod -R in the tree hand-off following a link. It's given the resolved real tree, and its parents aren't writable by the server.
+	- Decided against: The RCON drop skipped when a game port is 25575. That's needed, and a test pins it.
+	- Decided against: Rate limiting per IPv6 address rather than per /64. It's a recorded decision on the Firewall item.
+	- Decided against: The append in launch/session.go that lint flags. No backing array is shared.
+	- Decided against: The missing switch cases in launch/group.go. Unknown and here are meant to pass.
+	- Decided against: Operator args and environment reaching the sudo run. sudo resets the environment, and the operator already has sudo.
+	- Decided against: config switches without array and raw cases. The default branch warns.
+	- Decided against: The dropped MarshalIndent error in agent.go. The question holds only strings, so it can't fail.
+	- Decided against: The agent answer file handed to the sudo run. Its folder is 0700 and only the operator can write it, and root checks everything again.
+	- Decided against: A hostile agent hosting a hash on github.com. The plugin name match and the operator's yes are the gate, as design.md says.
+	- Decided against: update exiting 0 when every agent jar fails a check. design.md says so.
+	- Decided against: Unsigned releases. design.md lists signing under Needs more thought.
+	- Decided against: install-dev.bash counting Podman without podman-docker as a container runtime. 2026111713320657 asked for that.
+	- Decided against: A runUser that names an existing service account losing its groups. The operator chose it, and people's accounts are guarded.
+	- Decided against: Unchecked Fprintf to the terminal, about 130 sites. Nothing can be done on a failed terminal write.
+	- Decided against: shellcheck with every optional check on. It found only SC2310 and SC2312 notes.
 
 - setup and repair offer zfs allow for snapshots
 	- ID: 2026111211050654
