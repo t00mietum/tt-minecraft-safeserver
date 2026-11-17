@@ -2,6 +2,11 @@
 # Types one line into tt-minecraftd console on a pty, then Ctrl-C, the way a
 # person would. Exits with console's own exit code.
 # Usage: console.py LINE
+
+# Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+# Licensed under the GNU General Public License v2.0 or later. Full text at:
+#   https://spdx.org/licenses/GPL-2.0-or-later.html
+# SPDX-License-Identifier: GPL-2.0-or-later
 import os
 import pty
 import select

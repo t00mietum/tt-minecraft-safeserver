@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"unicode"
+	"unicode/utf8"
 )
 
 // LogFile is latest.log. It's the same file in both modes, since the server
@@ -51,12 +52,24 @@ func Clean(s string) string {
 	}, s)
 }
 
+// Cut shortens s to limit bytes on a character boundary, and marks the cut.
+func Cut(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
 // MainThread is the thread console commands run on, so their answers are
 // logged from it.
 const MainThread = "Server thread"
 
 // logHead is the start of a latest.log line, as in
-// "[12:00:03] [Server thread/INFO]: ". A thread name can hold a slash.
+// "[12:00:03] [Server thread/INFO]: ". A thread name can have a slash in it.
 var logHead = regexp.MustCompile(`^\[[0-9:]+\] \[(.+)/(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\]: `)
 
 // LogThread gives the thread that logged a latest.log line. ok is false for a

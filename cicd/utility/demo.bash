@@ -138,7 +138,7 @@ done
 fShot 200 "${prompt}_"
 
 args=()
-for f in "${frames}"/*.gif; do args+=("-d$(cat "${f%.gif}.delay")" "${f}"); done
+for f in "${frames}"/*.gif; do read -r d < "${f%.gif}.delay"; args+=("-d${d}" "${f}"); done
 gifsicle --no-warnings --loop -O3 --colors 16 "${args[@]}" -o "${outGif}"
 echo "demo: ${nFrame} frames, $(stat -c %s "${outGif}") bytes -> ${outGif}"
 

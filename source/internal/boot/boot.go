@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	// UnitName is the boot unit, and UnitFile is where setup writes it.
 	UnitName = "tt-minecraftd.service"
 	UnitFile = "/etc/systemd/system/" + UnitName
 	// Bin is where setup installs the tool, and what the unit runs.

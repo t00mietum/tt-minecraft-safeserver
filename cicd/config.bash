@@ -123,7 +123,7 @@ fCpuJobs(){
 	local -n jobs_cpuJ="$1"
 	local -i cores=1 load100=0
 	local load="${3:-0}" frac=""
-	## Checked first, since arithmetic would run what a bad one holds.
+	## Checked first, since arithmetic would run what's in a bad one.
 	[[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] && cores="$2"
 	frac="${load#*.}"; [[ "${load}" == *.* ]] || frac=""; frac="${frac}00"
 	if [[ "${load%%.*}" =~ ^[0-9]+$ && "${frac:0:2}" =~ ^[0-9]+$ ]]; then load100=$(( 10#${load%%.*} * 100 + 10#${frac:0:2} )); fi

@@ -21,6 +21,8 @@ import (
 )
 
 const (
+	// Table is the tool's own nftables table. The rest are where its rules
+	// and their unit go.
 	Table     = "tt_minecraftd"
 	RulesFile = "/etc/tt-minecraftd/firewall.nft"
 	UnitName  = "tt-minecraftd-firewall.service"
@@ -33,10 +35,12 @@ const (
 	discoveryPort = 7551
 )
 
-// lan is what allowFrom's lan means, and what the server can't reach.
-// CGNAT is in it, since tailnets live there.
-var lan4 = []string{"10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"}
-var lan6 = []string{"fc00::/7", "fe80::/10"}
+// lan4 and lan6 are what allowFrom's lan means, and what the server can't
+// reach. CGNAT is in it, since tailnets live there.
+var (
+	lan4 = []string{"10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"}
+	lan6 = []string{"fc00::/7", "fe80::/10"}
+)
 
 // Resolvers reads the nameserver lines of a resolv.conf.
 func Resolvers(r io.Reader) ([]netip.Addr, error) {

@@ -30,7 +30,7 @@ func (w Warning) String() string {
 
 // LoadFile parses an shcl file. Only a file that can't be read is an error.
 // Parse errors come back as warnings, since shcl repairs a bad line and
-// carries on. Its hints are dropped: the readers here say more about the
+// goes on. Its hints are dropped: the readers here say more about the
 // same lines, and a hint such as "did you mean a list" misleads for a key
 // that takes one value.
 func LoadFile(path string) (*shcl.Document, []Warning, error) {

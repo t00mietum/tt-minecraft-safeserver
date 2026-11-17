@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package repair holds design.md's repair checks. Each one looks, and says what
+// Package repair has design.md's repair checks. Each one looks, and says what
 // it found, with a fix where there is one. setup reuses the fixes.
 package repair
 
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
@@ -102,4 +103,35 @@ func (h *Host) fix(args ...string) func(ctx context.Context) error {
 		_, err := h.Run.Run(ctx, host.Cmd{Args: args, Sudo: true})
 		return err
 	}
+}
+
+// fixAll runs root commands in order, and stops at the first that fails.
+func (h *Host) fixAll(cmds ...[]string) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		for _, args := range cmds {
+			if err := h.fix(args...)(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// enabled gives a finding when unit isn't enabled.
+func (h *Host) enabled(ctx context.Context, unit, problem string) []Finding {
+	out, _ := h.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"systemctl", "is-enabled", unit}}) // disabled exits 1
+	if strings.TrimSpace(string(out)) == "enabled" {
+		return nil
+	}
+	return []Finding{{Problem: problem, Fixed: unit + " enabled", Fix: h.fix("systemctl", "enable", unit)}}
+}
+
+// anyRegular says whether any of paths is a plain file.
+func anyRegular(paths []string) bool {
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }

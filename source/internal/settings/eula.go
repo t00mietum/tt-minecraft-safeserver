@@ -5,7 +5,6 @@ package settings
 
 import (
 	"strings"
-	"syscall"
 )
 
 const eulaFile = "eula.txt"
@@ -39,17 +38,15 @@ func AcceptEULA(serverDir string) error {
 		return err
 	}
 	defer top.close()
+	// st is nil when there's no file yet.
 	text, st, err := top.read(eulaFile)
-	var like *syscall.Stat_t
 	switch {
 	case isNotExist(err):
 		text = []byte("#By changing the setting below to TRUE you are indicating your agreement to our EULA (" + EULAURL + ").\n")
 	case err != nil:
 		return err
-	default:
-		like = st
 	}
 	props := parseProperties(text)
 	props.set("eula", "true")
-	return top.write(eulaFile, props.bytes(), like)
+	return top.write(eulaFile, props.bytes(), st)
 }

@@ -29,6 +29,7 @@ All types of contributions are encouraged and valued. See the [Table of Contents
 - [I Want To Contribute](#i-want-to-contribute)
 	- [Reporting Bugs](#reporting-bugs)
 	- [Suggesting Enhancements](#suggesting-enhancements)
+- [Code style](#code-style)
 
 <!-- /TOC -->
 
@@ -160,6 +161,10 @@ include Setup of env, IDE and typical getting started instructions?
 Updating, improving and correcting the documentation
 
 -->
+
+## Code style
+
+See [style_guide.md](style_guide.md).
 
 <!-- TODO
 ## Styleguides

@@ -213,34 +213,26 @@ func (a API) NewestStable(ctx context.Context, version string) (Build, error) {
 // following links, as the settings package does, since the server account
 // may own the tree. The new files take the folder's owner and group.
 func (a API) Install(ctx context.Context, serverDir string, b Build) error {
-	dirfd, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	dirfd, err := download.OpenDir(serverDir)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return err
 	}
 	defer syscall.Close(dirfd)
 	if err := a.fetch().Into(ctx, dirfd, serverDir, download.File{Name: b.Name, URL: b.URL, SHA256: b.SHA256, Size: b.Size}); err != nil {
 		return err
 	}
-	var st syscall.Stat_t
-	if err := syscall.Fstat(dirfd, &st); err != nil {
-		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
-	}
-	return link(dirfd, serverDir, b.Name, st)
+	return link(dirfd, serverDir, b.Name)
 }
 
 // Point makes paper.jar in serverDir a link to name, a build already there,
 // owned like the folder.
 func Point(serverDir, name string) error {
-	dirfd, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	dirfd, err := download.OpenDir(serverDir)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return err
 	}
 	defer syscall.Close(dirfd)
-	var st syscall.Stat_t
-	if err := syscall.Fstat(dirfd, &st); err != nil {
-		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
-	}
-	return link(dirfd, serverDir, name, st)
+	return link(dirfd, serverDir, name)
 }
 
 // Name is a build's file name, as PaperMC gives it.
@@ -308,7 +300,11 @@ func versionID(e *zip.File) string {
 }
 
 // link makes paper.jar a link to name, replacing what's there in one rename.
-func link(dirfd int, serverDir, name string, st syscall.Stat_t) error {
+func link(dirfd int, serverDir, name string) error {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(dirfd, &st); err != nil {
+		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
+	}
 	tmp, err := download.TempName("paper.jar")
 	if err != nil {
 		return err
@@ -344,11 +340,8 @@ func symlinkat(target string, dirfd int, name string) error {
 	return nil
 }
 
-// atSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
-const atSymlinkNoFollow = 0x100
-
 func fchownatNoFollow(dirfd int, name string, uid, gid int) error {
-	return syscall.Fchownat(dirfd, name, uid, gid, atSymlinkNoFollow)
+	return syscall.Fchownat(dirfd, name, uid, gid, download.AtSymlinkNoFollow)
 }
 
 // Linked is the build paper.jar links to, read from the target's name.

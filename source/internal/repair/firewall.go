@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
@@ -31,14 +30,7 @@ var FirewallCheck = Check{
 var nftPaths = []string{"/usr/sbin/nft", "/sbin/nft"}
 
 // HasNft tells whether nftables' nft is installed.
-func HasNft() bool {
-	for _, p := range nftPaths {
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return true
-		}
-	}
-	return false
-}
+func HasNft() bool { return anyRegular(nftPaths) }
 
 func (h *Host) hasNft() bool {
 	if h.NftThere != nil {
@@ -63,7 +55,7 @@ func (h *Host) fwFiles() (rules, unit, resolv string) {
 	return rules, unit, resolv
 }
 
-// sameFile says whether path holds text. A missing file isn't an error.
+// sameFile says whether path has text. A missing file isn't an error.
 func sameFile(path, text string) (bool, error) {
 	have, err := os.ReadFile(path) // #nosec G304 -- one of the tool's own paths
 	if errors.Is(err, fs.ErrNotExist) {
@@ -123,14 +115,7 @@ func (h *Host) firewallOn(ctx context.Context) ([]Finding, error) {
 			},
 		})
 	}
-	out, _ := h.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"systemctl", "is-enabled", firewall.UnitName}}) // disabled exits 1
-	if strings.TrimSpace(string(out)) != "enabled" {
-		found = append(found, Finding{
-			Problem: firewall.UnitName + " isn't enabled, so the rules don't load at boot",
-			Fixed:   firewall.UnitName + " enabled",
-			Fix:     h.fix("systemctl", "enable", firewall.UnitName),
-		})
-	}
+	found = append(found, h.enabled(ctx, firewall.UnitName, firewall.UnitName+" isn't enabled, so the rules don't load at boot")...)
 
 	reload := Finding{
 		Fixed: "firewall rules loaded",
@@ -163,19 +148,12 @@ func (h *Host) firewallOff(ctx context.Context) ([]Finding, error) {
 		return []Finding{{
 			Problem: "firewall is off, but " + firewall.UnitName + " is still installed",
 			Fixed:   firewall.UnitName + " and its table removed",
-			Fix: func(ctx context.Context) error {
-				// Stopping it deletes the table.
-				for _, args := range [][]string{
-					{"systemctl", "disable", "--now", firewall.UnitName},
-					{"rm", "-f", "--", unitPath},
-					{"systemctl", "daemon-reload"},
-				} {
-					if err := h.fix(args...)(ctx); err != nil {
-						return err
-					}
-				}
-				return nil
-			},
+			// Stopping it deletes the table.
+			Fix: h.fixAll(
+				[]string{"systemctl", "disable", "--now", firewall.UnitName},
+				[]string{"rm", "-f", "--", unitPath},
+				[]string{"systemctl", "daemon-reload"},
+			),
 		}}, nil
 	}
 	if !h.hasNft() {

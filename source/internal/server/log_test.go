@@ -9,7 +9,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
-// A name or chat line can't hold escape codes or flip the text direction of
+// A name or chat line can't send escape codes or flip the text direction of
 // what the operator reads.
 func TestClean(t *testing.T) {
 	defer testid.Line(t, "df78h")

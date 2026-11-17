@@ -6,6 +6,7 @@ package repair
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -108,7 +109,7 @@ func ufwMissing(ctx context.Context, h *Host) ([]port, error) {
 	return uncovered(gamePorts(h.Cfg), specs), nil
 }
 
-// firewalldMissing reads the default zone's ports. A service that holds the
+// firewalldMissing reads the default zone's ports. A service that opens the
 // port isn't looked into, so it shows as missing.
 func firewalldMissing(ctx context.Context, h *Host) ([]port, error) {
 	out, err := h.Run.Run(ctx, host.Cmd{Look: true, Sudo: true, Args: []string{"firewall-cmd", "--list-ports"}})
@@ -121,14 +122,7 @@ func firewalldMissing(ctx context.Context, h *Host) ([]port, error) {
 func uncovered(ports []port, specs []string) []port {
 	var missing []port
 	for _, p := range ports {
-		ok := false
-		for _, s := range specs {
-			if covers(s, p) {
-				ok = true
-				break
-			}
-		}
-		if !ok {
+		if !slices.ContainsFunc(specs, func(s string) bool { return covers(s, p) }) {
 			missing = append(missing, p)
 		}
 	}

@@ -51,7 +51,7 @@ type Parts struct {
 	Image   bool
 }
 
-// Update holds what one run of the command needs.
+// Update is what one run of the command needs.
 type Update struct {
 	Cfg         *config.Config
 	ConfigPath  string

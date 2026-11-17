@@ -31,8 +31,8 @@ type API struct {
 
 const maxAPIReply = 8 << 20
 
-// Ask holds the conversation, running the agent's fetches, until it answers
-// in text.
+// Ask keeps the conversation going, running the agent's fetches, until it
+// answers in text.
 func (a API) Ask(ctx context.Context, prompt string) (string, error) {
 	if geteuid() == 0 {
 		return "", errors.New("the update agent doesn't run as root")

@@ -108,7 +108,7 @@ func unescape(s string) string {
 }
 
 // escape writes a value as Java's Properties.store would, for the characters
-// a setting here can hold, such as the colons in an IPv6 address.
+// a setting here can have, such as the colons in an IPv6 address.
 func escape(s string) string {
 	var b strings.Builder
 	for i, c := range s {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package plugins holds the approved jar list. See Plugin pinning in design.md.
+// Package plugins reads and writes the approved jar list, and checks jars against it. See Plugin pinning in design.md.
 package plugins
 
 import (

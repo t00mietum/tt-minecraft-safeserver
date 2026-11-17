@@ -8,10 +8,8 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 )
 
 // BootCheck is design.md's repair check 13, and setup's step 11. It never
@@ -49,15 +47,7 @@ func (h *Host) bootOn(ctx context.Context, path string) ([]Finding, error) {
 			},
 		})
 	}
-	out, _ := h.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"systemctl", "is-enabled", boot.UnitName}}) // disabled exits 1
-	if strings.TrimSpace(string(out)) != "enabled" {
-		found = append(found, Finding{
-			Problem: "startAtBoot is on, but " + boot.UnitName + " isn't enabled",
-			Fixed:   boot.UnitName + " enabled",
-			Fix:     h.fix("systemctl", "enable", boot.UnitName),
-		})
-	}
-	return found, nil
+	return append(found, h.enabled(ctx, boot.UnitName, "startAtBoot is on, but "+boot.UnitName+" isn't enabled")...), nil
 }
 
 // bootOff disables and removes the unit, and leaves a server it runs alone.
@@ -70,17 +60,10 @@ func (h *Host) bootOff(path string) ([]Finding, error) {
 	return []Finding{{
 		Problem: "startAtBoot is off, but " + boot.UnitName + " is still installed",
 		Fixed:   boot.UnitName + " disabled and removed",
-		Fix: func(ctx context.Context) error {
-			for _, args := range [][]string{
-				{"systemctl", "disable", boot.UnitName},
-				{"rm", "-f", "--", path},
-				{"systemctl", "daemon-reload"},
-			} {
-				if err := h.fix(args...)(ctx); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
+		Fix: h.fixAll(
+			[]string{"systemctl", "disable", boot.UnitName},
+			[]string{"rm", "-f", "--", path},
+			[]string{"systemctl", "daemon-reload"},
+		),
 	}}, nil
 }

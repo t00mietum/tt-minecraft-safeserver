@@ -54,12 +54,12 @@
 ##	- CICD_MEM_CAP caps the run's memory, with no swap: a size such as 24g, or none.
 ##	  The default is a third of RAM, from 4g to 32g.
 ##	- The arm64 step builds the test binaries for linux/arm64 and runs them on the arm64 test box,
-##	  ARM64_HOST in config.bash, under the shared host lock. VM_STATE_TOOL holds the box and puts a
+##	  ARM64_HOST in config.bash, under the shared host lock. VM_STATE_TOOL takes the box and puts a
 ##	  VM back the way it was found. A box or tool that isn't there, or a box busy past
 ##	  ARM64_LOCK_WAIT, is a SKIP and the run goes on. CICD_ARM64_HOST, CICD_ARM64_SSH, CICD_VM_STATE
 ##	  and CICD_ARM64_LOCK_WAIT override them.
 ##	- The fuzz step runs each Fuzz target in turn for FUZZ_TIME in config.bash (FUZZ_TIME_QUICK in
-##	  --quick, FUZZ_TIME_LONG in --long), from a copy of the tree, so a failing input lands in the
+##	  --quick, FUZZ_TIME_LONG in --long), from a copy of the tree, so a failing input ends up in the
 ##	  run folder. Its file is printed; copy it to the package's testdata/fuzz to keep it as a test.
 ##	  CICD_FUZZ_TIME overrides the time in every run.
 ##	- The soak step runs each TestSoak, which loops the main actions headless and fails when the live
@@ -188,7 +188,7 @@ if ((handsOff)) && [[ -n "${message}" ]]; then fUsage "--${mode} never publishes
 
 areaDirs=()
 if [[ "${mode}" == gate ]]; then
-	gateAreasAll=(cli); for d in "${root}"/source/internal/*/; do gateAreasAll+=("$(basename "${d}")"); done
+	gateAreasAll=(cli); for d in "${root}"/source/internal/*/; do d="${d%/}"; gateAreasAll+=("${d##*/}"); done
 	for a in "${gateAreas[@]:-}"; do
 		[[ -z "${a}" ]] && continue
 		[[ " ${gateAreasAll[*]} " == *" ${a} "* ]] || fUsage "--backlog-run-quick: no area '${a}'. Areas: ${gateAreasAll[*]}"
@@ -447,8 +447,10 @@ fStepFormat(){
 		printf '%s\n' "${bad}"; fDie "gofmt wants to reformat the files above"
 	fi
 	## A run that publishes may reformat, and records which files it touched so publish adds only those.
-	local f
-	while IFS= read -r f; do gofmt -w "${f}"; formatChanged+=("${f}"); done <<< "${bad}"
+	local files=()
+	mapfile -t files <<< "${bad}"
+	gofmt -w "${files[@]}"
+	formatChanged+=("${files[@]}")
 	fEcho_Clean "gofmt: reformatted ${#formatChanged[@]} file(s)"
 }
 

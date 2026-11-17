@@ -263,6 +263,17 @@ func (k *Kit) stop(ctx context.Context, e engine, warn int) error {
 	return k.handBack(ctx)
 }
 
+// preflight is the checks that can refuse a start, in every mode.
+func (k *Kit) preflight(ctx context.Context) error {
+	if err := k.checkSettings(); err != nil {
+		return err
+	}
+	if err := k.checkPlugins(); err != nil {
+		return err
+	}
+	return k.checkFirewall(ctx)
+}
+
 // startUnit is start when the boot unit is enabled. The checks that can
 // refuse a start run here too, so a refusal shows here and not only in the
 // journal.
@@ -270,13 +281,7 @@ func (k *Kit) startUnit(ctx context.Context) error {
 	if err := k.sudoUp(ctx); err != nil {
 		return err
 	}
-	if err := k.checkSettings(); err != nil {
-		return err
-	}
-	if err := k.checkPlugins(); err != nil {
-		return err
-	}
-	if err := k.checkFirewall(ctx); err != nil {
+	if err := k.preflight(ctx); err != nil {
 		return err
 	}
 	if _, err := k.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"systemctl", "start", boot.UnitName}}); err != nil {

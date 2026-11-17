@@ -1,14 +1,24 @@
 #!/bin/bash
-# Runs the hand tests that need root, against a real Paper server, in a
-# throwaway Debian container with systemd and a real sudo: setup, --adopt,
-# rootful Podman, native mode when it's on, and the firewall. See checks.bash.
-# Needs docker that can run --privileged, and the internet.
-#
-# --zfs runs setup and then the ZFS snapshot checks instead, on a throwaway
-# pool backed by a file in the run's folder. The container shares this host's
-# kernel, so the pool shows in its zpool list until the run destroys it.
-#
-# Usage: root-host.bash [--keep-temp] [--zfs]
+
+#  shellcheck enable=require-variable-braces  ## Every expansion braced: "${var}", not "$var".
+
+##	Purpose:
+##		- Runs the hand tests that need root, against a real Paper server, in a throwaway Debian
+##		  container with systemd and a real sudo: setup, --adopt, rootful Podman, native mode when
+##		  it's on, and the firewall. See checks.bash.
+##		- Needs docker that can run --privileged, and the internet.
+##		- --zfs runs setup and then the ZFS snapshot checks instead, on a throwaway pool backed by a
+##		  file in the run's folder. The container shares this host's kernel, so the pool shows in its
+##		  zpool list until the run destroys it.
+##	Syntax:
+##		root-host.bash [--keep-temp] [--zfs]
+##	History: At bottom of script.
+
+##	Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+##	Licensed under the GNU General Public License v2.0 or later. Full text at:
+##		https://spdx.org/licenses/GPL-2.0-or-later.html
+##	SPDX-License-Identifier: GPL-2.0-or-later
+
 set -euo pipefail
 
 projectName=tt-minecraft-safeserver
@@ -130,3 +140,9 @@ fi
 echo "Running the checks; setup downloads Paper, Geyser, Podman, and the image"
 docker exec -u op -e TERM=xterm -e ZFS_POOL="${pool}" -e ZFS_FILE="${pool:+${runDir}/zpool.img}" -w /home/op "${box}" \
 	nice -n 10 bash /usr/local/share/root-host/checks.bash
+
+
+##	History:
+##		- 2026-11-12: Created, with fixes from its first runs.
+##		- 2026-11-12: --zfs: snapshot checks on a throwaway pool.
+##		- 2026-11-13: Native checks skip while native mode is off.

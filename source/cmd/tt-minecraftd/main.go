@@ -273,14 +273,19 @@ func (inv invocation) pluginsFile() string {
 	return filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl")
 }
 
+// sudoAndExe finds sudo and this binary, for asRoot and asRootAndWait.
+func sudoAndExe() (sudo, exe string, err error) {
+	if sudo, err = exec.LookPath("sudo"); err != nil {
+		return "", "", fmt.Errorf("this needs root, and there's no sudo: %w", err)
+	}
+	exe, err = os.Executable()
+	return sudo, exe, err
+}
+
 // asRoot runs the tool again through sudo with the same arguments, for setup,
 // update, and repair. A var so tests don't exec.
 var asRoot = func(args []string) error {
-	sudo, err := exec.LookPath("sudo")
-	if err != nil {
-		return fmt.Errorf("this needs root, and there's no sudo: %w", err)
-	}
-	exe, err := os.Executable()
+	sudo, exe, err := sudoAndExe()
 	if err != nil {
 		return err
 	}
@@ -410,6 +415,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		}
 		u.Agent = a.Replay
 	case !agentOn || inv.opts.agentAnswer != "":
+		// Nothing to ask. An answer file goes on to the root run.
 	case root:
 		u.AgentNote = "the update agent isn't asked when update starts as root. Run update without sudo, and it asks the agent before it runs itself through sudo"
 	default:
@@ -458,24 +464,19 @@ func askThenRoot(ctx context.Context, u *updatepkg.Update, args []string) error 
 // runs as a child. Ctrl-C reaches both, and run's signal context keeps this
 // one waiting. A var so tests don't exec.
 var asRootAndWait = func(args []string) error {
-	sudo, err := exec.LookPath("sudo")
-	if err != nil {
-		return fmt.Errorf("this needs root, and there's no sudo: %w", err)
-	}
-	exe, err := os.Executable()
+	sudo, exe, err := sudoAndExe()
 	if err != nil {
 		return err
 	}
 	cmd := exec.Command(sudo, append([]string{"--", exe}, args...)...) // #nosec G204 -- this binary, with its own arguments
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	err = cmd.Run()
 	var exit *exec.ExitError
-	if err := cmd.Run(); errors.As(err, &exit) {
+	if errors.As(err, &exit) {
 		// The root run said what went wrong.
 		return exitCode(max(exit.ExitCode(), exitError))
-	} else if err != nil {
-		return err
 	}
-	return nil
+	return err
 }
 
 // exitCode is an exit code with nothing more to say.
@@ -571,15 +572,20 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 		report("FAILED", "plugins: "+err.Error())
 		return
 	}
+	// true for a new jar, false for a changed one
 	asked := make(map[string]bool, len(c.New)+len(c.Changed))
-	for _, name := range append(c.New, c.Changed...) {
+	for _, name := range c.New {
 		asked[name] = true
+	}
+	for _, name := range c.Changed {
+		asked[name] = false
 	}
 	answers := bufio.NewScanner(in)
 	var yes []plugins.Info
 	var left []string
 	for _, j := range jars {
-		if !asked[j.Name] {
+		isNew, ok := asked[j.Name]
+		if !ok {
 			continue
 		}
 		if len(left) > 0 {
@@ -596,7 +602,7 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 			about = "no plugin.yml"
 		}
 		state := "new"
-		if slices.Contains(c.Changed, j.Name) {
+		if !isNew {
 			state = "changed"
 		}
 		fmt.Fprintf(w, "\n%s (%s)\n  sha256: %s\n  size:   %d bytes\n  date:   %s\n  says:   %s\n",

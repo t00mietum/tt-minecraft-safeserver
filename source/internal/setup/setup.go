@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
@@ -36,7 +37,7 @@ import (
 // BinPath is where setup puts the tool, which the boot unit runs.
 const BinPath = boot.Bin
 
-// Setup holds one run's options. Accounts and Repair let tests stay off the
+// Setup is one run's options. Accounts and Repair let tests stay off the
 // host's real accounts and checks.
 type Setup struct {
 	Run host.Runner
@@ -260,7 +261,7 @@ func (s *Setup) options(ctx context.Context) ([]config.Option, error) {
 	if given(opts, "runMode") {
 		return opts, nil
 	}
-	mode, err := s.pickRuntime(ctx)
+	mode, err := s.pickRuntime()
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +287,7 @@ func given(opts []config.Option, key string) bool {
 
 // pickRuntime is design.md's pick: Podman, else Docker, else Podman through
 // apt or native mode. Docker is never installed.
-func (s *Setup) pickRuntime(context.Context) (string, error) {
+func (s *Setup) pickRuntime() (string, error) {
 	switch {
 	case launch.Installed("podman"):
 		return "podman", nil
@@ -501,9 +502,10 @@ func lastOfEach(opts []config.Option) []config.Option {
 		k := strings.ToLower(opts[i].Key)
 		if !seen[k] {
 			seen[k] = true
-			keep = append([]config.Option{opts[i]}, keep...)
+			keep = append(keep, opts[i])
 		}
 	}
+	slices.Reverse(keep)
 	return keep
 }
 
@@ -567,6 +569,17 @@ func configText(opts []config.Option) string {
 func (s *Setup) configDir() (string, error) {
 	dir := filepath.Dir(s.ConfigPath)
 	return dir, os.MkdirAll(dir, 0o755) // #nosec G301 -- status reads the config without sudo
+}
+
+// writeApproved adds jars to the approved list beside the config.
+func (s *Setup) writeApproved(jars []plugins.Info) error {
+	if _, err := s.configDir(); err != nil {
+		return err
+	}
+	if err := plugins.Approve(s.PluginsFile, jars); err != nil {
+		return fmt.Errorf("can't write the approved list: %w", err)
+	}
+	return nil
 }
 
 func (s *Setup) writeConfig(opts []config.Option) error {
@@ -653,11 +666,8 @@ func (s *Setup) getPaper(ctx context.Context, c config.Config, b *paper.Build) e
 	}
 	fmt.Fprintf(s.Out, "%-7s Paper %s build %d downloaded, and its SHA-256 matches; paper.jar points at %s\n", "FIXED", b.Version, b.ID, b.Name)
 	// start pins the build paper.jar points at, like a plugin.
-	if _, err := s.configDir(); err != nil {
+	if err := s.writeApproved([]plugins.Info{{Jar: plugins.Jar{Name: b.Name}, SHA256: b.SHA256, Size: b.Size}}); err != nil {
 		return err
-	}
-	if err := plugins.Approve(s.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: b.Name}, SHA256: b.SHA256, Size: b.Size}}); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
 	}
 	fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", b.Name)
 	return nil
@@ -709,11 +719,8 @@ func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser
 		fmt.Fprintf(s.Out, "%-7s %s %s build %d downloaded, and its SHA-256 matches\n", "FIXED", geyser.Title(b.Project), b.Version, b.ID)
 		jars = append(jars, plugins.Info{Jar: plugins.Jar{Name: b.Path()}, SHA256: b.SHA256, Source: s.Geyser.Source(b.Project)})
 	}
-	if _, err := s.configDir(); err != nil {
+	if err := s.writeApproved(jars); err != nil {
 		return err
-	}
-	if err := plugins.Approve(s.PluginsFile, jars); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
 	}
 	for _, j := range jars {
 		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", j.Name)
@@ -793,11 +800,8 @@ func (s *Setup) approve(jars []plugins.Info) error {
 	if len(jars) == 0 || s.DryRun {
 		return nil
 	}
-	if _, err := s.configDir(); err != nil {
+	if err := s.writeApproved(jars); err != nil {
 		return err
-	}
-	if err := plugins.Approve(s.PluginsFile, jars); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
 	}
 	fmt.Fprintf(s.Out, "%-7s %d plugin %s approved\n", "FIXED", len(jars), plural(len(jars), "jar"))
 	return nil
