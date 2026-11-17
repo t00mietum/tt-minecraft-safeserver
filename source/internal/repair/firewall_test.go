@@ -13,6 +13,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -96,9 +97,15 @@ func TestFirewallCheck(t *testing.T) {
 	}
 
 	fakeNft(t, false)
+	if got := look(t, h, FirewallCheck); !reflect.DeepEqual(got, []string{"nftables isn't installed, so the firewall can't load; the distro's nftables package adds it"}) {
+		t.Errorf("no nft, no apt: %q", got)
+	}
+	wasInstalled := launch.Installed
+	launch.Installed = func(name string) bool { return name == "apt-get" }
 	if got := look(t, h, FirewallCheck); !reflect.DeepEqual(got, []string{"nftables isn't installed, so the firewall can't load; apt-get install nftables adds it"}) {
 		t.Errorf("no nft: %q", got)
 	}
+	launch.Installed = wasInstalled
 
 	// Off: the unit goes, and so does a table left behind.
 	fakeNft(t, true)

@@ -537,6 +537,8 @@ func TestPodmanChecks(t *testing.T) {
 	t.Cleanup(func() { catatonitPaths = was })
 	dir := t.TempDir()
 	catatonitPaths = []string{filepath.Join(dir, "catatonit")}
+	hasAll(t, "no catatonit, no apt", look(t, h, catatonitCheck), "catatonit isn't installed", "the distro's catatonit package adds it")
+	launch.Installed = func(name string) bool { return name == "apt-get" }
 	hasAll(t, "no catatonit", look(t, h, catatonitCheck), "catatonit isn't installed", "apt-get install catatonit")
 	if err := os.WriteFile(catatonitPaths[0], nil, 0o755); err != nil {
 		t.Fatal(err)

@@ -290,6 +290,45 @@ func TestRuntimePick(t *testing.T) {
 	}
 }
 
+// Without apt, a missing catatonit, or Podman given with --set, stops setup
+// before it changes anything, as the runtime pick does.
+func TestNoAptPackages(t *testing.T) {
+	defer testid.Line(t, "df79g")
+	for _, c := range []struct {
+		name  string
+		tools []string
+		sets  []string
+		want  string
+	}{
+		{name: "no catatonit", tools: []string{"podman"}, want: "catatonit isn't installed"},
+		{name: "podman given", sets: []string{"runMode=podman"}, want: "podman and catatonit aren't installed"},
+	} {
+		r := newRig(t, c.tools, "", c.sets...)
+		r.s.Yes, r.s.AcceptEULA = true, true
+		err := r.s.Do(context.Background())
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "install it first") && !strings.Contains(err.Error(), "install them first") {
+			t.Errorf("%s: error %v, want %q", c.name, err, c.want)
+		}
+		if ran := r.ran(); slices.ContainsFunc(ran, func(s string) bool { return !strings.HasPrefix(s, "ps ") }) {
+			t.Errorf("%s: ran commands before refusing:\n%s", c.name, strings.Join(ran, "\n"))
+		}
+		if strings.Contains(r.out.String(), "Go ahead") {
+			t.Errorf("%s: asked to go ahead before refusing:\n%s", c.name, r.out)
+		}
+		if _, err := os.Stat(r.server); err == nil {
+			t.Errorf("%s: server folder made", c.name)
+		}
+	}
+
+	// A missing nft alone is still the firewall step's to report.
+	r := newRig(t, []string{"podman", "catatonit"}, "")
+	r.nft = false
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := r.s.Do(context.Background()); err != nil && strings.Contains(err.Error(), "install it first") {
+		t.Errorf("no nft refused up front: %v", err)
+	}
+}
+
 // A fresh image has no package lists, and install alone finds nothing.
 func TestAptUpdateFirst(t *testing.T) {
 	defer testid.Line(t, "df67t")

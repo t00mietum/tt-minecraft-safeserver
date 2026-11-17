@@ -109,6 +109,9 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.checkTree(cfg); err != nil {
 		return err
 	}
+	if err := s.needApt(cfg); err != nil {
+		return err
+	}
 	jars, err := s.newJars(cfg)
 	if err != nil {
 		return err
@@ -329,6 +332,19 @@ func (s *Setup) packages(c config.Config) []string {
 		pkgs = append(pkgs, "nftables")
 	}
 	return pkgs
+}
+
+// needApt refuses, before any change, when install would need apt and there
+// isn't any. packages leaves nftables out then, for the firewall step.
+func (s *Setup) needApt(c config.Config) error {
+	pkgs := s.packages(c)
+	switch {
+	case len(pkgs) == 0 || launch.Installed("apt-get"):
+		return nil
+	case len(pkgs) == 1:
+		return fmt.Errorf("%s isn't installed, and there's no apt-get to install it with; install it first", pkgs[0])
+	}
+	return fmt.Errorf("%s aren't installed, and there's no apt-get to install them with; install them first", strings.Join(pkgs, " and "))
 }
 
 func (s *Setup) install(ctx context.Context, c config.Config) error {

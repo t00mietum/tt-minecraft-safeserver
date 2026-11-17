@@ -25,7 +25,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup runs apt-get for catatonit on a box without apt
 	- ID: 2026111714065925
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Severity: Low
 	- Opened: 20261117-140659
@@ -33,7 +34,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Related IDs: 2026111713320657
 	- Incorrect behavior [Bug]: On a box with Podman, no catatonit, and no apt, setup's install step still runs apt-get install catatonit, and fails on the missing command. repair's catatonit and nftables messages also name apt-get.
 	- Expected behavior [Bug]: Without apt, setup stops before any change and says catatonit has to be installed first, as its runtime pick does for Podman itself.
-	- Reproduced [Bug]: No. Read only, from setup's packages(): the catatonit line has no apt check, unlike the nftables one.
+	- Reproduced [Bug]: 20261117, in setup's test rig: with Podman, no catatonit and no apt, setup asked to go ahead and ran apt-get update, the account steps, the tree, and the rest. `runMode=podman` with neither Podman nor apt did the same.
+	- Cause [Bug]: packages() checked for apt only for nftables, and nothing checked it before install.
+	- Actual fix [Bug]: setup stops before the plan when Podman or catatonit is missing and there's no apt-get, and says to install it first. repair's catatonit and nftables findings name apt-get only when it's there, and the distro's package otherwise.
+	- Test case: df79g (no apt: no catatonit, or Podman given, stops before any command or prompt; a missing nft alone still goes to the firewall step), df66g and df64h's repair asserts (hint with and without apt)
+	- Verified: df79g fails on the code before the fix, with every setup command run, and passes after. The backlog quick run passed.
+	- Swept: setup's packages(), pickRuntime() (already checked apt) and firewall step; repair's catatonit and nftables findings. No other apt-get call in Go code. design.md's setup section says so.
+	- Decisions:
+		- A missing nft without apt still stops setup at the firewall step, as design.md's step 9 says, rather than up front. Only the packages install would fail on are checked early.
+		- The check runs in dry runs too, since the install would fail the same way.
+		- 20261117: df66g's no-nft assert and the catatonit assert in repair's container test now expect "the distro's ... package adds it" with no apt-get, and keep the old apt-get text with apt-get there.
+	- Branch: nov17-2026111714065925
+	- Commit: 50f4429
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-141400
 
 - install.bash: install for one user, without root
 	- ID: 2026111713320666

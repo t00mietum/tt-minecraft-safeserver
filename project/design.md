@@ -262,6 +262,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - It sets `runMode` to `podman` when Podman is installed, and to `docker` when only Docker is. With neither, it offers to install Podman and `catatonit` through apt, and stops on a no. It never installs Docker.
 	- A `runMode` given with `--set` skips the pick. `--yes` takes Podman.
+	- With Podman picked and `catatonit` missing, setup installs it through apt. Without apt, it stops before any change and says to install it first. The same goes for Podman when `runMode` gives it and it's missing.
 	- While native mode is on, a no to Podman picks native mode, and `--native` skips the pick too.
 
 - NixOS is deferred. When it comes back, on NixOS it skips steps 2, 9, 11, and 12. It checks those parts instead, and prints the module settings for whatever is missing.
