@@ -26,7 +26,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111412275150
 	- Type: Task
 	- Status: Waiting on signoff
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Opened: 20261114-122751
 	- Opened by: JC
 	- Progress log:
@@ -38,6 +38,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111111303242
 	- Type: Task
 	- Status: Stalled
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261111-113032
 	- Opened by: t00mietum
@@ -57,6 +58,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Stalled
 		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261113-184851
 	- Opened by:
@@ -74,6 +76,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111412275159
 	- Type: Task
 	- Status: Stalled
+	- Target version: v1.0.0-beta.1
 	- Opened: 20261114-122751
 	- Opened by: JC
 	- Requirements: The plain record players connect to follows the home WAN address, as the domain's own record already does.
@@ -86,7 +89,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111709090977
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261117-090909
 	- Opened by:
@@ -100,7 +103,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111709090967
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261117-090909
 	- Opened by:
@@ -114,7 +117,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111409374443
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261114-093744
 	- Opened by:
@@ -128,7 +131,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111410134543
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261114-101345
 	- Opened by:
@@ -141,7 +144,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111709090987
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-090909
 	- Opened by:
@@ -154,7 +157,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111412275169
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-122751
 	- Opened by:
@@ -165,7 +168,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111412081476
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-120814
 	- Opened by:
@@ -178,7 +181,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111410134562
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-101345
 	- Opened by:
@@ -189,7 +192,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111410134553
 	- Type: Bug
 	- Status: Queued
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-101345
 	- Opened by:
@@ -203,7 +206,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Enhancement
 	- Status: Closed
 	- Closed reason: Done
-	- Target version: v1.0.0-alpha.2
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-085824
 	- Opened by: t00mietum
@@ -221,6 +224,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Closed
 	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -256,6 +260,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Closed
 	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -283,6 +288,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Bug
 	- Status: Closed
 	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
 	- Prereq IDs: 2026111111070787
 	- Severity: Critical
 	- Opened: 20261111-110656
@@ -328,6 +334,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Closed
 	- Closed reason: Done
+	- Target version: v1.0.0-alpha.1
 	- Priority: Low
 	- Opened: 20261113-114858
 	- Opened by:
@@ -355,6 +362,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Task
 	- Status: Closed
 	- Closed reason: Done
+	- Target version: v1.0.0-alpha.1
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -2635,9 +2643,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Canceled means it still applies but was decided against. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Closed means no more work is planned, and Closed reason says why.
 
-	- Closed reason values: Done means the work is finished. Duplicate and Superseded mean another item covers it, named in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is. Moot means something else changed that made it irrelevant.
+	- Closed reason values: Done means the work is finished. Duplicate means another item covers it, named in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is. Moot means something else changed that made it irrelevant.
 
-	- Target version is the release an item is planned for. Fill it in once work toward a release starts, and on every open item queued for the next one.
+	- Target version is the release an item is meant for. Every open item has one, and so does every item closed since the last release.
 
 	- As issues are worked, and statuses change, place them in correct sorting order within the list:
 		- First by status: Waiting for answers, Waiting on signoff, Testing, Waiting for testing, Stalled, Started, Queued, Closed, Deferred, Canceled
@@ -2652,7 +2660,7 @@ Template:
 	- ID: YYYYmmDDHHMMSSNN
 	- Type: [Bug|Feature|Enhancement|Task]
 	- Status: [Queued|Waiting for answers|Waiting on signoff|Waiting for testing|Started|Testing|Stalled|Closed|Canceled|Deferred]
-	- Closed reason: [Done|Duplicate|Superseded|Could not reproduce|Works as intended|Won't fix|Moot]
+	- Closed reason: [Done|Duplicate|Could not reproduce|Works as intended|Won't fix|Moot]
 	- Target version:
 	- Needs local test suite run?:
 	- Needs external testing:
