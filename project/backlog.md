@@ -2643,7 +2643,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Canceled means it still applies but was decided against. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Closed means no more work is planned, and Closed reason says why.
 
-	- Closed reason values: Done means the work is finished. Duplicate means another item covers it, named in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is. Moot means something else changed that made it irrelevant.
+	- Closed reason values: Done means the work is finished. Duplicate means another item covers it, and Superseded means a newer item replaces it. Both name that item in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is. Moot means something else changed that made it irrelevant.
 
 	- Target version is the release an item is meant for. Every open item has one, and so does every item closed since the last release.
 
@@ -2660,7 +2660,7 @@ Template:
 	- ID: YYYYmmDDHHMMSSNN
 	- Type: [Bug|Feature|Enhancement|Task]
 	- Status: [Queued|Waiting for answers|Waiting on signoff|Waiting for testing|Started|Testing|Stalled|Closed|Canceled|Deferred]
-	- Closed reason: [Done|Duplicate|Could not reproduce|Works as intended|Won't fix|Moot]
+	- Closed reason: [Done|Duplicate|Superseded|Could not reproduce|Works as intended|Won't fix|Moot]
 	- Target version:
 	- Needs local test suite run?:
 	- Needs external testing:
