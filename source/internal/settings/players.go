@@ -23,8 +23,8 @@ func ReadPlayers(serverDir, file string) ([]Player, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer top.close()
-	b, _, err := top.read(file)
+	defer top.Close()
+	b, _, err := top.Read(file)
 	if err != nil {
 		return nil, err
 	}

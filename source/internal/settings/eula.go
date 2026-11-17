@@ -19,8 +19,8 @@ func EULAAccepted(serverDir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer top.close()
-	text, _, err := top.read(eulaFile)
+	defer top.Close()
+	text, _, err := top.Read(eulaFile)
 	if isNotExist(err) {
 		return false, nil
 	}
@@ -37,9 +37,9 @@ func AcceptEULA(serverDir string) error {
 	if err != nil {
 		return err
 	}
-	defer top.close()
+	defer top.Close()
 	// st is nil when there's no file yet.
-	text, st, err := top.read(eulaFile)
+	text, st, err := top.Read(eulaFile)
 	switch {
 	case isNotExist(err):
 		text = []byte("#By changing the setting below to TRUE you are indicating your agreement to our EULA (" + EULAURL + ").\n")
@@ -48,5 +48,5 @@ func AcceptEULA(serverDir string) error {
 	}
 	props := parseProperties(text)
 	props.set("eula", "true")
-	return top.write(eulaFile, props.bytes(), st)
+	return top.Write(eulaFile, props.bytes(), st)
 }

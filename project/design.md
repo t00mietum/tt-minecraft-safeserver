@@ -626,7 +626,8 @@ cicd/                        build, test, and release scripts
 
 - Container mode runs `podman` or `docker` through sudo, and the container under the service account's uid and gid. Both get the same flags:
 	- `--read-only`, and a tmpfs on `/tmp`. The tmpfs allows exec, since Netty and other libraries extract native code there and load it.
-	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work.
+	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work. The working folder is `serverDir`'s real path.
+		- A link in a tree that works on the host but goes through a path the container doesn't have, such as a link to another link outside the trees, stops `start`. It names the link and the path to point it at.
 	- `paper.jar` and each plugin and Geyser extension jar mounted read-only over their own paths.
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
@@ -661,6 +662,8 @@ cicd/                        build, test, and release scripts
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
 
 - In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in container mode.
+
+- Root's own changes inside a tree go through folder handles that don't follow links, since the server account can put a link anywhere it writes. That covers the safe settings, a refused jar, and the Floodgate key's mode. A link on the way is refused.
 
 - A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
 

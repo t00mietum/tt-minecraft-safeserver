@@ -16,6 +16,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
 
@@ -207,21 +208,60 @@ var bedrockCheck = Check{
 		}
 
 		key := filepath.Join(dir, "floodgate", "key.pem")
-		fi, err := os.Lstat(key)
+		f, st, err := floodgateKey(h.Cfg.ServerDir)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			// Floodgate makes it at its first start, under the server's umask.
+		case errors.Is(err, linksafe.ErrLink):
+			found = append(found, Finding{Problem: err.Error() + ", so the Floodgate key can't be checked"})
 		case err != nil:
 			return nil, err
-		case !fi.Mode().IsRegular():
+		case st.Mode&syscall.S_IFMT != syscall.S_IFREG:
 			found = append(found, Finding{Problem: key + " isn't a plain file; Floodgate makes a new one when it's moved away"})
-		case fi.Mode().Perm()&0o007 != 0:
+		case st.Mode&0o007 != 0:
 			found = append(found, Finding{
-				Problem: fmt.Sprintf("%s is mode %04o, so other accounts can read the Floodgate key", key, fi.Mode().Perm()),
+				Problem: fmt.Sprintf("%s is mode %04o, so other accounts can read the Floodgate key", key, st.Mode&0o777),
 				Fixed:   key + " can only be read by its owner and group now",
-				Fix:     h.fix("chmod", "o-rwx", "--", key),
+				Fix:     func(context.Context) error { return closeKey(h.Cfg.ServerDir) },
 			})
+		}
+		if f != nil {
+			_ = f.Close() // only read from
 		}
 		return found, nil
 	},
+}
+
+// floodgateKey opens plugins/floodgate/key.pem without following a link on
+// the way, since the server account could swap one in, and root changes its
+// mode.
+func floodgateKey(serverDir string) (*os.File, *syscall.Stat_t, error) {
+	top, err := linksafe.Open(serverDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer top.Close()
+	d, err := top.Walk("plugins/floodgate")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer d.Close()
+	return d.OpenFile("key.pem")
+}
+
+// closeKey takes away other accounts' access to the key, through the handle
+// it checked.
+func closeKey(serverDir string) error {
+	f, st, err := floodgateKey(serverDir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return fmt.Errorf("%s isn't a plain file", f.Name())
+	}
+	if err := syscall.Fchmod(int(f.Fd()), st.Mode&0o7770); err != nil {
+		return &fs.PathError{Op: "chmod", Path: f.Name(), Err: err}
+	}
+	return nil
 }

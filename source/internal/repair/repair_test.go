@@ -385,14 +385,69 @@ func TestBedrockCheck(t *testing.T) {
 	if err := os.Chmod(key, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := fixAll(t, h, f, bedrockCheck); !reflect.DeepEqual(got, []string{"sudo chmod o-rwx -- " + key}) {
-		t.Errorf("open key: %q", got)
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("open key ran %q", got)
+	}
+	if fi, err := os.Stat(key); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Errorf("open key, fixed: %v %v", fi.Mode(), err)
 	}
 	if err := os.Chmod(key, 0o640); err != nil {
 		t.Fatal(err)
 	}
 	if got := look(t, h, bedrockCheck); len(got) != 0 {
 		t.Errorf("closed key: %q", got)
+	}
+}
+
+// The key's mode is changed as root, so a link on the way to it isn't
+// followed.
+func TestBedrockKeyLinks(t *testing.T) {
+	defer testid.Line(t, "df79b")
+	h, f := testHost(t, "", "", nil)
+	h.Cfg.Bedrock = true
+	plugins := filepath.Join(h.Cfg.ServerDir, "plugins")
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "key.pem")
+	for _, file := range []string{filepath.Join(plugins, "Geyser-Spigot.jar"), filepath.Join(plugins, "floodgate-spigot.jar"), secret} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(secret, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(outside, filepath.Join(plugins, "floodgate")); err != nil {
+		t.Fatal(err)
+	}
+	got := look(t, h, bedrockCheck)
+	hasAll(t, "linked folder", got, filepath.Join(plugins, "floodgate")+" is a link")
+	if strings.Contains(strings.Join(got, "\n"), "[fix]") {
+		t.Errorf("linked folder has a fix: %q", got)
+	}
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("linked folder ran %q", got)
+	}
+
+	if err := os.Remove(filepath.Join(plugins, "floodgate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(plugins, "floodgate"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(plugins, "floodgate", "key.pem")); err != nil {
+		t.Fatal(err)
+	}
+	hasAll(t, "linked key", look(t, h, bedrockCheck), "key.pem is a link")
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("linked key ran %q", got)
+	}
+
+	if fi, err := os.Stat(secret); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Errorf("the link's target changed: %v %v", fi.Mode(), err)
 	}
 }
 

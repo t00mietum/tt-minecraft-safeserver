@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/yottacore/shcl/source/go/v3"
 )
@@ -174,30 +175,48 @@ func Approve(file string, jars []Info) error {
 
 // Refuse moves a jar from pinnedDirs into RefusedDir, owned like plugins/.
 // One that's already there with the same name gets the time added to the new
-// one's name.
+// one's name. It runs as root, so nothing on the way is followed as a link.
 func Refuse(serverDir string, j Jar, now time.Time) (string, error) {
-	if !slices.Contains(pinnedDirs, path.Dir(j.Name)) {
+	from := path.Dir(j.Name)
+	if !slices.Contains(pinnedDirs, from) {
 		return "", fmt.Errorf("%s isn't a plugin, so it stays where it is", j.Name)
 	}
-	plugins, err := os.Stat(filepath.Join(serverDir, "plugins"))
+	top, err := linksafe.Open(serverDir)
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(serverDir, RefusedDir)
-	switch err := os.Mkdir(dir, 0o750); {
-	case err == nil:
-		if st, ok := plugins.Sys().(*syscall.Stat_t); ok {
-			if err := os.Lchown(dir, int(st.Uid), int(st.Gid)); err != nil {
-				return "", err
-			}
-		}
-	case !errors.Is(err, fs.ErrExist):
+	defer top.Close()
+	src, err := top.Walk(from)
+	if err != nil {
 		return "", err
 	}
-	dest := filepath.Join(dir, path.Base(j.Name))
-	if _, err := os.Lstat(dest); err == nil {
-		dest += "." + now.Format("20060102-150405")
+	defer src.Close()
+	plugins, err := top.Sub("plugins")
+	if err != nil {
+		return "", err
 	}
-	// A link goes as the link; Rename doesn't follow it.
-	return dest, os.Rename(filepath.Join(serverDir, filepath.FromSlash(j.Name)), dest)
+	owner, err := plugins.Stat()
+	plugins.Close()
+	if err != nil {
+		return "", err
+	}
+	refused, err := top.Sub(RefusedDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		refused, err = top.Mkdir(RefusedDir, owner)
+	}
+	if err != nil {
+		return "", err
+	}
+	defer refused.Close()
+	base := path.Base(j.Name)
+	name := base
+	err = src.Move(base, refused, name)
+	if errors.Is(err, fs.ErrExist) {
+		name += "." + now.Format("20060102-150405")
+		err = src.Move(base, refused, name)
+	}
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(serverDir, RefusedDir, name), nil
 }

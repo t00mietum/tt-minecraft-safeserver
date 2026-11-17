@@ -103,7 +103,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Refusing a plugin follows a link in the server tree
 	- ID: 2026111709090977
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261117-090909
@@ -113,11 +113,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/plugins/approve.go.
 		- 2026-11-17: Next, with 2026111709090967 and 2026111409374443, ahead of the move bugs. The fix is the same for all 3: folder handles opened without following links.
+		- Verified: df79a fails on the old code and passes with the fix, df5z3 still passes, and the quick gate passes. A trace on ZFS 2.3.9 showed renameat2 with RENAME_NOREPLACE taken, and EEXIST on the second move.
+		- The root-only chown of a new plugins-refused ran only in its non-root form here. The same call is the settings package's, which the root host check covers.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79a on the old code: a linked plugins-refused took the jar into the link's target, and a linked plugins/ let the jar be moved out of the folder it links to.
+	- Actual cause [Bug]: Refuse used path calls as root (stat, mkdir, lstat, rename), and each one follows a link the server account can plant.
+	- Actual fix [Bug]: Refuse opens serverDir, the jar's folder, plugins/ and plugins-refused/ as folder handles without following links, makes plugins-refused with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST. The handle code moved out of the settings package into source/internal/linksafe, which settings now uses too.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: df79a, df5z3
+	- Acceptance signoff: Self-closed: df79a fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- A new plugins-refused is now mode 0770, per design.md's Tree ownership. It was 0750 less the umask.
+		- On a filesystem that refuses the RENAME_NOREPLACE flag (EINVAL), the move checks the name and does a plain rename. A race there only replaces a file in a folder the server can already write.
+		- Swept: every root write in the tree. paper.Point, paper.Prune, download, geyser's plugins folder and the settings package already use folder handles or unlink a name right under serverDir. tree.ToServer's chown -R doesn't follow links. update/image.go and setup's config are under /etc.
 
 - repair's Floodgate key fix follows a link in the server tree
 	- ID: 2026111709090967
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261117-090909
@@ -127,11 +142,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/repair/files.go, bedrockCheck.
 		- 2026-11-17: Next, with 2026111709090977 and 2026111409374443, ahead of the move bugs. 2026111410134562 (the Floodgate key after setup --adopt) goes through the same fix.
+		- Verified: df79b fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-17: df5zg (TestBedrockCheck) expected the fix to run sudo chmod o-rwx on the key. It now expects no command, and the key at 0640, since the mode changes through the handle.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79b on the old code: with plugins/floodgate a link to another folder, repair offered and ran chmod o-rwx on the key in the link's target.
+	- Actual cause [Bug]: The check used lstat on the whole path, which follows a linked floodgate folder, and the fix ran chmod on the path later, as root.
+	- Actual fix [Bug]: The check and the fix each open plugins, floodgate and key.pem from serverDir without following links, check it's a plain file, and change the mode through that handle with fchmod. A link on the way is reported, with no fix.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: df79b, df5zg
+	- Acceptance signoff: Self-closed: df79b fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- The fix keeps the key's other mode bits and clears only other accounts' access, the same as chmod o-rwx.
+		- Swept: bedrockCheck is the only repair fix that changes a file inside the tree by path. ownershipCheck goes through tree.ToServer and ToOperator, with chown -R on the real tree path.
 
 - start doesn't catch a link in the server tree that won't resolve in the container
 	- ID: 2026111409374443
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261114-093744
@@ -141,6 +170,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
 		- 2026-11-17: Next, with the 2 newer link bugs 2026111709090977 and 2026111709090967.
+		- Verified: df79c fails on the old code and passes with the fix, and the quick gate passes.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by df79c on the old code: with world linked through worlds/current, itself a link, start went on and ran the container.
+	- Actual cause [Bug]: The container has only the trees, each at its real path, and nothing checked that the links in them still resolve there.
+	- Actual fix [Bug]: Container start walks each tree, resolves every link the way the container would, with only the mounts and the folders above them there, and refuses with the link and the real path to point it at. The container's working folder is now serverDir's real path too.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: df79c
+	- Acceptance signoff: Self-closed: df79c fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- start refuses, the first of the 2 fixes the item gives. A repair fix that rewrites the operator's links was left out, since the right target isn't always the real path.
+		- A link that dangles on the host too is left alone, since the container didn't cause it. A link to a path in the image, such as /usr, counts as not resolving.
+		- A folder the walk can't read is skipped, so the check never stops a start that worked before for that reason alone.
+		- The check is in the container start path, so with the boot unit enabled its refusal shows in the journal, not on the terminal.
+		- serverDir given as a link set a working folder the container didn't have. It's the same kind of bug, so the fix is here.
+		- Native mode isn't checked. It sees the whole host read-only, apart from ProtectHome, and it's deferred.
+		- Swept: Boxed.runArgs is the one place mounts are built. Native's ReadWritePaths uses the same real paths.
 
 - install.bash keeps a dev build that has the release's version
 	- ID: 2026111410134543
