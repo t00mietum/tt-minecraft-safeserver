@@ -22,48 +22,11 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- repair counts an outgoing ufw rule as opening the game port
-	- ID: 2026111709090987
-	- Type: Bug
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261117-090909
-	- Opened by:
-	- Incorrect behavior [Bug]: ufwMissing takes any line with ALLOW, so an ALLOW OUT or ALLOW FWD rule for 25565 hides the warning that players can't reach the server.
-	- Expected behavior [Bug]: only ALLOW IN rules count.
-	- Progress log:
-		- 2026-11-17: Found in a code tidy pass. source/internal/repair/hostfw.go.
-
-- Refusing a plugin follows a link in the server tree
-	- ID: 2026111709090977
-	- Type: Bug
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261117-090909
-	- Opened by:
-	- Incorrect behavior [Bug]: plugins.Refuse runs as root. A plugins-refused that's a link to a root-owned folder passes the mkdir (it exists), and the rename then moves a jar the server controls into the link's target. The jar's own path can go through a linked plugins folder too, and the lstat then rename check on the name can race.
-	- Expected behavior [Bug]: Refuse works from folder handles opened with O_NOFOLLOW, makes the folder with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST.
-	- Progress log:
-		- 2026-11-17: Found in a code tidy pass. source/internal/plugins/approve.go.
-		- 2026-11-17: Next, with 2026111709090967 and 2026111409374443, ahead of the move bugs. The fix is the same for all 3: folder handles opened without following links.
-
-- repair's Floodgate key fix follows a link in the server tree
-	- ID: 2026111709090967
-	- Type: Bug
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261117-090909
-	- Opened by:
-	- Incorrect behavior [Bug]: repair checks plugins/floodgate/key.pem with lstat, then runs chmod o-rwx on the path as root. The server account can swap the file, or the floodgate folder, for a link in between, and root changes the mode of the link's target.
-	- Expected behavior [Bug]: the fix opens each part with O_NOFOLLOW from the server folder, checks it's a plain file, and changes the mode through that handle, as the settings package does.
-	- Progress log:
-		- 2026-11-17: Found in a code tidy pass. source/internal/repair/files.go, bedrockCheck.
-		- 2026-11-17: Next, with 2026111709090977 and 2026111409374443, ahead of the move bugs. 2026111410134562 (the Floodgate key after setup --adopt) goes through the same fix.
-
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
 	- Status: Waiting on signoff
+	- Target version: v1.0.0-alpha.2
 	- Opened: 20261114-122751
 	- Opened by: JC
 	- Progress log:
@@ -119,10 +82,39 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Held for: an API key from the DNS host.
 		- 2026-11-14: The 2 old per-edition names can be deleted, since a phone has joined through the shared name.
 
+- Refusing a plugin follows a link in the server tree
+	- ID: 2026111709090977
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-alpha.2
+	- Priority: High
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: plugins.Refuse runs as root. A plugins-refused that's a link to a root-owned folder passes the mkdir (it exists), and the rename then moves a jar the server controls into the link's target. The jar's own path can go through a linked plugins folder too, and the lstat then rename check on the name can race.
+	- Expected behavior [Bug]: Refuse works from folder handles opened with O_NOFOLLOW, makes the folder with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/plugins/approve.go.
+		- 2026-11-17: Next, with 2026111709090967 and 2026111409374443, ahead of the move bugs. The fix is the same for all 3: folder handles opened without following links.
+
+- repair's Floodgate key fix follows a link in the server tree
+	- ID: 2026111709090967
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-alpha.2
+	- Priority: High
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: repair checks plugins/floodgate/key.pem with lstat, then runs chmod o-rwx on the path as root. The server account can swap the file, or the floodgate folder, for a link in between, and root changes the mode of the link's target.
+	- Expected behavior [Bug]: the fix opens each part with O_NOFOLLOW from the server folder, checks it's a plain file, and changes the mode through that handle, as the settings package does.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/repair/files.go, bedrockCheck.
+		- 2026-11-17: Next, with 2026111709090977 and 2026111409374443, ahead of the move bugs. 2026111410134562 (the Floodgate key after setup --adopt) goes through the same fix.
+
 - start doesn't catch a link in the server tree that won't resolve in the container
 	- ID: 2026111409374443
 	- Type: Bug
 	- Status: Queued
+	- Target version: v1.0.0-alpha.2
 	- Priority: High
 	- Opened: 20261114-093744
 	- Opened by:
@@ -136,6 +128,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111410134543
 	- Type: Bug
 	- Status: Queued
+	- Target version: v1.0.0-alpha.2
 	- Priority: Avg
 	- Opened: 20261114-101345
 	- Opened by:
@@ -144,10 +137,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-14: Seen in the live move. A build from 2026-11-12 was left in place, and the release binary was installed by hand after setup.
 
+- repair counts an outgoing ufw rule as opening the game port
+	- ID: 2026111709090987
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-alpha.2
+	- Priority: Low
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: ufwMissing takes any line with ALLOW, so an ALLOW OUT or ALLOW FWD rule for 25565 hides the warning that players can't reach the server.
+	- Expected behavior [Bug]: only ALLOW IN rules count.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/repair/hostfw.go.
+
 - status says nothing listens on the Bedrock UDP port, which is normal while no Bedrock player is on
 	- ID: 2026111412275169
 	- Type: Bug
 	- Status: Queued
+	- Target version: v1.0.0-alpha.2
 	- Priority: Low
 	- Opened: 20261114-122751
 	- Opened by:
@@ -158,6 +165,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111412081476
 	- Type: Bug
 	- Status: Queued
+	- Target version: v1.0.0-alpha.2
 	- Priority: Low
 	- Opened: 20261114-120814
 	- Opened by:
@@ -170,6 +178,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111410134562
 	- Type: Bug
 	- Status: Queued
+	- Target version: v1.0.0-alpha.2
 	- Priority: Low
 	- Opened: 20261114-101345
 	- Opened by:
@@ -180,6 +189,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111410134553
 	- Type: Bug
 	- Status: Queued
+	- Target version: v1.0.0-alpha.2
 	- Priority: Low
 	- Opened: 20261114-101345
 	- Opened by:
@@ -191,7 +201,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Let the server answer Bedrock LAN discovery through the firewall
 	- ID: 2026111708582431
 	- Type: Enhancement
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-alpha.2
 	- Priority: Avg
 	- Opened: 20261117-085824
 	- Opened by: t00mietum
@@ -207,7 +219,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Bedrock LAN discovery
 	- ID: 2026111111065829
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -232,7 +245,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Stand-in: none (20261113). The remaining check is a real phone and console on the home Wi-Fi. df797 already covers the firewall side in a namespace.
 	- Test case: df797
 	- Branch: nov14-2026111111065829
-	- Commit: fb7097b
+	- Commit: 98949af
 	- Verified: 2026-11-17: df797 passes. The live firewall has allowFrom any, input policy accept, and egress web, so a server packet that starts a flow is dropped to the internet as it is to the LAN. The phone that joined over the internet on 2026-11-14 got in that way, so a LAN phone that adds the server by address goes the same path.
 	- Acceptance signoff: Self-closed: LAN Games can't list the server until Geyser answers on 7551, which 2026111318485184 holds. The join by address is pinned by df797 and the live internet join.
 	- Closed: 20261117-084849
@@ -241,7 +254,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Move the first server over
 	- ID: 2026111111070787
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -267,7 +281,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Prereq IDs: 2026111111070787
 	- Severity: Critical
 	- Opened: 20261111-110656
@@ -294,7 +309,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - First release
 	- ID: 2026111111070774
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -310,7 +326,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: record a CLI demo gif for the README
 	- ID: 2026111311485862
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261113-114858
 	- Opened by:
@@ -336,7 +353,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -361,7 +379,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A push to main loses its connection while the pre-push merge gate runs
 	- ID: 2026111409494415
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261114-094944
 	- Opened by:
@@ -373,7 +392,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Installer tests fail on the arm64 box
 	- ID: 2026111409374434
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261114-093744
 	- Opened by:
@@ -385,7 +405,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update with no part named stops at the image's Java lookup when PaperMC is down
 	- ID: 2026111318335938
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261113-183359
 	- Opened by:
@@ -407,7 +428,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Connect the service to an AI agent to update the game programs and add-ons
 	- ID: 2026111207010610
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-070106
 	- Opened by: t00mietum
@@ -435,7 +457,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update
 	- ID: 2026111111065803
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -455,7 +478,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Update agent: Paper fallback and the --mc-version report
 	- ID: 2026111210034308
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100343
 	- Opened by:
@@ -488,7 +512,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Release-install script
 	- ID: 2026111111070761
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -519,7 +544,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-110708
 	- Opened by: t00mietum
@@ -548,7 +574,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Simplify: defer native mode, update --self, and NixOS; snapshot only before a version move
 	- ID: 2026111318002875
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261113-180028
 	- Opened by: t00mietum
@@ -572,7 +599,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - TestSetup and TestUpdate reach the host's own runner and account files
 	- ID: 2026111312221899
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261113-122218
 	- Opened by:
@@ -595,7 +623,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Player names and log lines shown to the operator keep text-direction characters
 	- ID: 2026111311594944
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261113-115949
 	- Opened by:
@@ -618,7 +647,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: other hosts and VMs
 	- ID: 2026111219111126
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -648,7 +678,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: fuzz the parsers that read operator and download input
 	- ID: 2026111311485816
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -673,7 +704,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: add a soak test
 	- ID: 2026111311485831
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -701,7 +733,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: run CodeQL from a pinned local CLI
 	- ID: 2026111311485847
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -730,7 +763,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: README doesn't say release builds are reproducible
 	- ID: 2026111311485876
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261113-114858
 	- Opened by:
@@ -753,7 +787,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: shellcheck and markdownlint run from the host
 	- ID: 2026111311485890
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -777,7 +812,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --mc-version
 	- ID: 2026111117302963
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
@@ -808,7 +844,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Start at boot
 	- ID: 2026111111065816
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -838,7 +875,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CI/CD pipeline
 	- ID: 2026111111065868
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -856,7 +894,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: containers
 	- ID: 2026111219111113
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -874,7 +913,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: temp files and safe removal
 	- ID: 2026111219111139
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -890,7 +930,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: container cleanup
 	- ID: 2026111219111152
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -906,7 +947,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: CPU and priority
 	- ID: 2026111219111165
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -922,7 +964,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: standard flags
 	- ID: 2026111219111178
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -940,7 +983,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: step output
 	- ID: 2026111219111191
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -956,7 +1000,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: a test for every Done item
 	- ID: 2026111219111104
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -973,7 +1018,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: test IDs
 	- ID: 2026111219111117
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -990,7 +1036,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: version line
 	- ID: 2026111219111130
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -1007,7 +1054,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup --adopt approves Geyser and Floodgate with no source
 	- ID: 2026111210364791
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261112-103647
 	- Opened by:
@@ -1034,7 +1082,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Container start says only permission denied before a new login
 	- ID: 2026111209291851
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261112-092918
 	- Opened by:
@@ -1059,7 +1108,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Commands fail for the operator until a new login after setup
 	- ID: 2026111207565307
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1087,7 +1137,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --self
 	- ID: 2026111117302995
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
@@ -1117,7 +1168,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-122642
 	- Opened by: t00mietum
@@ -1150,7 +1202,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Update agent: config keys, answer format, and the command kind
 	- ID: 2026111210033639
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100336
 	- Opened by:
@@ -1181,7 +1234,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Update agent: OpenAI and Anthropic APIs, with fetch
 	- ID: 2026111210033649
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100336
 	- Opened by:
@@ -1212,7 +1266,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --plugins asks the update agent
 	- ID: 2026111210034298
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100342
 	- Opened by:
@@ -1248,7 +1303,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - cmd sometimes misses its answer right after a start
 	- ID: 2026111207565308
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1278,7 +1334,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Podman warns the input isn't a TTY on every start from a script
 	- ID: 2026111207565309
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1306,7 +1363,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - status says no paper.jar when it can't read the folder
 	- ID: 2026111118183922
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-181839
 	- Opened by:
@@ -1334,7 +1392,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - plugins.shcl keys come back lower case after an approve
 	- ID: 2026111118053419
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-180534
 	- Opened by:
@@ -1356,7 +1415,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup's apt install fails on a fresh host
 	- ID: 2026111207565300
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1372,7 +1432,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall breaks Geyser's STUN lookup
 	- ID: 2026111207565301
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: High
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1389,7 +1450,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - stop hands the trees back under a native server when runMode names a container
 	- ID: 2026111207565302
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: High
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1405,7 +1467,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair removes the stopped container that keeps the crash log
 	- ID: 2026111207565303
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1424,7 +1487,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup lists the jars to approve only after Go ahead
 	- ID: 2026111207565304
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1440,7 +1504,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - stop leaves the trees with runUser when USER isn't set
 	- ID: 2026111207565305
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1455,7 +1520,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Hand tests that need root, as a script
 	- ID: 2026111207565306
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1476,7 +1542,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Current Geyser needs TCP on the Bedrock port too
 	- ID: 2026111113015461
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-130154
 	- Opened by:
@@ -1512,7 +1579,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands
 	- ID: 2026111111065711
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -1536,7 +1604,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: native mode start and stop
 	- ID: 2026111112163284
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: start and stop a throwaway Paper server in native mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, the jars can't be written or swapped, and `systemctl show tt-minecraftd-server` lists the sandbox settings. Beside it, `status` and `watch` show it in native mode, `console` takes a typed command and detaches on Ctrl-C with the server up, and `cmd list` prints the player count.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1571,7 +1640,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Podman, Docker, and native modes
 	- ID: 2026111115090766
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-150907
 	- Opened by: t00mietum
@@ -1601,7 +1671,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Run modes: Podman and Docker through sudo
 	- ID: 2026111116104049
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: under rootful Podman, start a throwaway Paper server and stop it with `stop --warn 10`, with the operator out of the `docker` group. It loads, the jars can't be written, and `sudo podman ps` shows the container. Then set `runMode` to `docker` and check that `stop` finds a container that Podman started.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1638,7 +1709,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Run modes: status without sudo
 	- ID: 2026111116104067
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: beside the throwaway Paper server under rootful Podman, run `status` without sudo. It says the server runs in podman mode, with its account, time up, and memory.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1669,7 +1741,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup
 	- ID: 2026111111065776
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -1692,7 +1765,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup: install steps and --adopt
 	- ID: 2026111116415175
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway host or VM with Podman, run `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `paper.jar` links to a downloaded build, and `repair --check` is clean.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1732,7 +1806,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall
 	- ID: 2026111111065789
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -1756,7 +1831,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall: setup and repair manage it
 	- ID: 2026111117135246
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway host or VM, `sudo tt-minecraftd setup`, then `repair --check` is clean, `nft list table inet tt_minecraftd` shows the rules, and `sudo systemctl restart nftables` leaves the table loaded. As the service account, `curl http://127.0.0.1` and a connection to a LAN address fail and bump `out_local` and `out_lan`. With `firewall: off`, `sudo tt-minecraftd repair` removes the unit and the table.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1789,7 +1865,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair sends a missing server folder to setup, which only runs repair again
 	- ID: 2026111117095694
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-170956
 	- Opened by:
@@ -1814,7 +1891,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Check Geyser's first config against the next start
 	- ID: 2026111117052206
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-170522
 	- Opened by:
@@ -1840,7 +1918,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair sends a missing Geyser to setup, which only runs repair again
 	- ID: 2026111117052190
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-170521
 	- Opened by:
@@ -1867,7 +1946,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - staticcheck: unused values in repair tests
 	- ID: 2026111116281098
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-162810
 	- Opened by: t00mietum
@@ -1881,7 +1961,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: Docker mode start and stop
 	- ID: 2026111112163174
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: start and stop a throwaway Paper server in Docker mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, and the jars can't be written.
 	- Priority: High
 	- Opened: 20261111-121631
@@ -1915,8 +1996,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: status and watch
 	- ID: 2026111112163393
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
 		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
+	- Closed reason: Done
 	- Needs hand testing: run `status` and `watch` beside the throwaway Paper server from the Docker and native hand tests. Version, players, memory, ports, and the log tail show, and Ctrl-C ends `watch`.
 	- Priority: High
 	- Opened: 20261111-121633
@@ -1949,8 +2031,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - console and cmd
 	- ID: 2026111111065750
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
 		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
 	- Priority: High
 	- Opened: 20261111-110657
@@ -1983,7 +2066,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Run modes: console input through attach
 	- ID: 2026111116104058
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway Paper server under Podman, then Docker, with the operator out of the `docker` group: `cmd list` prints the player count, `stop --warn 10` counts down in the chat and stops it, and `console` detaches on Ctrl-C with the server still up.
 	- Priority: High
 	- Opened: 20261111-161040
@@ -2014,7 +2098,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup: download Paper
 	- ID: 2026111116415186
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
@@ -2042,7 +2127,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup: Geyser and Floodgate
 	- ID: 2026111116415196
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
@@ -2076,7 +2162,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall: rules file, its unit, and the start check
 	- ID: 2026111117134046
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-171340
 	- Opened by:
@@ -2107,7 +2194,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall: drop counters in status
 	- ID: 2026111117135258
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-171352
 	- Opened by:
@@ -2133,7 +2221,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update: the command, and --paper
 	- ID: 2026111117302950
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-173029
 	- Opened by:
@@ -2162,7 +2251,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --plugins
 	- ID: 2026111117302973
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-173029
 	- Opened by:
@@ -2189,7 +2279,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --image
 	- ID: 2026111117302985
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
@@ -2217,7 +2308,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Native start misses the new latest.log when its inode is reused
 	- ID: 2026111113354106
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-133541
 	- Opened by:
@@ -2243,7 +2335,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Config reader for shcl in Go
 	- ID: 2026111111065684
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110656
 	- Opened by: t00mietum
@@ -2269,7 +2362,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Config defaults and overrides
 	- ID: 2026111111065697
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110656
 	- Opened by: t00mietum
@@ -2297,7 +2391,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: CLI, command runner, and tree hand-off
 	- ID: 2026111112162268
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-121622
 	- Opened by: t00mietum
@@ -2324,7 +2419,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Safe server settings
 	- ID: 2026111111065724
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -2356,7 +2452,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Safe server settings: Geyser config
 	- ID: 2026111112554261
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-125542
 	- Opened by: t00mietum
@@ -2382,7 +2479,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Plugin pinning
 	- ID: 2026111111065737
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -2414,7 +2512,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair
 	- ID: 2026111111065763
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -2534,10 +2633,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 	- The ID is the local time to the hundredth of a second. Opened is when it was written down, which may differ. (Use a keyboard macro and possibly something like project 'zuid' to generate.)
 
-	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Moot means something else changed that made it irrelevant. Canceled means it still applies but was decided against. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Can't reproduce means a real attempt to reproduce it failed.
+	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Canceled means it still applies but was decided against. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Closed means no more work is planned, and Closed reason says why.
+
+	- Closed reason values: Done means the work is finished. Duplicate and Superseded mean another item covers it, named in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is. Moot means something else changed that made it irrelevant.
+
+	- Target version is the release an item is planned for. Fill it in once work toward a release starts, and on every open item queued for the next one.
 
 	- As issues are worked, and statuses change, place them in correct sorting order within the list:
-		- First by status: Waiting for answers, Waiting on signoff, Testing, Waiting for testing, Can't reproduce, Stalled, Started, Queued, Done, Deferred, Canceled, Moot
+		- First by status: Waiting for answers, Waiting on signoff, Testing, Waiting for testing, Stalled, Started, Queued, Closed, Deferred, Canceled
 		- Then by severity|priority: Critical, High, Avg, Low
 		- Then by type: Bugs, [not bugs together]
 
@@ -2548,7 +2651,9 @@ Template:
 - Title
 	- ID: YYYYmmDDHHMMSSNN
 	- Type: [Bug|Feature|Enhancement|Task]
-	- Status: [Queued|Waiting for answers|Waiting on signoff|Waiting for testing|Started|Testing|Stalled|Can't reproduce|Moot|Canceled|Deferred|Done]
+	- Status: [Queued|Waiting for answers|Waiting on signoff|Waiting for testing|Started|Testing|Stalled|Closed|Canceled|Deferred]
+	- Closed reason: [Done|Duplicate|Superseded|Could not reproduce|Works as intended|Won't fix|Moot]
+	- Target version:
 	- Needs local test suite run?:
 	- Needs external testing:
 	- Priority [Feature|Enhancement] | Severity [Bug]: [Critical|High|Avg|Low]
