@@ -246,7 +246,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - status says nothing listens on the Bedrock UDP port, which is normal while no Bedrock player is on
 	- ID: 2026111412275169
 	- Type: Bug
-	- Status: Waiting on signoff
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261114-122751
@@ -258,13 +258,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df79f
 	- Branch: nov17-2026111412275169
 	- Commit: 4f32385
-	- Needs hand testing: On the live server with no Bedrock player on, status shows the line about UDP opening on a join. Judge the wording.
+	- Needs hand testing: No
 	- Stand-in: none (20261117). The wording is a matter of taste.
 	- Decisions:
 		- Kept the UDP line, worded as normal when idle, rather than dropping UDP from status. A listener during a join still shows.
 		- The claim that Geyser opens UDP only per join wasn't checked here. A throwaway server on 20261111 listed UDP right after start, so the line stays factual either way.
 		- Swept: the Bedrock UDP port is the only per-join socket status reads. The game port and Bedrock TCP keep the nothing listens line.
 	- Verified: df79f fails without the change and passes with it. Quick gate passed.
+	- Closed reason: Done
+	- Acceptance signoff: Self-closed 20261117 under the standing close policy. The line is plain, true whether or not Geyser holds UDP open, and df79f pins it.
+	- Closed: 2026-11-17
 
 - repair --check fails while the server runs on files the server writes as 0600
 	- ID: 2026111412081476
