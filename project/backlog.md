@@ -433,22 +433,36 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A docs-only push to main skips the merge gate, but the gate's tests read design.md
 	- ID: 2026111715274995
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
 	- Opened by:
 	- Incorrect behavior [Bug]: `cicd/docs-only-paths` counts `project/design.md` as docs. The config tests parse its settings table, and markdownlint checks it. A push to main that only edits that table, or adds a lint error, goes through with no gate, and the next gate on main fails on code nobody touched.
 	- Expected behavior [Bug]: design.md isn't docs-only, or a docs-only push still runs markdownlint and the config tests.
-	- Reproduced [Bug]: No. Read against the glob and the 2 tests that read the file.
+	- Reproduced [Bug]: 2026-11-18: df7ah on the old hook: a push to main of only README.md, design.md or .markdownlint.jsonc ran no gate, and a failing gate couldn't stop it.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 12. Detail in detail_backlog.md.
+		- 2026-11-18: Verified: the whole quick gate passed with df7ah and df7aj in it.
 	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed by reading.
+	- Closed reason: Done
+	- Actual cause [Bug]: The hook let a docs-only push skip every check, but markdownlint reads every doc and the config tests read design.md's table.
+	- Actual fix [Bug]: A docs-only push to main runs the quick gate without CodeQL in place of the merge gate, and a failure stops the push. A commit a whole merge gate passed on still skips both. The docs list itself is unchanged.
+	- Branch: fixes-2026111715274995
+	- Commit: 0938fe2
+	- Test case: df7ah TestPrePushGates: the real hook and docs list in a throwaway repo, with stand-in gates. It failed on the old hook and passes now.
+	- Swept: the hook has 2 ways past the merge gate, the docs list and the passed marker. df7ah covers both, and a push to dev.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Decisions:
+		- Picked the quick gate on docs pushes over taking design.md off the list. markdownlint reads every doc, so taking out design.md alone would leave the same gap for the rest, and a test that reads another doc later needs no list change.
+		- CodeQL is left out, since it reads only Go. The quick gate took 55 s here with CodeQL, well under the roughly 300 s idle limit GitHub is reported to put on a push's connection.
+		- The passed-marker check now comes before the docs check, so a commit a whole merge gate passed on runs nothing.
+	- Closed: 20261117-193524
 
 - The reproducible-build check rebuilds from the same folder and cache, so it can't fail
 	- ID: 2026111715275010
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152750
@@ -458,23 +472,49 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: `go build -x` run twice on a copy did no compiling the second time.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 13. Detail in detail_backlog.md.
+		- 2026-11-18: Verified: the build step passed alone with the fix. The fault check in the Test case row ran both ways.
 	- Origin: bb4ab14 cicd pipeline, README line d3387c1. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The second build ran from the same folder with the shared Go cache, so it only linked the first build's objects again.
+	- Actual fix [Bug]: The second build runs from a copy of source, go.mod and go.sum in the run folder, with an empty Go cache of its own. The step fails if that cache stays empty, since then the build didn't use it. The whole build step took 32 s here. README's line is true now and wasn't changed.
+	- Branch: fixes-2026111715274995
+	- Commit: 49ee587
+	- Test case: n/a: pipeline step, the build step's own check. Watched to fail: with -trimpath taken out of GO_BUILD_FLAGS, the new check failed with two different binaries, and the old one passed.
+	- Acceptance signoff: Self-closed: the check failed on a path-dependent build that the old check passed.
+	- Closed: 20261117-193445
+	- Decisions:
+		- The copy is the whole source folder, not only tracked files, so an untracked file the first build saw doesn't read as a reproducibility failure on a dev run.
 
 - The merge gate can pass while a step checked nothing
 	- ID: 2026111715275026
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152750
 	- Opened by:
 	- Incorrect behavior [Bug]: The gate-passed marker is written even when the root host, ZFS, vulnerability, CodeQL or arm64 steps were skipped, or shellcheck and markdownlint fell back to a warning. The pre-push hook then skips the gate. Any govulncheck error that isn't a finding reads as offline and is skipped. The format step runs the host's gofmt, and with no gofmt on PATH it says clean. HEAD is read when the run ends, not when it starts.
 	- Expected behavior [Bug]: The marker needs every step to pass, apart from an arm64 skip, on the HEAD the run started with. Other govulncheck and gofmt errors fail their steps.
-	- Reproduced [Bug]: 2026-11-17: the format step's line with gofmt off PATH printed clean. The rest was read.
+	- Reproduced [Bug]: 2026-11-17: the format step's line with gofmt off PATH printed clean. 2026-11-18: on the old script, gofmt off PATH and a file gofmt can't parse each printed clean, a govulncheck load error read as offline, a missing markdownlint left Lint at PASS, and df7aj failed on every SKIP.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 14. Detail in detail_backlog.md.
+		- 2026-11-18: Verified, old then new: gofmt off PATH clean then FAIL; a file gofmt can't parse clean then FAIL; govulncheck with no network SKIP in both; a govulncheck load error SKIP then FAIL; markdownlint missing PASS then SKIP.
+		- 2026-11-18: Verified: a merge gate with steps off said why and left the marker alone. Only a whole merge gate writes it, so the next one before a push to main runs that path.
 	- Origin: bb4ab14 cicd pipeline, bca305e gate marker. Not seen before. Confirmed for gofmt, Plausible for the rest.
 	- Sweep: cicd/cicd.bash gate summary, vuln step and format step.
+	- Closed reason: Done
+	- Actual cause [Bug]: The marker check looked only at steps turned off, never at each step's result. The vuln step read every error but a finding as offline, and the format step ran the host's gofmt with its errors thrown away.
+	- Actual fix [Bug]: The marker is written only when every merge step is on and PASS, apart from an arm64 SKIP, with a clean tree on the commit the run started on. Otherwise the summary says which. gofmt runs in the image and its errors fail. govulncheck skips only when the database fetch fails, and any other error fails. A missing shellcheck or markdownlint makes Lint a SKIP.
+	- Branch: fixes-2026111715274995
+	- Commit: 8b5ee0b
+	- Test case: df7aj TestGateMarker: the marker rule from cicd.bash over every merge step, plus a dirty tree and a moved HEAD. It failed under the old rule and passes now. The format, vuln and lint cases ran through cicd.bash, old and new.
+	- Swept: every fSkip in cicd.bash counts against the marker now: lint, vuln, fuzz, soak, codeql, arm64, both root host steps, demo, dogfood and publish. The other || true sites only shape output; each verdict comes from an exit code.
+	- Acceptance signoff: Self-closed: each case failed before and passes after.
+	- Decisions:
+		- A missing govulncheck fails, as a missing staticcheck or gosec already did.
+		- A publishing run still rewrites with the host's gofmt, since the tree is read-only in the container.
+		- Tool version drift stays a warning. It's checked only without the container, and a shellcheck or markdownlint at another version still checks the files.
+	- Closed: 20261117-193506
 
 - The .deb and .rpm packages install to /usr/bin, but setup and the boot unit run /usr/local/bin
 	- ID: 2026111715275041

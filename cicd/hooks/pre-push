@@ -4,12 +4,15 @@
 
 ##	Purpose:
 ##		- Runs the merge gate before a push to main, and stops the push if it fails.
-##		- A push to main whose commits change only the paths in cicd/docs-only-paths skips the gate.
-##		- So does a push of the commit that cicd/cicd.bash --merge-gate last passed on, with a clean tree.
-##		  A gate run inside the hook takes long enough that GitHub can drop the push's connection.
-##		  A push to dev or a feature branch is never held up.
+##		- A push of the commit that cicd/cicd.bash --merge-gate last passed on, with a clean tree,
+##		  skips it. A gate run inside the hook takes long enough that GitHub can drop the push's connection.
+##		- A push to main whose commits change only the paths in cicd/docs-only-paths runs the quick gate
+##		  in its place, without CodeQL, in about a minute. markdownlint reads every doc, and the config
+##		  tests read design.md, so a docs push can still break the next gate on main.
+##		- A push to dev or a feature branch is never held up.
 ##		- Install with: ln -s ../../cicd/hooks/pre-push .git/hooks/pre-push
-##		- CICD_MERGE_GATE_CMD names another command to run in place of the gate, for a test.
+##		- CICD_MERGE_GATE_CMD and CICD_DOCS_GATE_CMD name other commands to run in place of the 2 gates,
+##		  for a test.
 ##	History: At bottom of script.
 
 ##	Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
@@ -23,7 +26,9 @@ set -euo pipefail
 here="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 root="$(cd "${here}/../.." && pwd)"
 gate=("${root}/cicd/cicd.bash" --merge-gate)
+docsGate=("${root}/cicd/cicd.bash" --backlog-run-quick --no-codeql)
 [[ -z "${CICD_MERGE_GATE_CMD:-}" ]] || read -r -a gate <<< "${CICD_MERGE_GATE_CMD}"
+[[ -z "${CICD_DOCS_GATE_CMD:-}" ]] || read -r -a docsGate <<< "${CICD_DOCS_GATE_CMD}"
 
 fOnlyDocs(){ ## FROM TO: true when every changed path matches the list
 	local from="$1" to="$2" f g ok pats=() range
@@ -42,12 +47,13 @@ fOnlyDocs(){ ## FROM TO: true when every changed path matches the list
 while read -r _ localSha remoteRef remoteSha; do
 	[[ "${remoteRef}" == refs/heads/main ]] || continue
 	[[ ! "${localSha}" =~ ^0+$ ]] || continue
-	if fOnlyDocs "${remoteSha}" "${localSha}"; then
-		printf 'pre-push: only docs change on main, so the merge gate is skipped\n' >&2
-		continue
-	fi
 	if [[ "$(cat "${root}/cicd/artifacts/merge-gate-passed" 2>/dev/null || true)" == "${localSha}" ]]; then
 		printf "pre-push: the merge gate already passed on %s, so it's skipped\n" "${localSha:0:12}" >&2
+		continue
+	fi
+	if fOnlyDocs "${remoteSha}" "${localSha}"; then
+		printf 'pre-push: only docs change on main, so the quick gate runs in place of the merge gate\n' >&2
+		"${docsGate[@]}" || { printf 'pre-push: the quick gate failed, so nothing was pushed\n' >&2; exit 1; }
 		continue
 	fi
 	printf 'pre-push: running the merge gate before the push to main. If the push then fails with no message, run cicd/cicd.bash --merge-gate first, then push.\n' >&2
@@ -59,3 +65,4 @@ exit 0
 ##	History:
 ##		- 2026-11-12: Created.
 ##		- 2026-11-14: Skips the gate for the commit a merge gate already passed on.
+##		- 2026-11-18: A docs-only push runs the quick gate, since docs are read by lint and tests.

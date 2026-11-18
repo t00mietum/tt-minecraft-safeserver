@@ -1,4 +1,5 @@
-## Paths a push to main can change without the merge gate. One glob per line; a * crosses folders.
+## Paths a push to main can change with the quick gate in place of the merge gate, per hooks/pre-push.
+## One glob per line; a * crosses folders.
 *.md
 project/*
 .github/*

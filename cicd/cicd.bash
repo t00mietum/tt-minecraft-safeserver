@@ -143,8 +143,9 @@ fStepEnd(){
 	stepResult["${stepNow}"]="${r}${stepSkip:+ (${stepSkip})}"
 	stepName=""
 }
-## A step that can't run here. The run goes on, and the summary says why.
-fSkip(){ stepSkip="$*"; fEcho_Clean "SKIP: $*"; }
+## A step, or part of one, that can't run here. The run goes on, the summary says why, and the
+## merge gate doesn't count it as passed.
+fSkip(){ stepSkip="${stepSkip:+${stepSkip}; }$*"; fEcho_Clean "SKIP: $*"; }
 
 mode=default; message=""; quiet=0; leakOpt=""; noContainer=0; noRemote=0; keepTemp=0; listOnly=0; lintCheck=0
 gateAreas=(); aliasNote=""; modeOpts=()
@@ -440,16 +441,20 @@ fStepSync(){
 
 formatChanged=()
 fStepFormat(){
-	local bad
-	bad="$(gofmt -l source 2>/dev/null || true)"
+	local bad rc=0 err="${runTmp}/gofmt.err"
+	## The image's gofmt, at the pinned Go. A gofmt that's missing or can't parse a file is a FAIL, not clean.
+	bad="$(fGo format -- gofmt -l source 2> "${err}")" || rc=$?
+	if ((rc)); then cat -- "${err}"; fDie "gofmt failed (exit ${rc})"; fi
 	if [[ -z "${bad}" ]]; then fEcho_Clean "gofmt: clean"; return 0; fi
 	if ((handsOff)) || [[ "${mode}" == gate ]]; then
 		printf '%s\n' "${bad}"; fDie "gofmt wants to reformat the files above"
 	fi
 	## A run that publishes may reformat, and records which files it touched so publish adds only those.
+	## The tree is read-only in the container, so the rewrite is the host's gofmt.
 	local files=()
 	mapfile -t files <<< "${bad}"
-	gofmt -w "${files[@]}"
+	command -v gofmt >/dev/null 2>&1 || fDie "gofmt isn't on PATH here, to reformat the files above"
+	gofmt -w "${files[@]}" || fDie "gofmt -w failed"
 	formatChanged+=("${files[@]}")
 	fEcho_Clean "gofmt: reformatted ${#formatChanged[@]} file(s)"
 }
@@ -470,11 +475,11 @@ fStepLint(){
 	if ((useContainer)) || command -v shellcheck >/dev/null 2>&1; then
 		fGo lint -- shellcheck "${shellFiles[@]}" 2>&1 | fLintOut || fDie "shellcheck findings"
 		fEcho_Clean "shellcheck: clean"
-	else fEcho "WARNING: shellcheck skipped (not installed)"; fi
+	else fSkip "shellcheck isn't installed here"; fi
 	if ((useContainer)) || command -v markdownlint >/dev/null 2>&1; then
 		fGo lint -- markdownlint "${mdFiles[@]}" 2>&1 | fLintOut || fDie "markdownlint findings"
 		fEcho_Clean "markdownlint: clean (${#mdFiles[@]} file(s))"
-	else fEcho "WARNING: markdownlint skipped (not installed)"; fi
+	else fSkip "markdownlint isn't installed here"; fi
 	"${here}/utility/test-id.bash" --check -q || fDie "test IDs (see above)"
 	fEcho_Clean "test IDs: every test has its own"
 	((! useContainer)) || return 0
@@ -523,12 +528,16 @@ fStepRace(){
 fStepVuln(){
 	local out rc=0
 	out="$(fGo vuln -- govulncheck -test "${pkgs[@]}" 2>&1)" || rc=$?
-	if ((rc)); then
-		## Offline is a skip. A real finding says "Vulnerability #".
-		if grep -q 'Vulnerability #' <<< "${out}"; then grep -E 'Vulnerability #|Found in|Fixed in|More info|affected by' <<< "${out}" | fLintOut; fDie "govulncheck findings"; fi
+	((rc)) || { fEcho_Clean "govulncheck: clean"; return 0; }
+	## A finding says "Vulnerability #" and exits 3. Only a failed fetch of the database is a skip;
+	## any other error, a missing govulncheck included, fails the step.
+	if grep -q 'Vulnerability #' <<< "${out}"; then grep -E 'Vulnerability #|Found in|Fixed in|More info|affected by' <<< "${out}" | fLintOut; fDie "govulncheck findings"; fi
+	if grep -q '^govulncheck: fetching vulnerabilities: ' <<< "${out}"; then
+		grep -m 1 '^govulncheck: fetching vulnerabilities: ' <<< "${out}" | sed 's/^/  /'
 		fSkip "govulncheck can't reach vuln.go.dev"; return 0
 	fi
-	fEcho_Clean "govulncheck: clean"
+	tail -n 20 <<< "${out}"
+	fDie "govulncheck failed (exit ${rc})"
 }
 
 ## Each Fuzz target for its budget, from a copy of the tree: go test writes a failing input under
@@ -656,14 +665,18 @@ fStepBuild(){
 		fEcho_Clean "built ${EXE_NAME}-${os}-${arch}  $(sha256sum "${out}" | cut -c1-16)  $(stat -c %s "${out}") bytes"
 	done
 	if [[ "${mode}" != quick ]]; then
-		## The same source has to give the same bytes, from another path.
-		mkdir -p -- "${runTmp}/build2"
-		fGo build GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOAMD64=v1 -- go build "${GO_BUILD_FLAGS[@]}" -p "${BUILD_JOBS}" \
+		## The same source has to give the same bytes from a copy at another path. The second build gets
+		## an empty cache of its own, or it only links again from the first one's objects.
+		local copy="${runTmp}/build2src" cache2="${runTmp}/build2cache"
+		mkdir -- "${copy}" "${cache2}" "${runTmp}/build2"
+		cp -a -- "${root}/source" "${root}/go.mod" "${root}/go.sum" "${copy}/"
+		fGo build "GOCACHE=${cache2}" GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOAMD64=v1 -- go -C "${copy}" build "${GO_BUILD_FLAGS[@]}" -p "${BUILD_JOBS}" \
 			-ldflags "${GO_LDFLAGS_COMMON} -X main.version=${goVersion} -X main.buildEpoch=${epoch} -X main.release=${rel}" -o "${runTmp}/build2/${EXE_NAME}-linux-amd64" "${GO_MAIN_PKG}" \
 			|| fDie "go build failed (second build)"
+		[[ -n "$(find "${cache2}" -mindepth 1 -maxdepth 1 -print -quit)" ]] || fDie "the second build didn't use its own cache, so it proves nothing"
 		sum1="$(sha256sum < "${runTmp}/build/${EXE_NAME}-linux-amd64")"; sum2="$(sha256sum < "${runTmp}/build2/${EXE_NAME}-linux-amd64")"
 		[[ "${sum1}" == "${sum2}" ]] || fDie "the same source built to two different binaries"
-		fEcho_Clean "reproducible: two builds of linux/amd64 give the same checksum"
+		fEcho_Clean "reproducible: linux/amd64 built again from a copy at another path, with an empty cache, gives the same checksum"
 	fi
 	fEcho_Clean "$("${runTmp}/build/${EXE_NAME}-linux-amd64" --version 2>&1 || true)"
 }
@@ -808,6 +821,23 @@ fStepPublish(){
 	if GIT_SSH_COMMAND='ssh' fGitTool push -u origin "${branch}" >/dev/null 2>&1; then fEcho_Clean "pushed ${branch}"; else fEcho "WARNING: push of ${branch} failed"; fi
 }
 
+## True when the merge gate may leave its marker. Otherwise it prints why not. Every step has to be
+## on and PASS, apart from an arm64 SKIP, since the box can be away; a SKIP anywhere else checked
+## nothing. The tree has to be clean, on the same commit, from start to end.
+fGateWhole(){
+	local s r
+	for s in "${allSteps[@]}"; do
+		[[ -z "${stepOff[${s}]:-}" || "${stepOff[${s}]}" == "not part of the merge run" ]] || { printf 'with %s off' "${s}"; return 1; }
+	done
+	for s in "${stepList[@]}"; do
+		r="${stepResult[${s}]:-none}"
+		[[ "${r}" == PASS || ( "${s}" == arm64 && "${r}" == SKIP* ) ]] || { printf '%s ended %s' "${s}" "${r}"; return 1; }
+	done
+	[[ -n "${startHead}" && -z "${startDirty}" ]] || { printf 'on a dirty tree'; return 1; }
+	[[ "$(git rev-parse HEAD 2>/dev/null || true)" == "${startHead}" ]] || { printf 'HEAD moved during the run'; return 1; }
+	[[ -z "$(git status --porcelain 2>/dev/null || echo unknown)" ]] || { printf 'the tree changed during the run'; return 1; }
+}
+
 fCpuPlan(){
 	fEcho_Clean "Cores ...............: ${BUILD_JOBS} of ${cpuCores}, ${HEAVY_JOBS} for the hard steps (load ${cpuLoad:-unknown}), at low priority"
 	if [[ "${CICD_MEM_SCOPED:-none}" != none ]]; then fEcho_Clean "Memory cap ..........: ${CICD_MEM_SCOPED^^}, no swap (CICD_MEM_CAP; a step over it exits 137)"
@@ -862,8 +892,11 @@ if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/nul
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
 fi
 
-needCtr=0; for s in lint test race fuzz soak vuln codeql build package arm64 demo; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+needCtr=0; for s in format lint test race fuzz soak vuln codeql build package arm64 demo; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
 ((! needCtr)) || fCtrSetup
+
+## What the merge gate's marker names: the commit the steps ran on, not wherever HEAD is at the end.
+startHead="$(git rev-parse HEAD 2>/dev/null || true)"; startDirty="$(git status --porcelain 2>/dev/null || echo unknown)"
 
 for s in "${stepList[@]}"; do
 	fStep "${s}"
@@ -895,13 +928,11 @@ for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || fEcho_Clean "  of
 ## A whole merge gate that passed on a clean tree leaves its commit for the pre-push hook, which
 ## skips a second run. A 14-minute gate inside the hook lets the git host drop the push's connection.
 if [[ "${mode}" == merge ]]; then
-	gateWhole=1
-	for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" || "${stepOff[${s}]}" == "not part of the merge run" ]] || gateWhole=0; done
-	if ((gateWhole)) && [[ -z "$(git status --porcelain 2>/dev/null)" ]]; then
-		mkdir -p -- "${root}/cicd/artifacts" && git rev-parse HEAD > "${root}/cicd/artifacts/merge-gate-passed"
-		fEcho_Clean "Merge gate passed on $(git rev-parse --short HEAD); a push of that commit to main skips it"
+	if gateWhy="$(fGateWhole)"; then
+		mkdir -p -- "${root}/cicd/artifacts" && printf '%s\n' "${startHead}" > "${root}/cicd/artifacts/merge-gate-passed"
+		fEcho_Clean "Merge gate passed on ${startHead:0:7}; a push of that commit to main skips it"
 	else
-		fEcho_Clean "Merge gate passed, but on a dirty tree or with steps off, so a push to main runs it again"
+		fEcho_Clean "Merge gate passed, but ${gateWhy}, so a push to main runs it again"
 	fi
 fi
 fSection "${APP_NAME} CI/CD: done."
@@ -917,3 +948,5 @@ fEcho_Clean
 ##		- 2026-11-13: CodeQL step: the pinned Go bundle over the tracked Go files, cached outside the repo.
 ##		- 2026-11-13: demo step: the README's CLI demo gif, kept GFS-rotated, and committed only at a release.
 ##		- 2026-11-14: a whole merge gate on a clean tree records its commit, for the pre-push hook.
+##		- 2026-11-18: the gate marker needs every step to PASS on the commit the run started on. gofmt runs
+##		  in the image and its errors fail, govulncheck skips only a failed fetch, and the second build is from a copy.
