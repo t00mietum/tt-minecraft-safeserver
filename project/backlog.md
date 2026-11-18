@@ -323,7 +323,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - The update agent's answer is ignored when the reply repeats the question first
 	- ID: 2026111715274941
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
@@ -333,8 +333,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: a test reply that quoted the question before the answer gave 0 updates.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 9. Detail in detail_backlog.md.
+		- Verified: df75y and df790 fail on the old Parse, with the question, the form, the whole prompt, or a draft first, and pass now. Taking out any of the 3 rules turns df75y red. The quick gate passed.
+		- Swept: paper and moveReport go through the same match, and df790 quotes the whole prompt, jars included, before them. Live and Suggest are the only callers. FuzzParse's read-back still holds.
 	- Origin: 53a6bb3 agent config keys. Not seen before. Confirmed.
 	- Sweep: The same rule picks paper and moveReport.
+	- Closed reason: Done
+	- Actual cause [Bug]: Parse took the first object with a jars, paper or moveReport key. The prompt has 2 of its own: the question, when it lists jars, and the answer's form.
+	- Actual fix [Bug]: Parse skips the question, which names minecraftVersion and has no jar with a version or url, and the form, whose jar and Paper names are all `<...>` placeholders. The last other match wins. A reply with only those is an error. Each match is stepped over whole, so a quoted question with many jars costs one try.
+	- Branch: fixes-2026111715274941
+	- Test case: df75y, df790
+	- Acceptance signoff: Self-closed: its tests fail before the fix and pass after, per the standing close policy.
+	- Closed: 20261117-190054
+	- Decisions:
+		- The question is told by minecraftVersion plus no jar with a version or url, so an answer with an extra minecraftVersion still reads. That keeps 2026111210033639's rule that unknown fields are ignored.
+		- The last match wins, for a draft followed by a fix, or a restatement that doesn't match exactly. The search still stops after 50 tries, and what it found by then stands.
+		- A reply that only repeats the question or the form is an error, rather than nothing newer for every jar.
+		- design.md's Update agent now says a quoted question or form is skipped and the last other answer is used.
+	- Commit: 529a418
 
 - Ctrl-C does nothing during a stop --warn countdown, then stop fails with the server still up
 	- ID: 2026111715274958
@@ -680,7 +695,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - An API agent's key goes along when its URL redirects to another host
 	- ID: 2026111715275284
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
@@ -690,7 +705,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: a 307 from one test server to another delivered the key.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 30. Detail in detail_backlog.md.
+		- Verified: df7aa fails on the old client, where the other host got the key on 307, 308, and 302, and passes now, for both kinds, with and without a client passed in. The quick gate passed.
+		- Swept: post is the only request that sends a key, by a grep for Header.Set and SetBasicAuth under source. fetch and the download client send none. Their redirects are 2026111715275472's.
 	- Origin: 91a46c8 API agent kinds. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: API.Ask used a client that follows redirects, or the caller's client as given. On a 307 or 308 Go sends the POST again with its custom headers, so x-api-key went to the new host. Go drops Authorization on a move to another host, but not x-api-key.
+	- Actual fix [Bug]: Ask uses its own copy of the client, which never follows a redirect. A 3xx is an error that says agentURL needs the new address.
+	- Decisions:
+		- A client passed in is copied, not changed, so the rule holds for any client, tests included.
+		- design.md's Update agent now says the key goes only to agentURL's host.
+	- Branch: fixes-2026111715274941
+	- Test case: df7aa
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261117-190113
+	- Commit: 1fd93a9
 
 - From a root shell, ownerAfterStop becomes root
 	- ID: 2026111715275300

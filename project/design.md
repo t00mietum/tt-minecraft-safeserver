@@ -768,7 +768,7 @@ cicd/                        build, test, and release scripts
 	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents.
 	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
 
-- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.
+- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.
 
 - What it's told: the Minecraft version, the Paper build, and for each jar it's asked about, its path under `serverDir`, its name and version from `plugin.yml`, its SHA-256, and its source if it has one. Nothing else from the host, such as the config, addresses, or player names.
 
@@ -794,7 +794,7 @@ cicd/                        build, test, and release scripts
 
 - A `--dry-run` asks the agent too, and shows its suggestions as not checked, since it downloads nothing.
 
-- An answer that can't be read is reported, and so is each jar that fails a check. The rest of the plan still goes ahead after the usual question. `--set agent=none` skips the agent for one run.
+- An answer that can't be read is reported, and so is each jar that fails a check. A reply can quote the question or the answer's form first. Those are skipped, and the last other answer in it is used. The rest of the plan still goes ahead after the usual question. `--set agent=none` skips the agent for one run.
 
 ### Bedrock players
 

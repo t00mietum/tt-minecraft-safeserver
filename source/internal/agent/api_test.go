@@ -174,3 +174,40 @@ func TestStatusByCode(t *testing.T) {
 		t.Errorf("fetch: %q", got)
 	}
 }
+
+// A redirect could send the key and the prompt to another host, or down to
+// plain http, so the API client doesn't follow one.
+func TestAPIKeepsTheKeyOnRedirect(t *testing.T) {
+	defer testid.Line(t, "df7aa")
+	var elsewhere []string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere = append(elsewhere, r.Method+" "+r.URL.Path+" x-api-key="+r.Header.Get("x-api-key")+" auth="+r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices": [{"message": {"content": "{\"jars\": []}"}}], "content": [{"type": "text", "text": "{\"jars\": []}"}]}`)
+	}))
+	t.Cleanup(other.Close)
+	// localhost against httptest's 127.0.0.1, so it's another host.
+	away := strings.Replace(other.URL, "127.0.0.1", "localhost", 1)
+	for _, code := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusFound} {
+		moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, away+r.URL.Path, code)
+		}))
+		t.Cleanup(moved.Close)
+		given := moved.Client()
+		for _, kind := range []string{"anthropic", "openai"} {
+			for _, client := range []*http.Client{nil, given} {
+				api := API{Kind: kind, URL: moved.URL + "/v1", Model: "m", Key: "secret-" + kind, Client: client}
+				_, err := api.Ask(context.Background(), "q")
+				if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("said %d", code)) || !strings.Contains(err.Error(), "Redirects aren't followed") || strings.Contains(err.Error(), "secret") {
+					t.Errorf("%d %s, own client %v: %v", code, kind, client != nil, err)
+				}
+			}
+		}
+		if given.CheckRedirect != nil {
+			t.Errorf("%d: the client passed in was changed", code)
+		}
+	}
+	if len(elsewhere) > 0 {
+		t.Errorf("the other host got:\n%s", strings.Join(elsewhere, "\n"))
+	}
+}
