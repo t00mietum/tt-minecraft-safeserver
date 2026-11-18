@@ -257,20 +257,25 @@ fAgentHandOff() {
 # host's kernel, so it's destroyed on the way out whatever happens.
 pool="${ZFS_POOL:-}"
 ds="${pool}/mc"
+# The privileged container sees every pool on the host, so only a name
+# root-host.bash makes is ever touched, whoever set ZFS_POOL.
+fZfsOurs() { [[ "${pool}" == ttmcss-test-* ]] || { say "refused: pool '${pool}' isn't a ttmcss-test-* one"; return 1; }; }
+[[ -z "${pool}" ]] || fZfsOurs || exit 2
 snaps() { sudo zfs list -H -o name -t snapshot -d 1 "${ds}" | sed 's/.*@//'; }
 # The pool's history lines for one zfs subcommand, with who ran it.
 hist() { sudo zpool history -l "${pool}" | grep -E "^[^ ]+ zfs ${1} " || true; }
 newest() { snaps | grep -E "_${1}\$" | tail -1; }
 
 fZfsGone() {
-	[[ -n "${pool}" ]] && sudo zpool list -H -o name "${pool}" > /dev/null 2>&1 || return 0
+	[[ -n "${pool}" ]] && fZfsOurs && sudo zpool list -H -o name "${pool}" > /dev/null 2>&1 || return 0
 	tt-minecraftd stop > /dev/null 2>&1
 	sudo zpool destroy -f "${pool}" && echo "destroyed pool ${pool}"
 }
 
 fZfsPool() {
 	local file="${ZFS_FILE:?}"
-	[[ "${pool}" == ttmcss-test-* && "${file}" == */tmp/*/zpool.img ]] || { say "bad pool ${pool} or file ${file}"; return 1; }
+	fZfsOurs || return 1
+	[[ "${file}" == */tmp/*/zpool.img ]] || { say "bad file ${file}"; return 1; }
 	# The run folder is the host user's, not op's.
 	sudo truncate -s 512M "${file}" || return 1
 	sudo zpool create -o cachefile=none -m none "${pool}" "${file}" || return 1
@@ -400,3 +405,4 @@ exit "${failed}"
 ##		- 2026-11-12: Agent hand-off and ZFS snapshot checks.
 ##		- 2026-11-13: Boot unit checks. Native checks skip while native mode is off.
 ##		- 2026-11-17: Ctrl-C in the stop countdown. The boot check loads past startTimeout, and checks the unit didn't fail.
+##		- 2026-11-18: Refuses a ZFS_POOL that isn't a ttmcss-test-* name, before anything runs and again before the destroy.

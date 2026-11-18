@@ -681,9 +681,14 @@ fStepBuild(){
 	fEcho_Clean "$("${runTmp}/build/${EXE_NAME}-linux-amd64" --version 2>&1 || true)"
 }
 fStepPackage(){
-	local t arch f ver="${goVersion#v}" yaml epoch fmt
+	local t arch f ver="${goVersion#v}" yaml epoch fmt named
+	## Where setup and install.bash put it, and the boot unit runs it, so an upgrade reaches both.
+	## Not /usr/bin, which comes after it on PATH. See design.md, Boot.
+	local dst="/usr/local/bin/${EXE_NAME}"
 	epoch="$(fCommitEpoch)"
 	[[ -d "${relDir}" ]] || fDie "no build to package"
+	named="$(grep -aoE "/[a-z/]+/bin/${EXE_NAME}" "${runTmp}/build/${EXE_NAME}-linux-amd64" | sort -u || true)"
+	[[ "${named}" == "${dst}" ]] || fDie "the build runs itself from '${named//$'\n'/, }', but the packages put it in ${dst}"
 	for t in "${RELEASE_TARGETS[@]}"; do
 		arch="${t##*/}"
 		yaml="${runTmp}/nfpm_${arch}.yaml"
@@ -698,7 +703,7 @@ license: GPL-2.0-or-later
 homepage: https://github.com/t00mietum/tt-minecraft-safeserver
 contents:
   - src: ${runTmp}/build/${EXE_NAME}-linux-${arch}
-    dst: /usr/bin/${EXE_NAME}
+    dst: ${dst}
     file_info:
       mode: 0755
   - src: license.md
@@ -708,6 +713,7 @@ EOF_YAML
 			fGo package "SOURCE_DATE_EPOCH=${epoch}" -- nfpm package -p "${fmt}" -f "${yaml}" -t "${runTmp}/pkg_${arch}.${fmt}" > "${runTmp}/nfpm.log" 2>&1 \
 				|| { cat "${runTmp}/nfpm.log"; fDie "nfpm failed for ${fmt} ${arch}"; }
 			f="${runTmp}/pkg_${arch}.${fmt}"
+			fPkgHas "${fmt}" "${f}" "${dst}"
 			cp -f -- "${f}" "${relDir}/${EXE_NAME}_${ver}_${arch}.${fmt}"
 			fEcho_Clean "packaged ${EXE_NAME}_${ver}_${arch}.${fmt}"
 		done
@@ -715,6 +721,15 @@ EOF_YAML
 	(cd "${relDir}" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > "${runTmp}/sums" && cp -f -- "${runTmp}/sums" SHA256SUMS)
 	fEcho_Clean "SHA256SUMS: $(wc -l < "${relDir}/SHA256SUMS") file(s)"
 	fReleaseRotate
+}
+## The package's own file list has the binary at dst. Read on this box, with dpkg-deb or rpm.
+fPkgHas(){ ## fmt file dst
+	local list tool=rpm
+	[[ "${1}" != deb ]] || tool=dpkg-deb
+	if ! command -v "${tool}" > /dev/null; then fEcho_Clean "no ${tool} here, so where the .${1} puts the binary isn't checked"; return 0; fi
+	if [[ "${1}" == deb ]]; then list="$(dpkg-deb -c "${2}" | awk '{print $NF}' | sed 's|^\.||')"; else list="$(rpm -qlp "${2}")"; fi \
+		|| fDie "${tool} can't read ${2##*/}"
+	grep -qxF -- "${3}" <<< "${list}" || fDie "the .${1} doesn't put the binary in ${3}; it has: ${list//$'\n'/ }"
 }
 ## One folder per version. Keep the newest few, by modification time.
 fReleaseRotate(){

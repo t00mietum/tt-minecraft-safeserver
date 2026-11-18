@@ -24,7 +24,8 @@ const (
 	// UnitName is the boot unit, and UnitFile is where setup writes it.
 	UnitName = "tt-minecraftd.service"
 	UnitFile = "/etc/systemd/system/" + UnitName
-	// Bin is where setup installs the tool, and what the unit runs.
+	// Bin is where setup, install.bash, and the packages put the tool, and
+	// what the unit runs. The package step checks the build names only this.
 	Bin = "/usr/local/bin/tt-minecraftd"
 	// stopMargin is past stopTimeout: stop's 30 seconds from SIGTERM to
 	// SIGKILL, and some to hand back after.

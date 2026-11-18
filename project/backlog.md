@@ -519,32 +519,57 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - The .deb and .rpm packages install to /usr/bin, but setup and the boot unit run /usr/local/bin
 	- ID: 2026111715275041
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152750
 	- Opened by:
 	- Incorrect behavior [Bug]: setup copies the binary to `/usr/local/bin`, which comes first on PATH and is what the boot unit runs. A later package upgrade replaces only `/usr/bin`, so the operator and the boot unit keep the old build. design.md names the packages as a way to update.
 	- Expected behavior [Bug]: A package install and upgrade change the binary that the operator and the boot unit run.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 20261117. The alpha.1 .deb puts the binary in /usr/bin, while setup's copy and the boot unit use /usr/local/bin, which comes first on PATH.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 15. Detail in detail_backlog.md.
-	- Origin: bb4ab14 cicd pipeline. Not seen before. Plausible.
+		- Verified: the build and package steps passed, and the .deb and .rpm list /usr/local/bin/tt-minecraftd. Each new check failed with its part put back to /usr/bin.
+		- Verified: a .deb upgrade from the alpha.1 package, over a copy an older setup left in /usr/local/bin, removed /usr/bin/tt-minecraftd and put the new build in /usr/local/bin, owned by the package.
+		- Not verified: the .rpm upgrade.
+		- Swept: boot.Bin, setup's copy, install.bash, the demo, and the root host checks all use /usr/local/bin. No /usr/bin path for the tool is left in cicd or source.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The package step put the binary in /usr/bin, a different path from the one setup, install.bash, and the boot unit use.
+	- Actual fix [Bug]: The .deb and .rpm put it in /usr/local/bin. The package step fails when the build names another path for itself, or a package's file list doesn't have it there. design.md's Boot says so.
+	- Branch: fixes-2026111715275041
+	- Test case: the package step's checks that the build and each package name /usr/local/bin/tt-minecraftd, in every full run. No test ID, since the step isn't a Go test or a root host check.
+	- Actual effort: Low
+	- Closed: 20261117-194845
+	- Decisions:
+		- The packages go in /usr/local/bin, against the FHS and Debian policy, since setup, install.bash, and the boot unit's recorded path all use it, and an upgrade from alpha.1 then removes its own /usr/bin copy. Check entry in questions.md.
+	- Acceptance signoff: Self-closed: the package checks and the .deb upgrade passed, and the path call is a Check entry.
+	- Commit: 6404266
 
 - The root host ZFS checks force-destroy any pool ZFS_POOL names, even one the name check refused
 	- ID: 2026111715275056
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152750
 	- Opened by:
 	- Incorrect behavior [Bug]: `fZfsPool` refuses a pool not named `ttmcss-test-*`, but the exit trap's `fZfsGone` runs `zpool destroy -f` on any name that exists. It runs in a privileged container that sees the host's pools. A hand run of checks.bash with ZFS_POOL set to a real pool would destroy it. root-host.bash checks the name, and checks.bash doesn't.
 	- Expected behavior [Bug]: fZfsGone refuses any pool not named `ttmcss-test-*`.
-	- Reproduced [Bug]: No. Read only, on purpose.
+	- Reproduced [Bug]: 20261117. A hand run of checks.bash with ZFS_POOL=tank ran zpool destroy -f tank twice, once at the end of the ZFS checks and once from the exit trap.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 16. Detail in detail_backlog.md.
-	- Origin: 684bd24 root-host --zfs. Not seen before. Plausible.
+		- Verified: df7ak fails on the old checks.bash, with 2 destroys of tank, and passes on the new one. Its control shows a ttmcss-test-* pool still gets destroyed on the way out.
+		- Swept: root-host.bash checks the name before its own destroy. In checks.bash every zpool and zfs call runs after the gate at the top. zfs-tools.bash only installs.
+	- Origin: 684bd24 root-host --zfs. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: Only fZfsPool checked the name. fZfsGone, the exit trap, checked only that the pool existed.
+	- Actual fix [Bug]: checks.bash refuses a ZFS_POOL that isn't a ttmcss-test-* name before anything runs, and fZfsPool and fZfsGone both go through the same name check.
+	- Branch: fixes-2026111715275041
+	- Test case: df7ak
+	- Actual effort: Low
+	- Closed: 20261117-194121
+	- Commit: 2464337
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425

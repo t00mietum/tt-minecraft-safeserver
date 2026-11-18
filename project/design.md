@@ -895,6 +895,7 @@ cicd/                        build, test, and release scripts
 
 	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
 	- The unit runs the tool from `/usr/local/bin`, where `setup` puts it, with `--config` when the config isn't the default one.
+		- The `.deb` and `.rpm` packages and the install script put it there too, so an upgrade changes what the operator and the unit run. A package in `/usr/bin` would sit behind a copy in `/usr/local/bin`, which comes first on PATH.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
 	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.
 
