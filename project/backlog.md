@@ -601,7 +601,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - how-to-connect's Bedrock whitelist example loses its quotes
 	- ID: 2026111715275073
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152750
@@ -611,7 +611,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: No. Floodgate's parsing wasn't checked.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 17. Detail in detail_backlog.md.
+		- Needs hand testing: Run the documented command with a gamertag that has a space and see Floodgate accept it. Floodgate's parsing wasn't checked.
 	- Origin: 69af57e binary name. Not seen before. Plausible.
+	- Fixed: how-to-connect.md puts the whole command in single quotes, so the double quotes reach the server.
+	- Test case: none, a doc line
 
 - update --paper deletes the build it replaced when paper.jar links to ./name or a full path
 	- ID: 2026111715275089
@@ -965,7 +968,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - README and design.md say things the code doesn't do
 	- ID: 2026111715275393
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -976,6 +979,11 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 37. Detail in detail_backlog.md.
 	- Origin: cfd6be9, d8add81, b097820. Not seen before. Confirmed by reading.
+	- Closed reason: Done
+	- Fixed: README names update --paper for Paper and says the start snapshot is for update --mc-version with zfsDataset set. design.md Testing lists the root host checks, fuzz, soak, race tests, CodeQL and arm64. The YAML line stays, since go.mod has go.yaml.in/yaml/v3.
+	- Test case: none, doc lines
+	- Acceptance signoff: Self-closed: mechanical doc fixes
+	- Closed: 20261117-200539
 
 - start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
 	- ID: 2026111715275408

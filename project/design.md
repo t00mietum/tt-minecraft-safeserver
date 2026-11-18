@@ -971,6 +971,8 @@ cicd/                        build, test, and release scripts
 
 - A smoke test starts a real Paper server in the container on a throwaway tree with a tiny world. It checks the hardening flags, that the server finishes loading, that `cmd` works, that the jars can't be written, and a clean exit on `stop`.
 
+- The root host checks run `setup`, `repair`, `start`, the firewall, and the ZFS snapshots as root in a privileged container. Fuzz targets, a soak test, race tests, CodeQL, and the arm64 run on a second host come with the full run and the merge gate.
+
 - A live start and stop on a real server checks ownership, the listening ports, that a Java and a Bedrock client can join, and that a player who isn't whitelisted gets turned away.
 
 - With the firewall on, a connection from the service account to a LAN address or to localhost fails and bumps the drop counter.
