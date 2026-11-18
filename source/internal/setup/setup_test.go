@@ -137,7 +137,7 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		Exe:         filepath.Join(dir, "tt-minecraftd"),
 		Accounts: func(c *config.Config) *repair.Host {
 			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, BootFile: filepath.Join(dir, "boot.service")}
+				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, Routes: filepath.Join(dir, "ipv6_route"), BootFile: filepath.Join(dir, "boot.service")}
 		},
 		Paper:  &r.paper,
 		Geyser: &r.geyser,

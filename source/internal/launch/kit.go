@@ -29,10 +29,12 @@ type Kit struct {
 	Cfg     *config.Config
 	// PluginsFile is the approved jar list, plugins.shcl.
 	PluginsFile string
-	Out         io.Writer
-	Root        bool
-	DryRun      bool
-	Sleep       func(time.Duration)
+	// FirewallFiles are the firewall's files, which tests point elsewhere.
+	FirewallFiles firewall.Files
+	Out           io.Writer
+	Root          bool
+	DryRun        bool
+	Sleep         func(time.Duration)
 	// Now named the start and stop snapshots, which are gone.
 	// Now func() time.Time
 	// Boot is set when the boot unit is enabled for this config, so start and
@@ -173,11 +175,20 @@ func (k *Kit) checkPlugins() error {
 	return errors.New("a jar is new or changed; sudo tt-minecraftd repair --approve-plugins shows each one and asks")
 }
 
-// checkFirewall refuses a start without the tool's nftables table, so the
-// server never runs unfenced. See design.md, Firewall.
+// checkFirewall refuses a start without the tool's nftables table, or with
+// rules written for another config or another network, so the server never
+// runs unfenced. The file stands in for the table, since the unit loads it
+// and repair reloads it whenever it writes it. See design.md, Firewall.
 func (k *Kit) checkFirewall(ctx context.Context) error {
 	if !k.Cfg.Firewall {
 		return nil
+	}
+	same, err := firewall.Matches(k.Cfg, k.FirewallFiles)
+	if err != nil {
+		return fmt.Errorf("can't check the firewall rules: %w", err)
+	}
+	if !same {
+		return errors.New("the firewall rules don't match the config or the host's network; sudo tt-minecraftd repair writes and loads them")
 	}
 	up, err := firewall.Loaded(ctx, k.Run)
 	if err != nil {

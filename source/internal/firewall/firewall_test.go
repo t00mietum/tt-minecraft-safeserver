@@ -6,6 +6,7 @@ package firewall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -99,7 +100,7 @@ func TestRules(t *testing.T) {
 	for _, tc := range cases {
 		c := config.Defaults()
 		c.AllowFrom, c.Egress, c.Bedrock = tc.allow, tc.egress, tc.bedrock
-		rules := Rules(&c, dns)
+		rules := Rules(&c, Local{DNS: dns})
 		if !strings.HasPrefix(rules, "#!/usr/sbin/nft -f\n") || !strings.Contains(rules, "table inet tt_minecraftd\ndelete table inet tt_minecraftd\n") {
 			t.Errorf("%s: no atomic swap at the top:\n%s", tc.name, rules)
 		}
@@ -118,7 +119,7 @@ func TestRules(t *testing.T) {
 		}
 		// nft looks the account up, so check with one that's here.
 		c.RunUser = me.Username
-		checked = nftCheck(t, Rules(&c, dns))
+		checked = nftCheck(t, Rules(&c, Local{DNS: dns}))
 	}
 	if !checked {
 		t.Log("nft -c not run: no unprivileged network namespace")
@@ -127,7 +128,7 @@ func TestRules(t *testing.T) {
 	// A DNS rule comes before the loopback and LAN drops, or a local
 	// resolver couldn't be reached.
 	c := config.Defaults()
-	rules := Rules(&c, dns)
+	rules := Rules(&c, Local{DNS: dns})
 	if strings.Index(rules, "th dport 53 ip daddr @dns4 accept") > strings.Index(rules, `oifname "lo"`) {
 		t.Error("DNS comes after the loopback drop")
 	}
@@ -137,11 +138,11 @@ func TestRules(t *testing.T) {
 	}
 
 	c.GamePort, c.BedrockPort = 25575, 25576
-	if rules := Rules(&c, nil); strings.Contains(rules, "tcp dport 25575 counter name in_closed") {
+	if rules := Rules(&c, Local{}); strings.Contains(rules, "tcp dport 25575 counter name in_closed") {
 		t.Error("gamePort on the RCON port got dropped")
 	}
 	c.JoinRateLimit = 5
-	if rules := Rules(&c, nil); !strings.Contains(rules, "limit rate over 5/minute burst 5 packets") {
+	if rules := Rules(&c, Local{}); !strings.Contains(rules, "limit rate over 5/minute burst 5 packets") {
 		t.Error("joinRateLimit not used")
 	}
 }
@@ -152,7 +153,7 @@ func TestOwnPortsOnLoopback(t *testing.T) {
 	defer testid.Line(t, "df67w")
 	c := config.Defaults()
 	c.GamePort, c.BedrockPort = 25570, 19140
-	rules := Rules(&c, nil)
+	rules := Rules(&c, Local{})
 	drop := strings.Index(rules, `oifname "lo" counter name out_local goto refuse`)
 	for _, s := range []string{`oifname "lo" tcp dport 25570 accept`, `oifname "lo" meta l4proto { tcp, udp } th dport 19140 accept`} {
 		if i := strings.Index(rules, s); i < 0 || i > drop {
@@ -163,7 +164,7 @@ func TestOwnPortsOnLoopback(t *testing.T) {
 		t.Errorf("%d loopback rules, want 3", n)
 	}
 	c.Bedrock = false
-	if rules := Rules(&c, nil); strings.Contains(rules, "19140") {
+	if rules := Rules(&c, Local{}); strings.Contains(rules, "19140") {
 		t.Error("bedrockPort open on loopback with bedrock off")
 	}
 }
@@ -245,7 +246,7 @@ func TestCounters(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.RunUser = me.Username
 	path := filepath.Join(t.TempDir(), "firewall.nft")
-	if err := os.WriteFile(path, []byte(Rules(&cfg, nil)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(Rules(&cfg, Local{})), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, load := range []bool{true, false} {
@@ -268,4 +269,146 @@ func TestCounters(t *testing.T) {
 			t.Errorf("loaded %v: got %v, %v, from %s", load, got, err, out)
 		}
 	}
+}
+
+// route is one /proc/net/ipv6_route line.
+func route(dest string, bits int, gateway string, flags uint32, dev string) string {
+	hex16 := func(s string) string {
+		a := netip.MustParseAddr(s).As16()
+		return fmt.Sprintf("%x", a[:])
+	}
+	return fmt.Sprintf("%s %02x %s 00 %s 00000100 00000001 00000000 %08x %8s\n", hex16(dest), bits, hex16("::"), hex16(gateway), flags, dev)
+}
+
+// The host's own subnets are the on-link routes, and nothing a VPN or the
+// kernel's local table adds.
+func TestOnLink(t *testing.T) {
+	defer testid.Line(t, "df7a1")
+	list := route("2001:db8:1:2::", 64, "::", 0x1, "eth0") + // RA's on-link prefix
+		route("::", 0, "fe80::1", 0x450003, "eth0") + // default through the router
+		route("2001:db8:5::", 48, "fe80::1", 0x3, "eth0") + // routed elsewhere
+		route("2001:db8:1:2::abcd", 128, "::", 0x80200001, "eth0") + // own address, local table
+		route("2001:db8:1:2::", 128, "::", 0x100001, "eth0") + // subnet anycast
+		route("2001:db8:9::7", 128, "::", 0x1000001, "eth0") + // cached clone
+		route("::", 0, "::", 0x1, "wg0") + // a VPN's whole internet
+		route("2000::", 3, "::", 0x1, "tun0") + // or a big part of it
+		route("2001:db8:aa::", 64, "::", 0x201, "eth1") + // unreachable
+		route("2001:db8:bb::", 64, "::", 0x1, "lo") +
+		route("fe80::", 64, "::", 0x1, "eth0") +
+		route("fd00:1::", 64, "::", 0x1, "eth0") +
+		route("ff00::", 8, "::", 0x1, "eth0") +
+		route("2001:db8:7:100::", 56, "::", 0x1, "br0") + // a container bridge
+		route("2001:db8:7:120::", 64, "::", 0x1, "br0") + // inside the /56
+		route("2001:db8:1:2::", 64, "::", 0x1, "eth0") + // twice, other table
+		"garbage line\n"
+	got, err := OnLink(strings.NewReader(list))
+	want := []netip.Prefix{netip.MustParsePrefix("2001:db8:1:2::/64"), netip.MustParsePrefix("2001:db8:7:100::/56")}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, %v, want %v", got, err, want)
+	}
+	// This box's own list reads without an error.
+	if f, err := os.Open("/proc/net/ipv6_route"); err == nil {
+		defer f.Close()
+		if _, err := OnLink(f); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// The server can't reach the host's IPv6 subnets, multicast, or broadcast,
+// whatever egress allows, and the LAN discovery answer still goes ahead.
+func TestLANDropCoversSubnetsAndMulticast(t *testing.T) {
+	defer testid.Line(t, "df7a2")
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nets := []netip.Prefix{netip.MustParsePrefix("2001:db8:1:2::/64"), netip.MustParsePrefix("2001:db8:1:2::/64"), netip.MustParsePrefix("fd00::/64")}
+	for _, egress := range []string{"web", "open"} {
+		c := config.Defaults()
+		c.Egress, c.Bedrock = egress, true
+		rules := Rules(&c, Local{Nets: nets})
+		lan6 := "\tset lan6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { fc00::/7, fe80::/10, 2001:db8:1:2::/64 }\n\t}"
+		if !strings.Contains(rules, lan6) {
+			t.Errorf("%s: no %q in\n%s", egress, lan6, rules)
+		}
+		// allowFrom's lan stays the private ranges.
+		if !strings.Contains(rules, "\tset allow6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { fc00::/7, fe80::/10 }\n") {
+			t.Errorf("%s: allow6 changed:\n%s", egress, rules)
+		}
+		answer := strings.Index(rules, "udp sport 7551 ip daddr . udp dport @seek4 accept")
+		last := strings.Index(rules, "\tchain refuse {")
+		if egress == "web" {
+			last = strings.Index(rules, "tcp dport { 80, 443 } accept")
+		}
+		for _, s := range []string{"ip6 daddr @lan6 counter name out_lan goto refuse", "ip daddr { 224.0.0.0/4, 255.255.255.255 } counter name out_lan goto refuse", "ip6 daddr ff00::/8 counter name out_lan goto refuse"} {
+			if i := strings.Index(rules, s); i < answer || i > last {
+				t.Errorf("%s: %q at %d, want between %d and %d", egress, s, i, answer, last)
+			}
+		}
+		c.RunUser = me.Username
+		nftCheck(t, Rules(&c, Local{Nets: nets}))
+	}
+}
+
+// start's view of the rules file: the config and the host's resolvers and
+// subnets have to give it, apart from a subnet the host has lost.
+func TestMatches(t *testing.T) {
+	defer testid.Line(t, "df7a3")
+	dir := t.TempDir()
+	f := Files{Rules: filepath.Join(dir, "firewall.nft"), ResolvConf: filepath.Join(dir, "resolv.conf"), Routes: filepath.Join(dir, "ipv6_route")}
+	write := func(path, text string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := config.Defaults()
+	home, other := route("2001:db8:1:2::", 64, "::", 0x1, "eth0"), route("2001:db8:3:4::", 64, "::", 0x1, "eth0")
+	write(f.ResolvConf, "nameserver 192.168.1.1\n")
+	write(f.Routes, home)
+	l, err := ReadLocal(f)
+	if err != nil || len(l.Nets) != 1 || len(l.DNS) != 1 {
+		t.Fatalf("read %v, %v", l, err)
+	}
+	if ok, err := Matches(&c, f); ok || err != nil {
+		t.Errorf("no file: %v, %v", ok, err)
+	}
+	written := Rules(&c, l)
+	write(f.Rules, written)
+	check := func(what string, want bool) {
+		t.Helper()
+		if ok, err := Matches(&c, f); ok != want || err != nil {
+			t.Errorf("%s: got %v, %v, want %v", what, ok, err, want)
+		}
+	}
+	check("as written", true)
+	for _, change := range []func(*config.Config){
+		func(c *config.Config) { c.AllowFrom = []string{"any"} },
+		func(c *config.Config) { c.Egress = "open" },
+		func(c *config.Config) { c.JoinRateLimit = 5 },
+		func(c *config.Config) { c.RunUser = "mc" },
+		func(c *config.Config) { c.Bedrock = !c.Bedrock },
+	} {
+		was := c
+		change(&c)
+		check(fmt.Sprintf("config %+v", c), false)
+		c = was
+	}
+	write(f.ResolvConf, "nameserver 192.168.1.2\n")
+	check("new resolver", false)
+	write(f.ResolvConf, "nameserver 192.168.1.1\n")
+	write(f.Routes, home+other)
+	check("new subnet", false)
+	write(f.Routes, "")
+	check("subnet gone, or not up yet", true)
+	if err := os.Remove(f.Routes); err != nil {
+		t.Fatal(err)
+	}
+	check("IPv6 off", true)
+	write(f.Rules, strings.Replace(written, "drop\n", "accept\n", 1))
+	check("edited by hand", false)
+	write(f.Rules, strings.Replace(written, "2001:db8:1:2::/64", "2001:db8:1::/48", 1))
+	write(f.Routes, home)
+	check("a wider subnet", true)
 }

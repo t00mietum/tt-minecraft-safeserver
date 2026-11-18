@@ -47,7 +47,7 @@ func TestFirewallCheck(t *testing.T) {
 	if err := os.WriteFile(h.ResolvConf, []byte("nameserver 192.168.1.1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rules := firewall.Rules(h.Cfg, []netip.Addr{netip.MustParseAddr("192.168.1.1")})
+	rules := firewall.Rules(h.Cfg, firewall.Local{DNS: []netip.Addr{netip.MustParseAddr("192.168.1.1")}})
 
 	// A new host: all 4 found, and fixed in order.
 	enabled = "disabled\n"
@@ -94,6 +94,23 @@ func TestFirewallCheck(t *testing.T) {
 	}
 	if got := look(t, h, FirewallCheck); len(got) != 2 {
 		t.Errorf("resolver changed: %q", got)
+	}
+	// So does a new IPv6 subnet on the LAN, which goes in the file.
+	if err := os.WriteFile(h.ResolvConf, []byte("nameserver 192.168.1.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, FirewallCheck); len(got) != 0 {
+		t.Errorf("resolver back: %q", got)
+	}
+	route := "20010db8000100020000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n"
+	if err := os.WriteFile(h.Routes, []byte(route), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixAll(t, h, f, FirewallCheck); !reflect.DeepEqual(got, []string{want[0], want[4]}) || !strings.Contains(string(f.Ran[0].Stdin), "fe80::/10, 2001:db8:1:2::/64 }") {
+		t.Errorf("subnet added: ran %q, wrote\n%s", got, f.Ran[0].Stdin)
+	}
+	if err := os.Remove(h.Routes); err != nil {
+		t.Fatal(err)
 	}
 
 	fakeNft(t, false)

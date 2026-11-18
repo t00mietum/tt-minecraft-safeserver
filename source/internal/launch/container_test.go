@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -84,8 +86,16 @@ func newRig(t *testing.T) *rig {
 	g.r.Reply = g.reply
 	noRuntimes(t)
 	inGroup(t, groupHere)
+	// Firewall rules that match the config, with no IPv6 subnets.
+	fw := firewall.Files{Rules: filepath.Join(base, "firewall.nft"), ResolvConf: filepath.Join(base, "resolv.conf"), Routes: filepath.Join(base, "ipv6_route")}
+	if err := os.WriteFile(fw.ResolvConf, []byte("nameserver 127.0.0.53\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fw.Rules, []byte(firewall.Rules(&cfg, firewall.Local{DNS: []netip.Addr{netip.MustParseAddr("127.0.0.53")}})), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	g.d = &Boxed{
-		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
+		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, FirewallFiles: fw, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
 		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
@@ -460,6 +470,41 @@ func TestStartChecksFirewall(t *testing.T) {
 		for _, c := range g.r.Ran {
 			if c.Args[0] == "nft" {
 				t.Errorf("native %v, firewall off: asked nft", native)
+			}
+		}
+	}
+}
+
+// Rules written for another config, or that miss a new IPv6 subnet, stop a
+// start in either mode before anything changes, even with the table loaded.
+func TestStartChecksFirewallRules(t *testing.T) {
+	defer testid.Line(t, "df7a5")
+	for _, native := range []bool{false, true} {
+		for what, change := range map[string]func(g *nativeRig){
+			"allowFrom": func(g *nativeRig) { g.d.Cfg.AllowFrom = []string{"any"} },
+			"runUser":   func(g *nativeRig) { g.d.Cfg.RunUser = "mc" },
+			"bedrock":   func(g *nativeRig) { g.d.Cfg.Bedrock = !g.d.Cfg.Bedrock },
+			"no file": func(g *nativeRig) {
+				if err := os.Remove(g.d.FirewallFiles.Rules); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"new subnet": func(g *nativeRig) {
+				route := "20010db8000100020000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n"
+				if err := os.WriteFile(g.d.FirewallFiles.Routes, []byte(route), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		} {
+			g := newNativeRig(t)
+			change(g)
+			start := g.d.Start
+			if native {
+				start = g.n.Start
+			}
+			err := start(context.Background(), StartMode{})
+			if err == nil || !strings.Contains(err.Error(), "firewall rules don't match") || !strings.Contains(err.Error(), "repair") || len(g.changes()) != 1 {
+				t.Errorf("native %v, %s: err %v, ran %q", native, what, err, g.changes())
 			}
 		}
 	}

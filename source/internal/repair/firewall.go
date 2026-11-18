@@ -4,7 +4,6 @@
 package repair
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -39,20 +38,18 @@ func (h *Host) hasNft() bool {
 	return HasNft()
 }
 
-// fwFiles gives the rules file, the unit file, and resolv.conf, which tests
-// point elsewhere.
-func (h *Host) fwFiles() (rules, unit, resolv string) {
-	rules, unit, resolv = h.RulesFile, h.UnitFile, h.ResolvConf
-	if rules == "" {
-		rules = firewall.RulesFile
+// fwFiles gives the firewall's files, which tests point elsewhere. An empty
+// field left in Files means the real file.
+func (h *Host) fwFiles() (f firewall.Files, unit string) {
+	f = firewall.Files{Rules: h.RulesFile, ResolvConf: h.ResolvConf, Routes: h.Routes}
+	if f.Rules == "" {
+		f.Rules = firewall.RulesFile
 	}
+	unit = h.UnitFile
 	if unit == "" {
 		unit = firewall.UnitFile
 	}
-	if resolv == "" {
-		resolv = "/etc/resolv.conf"
-	}
-	return rules, unit, resolv
+	return f, unit
 }
 
 // sameFile says whether path has text. A missing file isn't an error.
@@ -74,16 +71,13 @@ func (h *Host) firewallOn(ctx context.Context) ([]Finding, error) {
 	if !h.hasNft() {
 		return []Finding{{Problem: "nftables isn't installed, so the firewall can't load; " + adds("nftables")}}, nil
 	}
-	rulesPath, unitPath, resolvPath := h.fwFiles()
-	conf, err := os.ReadFile(resolvPath) // #nosec G304 -- resolv.conf
+	files, unitPath := h.fwFiles()
+	rulesPath := files.Rules
+	local, err := firewall.ReadLocal(files)
 	if err != nil {
 		return nil, err
 	}
-	dns, err := firewall.Resolvers(bytes.NewReader(conf))
-	if err != nil {
-		return nil, err
-	}
-	rules, unit := firewall.Rules(h.Cfg, dns), firewall.Unit()
+	rules, unit := firewall.Rules(h.Cfg, local), firewall.Unit()
 	var found []Finding
 	stale := false
 
@@ -138,7 +132,7 @@ func (h *Host) firewallOn(ctx context.Context) ([]Finding, error) {
 
 // firewallOff takes the unit and the table away, and leaves the rules file.
 func (h *Host) firewallOff(ctx context.Context) ([]Finding, error) {
-	_, unitPath, _ := h.fwFiles()
+	_, unitPath := h.fwFiles()
 	_, err := os.Lstat(unitPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

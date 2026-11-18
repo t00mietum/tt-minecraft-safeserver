@@ -159,7 +159,9 @@ Common:  --config PATH, --set KEY=VALUE
 
 4. Check every jar in `plugins/` against the approved list. Refuse when a jar is new or changed. See [Plugin pinning](#plugin-pinning).
 
-5. With `firewall` on, check through sudo that the tool's nftables table is loaded. Refuse to start without it.
+5. With `firewall` on, check that `/etc/tt-minecraftd/firewall.nft` is what the config and the host's network give, and through sudo that the tool's nftables table is loaded. Refuse to start when either fails, and name `repair` as the fix.
+	- The unit loads the file, and `repair` reloads it whenever it writes it, so the file stands for the loaded table.
+	- An IPv6 subnet the file has and the host doesn't is fine, since it only blocks more. At boot, the router's announcement can come after the server starts.
 
 6. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
 
@@ -331,7 +333,7 @@ Common:  --config PATH, --set KEY=VALUE
 	6. The safe settings are in place.
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.
-	9. With `firewall` on, the rules file matches the config, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
+	9. With `firewall` on, the rules file matches the config and the host's network, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
 		- A missing `nft` is reported with the command that adds it, the same as `catatonit`. A new rules file is loaded with `systemctl reload-or-restart`, so a running table is swapped in one go.
 		- Turning it off leaves the rules file in place.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
@@ -860,6 +862,8 @@ cicd/                        build, test, and release scripts
 		- Its own game ports are allowed. Geyser sends to its own Bedrock port over loopback, and its STUN lookup gets no answer when those are dropped.
 		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
+		- The host's own IPv6 subnets count as private here, since a home LAN's router, NAS, and printers have global addresses there. They're the on-link routes in `/proc/net/ipv6_route`, read when the rules are written. A route wider than /32 doesn't count, since a VPN can put much of the internet on its device. `allowFrom`'s `lan` stays the private ranges.
+		- Multicast and broadcast get dropped too, such as SSDP to the router.
 		- That includes the server's answer to a LAN client's broadcast. Conntrack keys the client's packet on the broadcast address, so an answer from the server's own address isn't a reply. An answer to a client that asked the server's address directly still goes out.
 		- With `bedrock` on, Bedrock LAN discovery is the exception. A LAN address in `allowFrom` that broadcasts to UDP 7551 is remembered for 10 seconds, with the port it sent from. The server may send from 7551 to that address and port only. Clients broadcast every 2 seconds, so a client that's still looking stays on the list.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.

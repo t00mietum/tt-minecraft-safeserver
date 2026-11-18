@@ -24,9 +24,9 @@ type Host struct {
 	Passwd, Group string
 	// Root is whether repair runs as root, which some reads need.
 	Root bool
-	// RulesFile, UnitFile, and ResolvConf are the firewall's files. Empty
-	// means the real ones.
-	RulesFile, UnitFile, ResolvConf string
+	// RulesFile, UnitFile, ResolvConf, and Routes are the firewall's files.
+	// Routes stands in for /proc/net/ipv6_route. Empty means the real ones.
+	RulesFile, UnitFile, ResolvConf, Routes string
 	// BootFile is the boot unit's file. Empty means the real one.
 	BootFile string
 	// NftThere, when set, stands in for HasNft.

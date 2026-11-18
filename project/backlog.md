@@ -227,7 +227,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - The firewall lets the server reach LAN hosts on IPv6 global addresses, and send multicast
 	- ID: 2026111715274893
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152748
@@ -238,21 +238,53 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 6. Detail in detail_backlog.md.
 	- Origin: 88f3d3f firewall rules file and unit. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Cause [Bug]: The LAN set held only the ULA and link-local ranges for IPv6, and nothing dropped multicast or broadcast.
+	- Actual fix [Bug]: The rules add the host's on-link IPv6 prefixes to the LAN set, read from the kernel's IPv6 route list when the rules are written: routes with no gateway, not on loopback, and /32 or longer. Multicast and broadcast are dropped and counted as out_lan, after the seek4 answer.
+	- Test case: df7a1 (route list), df7a2 (rendered rules), df7a4 (rules from a namespace's own routes, loaded), df66g (repair rewrites for a new subnet)
+	- Verified: df7a2 and df7a4 fail with the old rules and pass with the fix. In df7a4, sends to the LAN's global subnet, ff02::1, 224.0.0.251 and 255.255.255.255 are refused under egress open, and sends past a VPN-style 2000::/3 route and to the internet still go. The quick gate passed.
+	- Swept: firewall.Rules has 2 callers, repair's check and start's firewall.Matches, and both read the prefixes through firewall.ReadLocal. setup gets it through repair. allowFrom's inbound lan list is left alone, per design.md's Exposure.
+	- Branch: fixes-2026111715274893
+	- Commit: 46673e8
+	- Acceptance signoff: Self-closed: its tests failed before and pass after, per the standing close policy.
+	- Closed: 20261117-183929
+	- Decisions:
+		- Prefixes come from the route list rather than the host's addresses, so the on-link /64 of a DHCPv6 /128 address counts too.
+		- A route wider than /32 isn't a subnet, since a VPN can put much of the internet, or all of it, on its device with no gateway, and the server would lose IPv6.
+		- allowFrom's lan stays the private ranges, as design.md's Exposure says. Adding the subnets there would also let in others on a VPN's shared subnet.
+		- IPv4 on-link subnets aren't added, since a home LAN's IPv4 is private already.
+		- Multicast and broadcast get rules of their own rather than joining the LAN sets, since those sets also feed allowFrom's lan.
+		- design.md's Firewall says so.
 
 - start accepts any loaded firewall table, even one written for an older config
 	- ID: 2026111715274909
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
 	- Opened by:
 	- Incorrect behavior [Bug]: `checkFirewall` only asks whether the table exists. After a change to allowFrom, egress, joinRateLimit, runUser or bedrock, or a `start --set` of one of them, start runs on the old rules with no warning. A new runUser isn't filtered outbound at all, and a newly on Bedrock port has no rate limit or loopback allowance.
 	- Expected behavior [Bug]: start compares the rules file with the rules the config gives, and refuses on a mismatch, naming repair.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 20261117: df7a5 on the old check: a changed allowFrom, runUser or bedrock, a missing rules file, and a new subnet each let start go on to launch the server.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 7. Detail in detail_backlog.md.
 	- Origin: 88f3d3f firewall rules file and unit. Not seen before. Plausible.
+	- Closed reason: Done
+	- Cause [Bug]: checkFirewall only asked nft whether the table was loaded.
+	- Actual fix [Bug]: start compares firewall.nft with the rules the config, the resolvers and the host's IPv6 subnets give, before the table check, and refuses naming repair. A subnet the file has and the host doesn't still passes.
+	- Test case: df7a5 (start in both modes), df7a3 (firewall.Matches)
+	- Verified: df7a5 fails on the old check, where a changed allowFrom, runUser or bedrock, a missing file, and a new subnet each started the server, and passes after. The quick gate passed.
+	- Swept: both modes' Start and startUnit go through preflight; the launch rig writes a matching file; main's Kit uses the real files. repair's own check was already strict.
+	- Branch: fixes-2026111715274893
+	- Commit: 46673e8
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-183942
+	- Decisions:
+		- The file stands for the loaded table: the unit loads it, and repair reloads it whenever it writes it. Reading the table back would mean matching nft's own listing.
+		- A subnet the file has and the host doesn't passes, since the router's announcement can come after the boot unit's start. repair still writes the exact list.
+		- A new ISP prefix makes start refuse until repair runs. Check: entry in questions.md.
+		- design.md's start and repair say so.
 
 - repair on a second config removes or rewrites the main config's boot unit and firewall
 	- ID: 2026111715274925
