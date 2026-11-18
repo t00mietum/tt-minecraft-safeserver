@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - At a boot unit stop, both start --foreground and its ExecStop hand the trees back, and a slow hand-back can fail the unit
 	- ID: 2026111719172263
 	- Type: Bug
-	- Status: Waiting for testing
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-191722
@@ -40,7 +40,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261117: Verified: df7am fails on the unfixed code (start --foreground hands back inside the unit, and a SIGTERM in its wait with the server down fails it, in both modes) and passes with the fix. The quick gate passed, and race tests of launch and cli.
 		- Not run against a real systemd unit here. df78x does that.
 		- 20261117: Verified: df78x passed in a root host container on ca9d851, with the unit inactive and not failed after stop. The root host run itself is still to run.
-	- Needs local test suite run?: the root host check df78x, which fails when the boot unit is failed after stop.
+	- Needs local test suite run?: No. Passed 20261117.
 	- Actual cause [Bug]: Inside the boot unit, start --foreground handed back after the server's end, and so did ExecStop's stop. systemd sends SIGTERM to the unit once ExecStop is done, which cut start's chown short. A wait that SIGTERM cut short with the server down was also an error, and native mode's 5 s poll is nearly always in that wait.
 	- Actual effort: Low
 	- Actual fix [Bug]: Inside the boot unit, told by its cgroup, start --foreground leaves the hand-back to ExecStop's stop, in both modes. A SIGTERM in its wait with the server down is a clean stop, exit 0. Outside the unit nothing changes. design.md's Boot section says so.
@@ -51,6 +51,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- ExecStop's stop keeps the hand-back rather than start, since systemd runs ExecStop after every start, even when the server ended by itself, and only ExecStop finishes before the SIGTERM.
 		- A SIGTERM counts as clean only when the server is down. With it still up, start still fails.
 		- Swept: the hand-backs at start's end are container.go's foreground end and native.go's foreground loop, both changed. The --debug paths can't run in the unit. stop's hand-backs stay.
+	- Closed reason: Done
+	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed df7ag and df78x, with df68e and df76n after them, 4 native SKIPs.
+	- Closed: 20261117-204121
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
@@ -384,7 +387,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Ctrl-C does nothing during a stop --warn countdown, then stop fails with the server still up
 	- ID: 2026111715274958
 	- Type: Bug
-	- Status: Waiting for testing
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
@@ -401,7 +404,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Verified: in a root host container on ca9d851, df7ag passed. Read the old way, right after stop exited, the stop-off line was missing in 2 of 3 runs, and there 2 s later.
 	- Origin: 3a04d86 native mode start and stop, 5c5b023 console and cmd. Not seen before. Confirmed.
 	- Sweep: attach.go reports a Ctrl-C as a detach timeout.
-	- Needs local test suite run?: the root host check df7ag, in the same run as df78x for 2026111715274978.
+	- Needs local test suite run?: No. Passed 20261117.
 	- Actual cause [Bug]: Every wait in launch went through Kit.Sleep, which main set to time.Sleep, so it ignored Ctrl-C. cmd returned nil on a done context. AttachConsole read any end of its own timeout context as a slow detach.
 	- Actual effort: Avg
 	- Actual fix [Bug]: Waits go through Kit.pause, which ends at Ctrl-C or SIGTERM. A countdown cut short says "The stop is off. The server stays up." to the players and exits 1, with the server and trees as they were. Ctrl-C in stop's save wait, cmd's answer wait, start's load wait, and attach exits 1 and says interrupted.
@@ -415,11 +418,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Ctrl-C after the stop line is out leaves the server stopping, and says another stop hands the trees back.
 		- The test console now refuses a done context, as a real send does.
 		- The df7ag check waits for the stop-off line, and stop doesn't wait for Paper to log it. Its job ends once the console has the line, as for the countdown lines.
+	- Closed reason: Done
+	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed df7ag and df78x, with df68e and df76n after them, 4 native SKIPs.
+	- Closed: 20261117-204121
 
 - At boot, a server slower to load than startTimeout gets stopped again
 	- ID: 2026111715274978
 	- Type: Bug
-	- Status: Waiting for testing
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
@@ -438,7 +444,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every pipe into grep -q in checks.bash. status and start --help now go to a file or a variable first. The podman ps, podman image ls, id and find pipes print a line or 2, and stay.
 	- Origin: 3a04d86 native mode start and stop, 58531cc podman mode. Not seen before. Confirmed.
 	- Sweep: native.go has the same timeout.
-	- Needs local test suite run?: the root host check df78x, which now loads past a 1 s startTimeout at boot and checks the unit isn't failed after stop.
+	- Needs local test suite run?: No. Passed 20261117.
 	- Actual cause [Bug]: waitLoaded's timeout was an error in every start mode. Boxed.Start dropped what the runtime's wait printed.
 	- Actual effort: Avg
 	- Actual fix [Bug]: With --foreground, a slow load is a warning, and start goes on to wait for the server's end, in both modes. In container mode, start --foreground exits with the code wait prints when it isn't 0, after the hand-back. Plain start still exits 1 on a slow load.
@@ -450,6 +456,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The code is the last line of wait's output. Output that isn't a number is an error, never success. Codes outside 1 to 255 exit 1. design.md's exit codes line says start --foreground is the exception.
 		- Native passes no exit code, since its server runs inside tmux in a collected unit, and native mode is deferred.
 		- df78x's boot run now loads past startTimeout every time, which still covers start and stop through the unit. The test rig's wait prints 0 by default.
+	- Closed reason: Done
+	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed df7ag and df78x, with df68e and df76n after them, 4 native SKIPs.
+	- Closed: 20261117-204121
 
 - A docs-only push to main skips the merge gate, but the gate's tests read design.md
 	- ID: 2026111715274995
