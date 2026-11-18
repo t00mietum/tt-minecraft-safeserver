@@ -601,7 +601,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - how-to-connect's Bedrock whitelist example loses its quotes
 	- ID: 2026111715275073
 	- Type: Bug
-	- Status: Waiting on signoff
+	- Status: Waiting on automated testing
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152750
@@ -611,10 +611,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: No. Floodgate's parsing wasn't checked.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 17. Detail in detail_backlog.md.
-		- Needs hand testing: Run the documented command with a gamertag that has a space and see Floodgate accept it. Floodgate's parsing wasn't checked.
 	- Origin: 69af57e binary name. Not seen before. Plausible.
 	- Fixed: how-to-connect.md puts the whole command in single quotes, so the double quotes reach the server.
 	- Test case: none, a doc line
+	- Needs external testing: Paper rig with Floodgate (private/claude_simple/tools/paper-rig/): run the documented cmd line with a gamertag that has a space, and check Floodgate reads it as one name.
 
 - update --paper deletes the build it replaced when paper.jar links to ./name or a full path
 	- ID: 2026111715275089
