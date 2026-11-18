@@ -80,6 +80,16 @@ func Clean(s string) string {
 	}, s)
 }
 
+// CleanLines is Clean for text of several lines, such as a log tail or an
+// error, and keeps the line breaks.
+func CleanLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = Clean(l)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // Cut shortens s to limit bytes on a character boundary, and marks the cut.
 func Cut(s string, limit int) string {
 	if len(s) <= limit {

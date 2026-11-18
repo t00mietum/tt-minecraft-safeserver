@@ -126,7 +126,7 @@ func Jars(serverDir string) ([]Jar, error) {
 	}
 	rel, err := filepath.Rel(base, paper)
 	if err != nil || !insideServer(filepath.ToSlash(rel)) {
-		return nil, fmt.Errorf("paper.jar points to %s, outside %s, so it can't be approved", paper, serverDir)
+		return nil, fmt.Errorf("paper.jar points to %s, outside %s, so it can't be approved", server.Clean(paper), serverDir)
 	}
 	return append(jars, Jar{filepath.ToSlash(rel), paper}), nil
 }

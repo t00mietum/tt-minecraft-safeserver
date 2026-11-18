@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 )
 
 // API is an agent behind a chat API: OpenAI's chat completions, which local
@@ -183,7 +185,7 @@ func (a API) post(ctx context.Context, path string, body, into any) error {
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			hint = ". The key comes from TT_MINECRAFTD_AGENT_KEY"
 		}
-		return fmt.Errorf("the agent's server said %s: %s%s", resp.Status, clean(string(says), 400), hint)
+		return fmt.Errorf("the agent's server said %s: %s%s", download.Status(resp.StatusCode), clean(string(says), 400), hint)
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIReply)).Decode(into); err != nil {
 		return fmt.Errorf("the agent's server sent something that isn't its JSON: %w", err)

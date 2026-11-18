@@ -781,3 +781,48 @@ func TestBootUnitRefuses(t *testing.T) {
 		t.Errorf("asked about %q, want %s", asked, defaultConfig)
 	}
 }
+
+// A jar's name is the server account's, so repair shows it without its
+// escape codes, in the report and in the question.
+func TestRepairCleansJarName(t *testing.T) {
+	defer testid.Line(t, "df79z")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugins", "x\x1b]0;owned\x07\x1b[2K\r.jar"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set := "--set=serverDir=" + dir
+	shown := "plugins/x]0;owned[2K.jar"
+	code, out, _ := runArgs("repair", "--check", set)
+	if code != exitError || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "FAILED  "+shown+" isn't approved") {
+		t.Errorf("--check: exit %d, stdout %q", code, out)
+	}
+	inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
+	if done {
+		t.Fatal("prepare stopped")
+	}
+	var b bytes.Buffer
+	_ = repair(context.Background(), inv, strings.NewReader("y\n"), &b, true)
+	if out := b.String(); strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "\n"+shown+" (new)\n") || !strings.Contains(out, "FIXED   "+shown+" approved") {
+		t.Errorf("--approve-plugins: %q", out)
+	}
+}
+
+// An error can name a file the server account named, so the one run prints
+// is cleaned, line by line.
+func TestRunCleansError(t *testing.T) {
+	defer testid.Line(t, "df7a0")
+	noDefaultConfig(t)
+	dir := t.TempDir()
+	if err := os.Symlink("paper\x1b[2J\x07.jar", filepath.Join(dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	code, _, msg := runArgs("update", "--paper", "--dry-run", "--set=serverDir="+dir)
+	if code != exitError || strings.ContainsAny(msg, "\x1b\x07") || !strings.Contains(msg, "paper.jar links to") {
+		t.Errorf("exit %d, stderr %q", code, msg)
+	}
+}

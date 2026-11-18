@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // DefaultBase is PaperMC's download API, called Fill.
@@ -365,6 +366,11 @@ func Current(serverDir string) (*Linked, error) {
 		return nil, fmt.Errorf("%s is a file, not a link to a build, so its version is unknown; rename it to its build's name, such as paper-26.3-249.jar, and link paper.jar to that", link)
 	case err != nil:
 		return nil, err
+	}
+	// Refused whole, since Target is shown and parseName checks only the
+	// last part.
+	if server.Clean(target) != target {
+		return nil, fmt.Errorf("paper.jar links to %q, a name with control characters, so its version is unknown", target)
 	}
 	l, ok := parseName(filepath.Base(target))
 	if !ok {

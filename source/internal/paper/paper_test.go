@@ -330,3 +330,19 @@ func TestClaimsAndPoint(t *testing.T) {
 		t.Errorf("paper.jar: %q %v", target, err)
 	}
 }
+
+// paper.jar's link text is shown in update's plan and errors, and the server
+// account can set it, so one with control characters anywhere is refused.
+func TestCurrentRefusesControlCharacters(t *testing.T) {
+	defer testid.Line(t, "df79v")
+	for _, target := range []string{"/x\x1b]0;owned\x07\x1b[2J/paper-26.3-249.jar", "paper-26.3-249.jar\u202e", "\x1b[2Jevil"} {
+		dir := t.TempDir()
+		if err := os.Symlink(target, filepath.Join(dir, "paper.jar")); err != nil {
+			t.Fatal(err)
+		}
+		cur, err := Current(dir)
+		if err == nil || cur != nil || strings.ContainsAny(err.Error(), "\x1b\x07\u202e") {
+			t.Errorf("%q: %+v, %v", target, cur, err)
+		}
+	}
+}

@@ -197,7 +197,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Text from the server tree and from download servers reaches the terminal with escape codes intact
 	- ID: 2026111715274877
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152748
@@ -209,6 +209,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: Code review 20261117 item 5. Detail in detail_backlog.md.
 	- Origin: ba0f959, 9058841, 6d1da22, 3a04d86, 1b3d301 and 9f30908. Same class as 2026111311594944, which fixed player names and log lines. Confirmed.
 	- Sweep: plugins/check.go, paper.Current, status.go ping and plugin lines, launch/kit.go jar lines and log tail, launch/links.go, main.go repairPlugins, setup.go plan and approval lines, update.go plan, download.go and agent/api.go status errors.
+	- Closed reason: Done
+	- Actual cause [Bug]: Text read from the server tree, the ping, and HTTP status lines was printed as read. Only log lines, op names and plugin.yml claims went through `server.Clean`.
+	- Actual fix [Bug]: The places that print clean what they're given: status's `Report.Write` cleans every line, start's `Kit.say` cleans every text argument, and repair's report line and the error `run` prints are cleaned line by line through the new `server.CleanLines`. Repair's question, setup's and update's jar lines clean the names they show. `paper.Current` refuses a link text with control characters, and HTTP errors name the status by its code through `download.Status`, not the server's own reason text. design.md's update section says so.
+	- Swept: every site in the Sweep row. launch/links.go and setup.go's Describe error are returned errors, which `run` cleans. Twins: agent/fetch.go also printed `resp.Status`, start's settings warnings go through `Kit.say`, and update's approved-list warnings and skip lines print approved names. Left alone: settings.Warnings already cleans op names, config and tree warnings hold the operator's own paths, Paper and Geyser build names from the download APIs are checked against a name pattern, and update's `s.jar.Name` always equals a checked build path. `console` passes the terminal through by design.
+	- Test case: df79r, df79s, df79t, df79v, df79w, df79x, df79y, df79z, df7a0
+	- Verified: all 9 fail on the old code and pass with the fix. With only the 4 print funnels added to the old code, df79r, df79s, df79t, df79z and df7a0 pass, so each funnel holds by itself. The quick gate passes.
+	- Branch: fixes-2026111715274877
+	- Commit: 8f7239f
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now, and every Sweep site is covered.
+	- Closed: 20261117-182413
+	- Decisions:
+		- Jar names stay as read, since they key the approved list and `Refuse` moves the file by its name. Cleaning happens where text is printed, not in `plugins.Jars`, so 2 files can't merge under one cleaned name.
+		- Cleaning goes in the few places output passes through (status, start, repair, `run`'s error line), so a new line there is covered without a sweep. Lines keep their breaks through `server.CleanLines`.
+		- `paper.Current` refuses rather than cleans, since `Target` is also the name update keeps when it prunes.
 
 - The firewall lets the server reach LAN hosts on IPv6 global addresses, and send multicast
 	- ID: 2026111715274893

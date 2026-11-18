@@ -83,9 +83,18 @@ func (c Client) Get(ctx context.Context, url string) (*http.Response, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close() // the status is the error that matters
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
+		return nil, fmt.Errorf("%s: %s", url, Status(resp.StatusCode))
 	}
 	return resp, nil
+}
+
+// Status names an HTTP status by its code. Not resp.Status, whose text is
+// the server's own and can hold escape codes.
+func Status(code int) string {
+	if text := http.StatusText(code); text != "" {
+		return fmt.Sprintf("%d %s", code, text)
+	}
+	return fmt.Sprint(code)
 }
 
 // JSON reads an API answer of up to MaxJSON into v.

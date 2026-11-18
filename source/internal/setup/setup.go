@@ -481,7 +481,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		if about == "" {
 			about = "no plugin.yml"
 		}
-		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", j.Name, j.SHA256, about)
+		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", server.Clean(j.Name), j.SHA256, about)
 		if j.Source != "" {
 			fmt.Fprintf(w, "  source: %s\n", j.Source)
 		}
@@ -743,7 +743,7 @@ func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser
 		return err
 	}
 	for _, j := range jars {
-		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", j.Name)
+		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", server.Clean(j.Name))
 	}
 	return nil
 }

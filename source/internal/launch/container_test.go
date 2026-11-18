@@ -654,3 +654,32 @@ func TestFindContainer(t *testing.T) {
 		}
 	}
 }
+
+// A jar's name comes from the server account, so start's refusal shows it
+// without its escape codes.
+func TestStartCleansJarName(t *testing.T) {
+	defer testid.Line(t, "df79s")
+	g := newRig(t)
+	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "\x1b]0;owned\x07\x1b[2K\rGeyser-Spigot.jar"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := g.d.Start(context.Background(), StartMode{})
+	out := g.out.String()
+	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "not approved: plugins/]0;owned[2KGeyser-Spigot.jar\n") {
+		t.Errorf("err %v, output %q", err, out)
+	}
+}
+
+// The log tail of a server that died while loading is the server's text, so
+// it's shown without escape codes, a line per line.
+func TestStartCleansLogTail(t *testing.T) {
+	defer testid.Line(t, "df79t")
+	g := newRig(t)
+	g.states = []string{"", "exited"}
+	g.log = "first \x1b]52;c;ZWNobyBoaQ==\x07line\r\nsecond\x1b[2J line\n"
+	err := g.d.Start(context.Background(), StartMode{})
+	out := g.out.String()
+	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "first ]52;c;ZWNobyBoaQ==line\nsecond[2J line\n") {
+		t.Errorf("err %v, output %q", err, out)
+	}
+}

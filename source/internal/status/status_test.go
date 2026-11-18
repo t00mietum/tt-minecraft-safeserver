@@ -473,3 +473,29 @@ func TestStatusHostileFiles(t *testing.T) {
 		t.Fatal("status hung on a pipe or a device")
 	}
 }
+
+// Jar names, the ping's version, and its player sample come from the server
+// account, so escape codes in them don't reach the terminal.
+func TestStatusCleansServerText(t *testing.T) {
+	defer testid.Line(t, "df79r")
+	g := newRig(t)
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
+	write(t, filepath.Join(g.dir, "plugins", "x\x1b]0;owned\x07.jar"), "bad")
+	g.p.Ping = func(_ context.Context, addr string) (server.PingReply, error) {
+		var r server.PingReply
+		r.Version.Name = "Paper\x1b[2J\u202e"
+		r.Players.Sample = append(r.Players.Sample, struct {
+			Name string `json:"name"`
+		}{"Ev\x1b]52;c;aGk=\x07il"})
+		return r, nil
+	}
+	out := g.text(t, 0)
+	if strings.ContainsAny(out, "\x1b\x07\r\u202e") {
+		t.Errorf("control characters in status:\n%q", out)
+	}
+	for _, want := range []string{"Paper[2J (", ": Ev]52;c;aGk=il", "new: plugins/x]0;owned.jar"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status lacks %q:\n%s", want, out)
+		}
+	}
+}

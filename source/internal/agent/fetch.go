@@ -18,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 )
 
 // Fetcher is the one tool the API kinds get: a GET of an https page, given
@@ -77,7 +79,7 @@ func (f *Fetcher) get(ctx context.Context, address string) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }() // read-only, nothing to lose
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %s", resp.Status)
+		return "", fmt.Errorf("HTTP %s", download.Status(resp.StatusCode))
 	}
 	kind, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if kind != "" && !strings.HasPrefix(kind, "text/") && !strings.HasSuffix(kind, "json") &&

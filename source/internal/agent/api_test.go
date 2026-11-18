@@ -145,3 +145,32 @@ func TestAPIFailures(t *testing.T) {
 		t.Errorf("root: %v", err)
 	}
 }
+
+// rawStatus answers 404 with a reason phrase holding escape codes.
+func rawStatus(w http.ResponseWriter, _ *http.Request) {
+	c, buf, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	_, _ = buf.WriteString("HTTP/1.1 404 \x1b]0;owned\x07\x1b[2Jgone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	_ = buf.Flush()
+}
+
+// The agent's server and a fetched page give their own reason phrase, so
+// errors name the status by its code.
+func TestStatusByCode(t *testing.T) {
+	defer testid.Line(t, "df79y")
+	ts := httptest.NewServer(http.HandlerFunc(rawStatus))
+	t.Cleanup(ts.Close)
+	_, err := API{Kind: "openai", URL: ts.URL, Model: "m"}.Ask(context.Background(), "q")
+	if err == nil || strings.ContainsAny(err.Error(), "\x1b\x07") || !strings.Contains(err.Error(), "said 404 Not Found") {
+		t.Errorf("API: %v", err)
+	}
+	tls := httptest.NewTLSServer(http.HandlerFunc(rawStatus))
+	t.Cleanup(tls.Close)
+	got := (&Fetcher{Client: tls.Client()}).Fetch(context.Background(), tls.URL+"/page")
+	if strings.ContainsAny(got, "\x1b\x07") || !strings.Contains(got, "HTTP 404 Not Found") {
+		t.Errorf("fetch: %q", got)
+	}
+}

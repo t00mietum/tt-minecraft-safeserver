@@ -35,6 +35,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	setuppkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/setup"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -166,7 +167,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if errors.As(err, &code) {
 			return int(code)
 		}
-		fmt.Fprintf(stderr, "tt-minecraftd: %v\n", err)
+		// Errors often name a file the server account named.
+		fmt.Fprintf(stderr, "tt-minecraftd: %s\n", server.CleanLines(err.Error()))
 		return exitError
 	}
 	return exitOK
@@ -501,7 +503,7 @@ func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	}
 	failed := false
 	report := func(state, text string) {
-		fmt.Fprintf(w, "%-7s %s\n", state, text)
+		fmt.Fprintf(w, "%-7s %s\n", state, server.CleanLines(text))
 		failed = failed || state == "FAILED"
 	}
 	h, before, after := repairSteps(inv)
@@ -546,7 +548,7 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 		return
 	}
 	for _, warn := range warns {
-		fmt.Fprintf(w, "warning: %s\n", warn)
+		fmt.Fprintf(w, "warning: %s\n", server.Clean(warn.String()))
 	}
 	c, err := plugins.CheckJars(inv.cfg.ServerDir, approved, &plugins.Sums{})
 	if err != nil {
@@ -606,7 +608,7 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 			state = "changed"
 		}
 		fmt.Fprintf(w, "\n%s (%s)\n  sha256: %s\n  size:   %d bytes\n  date:   %s\n  says:   %s\n",
-			j.Name, state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
+			server.Clean(j.Name), state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
 		// A changed jar keeps the source it has.
 		if p := geyser.Project(info.Name, info.About); state == "new" && p != "" {
 			info.Source = geyserAPI.Source(p)

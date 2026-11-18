@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -64,5 +65,31 @@ func TestStagedOpenPipe(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Open hung on a pipe")
+	}
+}
+
+// rawStatus answers 404 with a reason phrase holding escape codes.
+func rawStatus(w http.ResponseWriter, _ *http.Request) {
+	c, buf, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	_, _ = buf.WriteString("HTTP/1.1 404 \x1b]0;owned\x07\x1b[2Jgone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	_ = buf.Flush()
+}
+
+// A download server's reason phrase is its own text, so the error names the
+// status by its code.
+func TestStatusByCode(t *testing.T) {
+	defer testid.Line(t, "df79x")
+	ts := httptest.NewServer(http.HandlerFunc(rawStatus))
+	t.Cleanup(ts.Close)
+	_, err := Client{}.Get(context.Background(), ts.URL+"/x.jar")
+	if err == nil || strings.ContainsAny(err.Error(), "\x1b\x07") || !strings.Contains(err.Error(), "/x.jar: 404 Not Found") {
+		t.Errorf("%v", err)
+	}
+	if got := Status(599); got != "599" {
+		t.Errorf("Status(599) = %q", got)
 	}
 }

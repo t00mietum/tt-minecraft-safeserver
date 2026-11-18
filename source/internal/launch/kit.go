@@ -64,8 +64,19 @@ type engine interface {
 	kill(ctx context.Context) error
 }
 
+// say cleans what it's given, since jar names, settings values, and the log
+// tail come from the server account.
 func (k *Kit) say(format string, a ...any) {
-	fmt.Fprintf(k.Out, format+"\n", a...)
+	clean := make([]any, len(a))
+	for i, v := range a {
+		switch v.(type) {
+		case string, error, fmt.Stringer:
+			clean[i] = server.CleanLines(fmt.Sprint(v))
+		default:
+			clean[i] = v
+		}
+	}
+	fmt.Fprintf(k.Out, format+"\n", clean...)
 }
 
 func (k *Kit) warn(warns []string) {

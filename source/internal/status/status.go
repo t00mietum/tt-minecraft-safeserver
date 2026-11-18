@@ -437,6 +437,8 @@ func tailFile(file string, n int) ([]string, error) {
 
 // Write prints the report, with a blank line at the start, the end, and
 // between sections. Lines longer than width are cut, unless width is 0.
+// Every line is cleaned here, since most of it comes from the server: jar
+// names, the ping, the log.
 func (r Report) Write(w io.Writer, width int) error {
 	var b strings.Builder
 	b.WriteString("\n")
@@ -446,7 +448,7 @@ func (r Report) Write(w io.Writer, width int) error {
 			if l.Label != "" {
 				label = l.Label + ":"
 			}
-			b.WriteString(cut(fmt.Sprintf("%-11s %s", label, l.Text), width))
+			b.WriteString(cut(server.Clean(fmt.Sprintf("%-11s %s", label, l.Text)), width))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")

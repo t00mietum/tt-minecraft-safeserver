@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -177,5 +178,25 @@ func TestJarsGlobInServerDir(t *testing.T) {
 		if err != nil || c.OK() || c.Jars != len(want) || !reflect.DeepEqual(c.New, want) {
 			t.Errorf("%s: CheckJars = %+v, %v; want new %q", name, c, err, want)
 		}
+	}
+}
+
+// The folder paper.jar points to is the server account's to name, so the
+// refusal of one outside the server folder shows it cleaned.
+func TestJarsOutsideCleaned(t *testing.T) {
+	defer testid.Line(t, "df79w")
+	dir, outside := t.TempDir(), filepath.Join(t.TempDir(), "x\x1b]0;owned\x07")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "paper-26.3-249.jar"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "paper-26.3-249.jar"), filepath.Join(dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Jars(dir)
+	if err == nil || strings.ContainsAny(err.Error(), "\x1b\x07") || !strings.Contains(err.Error(), "x]0;owned/paper-26.3-249.jar, outside") {
+		t.Errorf("%v", err)
 	}
 }
