@@ -351,6 +351,9 @@ type Linked struct {
 	ID      int
 	// Target is the link's text, such as paper-26.3-249.jar.
 	Target string
+	// Name is the build's file name in serverDir when paper.jar leads to a
+	// file there, however the link is written. Empty otherwise.
+	Name string
 	// Gone is a link to a build that isn't there.
 	Gone bool
 }
@@ -377,8 +380,17 @@ func Current(serverDir string) (*Linked, error) {
 		return nil, fmt.Errorf("paper.jar links to %s, which isn't named paper-VERSION-BUILD.jar, so its version is unknown", target)
 	}
 	l.Target = target
-	if _, err := os.Stat(link); errors.Is(err, fs.ErrNotExist) {
+	dest, err := os.Stat(link)
+	if errors.Is(err, fs.ErrNotExist) {
 		l.Gone = true
+	}
+	// ./name, a full path, or ../server/name all reach the same file, and
+	// Prune matches on the plain name.
+	if err == nil {
+		base := filepath.Base(target)
+		if here, err := os.Stat(filepath.Join(serverDir, base)); err == nil && os.SameFile(here, dest) {
+			l.Name = base
+		}
 	}
 	return &l, nil
 }

@@ -619,7 +619,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update --paper deletes the build it replaced when paper.jar links to ./name or a full path
 	- ID: 2026111715275089
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152750
@@ -630,6 +630,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 18. Detail in detail_backlog.md.
 	- Origin: 6d1da22. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: update compared the link's text with file names, so only a link written as the bare name kept the build it replaced.
+	- Actual fix [Bug]: `paper.Current` gives the build's `Name` in `serverDir` when `paper.jar` leads to that same file, however the link is written, and update keeps that name.
+	- Swept: `paper.Prune` has the one caller. `Linked.Target` is now only shown, in update's gone-build plan line. plugins, status and start resolve `paper.jar` with `EvalSymlinks`, not its text.
+	- Test case: df7ap
+	- Verified: df7ap fails on the old code for `./name`, a full path, `../server/name` and a doubled slash, and passes with the fix. The quick gate passes.
+	- Branch: fixes-2026111715275089
+	- Commit: 9efc39f
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261117-201309
+	- Decisions:
+		- The kept name comes from the same file, by `os.SameFile`, not from cleaning the link text, so any path to it counts. A link to a same-named build outside `serverDir` doesn't keep the local one, as before.
 
 - repair makes a missing group but leaves the account's primary group wrong until the next run
 	- ID: 2026111715275105
@@ -687,7 +699,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup --dry-run plans firewall rules that the real run can't write
 	- ID: 2026111715275137
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152751
@@ -698,11 +710,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 21. Detail in detail_backlog.md.
 	- Origin: 4b8af66. Related to 2026111714065925. Plausible.
+	- Closed reason: Done
+	- Actual cause [Bug]: the dry run planned the firewall step whenever nft was missing, even with no apt to install it.
+	- Actual fix [Bug]: the dry run plans it only when apt is set to install nftables. Otherwise it runs repair's firewall check, which reports the real run's FAILED line, and setup stops there.
+	- Swept: setup's other dry run steps. The account, boot unit and Floodgate key steps run the real look. Safe settings plan without a look, since a new tree has none to fail. Podman and catatonit with no apt are refused before the plan by `needApt`.
+	- Test case: df7aq
+	- Verified: df7aq fails on the old code, where the dry run planned the rules and ended at exit 0, and passes with the fix. df66h, which plans the rules when apt is there, still passes. The quick gate passes.
+	- Branch: fixes-2026111715275089
+	- Commit: 4c9e4ec
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261117-201309
 
 - setup on an existing install doesn't refuse while the server runs
 	- ID: 2026111715275153
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152751
@@ -713,6 +735,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 22. Detail in detail_backlog.md.
 	- Origin: b21d65f setup install steps. Not seen before. Plausible.
+	- Closed reason: Done
+	- Actual cause [Bug]: `refuseRunning` was called only on the new-install path.
+	- Actual fix [Bug]: setup on an existing install refuses while a Paper server runs, before the Geyser and Floodgate lookup, the question, repair and update. Dry run too, as on a new install.
+	- Swept: `refuseRunning` now runs on both paths of `Setup.Do`. `--adopt` with a config there is still refused first, by its own message.
+	- Test case: df7ar
+	- Verified: df7ar fails on the old code, which downloaded Geyser and Floodgate and ran repair and update, and passes with the fix. The quick gate passes.
+	- Branch: fixes-2026111715275089
+	- Commit: a961659
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and it follows design.md's setup rule.
+	- Closed: 20261117-201309
+	- Decisions:
+		- Refuse on an existing install too, rather than limit design.md's rule to a new install, per the recorded setup decision that it never changes a tree under a live server. design.md lets `repair` and `update` run by themselves while it runs. A `Check:` entry is in questions.md.
+		- 20261117: df65h's assert that an existing install runs no host command now allows the `ps` look. It was no commands, and is now only `ps`.
 
 - repair counts a Paper started by hand as runUser as the tool's own
 	- ID: 2026111715275170

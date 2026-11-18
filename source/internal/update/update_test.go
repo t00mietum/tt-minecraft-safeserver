@@ -176,6 +176,51 @@ func TestPaper(t *testing.T) {
 	}
 }
 
+// --paper keeps the build paper.jar led to, however the link is written, and
+// only that one: a same-named build elsewhere doesn't save the local file.
+func TestPaperKeepsLinkedBuild(t *testing.T) {
+	defer testid.Line(t, "df7ap")
+	ctx := context.Background()
+	both := []string{"paper-26.3-244.jar", "paper-26.3-249.jar", "paper.jar"}
+	for _, c := range []struct {
+		name string
+		link func(server string) string
+		want []string
+	}{
+		{"plain", func(string) string { return "paper-26.3-244.jar" }, both},
+		{"dot slash", func(string) string { return "./paper-26.3-244.jar" }, both},
+		{"full path", func(s string) string { return filepath.Join(s, "paper-26.3-244.jar") }, both},
+		{"up and back", func(string) string { return "../server/paper-26.3-244.jar" }, both},
+		{"double slash", func(s string) string { return s + "//paper-26.3-244.jar" }, both},
+		{"elsewhere", func(s string) string {
+			other := filepath.Join(filepath.Dir(s), "other")
+			if err := os.Mkdir(other, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(other, "paper-26.3-244.jar"), []byte("other"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(other, "paper-26.3-244.jar")
+		}, []string{"paper-26.3-249.jar", "paper.jar"}},
+	} {
+		r := newRig(t, "", 249)
+		r.u.Yes = true
+		jar := filepath.Join(r.dir, "paper.jar")
+		if err := os.Remove(jar); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(c.link(r.dir), jar); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.u.Do(ctx); err != nil {
+			t.Fatalf("%s: %v\n%s", c.name, err, r.out)
+		}
+		if !reflect.DeepEqual(r.files(), c.want) {
+			t.Errorf("%s: left %q, want %q\n%s", c.name, r.files(), c.want, r.out)
+		}
+	}
+}
+
 // fakeGeyser has Geyser 2.1 build 9, and writes "new" for it.
 type fakeGeyser struct {
 	asked     []string

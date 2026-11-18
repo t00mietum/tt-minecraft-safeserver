@@ -512,8 +512,10 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 	}
 	fmt.Fprintf(u.Out, "%-7s %s approved\n", "FIXED", s.to.Name)
 	keep := []string{s.to.Name}
-	if s.from != nil && filepath.Dir(s.from.Target) == "." {
-		keep = append(keep, s.from.Target)
+	// Name, not Target: a link written as ./name or a full path never
+	// equals a file name, and the build it replaced would go.
+	if s.from != nil && s.from.Name != "" {
+		keep = append(keep, s.from.Name)
 	}
 	gone, err := paper.Prune(dir, keep...)
 	if len(gone) > 0 {

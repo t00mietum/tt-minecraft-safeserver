@@ -204,6 +204,10 @@ func (s *Setup) existing(ctx context.Context) error {
 	if s.Adopt != "" {
 		return fmt.Errorf("%s is there already, so this isn't a new install; set serverDir in it to move to another server folder", s.ConfigPath)
 	}
+	// Geyser and Floodgate would land in a live server's plugins folder.
+	if err := s.refuseRunning(ctx); err != nil {
+		return err
+	}
 	cfg := s.Loaded
 	var bedrock []geyser.Build
 	// A missing tree is repair's to report.
@@ -640,12 +644,13 @@ func (s *Setup) writeConfig(opts []config.Option) error {
 }
 
 // firewall is step 9, repair's firewall check with its fixes. A dry run may
-// not have nft yet, since apt only printed its install.
+// not have nft yet, since apt only printed its install. Without apt to get it,
+// the check runs and fails as the real run does.
 func (s *Setup) firewall(ctx context.Context, c *config.Config, report repair.Report) {
 	if !c.Firewall {
 		return
 	}
-	if s.DryRun && !hasNft() {
+	if s.DryRun && !hasNft() && slices.Contains(s.packages(*c), "nftables") {
 		report("PLAN", "firewall rules written to "+firewall.RulesFile+", and "+firewall.UnitName+" enabled and started")
 		return
 	}
