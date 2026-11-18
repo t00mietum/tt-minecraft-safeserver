@@ -618,20 +618,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - how-to-connect's Bedrock whitelist example loses its quotes
 	- ID: 2026111715275073
 	- Type: Bug
-	- Status: Waiting on automated testing
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152750
 	- Opened by:
 	- Incorrect behavior [Bug]: The shell strips the quotes in `tt-minecraftd cmd fwhitelist add "Some Gamertag"`, and cmd joins its words with spaces. Floodgate gets the gamertag as 2 words.
 	- Expected behavior [Bug]: The doc gives a form that reaches Floodgate quoted, or cmd quotes a word that has a space.
-	- Reproduced [Bug]: No. Floodgate's parsing wasn't checked.
+	- Reproduced [Bug]: Yes, 20261117. Floodgate 2.2.5 on Paper 26.3 takes `fwhitelist add Some Gamertag` as extra arguments ("Invalid command syntax").
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 17. Detail in detail_backlog.md.
 	- Origin: 69af57e binary name. Not seen before. Plausible.
 	- Fixed: how-to-connect.md puts the whole command in single quotes, so the double quotes reach the server.
 	- Test case: none, a doc line
-	- Needs external testing: Paper rig with Floodgate (private/claude_simple/tools/paper-rig/): run the documented cmd line with a gamertag that has a space, and check Floodgate reads it as one name.
+	- Closed: 20261117-204500
+	- Acceptance signoff: Self-closed: on a real Paper 26.3 with Floodgate 2.2.5, `fwhitelist add "Some Gamertag"` was read as one name (a lookup was tried and the name wasn't found), and the unquoted form gave "Invalid command syntax". cmd sends one argument as is.
+	- Verified: both lines typed into the console of a throwaway Paper 26.3 with Floodgate 2.2.5. This skipped tt-minecraftd start and cmd; the code joins one argument unchanged.
 
 - update --paper deletes the build it replaced when paper.jar links to ./name or a full path
 	- ID: 2026111715275089
