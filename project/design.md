@@ -155,7 +155,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 1. Load and check the config. Refuse when a Paper server is already running, under any account. That includes one the old scripts started.
 
-2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules.
+2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules. `--dry-run` runs both, since neither changes anything, so it asks for the password at the same point.
 
 3. Check the safe settings in `server.properties` and the other server files. Refuse when one is wrong, and name the setting and `repair` as the fix. See [Safe server settings](#safe-server-settings).
 
@@ -668,6 +668,7 @@ cicd/                        build, test, and release scripts
 
 - Each tree in `ownerTrees` changes hands with `chown -R`. A missing tree gets a warning.
 	- Before a start, the trees go to `runUser`. After a stop, they go to `ownerAfterStop`.
+		- A start that fails after the hand-off, with the server down, hands them back. When the server is still up, or that can't be told, the error says `stop` hands them back. In the boot unit, `ExecStop` does it.
 	- The group is always `runGroup`, and the operator is in it. So logs and `status` work while the server runs.
 		- A login from before the operator joined the group, as right after setup, doesn't have it yet. Native `start` and `cmd` say to log in again before they change or send anything, and container `start` warns once the server is up.
 		- Container `start` reads the tree before it changes hands. After a crash the tree is still the server's, so when that read is refused, `start` gives the same reason.
@@ -897,6 +898,7 @@ cicd/                        build, test, and release scripts
 	- The unit runs the tool from `/usr/local/bin`, where `setup` puts it, with `--config` when the config isn't the default one.
 		- The `.deb` and `.rpm` packages and the install script put it there too, so an upgrade changes what the operator and the unit run. A package in `/usr/bin` would sit behind a copy in `/usr/local/bin`, which comes first on PATH.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
+		- Only `ExecStop`'s `stop` hands the trees back. systemd runs it after every start, even when the server ended by itself, and sends SIGTERM to what's left once it's done, which would cut a second hand-back short and fail the unit. A SIGTERM that finds the server down is a clean stop.
 	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.
 
 - With `startAtBoot` off, `repair` disables and removes the unit.

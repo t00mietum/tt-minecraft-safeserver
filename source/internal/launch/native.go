@@ -99,12 +99,12 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 		return err
 	}
 	if err := n.lockJars(ctx, jars); err != nil {
-		return err
+		return n.failedStart(ctx, n, err)
 	}
 	n.oldLog, _ = server.OpenRegular(n.latestLog()) // none yet is fine
 	defer n.dropOldLog()
 	if _, err := n.Run.Run(ctx, host.Cmd{Args: args, Sudo: true}); err != nil {
-		return err
+		return n.failedStart(ctx, n, err)
 	}
 
 	if mode.Debug {
@@ -115,7 +115,7 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 		return nil
 	}
 	if err := n.waitLoaded(ctx, n); err != nil && !n.slowAtBoot(mode, err) {
-		return err
+		return n.failedStart(ctx, n, err)
 	}
 	n.dropOldLog()
 	if !mode.Foreground {
@@ -127,9 +127,12 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 		if !up {
-			return n.handBack(ctx)
+			return n.startHandBack(ctx)
 		}
 		if err := n.pause(ctx, foregroundPoll); err != nil {
+			if n.stoppedByUnit(ctx, n) {
+				return nil
+			}
 			return fmt.Errorf("%w; stop stops the server if it's still up", err)
 		}
 	}

@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - At a boot unit stop, both start --foreground and its ExecStop hand the trees back, and a slow hand-back can fail the unit
 	- ID: 2026111719172263
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting for testing
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-191722
@@ -33,10 +33,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Related IDs: 2026111715274978
 	- Incorrect behavior [Bug]: On systemctl stop, ExecStop's stop and start --foreground each run the hand-back once the server is down. When ExecStop ends first, systemd sends SIGTERM to start --foreground, which cuts its chown short and exits 1, so the unit ends as failed. A big tree makes that more likely.
 	- Expected behavior [Bug]: One hand-back, and a clean stop leaves the unit inactive, not failed.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 20261117: df7am fails on the unfixed code, with the fake runner. Not seen on a real unit.
 	- Possible cause [Bug]: Kit.stop and Boxed.Start's --foreground end both call handBack. Inside the unit, one of them could leave it to the other, or start --foreground could finish its hand-back after SIGTERM.
 	- Progress log:
 		- 20261117: Found while fixing 2026111715274978.
+		- 20261117: Verified: df7am fails on the unfixed code (start --foreground hands back inside the unit, and a SIGTERM in its wait with the server down fails it, in both modes) and passes with the fix. The quick gate passed, and race tests of launch and cli.
+		- Not run against a real systemd unit here. df78x does that.
+	- Needs local test suite run?: the root host check df78x, which fails when the boot unit is failed after stop.
+	- Actual cause [Bug]: Inside the boot unit, start --foreground handed back after the server's end, and so did ExecStop's stop. systemd sends SIGTERM to the unit once ExecStop is done, which cut start's chown short. A wait that SIGTERM cut short with the server down was also an error, and native mode's 5 s poll is nearly always in that wait.
+	- Actual effort: Low
+	- Actual fix [Bug]: Inside the boot unit, told by its cgroup, start --foreground leaves the hand-back to ExecStop's stop, in both modes. A SIGTERM in its wait with the server down is a clean stop, exit 0. Outside the unit nothing changes. design.md's Boot section says so.
+	- Branch: fixes-2026111719172263
+	- Commit: 99599e1
+	- Test case: df7am, and the root host check df78x
+	- Decisions:
+		- ExecStop's stop keeps the hand-back rather than start, since systemd runs ExecStop after every start, even when the server ended by itself, and only ExecStop finishes before the SIGTERM.
+		- A SIGTERM counts as clean only when the server is down. With it still up, start still fails.
+		- Swept: the hand-backs at start's end are container.go's foreground end and native.go's foreground loop, both changed. The --debug paths can't run in the unit. stop's hand-backs stay.
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
@@ -761,7 +774,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A start that fails after the hand-off leaves the trees with the service account
 	- ID: 2026111715275237
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
@@ -771,8 +784,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: a test made create fail. The chown to the service account ran, and no hand-back did.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 27. Detail in detail_backlog.md.
+		- 20261117: Verified: df7an fails on the unfixed code (no hand-back after a failed create, start, load, or systemd-run, and no hint) and passes with the fix. The quick gate passed, and race tests of launch and cli.
 	- Origin: 6fb7ece container create and start. Not seen before. Confirmed.
 	- Sweep: native.go has the same path.
+	- Closed reason: Done
+	- Actual cause [Bug]: Start returned the error from create, start, the load wait, and in native mode the jar lock and systemd-run, with no hand-back after tree.ToServer.
+	- Actual effort: Low
+	- Actual fix [Bug]: After the hand-off, a failed start checks the server. When it's down, the trees go back. When it's up, or that can't be told, the error says they're still the service account's and stop hands them back. In both modes.
+	- Branch: fixes-2026111719172263
+	- Commit: 860ec34
+	- Test case: df7an
+	- Acceptance signoff: Self-closed: reproduced, df7an fails before the fix and passes after, and the sweep is answered.
+	- Closed: 20261117-200247
+	- Decisions:
+		- A slow load or a Ctrl-C in the load wait leaves the server up, so the trees stay, and those errors already say it's still running.
+		- No chown after Ctrl-C, since it would get the same SIGINT from the terminal. The error says stop hands them back.
+		- Inside the boot unit, start leaves the hand-back to ExecStop's stop, per 2026111719172263.
+		- Swept: native.go's jar lock, systemd-run, and load wait take the same step. Both --debug paths already hand back. repair's tree.ToServer isn't a start.
 
 - Two jar links to the same file give the same mount twice, and start fails
 	- ID: 2026111715275253
@@ -792,17 +820,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - start --dry-run says it would run sudo -v, then sudo asks for a password anyway
 	- ID: 2026111715275268
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
 	- Opened by:
 	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
 	- Expected behavior [Bug]: sudo -v runs in dry run too, since it changes nothing.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 20261117: the built binary's start --dry-run, with a stand-in sudo whose sudo -n fails, printed would run: sudo -v and never ran it.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
-	- Origin: 3a04d86. Related to 2026111410134553. Plausible.
+		- Waiting on signoff for the Against line: the dry-run plan no longer shows a would run: sudo -v line, and sudo's own prompt takes its place.
+		- 20261117: Verified: df79e fails on the unfixed code (sudo -v isn't a look) and passes with the fix. The built binary's start --dry-run ran sudo -v through the stand-in, and the unfixed build printed it. The quick gate passed, and race tests of launch and cli.
+	- Origin: 3a04d86. Related to 2026111410134553. Confirmed.
+	- Actual cause [Bug]: sudoUp ran sudo -v as a change, so dry run printed it instead of running it.
+	- Actual effort: Low
+	- Actual fix [Bug]: sudo -v is a look, so dry run runs it, and asks for the password where a real run does. It still runs only when sudo -n true fails. design.md's start step 2 says so.
+	- Branch: fixes-2026111719172263
+	- Commit: 3923e56
+	- Test case: df79e
+	- Against: 2026111410134553's decision that dry run prints sudo -v only when sudo -n true fails. It still comes only then, and now runs rather than prints, as this item asks.
+	- Decisions:
+		- 20261117: the launch rig's changes() keeps sudo -v in its list, though it's now a look, so each test's list still shows sudo asked up front. No assert changed. df79e checks it's a look and on the terminal.
+		- Swept: kit.go's sudoUp is the only sudo -v. setup, update, and repair run themselves through sudo, and skip it under dry run.
 
 - An API agent's key goes along when its URL redirects to another host
 	- ID: 2026111715275284

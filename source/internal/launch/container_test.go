@@ -146,11 +146,13 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 	return nil, nil
 }
 
-// changes are the commands that aren't looks, as they'd print.
+// changes are the commands that aren't looks, as they'd print, with sudo -v
+// kept in, so each list also shows where sudo asks. It's a look, so dry run
+// asks there too.
 func (g *rig) changes() []string {
 	var lines []string
 	for i, c := range g.r.Ran {
-		if !c.Look {
+		if !c.Look || host.Quote(c.Args) == "sudo -v" {
 			lines = append(lines, g.r.Lines()[i])
 		}
 	}
@@ -219,8 +221,8 @@ func TestStartSudoNoPassword(t *testing.T) {
 				}
 			case "sudo -v":
 				asks++
-				if !c.Tty {
-					t.Errorf("sudo -v ran without the terminal")
+				if !c.Tty || !c.Look {
+					t.Errorf("sudo -v ran as %+v, want on the terminal, and as a look so dry run asks there too", c)
 				}
 			}
 		}
@@ -273,6 +275,82 @@ func TestDockerStartFails(t *testing.T) {
 	err = g.d.Start(context.Background(), StartMode{})
 	if err == nil || !strings.Contains(err.Error(), "didn't finish loading") || g.slept != 5*time.Second {
 		t.Errorf("slow: err %v, slept %s", err, g.slept)
+	}
+}
+
+// A start that fails after the hand-off, with the server down, hands the
+// trees back. One that leaves the server up, or can't tell, says how to get
+// them back. Inside the boot unit, ExecStop's stop does it.
+func TestFailedStartHandsBack(t *testing.T) {
+	defer testid.Line(t, "df7an")
+	back := "sudo chown -R -- alice:minecraftd "
+	failing := func(g *rig, step string, cancel func()) {
+		g.r.Reply = func(c host.Cmd) ([]byte, error) {
+			if len(c.Args) > 1 && c.Args[1] == step {
+				if cancel != nil {
+					cancel()
+				}
+				return nil, errors.New(step + ": image not known")
+			}
+			return g.reply(c)
+		}
+	}
+	for _, c := range []struct {
+		name, step string
+		states     []string
+		log        string
+		inUnit     bool
+		ctrlC      bool
+		handBack   bool
+		says       string
+	}{
+		{"create fails", "create", []string{"", ""}, "", false, false, true, "create: image not known"},
+		{"start fails", "start", []string{"", "created"}, "", false, false, true, "start: image not known"},
+		{"dies while loading", "", []string{"", "exited"}, "Error: Unable to access jarfile paper.jar\n", false, false, true, "exited while loading"},
+		{"slow load", "", []string{"", "running"}, "", false, false, false, "didn't finish loading"},
+		{"start fails, server up", "start", []string{"", "running"}, "", false, false, false, "the trees are still minecraftd's, and stop hands them back"},
+		{"Ctrl-C in create", "create", []string{"", ""}, "", false, true, false, "the trees are still minecraftd's, and stop hands them back"},
+		{"in the unit", "create", []string{"", ""}, "", true, false, false, "create: image not known"},
+	} {
+		g := newRig(t)
+		g.d.InUnit = c.inUnit
+		g.d.Cfg.RunUser = "minecraftd"
+		g.states, g.log = c.states, c.log
+		ctx, cancel := context.WithCancel(context.Background())
+		if c.step != "" {
+			var onFail func()
+			if c.ctrlC {
+				onFail = cancel
+			}
+			failing(g, c.step, onFail)
+		}
+		err := g.d.Start(ctx, StartMode{})
+		cancel()
+		got := g.changes()
+		if err == nil || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: err %v, want %q", c.name, err, c.says)
+		}
+		if handed := strings.HasPrefix(got[len(got)-1], back); handed != c.handBack {
+			t.Errorf("%s: hand-back %v, want %v; ran %q", c.name, handed, c.handBack, got)
+		}
+		if c.inUnit && strings.Contains(err.Error(), "stop hands them back") {
+			t.Errorf("%s: err %v", c.name, err)
+		}
+	}
+
+	// Native mode, when systemd-run fails.
+	n := newNativeRig(t)
+	n.states = []string{"inactive", "failed"}
+	inner := n.r.Reply
+	n.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if c.Args[0] == "systemd-run" {
+			return nil, errors.New("systemd-run: unit exists")
+		}
+		return inner(c)
+	}
+	err := n.n.Start(context.Background(), StartMode{})
+	if got := n.changes(); err == nil || !strings.HasPrefix(got[len(got)-1], back) {
+		t.Errorf("native, systemd-run fails: err %v, ran %q", err, got)
 	}
 }
 

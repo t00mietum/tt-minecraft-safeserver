@@ -211,7 +211,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
-	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun}
+	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, InUnit: inUnit()}
 	if name == "start" || name == "stop" {
 		served, err := bootServes(ctx, inv.configPath)
 		switch {
@@ -255,11 +255,15 @@ var serverMode = func(ctx context.Context, c *config.Config) string {
 	return mode
 }
 
+// inUnit says whether this process runs inside the boot unit. A var so
+// tests don't depend on where they run.
+var inUnit = boot.InsideNow
+
 // bootServes says whether the boot unit is enabled for this config, from
 // outside the unit. Its own start --foreground and stop do the real work. A
 // var so tests don't read the host's units.
 var bootServes = func(ctx context.Context, configPath string) (bool, error) {
-	if boot.InsideNow() {
+	if inUnit() {
 		return false, nil
 	}
 	runner := host.NewExec(false)

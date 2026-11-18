@@ -41,7 +41,10 @@ type Kit struct {
 	// Now func() time.Time
 	// Boot is set when the boot unit is enabled for this config, so start and
 	// stop go through systemctl. Inside the unit it's never set.
-	Boot   bool
+	Boot bool
+	// InUnit is set inside the boot unit, as start --foreground and its
+	// ExecStop run. There start leaves the hand-back to ExecStop's stop.
+	InUnit bool
 	sudoed bool
 }
 
@@ -130,7 +133,8 @@ func (k *Kit) sudoUp(ctx context.Context) error {
 		k.sudoed = true
 		return nil
 	}
-	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Tty: true})
+	// A look, so dry run asks here too, rather than at its first sudo look.
+	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Look: true, Tty: true})
 	k.sudoed = err == nil
 	return err
 }
@@ -428,6 +432,46 @@ func (k *Kit) waitStopped(ctx context.Context, e engine) error {
 	}
 	k.say("The server is still up after %s; sending SIGTERM.", k.Cfg.StopTimeout)
 	return e.kill(ctx)
+}
+
+// startHandBack is the hand-back at the end of a start. Inside the boot unit
+// it's left to ExecStop's stop. systemd runs that after every start, even
+// when the server ended by itself, and sends SIGTERM to the unit once stop
+// is done, which would cut a second chown short and fail the unit.
+func (k *Kit) startHandBack(ctx context.Context) error {
+	if k.InUnit {
+		return nil
+	}
+	return k.handBack(ctx)
+}
+
+// failedStart is a start that failed after the hand-off. With the server
+// down, the trees come back, so they don't stay with the service account. A
+// slow or cut-short load leaves the server up, and its error says so.
+func (k *Kit) failedStart(ctx context.Context, e engine, err error) error {
+	if k.InUnit || errors.Is(err, errSlowLoad) || errors.Is(err, ErrInterrupted) {
+		return err
+	}
+	// After Ctrl-C a chown would get the same SIGINT.
+	if ctx.Err() == nil {
+		if up, upErr := e.running(ctx); upErr == nil && !up {
+			return errors.Join(err, k.handBack(ctx))
+		}
+	}
+	return fmt.Errorf("%w; the trees are still %s's, and stop hands them back", err, k.Cfg.RunUser)
+}
+
+// stoppedByUnit says whether start --foreground's wait for the server's end
+// was cut short only by systemd's SIGTERM, after ExecStop's stop brought the
+// server down. That's a clean stop, not a failure of the unit.
+func (k *Kit) stoppedByUnit(ctx context.Context, e engine) bool {
+	if !k.InUnit || ctx.Err() == nil {
+		return false
+	}
+	look, cancel := context.WithTimeout(context.WithoutCancel(ctx), attachTimeout)
+	defer cancel()
+	up, err := e.running(look)
+	return err == nil && !up
 }
 
 func (k *Kit) handBack(ctx context.Context) error {
