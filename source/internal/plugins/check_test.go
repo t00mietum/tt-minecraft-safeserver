@@ -153,3 +153,29 @@ func TestJarLinksNotOpened(t *testing.T) {
 		t.Error("inotify missed an open of the pipe")
 	}
 }
+
+// Glob characters in serverDir are part of its name, not a pattern. Read as a
+// pattern, mc[1] matches only mc1, so no jar was found and the check passed.
+func TestJarsGlobInServerDir(t *testing.T) {
+	defer testid.Line(t, "df79p")
+	for _, name := range []string{"mc[1]", "mc*", "mc?", `mc\x`, "[mc"} {
+		dir := filepath.Join(t.TempDir(), name)
+		ext := filepath.Join(dir, "plugins", "Geyser-Spigot", "extensions")
+		if err := os.MkdirAll(ext, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"plugins/evil.jar", "plugins/Geyser-Spigot/extensions/x.jar", "paper-1.jar"} {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Symlink("paper-1.jar", filepath.Join(dir, "paper.jar")); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"plugins/evil.jar", "plugins/Geyser-Spigot/extensions/x.jar", "paper-1.jar"}
+		c, err := CheckJars(dir, nil, &Sums{})
+		if err != nil || c.OK() || c.Jars != len(want) || !reflect.DeepEqual(c.New, want) {
+			t.Errorf("%s: CheckJars = %+v, %v; want new %q", name, c, err, want)
+		}
+	}
+}

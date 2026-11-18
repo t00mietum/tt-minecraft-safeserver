@@ -4,6 +4,7 @@
 package settings
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -569,5 +570,113 @@ func TestGeyserFirstStart(t *testing.T) {
 	}
 	if fi, _ := os.Stat(filepath.Join(dir, "plugins", "Geyser-Spigot")); fi.Mode().Perm() != 0o750 {
 		t.Errorf("an existing folder's mode changed to %v", fi.Mode())
+	}
+}
+
+// Paper and Geyser read YAML with SnakeYAML, which takes flow style, anchors
+// and merges, and keeps the last copy of a key given twice. Each copy of a
+// key is checked, and a fix that can't edit every bad copy in place leaves the
+// file alone and says so.
+func TestYAMLEveryCopy(t *testing.T) {
+	defer testid.Line(t, "df79q")
+	const spigot, paper = "spigot.yml", "config/paper-global.yml"
+	for _, c := range []struct {
+		name, file, text, fixed string
+		keys                    []string
+	}{
+		{"repeated key", spigot, "settings:\n  bungeecord: false\n  bungeecord: true\n", "settings:\n  bungeecord: false\n  bungeecord: false\n", []string{"settings.bungeecord"}},
+		{"repeated section", spigot, "settings:\n  bungeecord: TRUE # x\nsettings:\n  debug: false\n", "settings:\n  bungeecord: false # x\nsettings:\n  debug: false\n", []string{"settings.bungeecord"}},
+		{"quoted key, CRLF", paper, "\"proxies\":\r\n  velocity:\r\n    'enabled': yes\r\n", "\"proxies\":\r\n  velocity:\r\n    'enabled': false\r\n", []string{"proxies.velocity.enabled"}},
+		{"flow style", paper, "proxies: {velocity: {enabled: true}, proxy-protocol: true}\n", "", []string{"proxies.velocity.enabled", "proxies.proxy-protocol"}},
+		{"flow in block", paper, "proxies:\n  velocity: {enabled: false}\n  velocity: {enabled: true}\n", "", []string{"proxies.velocity.enabled"}},
+		{"merge", paper, "on: &on\n  enabled: true\nproxies:\n  velocity:\n    <<: *on\n", "", []string{"proxies.velocity.enabled"}},
+		{"alias", spigot, "yes: &t true\nsettings:\n  bungeecord: *t\n", "", []string{"settings.bungeecord"}},
+		{"anchored value", spigot, "settings:\n  bungeecord: &t true\n", "", []string{"settings.bungeecord"}},
+		{"section", spigot, "settings:\n  bungeecord:\n    x: 1\n", "", []string{"settings.bungeecord"}},
+		{"lone CR", spigot, "settings:\r  bungeecord: true\n", "", []string{"settings.bungeecord"}},
+	} {
+		cfg, dir := newServer(t)
+		cfg.Bedrock = false
+		if _, err := Fix(cfg); err != nil {
+			t.Fatal(err)
+		}
+		put(t, dir, c.file, c.text, 0o660)
+		var want []string
+		for _, k := range c.keys {
+			want = append(want, c.file+" "+k)
+		}
+		if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems), want) {
+			t.Errorf("%s: check: %v, %q; want %q", c.name, err, keys(problems), want)
+		}
+		_, err := Fix(cfg)
+		b, _ := os.ReadFile(filepath.Join(dir, c.file))
+		if c.fixed == "" {
+			if err == nil || !strings.Contains(err.Error(), c.file+": can't set ") || string(b) != c.text {
+				t.Errorf("%s: fix: %v, wrote %q", c.name, err, b)
+			}
+			continue
+		}
+		if err != nil || string(b) != c.fixed {
+			t.Errorf("%s: fix: %v, wrote %q; want %q", c.name, err, b, c.fixed)
+		}
+		if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+			t.Errorf("%s: after fix: %v, %q", c.name, err, keys(problems))
+		}
+	}
+
+	// A file the parser can't read is an error, as for Paper, and doesn't
+	// stop the fix of the others.
+	cfg, dir := newServer(t)
+	cfg.Bedrock = false
+	put(t, dir, propertiesFile, "white-list=false\n", 0o660)
+	put(t, dir, spigot, "settings: [\n", 0o660)
+	put(t, dir, paper, "proxies:\n  proxy-protocol: true\n---\nproxies: {}\n", 0o660)
+	if _, err := Check(cfg); err == nil || !strings.Contains(err.Error(), spigot+": can't read it as YAML") || !strings.Contains(err.Error(), paper+": can't read it as YAML: more than one") {
+		t.Errorf("unreadable: %v", err)
+	}
+	if problems, err := Fix(cfg); err == nil || len(problems) == 0 || problems[0].File != propertiesFile {
+		t.Errorf("fix with unreadable files: %v, %q", err, keys(problems))
+	}
+	if problems, _ := Check(cfg); len(problems) != 0 {
+		t.Errorf("server.properties left: %q", keys(problems))
+	}
+
+	// Merges that bring in the same mapping over and over are read once, so
+	// the server account can't stall a check run as root.
+	var bomb strings.Builder
+	bomb.WriteString("m0: &m0\n  bungeecord: true\n")
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&bomb, "m%d: &m%d\n  <<: [%s]\n", i, i, strings.TrimSuffix(strings.Repeat(fmt.Sprintf("*m%d, ", i-1), 8), ", "))
+	}
+	bomb.WriteString("settings:\n  <<: *m10\n")
+	put(t, dir, spigot, bomb.String(), 0o660)
+	put(t, dir, paper, "", 0o660)
+	if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems), []string{spigot + " settings.bungeecord"}) {
+		t.Errorf("merges: %v, %q", err, keys(problems))
+	}
+
+	// Geyser's file too, and a key with no copy where Geyser reads it is
+	// missing.
+	cfg, dir = newServer(t)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	good := strings.Replace(geyserNow, "auth-type: online", "auth-type: floodgate", 1)
+	for _, text := range []string{
+		good + "java: {auth-type: online}\n",
+		strings.Replace(good, "  auth-type: floodgate\n", "  auth-type: floodgate\n  auth-type: online\n", 1),
+	} {
+		put(t, dir, geyserConfig, text, 0o660)
+		if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems), []string{geyserConfig + " java.auth-type"}) {
+			t.Errorf("%q: %v, %q", text, err, keys(problems))
+		}
+	}
+	put(t, dir, geyserConfig, good+"bedrock:\n  transport: nethernet\n", 0o660)
+	problems, err := Check(cfg)
+	if want := []string{geyserConfig + " bedrock.address", geyserConfig + " bedrock.port"}; err != nil || !reflect.DeepEqual(keys(problems), want) || !problems[0].Missing {
+		t.Errorf("second bedrock section: %v, %+v", err, problems)
+	}
+	if _, err := Fix(cfg); err == nil || !strings.Contains(err.Error(), "bedrock.address, bedrock.port") {
+		t.Errorf("fix of the second bedrock section: %v", err)
 	}
 }

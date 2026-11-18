@@ -137,7 +137,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A serverDir with glob characters in its path skips every plugin check
 	- ID: 2026111715274846
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152748
@@ -147,23 +147,52 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: an unapproved jar under `mc[1]/plugins` gave 0 jars and a passing check.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 3. Detail in detail_backlog.md.
+		- Verified: df79p fails on 2369445, where `mc[1]`, `mc\x` and `[mc` found no plugin jars, and passes on 80c5e6f. The quick gate passes.
 	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: Jars built a `filepath.Glob` pattern from serverDir, so its glob characters were read as a pattern.
+	- Actual fix [Bug]: Jars lists each pinned folder with `os.ReadDir` and matches only the file name against `*.jar`, from round commit 80c5e6f. This item adds the test.
+	- Test case: df79p
+	- Branch: fixes-2026111715274846
+	- Acceptance signoff: Self-closed: df79p fails on dev at 2369445 and passes now.
+	- Closed: 20261117-175601
+	- Decisions:
+		- Swept: no other `filepath.Glob` or `Match` on a path in `source/`. `paper.jar` goes through `EvalSymlinks`, and the read-only mounts come from Jars.
+		- Left alone: the .jar match stays case-sensitive, as Paper's `FileProviderSource` checks `endsWith(".jar")`.
+	- Commit: 51e34fd
 
 - The safe settings check misses proxy settings written in YAML flow style or as a repeated key
 	- ID: 2026111715274861
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152748
 	- Opened by:
 	- Incorrect behavior [Bug]: `proxies: {velocity: {enabled: true}}` passes the check, and so does `bungeecord: false` followed by `bungeecord: true`. The reader counts a key it can't find as safe, and keeps the first copy of a key. Paper's YAML reader reads flow style and keeps the last copy. design.md calls proxy forwarding the most common takeover.
 	- Expected behavior [Bug]: A settings file the reader can't follow counts as a problem, or the reader reads both forms the way Paper does.
-	- Reproduced [Bug]: 2026-11-17: both files passed `Check` in a test. Paper reading them as on is Plausible.
+	- Reproduced [Bug]: 2026-11-17: both files passed `Check` in a test. Paper 26.3-253 read both as on.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 4. Detail in detail_backlog.md.
-	- Origin: 91ac8da safe server settings check on start. Not seen before. Confirmed on the tool side.
+		- Reproduced on Paper 26.3 build 253: with `bungeecord: false` then `bungeecord: true` in spigot.yml, Paper ran in BungeeCord mode and saved `true`. With `proxies: {velocity: {enabled: true, ...}}` in paper-global.yml, Paper read velocity as on, and turned it off only for the empty secret.
+		- Verified: df79q fails on the old reader, which passed 5 of its 10 file shapes, wrote broken YAML for 1, and passed the unreadable and Geyser cases. It passes now. Real files from Paper 26.3-253 and Geyser 2.12.1-1304 parse, and Fix then Check on them is clean with spigot.yml and paper-global.yml unchanged. FuzzFix ran 90 s, 37k inputs, clean. The quick gate passes.
+	- Origin: 91ac8da safe server settings check on start. Not seen before. Confirmed.
 	- Sweep: The Geyser config reader in settings/geyser.go.
+	- Closed reason: Done
+	- Actual cause [Bug]: `yamlFind` read only block style and took the first copy of a key. A key it couldn't find counted as off. Paper's reader takes flow style, and keeps the last copy.
+	- Actual fix [Bug]: The Paper and Geyser YAML files are parsed with `go.yaml.in/yaml/v3`. Every copy of a checked key has to be right, through repeated sections, anchors and merges. A file that isn't YAML or holds 2 documents is an error. `repair` still edits only the key's line, checks the result again, and leaves a file it can't fix that way with an error saying to set it by hand. One YAML file failing no longer stops the others.
+	- Test case: df79q, df78c
+	- Branch: fixes-2026111715274846
+	- Acceptance signoff: Self-closed: df79q fails on the old reader and passes now, and Paper itself read both settings as on.
+	- Decisions:
+		- A copy that isn't plain false, such as `yes`, `on` or a null, still counts as wrong, as before.
+		- A missing Paper YAML key is still fine, per design.md. A Geyser key counts as missing when the copy the reader takes has none, such as one only in an earlier repeated section.
+		- An alias or anchor on a checked key is left for the operator to fix, where the old fix overwrote the line.
+		- FuzzFix (df78c) said Fix never fails on a YAML file. Now Fix fails only on a YAML file it can't read or fix in place, leaves that file as it was, and when it passes Check finds nothing. Changed since an unreadable or flow-style file can't be fixed by editing lines, and writing it anyway would hide the setting.
+		- A new module, named in design.md's Software stack, which already expected one. Check: entry in questions.md.
+		- Swept: `scanYAML` and `scanGeyser` both go through `yamlScan` and `yamlFix`; `geyserAuthPath` reads the parsed file. `yamlNameVersion` in plugins/approve.go stays line-based, since plugin.yml names are only shown and used for update sources, and the hash is the check.
+	- Closed: 20261117-180920
+	- Commit: f74b64a
 
 - Text from the server tree and from download servers reaches the terminal with escape codes intact
 	- ID: 2026111715274877

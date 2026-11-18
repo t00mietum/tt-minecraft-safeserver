@@ -504,7 +504,7 @@ cicd/                        build, test, and release scripts
 
 - Expected outside modules:
 	- The shcl Go module, `github.com/yottacore/shcl/source/go/v3`, at its latest published release, beta or not.
-	- A YAML package, for `paper-global.yml`, `spigot.yml`, and the Geyser and Floodgate configs.
+	- The YAML module `go.yaml.in/yaml/v3`, for `paper-global.yml`, `spigot.yml`, and the Geyser config.
 
 - At run time it calls `podman` or `docker` through sudo, or `systemd-run` and `tmux`, plus `sudo`, `systemctl`, and `ss`. It also calls `zfs` when snapshots are on, `nft` when the firewall is on, and `apt-get` in `setup` on Debian. `repair` calls `ufw` or `firewall-cmd` to read their rules, when one is active. `update` runs `agentCommand` as the operator, when `agent` is `command`.
 
@@ -703,6 +703,8 @@ cicd/                        build, test, and release scripts
 - A missing `server.properties` counts as wrong, since Minecraft's own defaults have the whitelist off, and `repair` writes one. A YAML file or key that's missing is fine, since each of those defaults to off.
 
 - Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is wrong, since Geyser's first start would write its own defaults and run with them, on port 19132 and with online mode logins. setup and `repair` write one with only the first 3 Geyser keys above, and make its folders when they're missing. Geyser keeps those keys and fills in the rest at its first start. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. The last 3 keys are the exception: Geyser's defaults for them are already right, so a missing one is fine. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
+
+- The YAML files are read the way Paper and Geyser read them, with flow style, anchors and merges. Every copy of a key has to be right, since Paper's YAML reader keeps the last copy of a key given twice. A file that isn't YAML, or holds more than one document, stops `start`. `repair` edits only a key's own line, to keep the comments, and checks the result again before writing it. It leaves a file it can't fix that way, such as one in flow style, and says to fix it by hand.
 
 - The server account can write the tree. So a settings file that's a link, or isn't a plain file, is refused, and `repair` puts a new file in place of the old one rather than writing into it.
 
