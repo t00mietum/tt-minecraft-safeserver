@@ -21,11 +21,32 @@ var BootCheck = Check{
 		if path == "" {
 			path = boot.UnitFile
 		}
+		// There's one boot unit, so one written for another config isn't
+		// this config's to change. See design.md, Boot.
+		if other := h.bootOwner(path); other != "" {
+			if !h.Cfg.StartAtBoot {
+				return []Finding{{Note: true, Problem: boot.UnitName + " runs the config at " + other + ", so it's left alone"}}, nil
+			}
+			return []Finding{{Problem: "startAtBoot is on, but " + boot.UnitName + " runs the config at " + other + "; there's one boot unit, so only one config can start at boot"}}, nil
+		}
 		if !h.Cfg.StartAtBoot {
 			return h.bootOff(path)
 		}
 		return h.bootOn(ctx, path)
 	},
+}
+
+// bootOwner is the config the unit at path runs, when that's another one.
+// A unit it can't read or place is taken as this config's, as before.
+func (h *Host) bootOwner(path string) string {
+	text, err := os.ReadFile(path) // #nosec G304 -- the boot unit's path
+	if err != nil {
+		return ""
+	}
+	if owner, ok := boot.Owner(string(text)); ok && !boot.SameConfig(owner, h.ConfigPath) {
+		return owner
+	}
+	return ""
 }
 
 func (h *Host) bootOn(ctx context.Context, path string) ([]Finding, error) {

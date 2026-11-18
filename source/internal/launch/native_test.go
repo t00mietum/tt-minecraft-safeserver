@@ -5,14 +5,17 @@ package launch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -130,6 +133,30 @@ func TestNativeStartLog(t *testing.T) {
 	}
 }
 
+// A latest.log the server swaps for a pipe stops the wait for the Done line
+// with an error, rather than hanging the read.
+func TestNativeStartLogPipe(t *testing.T) {
+	defer testid.Line(t, "df79k")
+	g := newNativeRig(t)
+	g.states = []string{"inactive", "active"}
+	g.launch = func() {
+		path := filepath.Join(g.dir, "logs", "latest.log")
+		if err := syscall.Mkfifo(path, 0o600); err != nil {
+			t.Error(err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- g.n.Start(context.Background(), StartMode{}) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, server.ErrNotRegular) {
+			t.Errorf("err %v, want ErrNotRegular", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("start hung reading a pipe for latest.log")
+	}
+}
+
 // Another Paper server, a live unit, or a path the unit can't take stop start
 // before it changes anything. A failed unit is cleared.
 func TestNativeStartRefuses(t *testing.T) {
@@ -203,6 +230,17 @@ func TestNativeStartModes(t *testing.T) {
 	got = g.changes()
 	if strings.Contains(strings.Join(g.r.Lines(), "\n"), "sudo -v") || !strings.Contains(got[len(got)-1], "chown -R -- alice:minecraftd") || g.slept != 2*foregroundPoll {
 		t.Errorf("foreground: ran %q, slept %s", g.r.Lines(), g.slept)
+	}
+
+	// A slow load in --foreground is only a warning, as in container mode.
+	g = newNativeRig(t)
+	g.n.Root = true
+	g.states = []string{"inactive", "active", "active", "active", "active", "active", "active", "inactive"}
+	if err := g.n.Start(context.Background(), StartMode{Foreground: true}); err != nil || !strings.Contains(g.out.String(), "warning: the server didn't finish loading") {
+		t.Errorf("foreground, slow: err %v, output %q", err, g.out.String())
+	}
+	if got := g.changes(); !strings.Contains(got[len(got)-1], "chown -R -- alice:minecraftd") || g.slept != 5*time.Second+foregroundPoll {
+		t.Errorf("foreground, slow: ran %q, slept %s", got, g.slept)
 	}
 
 	g = newNativeRig(t)

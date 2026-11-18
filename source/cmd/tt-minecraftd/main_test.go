@@ -70,7 +70,7 @@ func noHostRunner(t *testing.T) (*host.Fake, *int) {
 		*took++
 		return fake, func(c *config.Config) *repairpkg.Host {
 			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), BootFile: filepath.Join(etc, "boot.service"),
+				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), Routes: filepath.Join(etc, "ipv6_route"), BootFile: filepath.Join(etc, "boot.service"),
 				NftThere: func() bool { return false }}
 		}
 	}
@@ -779,5 +779,72 @@ func TestBootUnitRefuses(t *testing.T) {
 	}
 	if len(asked) != 2 || asked[0] != defaultConfig {
 		t.Errorf("asked about %q, want %s", asked, defaultConfig)
+	}
+}
+
+// A jar's name is the server account's, so repair shows it without its
+// escape codes, in the report and in the question.
+func TestRepairCleansJarName(t *testing.T) {
+	defer testid.Line(t, "df79z")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugins", "x\x1b]0;owned\x07\x1b[2K\r.jar"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set := "--set=serverDir=" + dir
+	shown := "plugins/x]0;owned[2K.jar"
+	code, out, _ := runArgs("repair", "--check", set)
+	if code != exitError || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "FAILED  "+shown+" isn't approved") {
+		t.Errorf("--check: exit %d, stdout %q", code, out)
+	}
+	inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
+	if done {
+		t.Fatal("prepare stopped")
+	}
+	var b bytes.Buffer
+	_ = repair(context.Background(), inv, strings.NewReader("y\n"), &b, true)
+	if out := b.String(); strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "\n"+shown+" (new)\n") || !strings.Contains(out, "FIXED   "+shown+" approved") {
+		t.Errorf("--approve-plugins: %q", out)
+	}
+}
+
+// An error can name a file the server account named, so the one run prints
+// is cleaned, line by line.
+func TestRunCleansError(t *testing.T) {
+	defer testid.Line(t, "df7a0")
+	noDefaultConfig(t)
+	dir := t.TempDir()
+	if err := os.Symlink("paper\x1b[2J\x07.jar", filepath.Join(dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	code, _, msg := runArgs("update", "--paper", "--dry-run", "--set=serverDir="+dir)
+	if code != exitError || strings.ContainsAny(msg, "\x1b\x07") || !strings.Contains(msg, "paper.jar links to") {
+		t.Errorf("exit %d, stderr %q", code, msg)
+	}
+}
+
+// start --foreground's error for a server that exited with a code of its own
+// exits with that code, so systemd sees a crash at boot as a failure.
+func TestServerExitCode(t *testing.T) {
+	defer testid.Line(t, "df7af")
+	for _, c := range []struct {
+		err  error
+		code int
+	}{
+		{nil, exitOK},
+		{launch.ExitError{Code: 137}, 137},
+		{errors.Join(errors.New("hand-back failed"), launch.ExitError{Code: 1}), 1},
+		{launch.ExitError{Code: -1}, exitError},
+		{launch.ExitError{Code: 300}, exitError},
+		{errors.New("other"), exitError},
+	} {
+		var msg bytes.Buffer
+		if got := failed(c.err, &msg); got != c.code || (c.err != nil) != strings.HasPrefix(msg.String(), "tt-minecraftd: ") {
+			t.Errorf("%v: exit %d, stderr %q; want %d", c.err, got, msg.String(), c.code)
+		}
 	}
 }

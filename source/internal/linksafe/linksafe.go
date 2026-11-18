@@ -41,6 +41,15 @@ func Open(path string) (Dir, error) {
 	return Dir{fd, path}, nil
 }
 
+// AfterMkdirat is for tests. Mkdir calls it between making a folder and
+// opening it, where the server could swap the folder for a link.
+var AfterMkdirat func(path string)
+
+// Fd is d's handle, for calls that take one. It stays d's to close.
+func (d Dir) Fd() int {
+	return d.fd
+}
+
 // Close lets go of the handle.
 func (d Dir) Close() {
 	_ = syscall.Close(d.fd) // read-only folder handle, nothing to lose
@@ -105,6 +114,11 @@ func (d Dir) Mkdir(name string, like *syscall.Stat_t) (Dir, error) {
 	if err := syscall.Mkdirat(d.fd, name, 0o700); err != nil {
 		return Dir{}, &fs.PathError{Op: "mkdir", Path: d.Name(name), Err: err}
 	}
+	if AfterMkdirat != nil {
+		AfterMkdirat(d.Name(name))
+	}
+	// The server can swap the new folder for a link before this open, so the
+	// owner and mode are set through the handle, never by name.
 	sub, err := d.Sub(name)
 	if err != nil {
 		return Dir{}, err

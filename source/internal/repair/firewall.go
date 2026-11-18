@@ -4,12 +4,12 @@
 package repair
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io/fs"
 	"os"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 )
@@ -39,20 +39,18 @@ func (h *Host) hasNft() bool {
 	return HasNft()
 }
 
-// fwFiles gives the rules file, the unit file, and resolv.conf, which tests
-// point elsewhere.
-func (h *Host) fwFiles() (rules, unit, resolv string) {
-	rules, unit, resolv = h.RulesFile, h.UnitFile, h.ResolvConf
-	if rules == "" {
-		rules = firewall.RulesFile
+// fwFiles gives the firewall's files, which tests point elsewhere. An empty
+// field left in Files means the real file.
+func (h *Host) fwFiles() (f firewall.Files, unit string) {
+	f = firewall.Files{Rules: h.RulesFile, ResolvConf: h.ResolvConf, Routes: h.Routes}
+	if f.Rules == "" {
+		f.Rules = firewall.RulesFile
 	}
+	unit = h.UnitFile
 	if unit == "" {
 		unit = firewall.UnitFile
 	}
-	if resolv == "" {
-		resolv = "/etc/resolv.conf"
-	}
-	return rules, unit, resolv
+	return f, unit
 }
 
 // sameFile says whether path has text. A missing file isn't an error.
@@ -74,32 +72,37 @@ func (h *Host) firewallOn(ctx context.Context) ([]Finding, error) {
 	if !h.hasNft() {
 		return []Finding{{Problem: "nftables isn't installed, so the firewall can't load; " + adds("nftables")}}, nil
 	}
-	rulesPath, unitPath, resolvPath := h.fwFiles()
-	conf, err := os.ReadFile(resolvPath) // #nosec G304 -- resolv.conf
+	files, unitPath := h.fwFiles()
+	rulesPath := files.Rules
+	local, err := firewall.ReadLocal(files)
 	if err != nil {
 		return nil, err
 	}
-	dns, err := firewall.Resolvers(bytes.NewReader(conf))
-	if err != nil {
-		return nil, err
-	}
-	rules, unit := firewall.Rules(h.Cfg, dns), firewall.Unit()
+	rules, unit := firewall.Rules(h.Cfg, local), firewall.Unit()
 	var found []Finding
 	stale := false
 
-	ok, err := sameFile(rulesPath, rules)
-	if err != nil {
+	written := firewall.ForConfig(rules, h.ConfigPath)
+	have, err := os.ReadFile(rulesPath) // #nosec G304 -- one of the tool's own paths
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	if !ok {
+	switch other := h.rulesOwner(string(have), unitPath); {
+	case string(have) == written:
+	case other != "" && firewall.StripOwner(string(have)) == rules:
+		// The other config's file gives this one's rules too.
+	case other != "":
+		return []Finding{{Problem: "firewall is on, but " + rulesPath + " is written for the config at " + other + ", with other rules; there's one firewall table, so only one config's rules can load"}}, nil
+	default:
 		stale = true
 		found = append(found, Finding{
 			Problem: rulesPath + " is missing, or doesn't match the config",
 			Fixed:   rulesPath + " written from the config",
-			Fix:     func(ctx context.Context) error { return h.put(ctx, rulesPath, rules) },
+			Fix:     func(ctx context.Context) error { return h.put(ctx, rulesPath, written) },
 		})
 	}
-	if ok, err = sameFile(unitPath, unit); err != nil {
+	ok, err := sameFile(unitPath, unit)
+	if err != nil {
 		return nil, err
 	}
 	if !ok {
@@ -136,9 +139,28 @@ func (h *Host) firewallOn(ctx context.Context) ([]Finding, error) {
 	return found, nil
 }
 
+// rulesOwner is the config a rules file was written for, when that's another
+// one and its unit is still installed. Once that config turns its firewall
+// off, the file left behind is anyone's.
+func (h *Host) rulesOwner(text, unitPath string) string {
+	owner := firewall.Owner(text)
+	if owner == "" || boot.SameConfig(owner, h.ConfigPath) {
+		return ""
+	}
+	if _, err := os.Lstat(unitPath); err != nil {
+		return ""
+	}
+	return owner
+}
+
 // firewallOff takes the unit and the table away, and leaves the rules file.
 func (h *Host) firewallOff(ctx context.Context) ([]Finding, error) {
-	_, unitPath, _ := h.fwFiles()
+	files, unitPath := h.fwFiles()
+	if text, err := os.ReadFile(files.Rules); err == nil { // #nosec G304 -- one of the tool's own paths
+		if other := h.rulesOwner(string(text), unitPath); other != "" {
+			return []Finding{{Note: true, Problem: files.Rules + " and " + firewall.UnitName + " are for the config at " + other + ", so they're left alone"}}, nil
+		}
+	}
 	_, err := os.Lstat(unitPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

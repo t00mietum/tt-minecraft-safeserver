@@ -25,13 +25,53 @@ import (
 // udpStandIn is the test binary run again inside a network namespace, as
 // "serve <port>..." (answer every datagram to its sender), "probe
 // <addr:port>" (send one and say whether anything came back), "send <port>
-// <addr:port>" (send one from that port) or "listen <port>" (say whether
-// anything arrives).
+// <addr:port>" (send one from that port), "listen <port>" (say whether
+// anything arrives), "try <addr:port>" (send one and say whether the output
+// drop refused it) or "rules <path>" (write the rules for this namespace's
+// routes).
 func udpStandIn(args []string) int {
 	if len(args) < 2 {
 		return 2
 	}
 	switch args[0] {
+	case "rules":
+		l, err := ReadLocal(Files{ResolvConf: os.DevNull})
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		cfg := config.Defaults()
+		cfg.RunUser, cfg.Egress = "root", "open"
+		if err := os.WriteFile(args[1], []byte(Rules(&cfg, l)), 0o600); err != nil {
+			fmt.Println(err)
+			return 3
+		}
+	case "try":
+		d := net.Dialer{Control: func(_, _ string, rc syscall.RawConn) error {
+			var serr error
+			err := rc.Control(func(fd uintptr) {
+				serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
+			})
+			if err != nil {
+				return err
+			}
+			return serr
+		}}
+		c, err := d.Dial("udp", args[1])
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		_, err = c.Write([]byte("hello"))
+		switch {
+		case errors.Is(err, syscall.EPERM):
+			fmt.Println("refused")
+		case err != nil:
+			fmt.Println(err)
+			return 3
+		default:
+			fmt.Println("sent")
+		}
 	case "serve":
 		for _, p := range args[1:] {
 			c, err := net.ListenPacket("udp4", "0.0.0.0:"+p)
@@ -151,7 +191,7 @@ func TestBroadcastAnswer(t *testing.T) {
 	cfg.BedrockPort = 19132
 	dir := t.TempDir()
 	rules := filepath.Join(dir, "firewall.nft")
-	if err := os.WriteFile(rules, []byte(Rules(&cfg, nil)), 0o600); err != nil {
+	if err := os.WriteFile(rules, []byte(Rules(&cfg, Local{})), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// 19132 is RakNet's old discovery, which Geyser no longer answers with
@@ -214,6 +254,78 @@ grep got "$LOG" | sort | uniq -c
 		wantCounts := map[string]uint64{"in_refused": 0, "in_flood": 0, "in_closed": 0, "out_local": 0, "out_lan": 2, "out_web": 0}
 		if err != nil || !reflect.DeepEqual(counts, wantCounts) {
 			t.Errorf("counters %v, %v, want %v", counts, err, wantCounts)
+		}
+	}
+}
+
+// Under egress open, the server can't send to a host on the LAN's global
+// IPv6 subnet, to multicast, or to broadcast. The rules come from the
+// namespace's own routes, where the subnet is on-link, as is a VPN-style
+// 2000::/3 and a default route with no gateway, which stay reachable. The
+// run without the rules is the control.
+func TestLANv6AndMulticastBlocked(t *testing.T) {
+	defer testid.Line(t, "df7a4")
+	if !nftCheck(t, "") {
+		t.Skip("no unprivileged network namespace with nft")
+	}
+	for _, tool := range []string{"ip", "nsenter"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip("no " + tool)
+		}
+	}
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tries := []string{"[2001:db8:77::2]:40000", "[ff02::1%vs0]:40000", "224.0.0.251:5353", "255.255.255.255:40000", "192.168.77.2:40000", "[2001:db8:99::1]:40000", "203.0.113.9:40000"}
+	script := `set -e
+for f in all default; do echo 0 > /proc/sys/net/ipv6/conf/$f/disable_ipv6; done
+ip link set lo up
+ip link add vs0 type veth peer name vc0
+unshare -n sleep 30 & C=$!
+trap 'kill $C 2>/dev/null' EXIT
+while [ "$(readlink /proc/$C/ns/net)" = "$(readlink /proc/$$/ns/net)" ]; do sleep 0.01; done
+ip link set vc0 netns $C
+nsenter -t $C -n sh -c 'ip link set lo up && ip link set vc0 up && ip addr add 192.168.77.2/24 dev vc0 && ip -6 addr add 2001:db8:77::2/64 dev vc0 nodad'
+ip link set vs0 up
+ip addr add 192.168.77.1/24 dev vs0
+ip -6 addr add 2001:db8:77::1/64 dev vs0 nodad
+ip route add default dev vs0
+ip -6 route add default dev vs0
+ip -6 route add 2000::/3 dev vs0
+if [ -n "$RULES" ]; then
+	TT_UDP_STANDIN="rules $RULES" "$BIN"
+	/usr/sbin/nft -f "$RULES"
+	grep 'elements = { fc00::/7' "$RULES"
+fi
+for to in ` + strings.Join(tries, " ") + `; do
+	printf 'try %s ' "$to"
+	TT_UDP_STANDIN="try $to" "$BIN"
+done
+`
+	rules := filepath.Join(t.TempDir(), "firewall.nft")
+	for _, load := range []bool{false, true} {
+		cmd := exec.Command("unshare", "-rn", "sh", "-c", script)
+		cmd.Env = append(os.Environ(), "BIN="+bin, "RULES=")
+		if load {
+			cmd.Env[len(cmd.Env)-1] = "RULES=" + rules
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("loaded %v: %v\n%s", load, err, out)
+		}
+		got := string(out)
+		for i, to := range tries {
+			want := "sent"
+			if load && i < 5 {
+				want = "refused"
+			}
+			if w := "try " + to + " " + want + "\n"; !strings.Contains(got, w) {
+				t.Errorf("loaded %v: no %q in\n%s", load, w, got)
+			}
+		}
+		if load && !strings.Contains(got, "elements = { fc00::/7, fe80::/10, 2001:db8:77::/64 }") {
+			t.Errorf("the subnet isn't in lan6:\n%s", got)
 		}
 	}
 }

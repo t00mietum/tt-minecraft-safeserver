@@ -17,9 +17,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 )
 
 // DefaultBase is GeyserMC's download API.
@@ -112,42 +112,20 @@ func (a API) Latest(ctx context.Context, project string) (Build, error) {
 // Install downloads b into serverDir's plugins folder, making the folder when
 // it's missing, owned like serverDir.
 func (a API) Install(ctx context.Context, serverDir string, b Build) error {
-	top, err := download.OpenDir(serverDir)
+	top, err := linksafe.Open(serverDir)
 	if err != nil {
 		return err
 	}
-	defer syscall.Close(top)
-	dir := serverDir + "/plugins"
-	err = syscall.Mkdirat(top, "plugins", 0o770)
-	switch {
-	case err == nil:
-		if err := chownLike(top, "plugins"); err != nil {
-			return &fs.PathError{Op: "chown", Path: dir, Err: err}
-		}
-	case !errors.Is(err, syscall.EEXIST):
-		return &fs.PathError{Op: "mkdir", Path: dir, Err: err}
+	defer top.Close()
+	dir, err := top.Mkdir("plugins", nil)
+	if errors.Is(err, fs.ErrExist) {
+		dir, err = top.Sub("plugins")
 	}
-	fd, err := syscall.Openat(top, "plugins", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: dir, Err: err}
+		return err
 	}
-	defer syscall.Close(fd)
-	return a.fetch().Into(ctx, fd, dir, download.File{Name: b.Name, URL: b.URL, SHA256: b.SHA256})
-}
-
-// chownLike gives a new folder the owner and group of the one it's in, and
-// the tree's mode past the umask. Only root can chown, and a test run isn't.
-func chownLike(top int, name string) error {
-	if os.Geteuid() == 0 {
-		var st syscall.Stat_t
-		if err := syscall.Fstat(top, &st); err != nil {
-			return err
-		}
-		if err := syscall.Fchownat(top, name, int(st.Uid), int(st.Gid), download.AtSymlinkNoFollow); err != nil {
-			return err
-		}
-	}
-	return syscall.Fchmodat(top, name, 0o770, 0)
+	defer dir.Close()
+	return a.fetch().Into(ctx, dir.Fd(), top.Name("plugins"), download.File{Name: b.Name, URL: b.URL, SHA256: b.SHA256})
 }
 
 // Project is the GeyserMC project a jar in plugins/ is, when both its file

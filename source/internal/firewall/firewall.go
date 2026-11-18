@@ -7,11 +7,17 @@ package firewall
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,11 +42,233 @@ const (
 )
 
 // lan4 and lan6 are what allowFrom's lan means, and what the server can't
-// reach. CGNAT is in it, since tailnets live there.
+// reach. CGNAT is in it, since tailnets live there. The host's own IPv6
+// subnets are added to the server's side only, from Local.Nets.
 var (
 	lan4 = []string{"10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"}
 	lan6 = []string{"fc00::/7", "fe80::/10"}
 )
+
+// Local is what the rules take from the host rather than the config.
+type Local struct {
+	// DNS are the resolvers the server may still reach on port 53 when
+	// they're on the LAN or loopback.
+	DNS []netip.Addr
+	// Nets are the host's on-link IPv6 prefixes. A home LAN's router, NAS,
+	// and printers have global addresses there.
+	Nets []netip.Prefix
+}
+
+// Files are where ReadLocal and Matches look. Empty means the real ones.
+type Files struct {
+	Rules, ResolvConf, Routes string
+}
+
+func (f Files) orReal() Files {
+	if f.Rules == "" {
+		f.Rules = RulesFile
+	}
+	if f.ResolvConf == "" {
+		f.ResolvConf = "/etc/resolv.conf"
+	}
+	if f.Routes == "" {
+		f.Routes = "/proc/net/ipv6_route"
+	}
+	return f
+}
+
+// ReadLocal reads the resolvers and the on-link prefixes. With IPv6 off at
+// boot there's no route file, and so no prefixes.
+func ReadLocal(f Files) (Local, error) {
+	f = f.orReal()
+	conf, err := os.ReadFile(f.ResolvConf) // #nosec G304 -- resolv.conf
+	if err != nil {
+		return Local{}, err
+	}
+	dns, err := Resolvers(bytes.NewReader(conf))
+	if err != nil {
+		return Local{}, err
+	}
+	routes, err := os.ReadFile(f.Routes) // #nosec G304 -- the kernel's route list
+	if errors.Is(err, fs.ErrNotExist) {
+		return Local{DNS: dns}, nil
+	}
+	if err != nil {
+		return Local{}, err
+	}
+	nets, err := OnLink(bytes.NewReader(routes))
+	return Local{DNS: dns, Nets: nets}, err
+}
+
+// Matches says whether the rules file is the one the config and the host
+// give. A prefix the file has and the host doesn't is fine, since it only
+// blocks more: at boot the router's announcement can come after the server
+// starts. A prefix the host has and the file lacks isn't. A missing file
+// doesn't match.
+func Matches(c *config.Config, f Files) (bool, error) {
+	f = f.orReal()
+	have, err := os.ReadFile(f.Rules) // #nosec G304 -- the tool's own file
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	l, err := ReadLocal(f)
+	if err != nil {
+		return false, err
+	}
+	l.Nets = append(l.Nets, fileNets(string(have))...)
+	return StripOwner(string(have)) == Rules(c, l), nil
+}
+
+// ownerTag starts the header line that names the config a rules file was
+// written for. There's one rules file, and a second config's repair leaves
+// it alone. Matches skips the line, since 2 configs can give the same rules.
+const ownerTag = "# Config: "
+
+// ForConfig is rules with a header line naming the config at configPath.
+func ForConfig(rules, configPath string) string {
+	if configPath == "" {
+		configPath = config.DefaultPath
+	}
+	if abs, err := filepath.Abs(configPath); err == nil {
+		configPath = abs
+	}
+	head, body, _ := strings.Cut(rules, "\n\n")
+	return head + "\n" + ownerTag + strconv.QuoteToASCII(configPath) + "\n\n" + body
+}
+
+// Owner is the config a rules file names, or "" when it names none, as one
+// from an older build doesn't.
+func Owner(text string) string {
+	for line := range strings.Lines(text) {
+		if !strings.HasPrefix(line, "#") {
+			break
+		}
+		if q, ok := strings.CutPrefix(strings.TrimSuffix(line, "\n"), ownerTag); ok {
+			if path, err := strconv.Unquote(q); err == nil {
+				return path
+			}
+		}
+	}
+	return ""
+}
+
+// StripOwner is a rules file without the line ForConfig adds.
+func StripOwner(text string) string {
+	var b strings.Builder
+	head := true
+	for line := range strings.Lines(text) {
+		head = head && strings.HasPrefix(line, "#")
+		if head && strings.HasPrefix(line, ownerTag) {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
+}
+
+// fileNets are the prefixes in a rules file's lan6 set past the fixed ones.
+func fileNets(text string) []netip.Prefix {
+	_, rest, ok := strings.Cut(text, "\tset lan6 {\n")
+	if !ok {
+		return nil
+	}
+	body, _, _ := strings.Cut(rest, "\t}\n")
+	_, elems, ok := strings.Cut(body, "elements = { ")
+	if !ok {
+		return nil
+	}
+	elems, _, _ = strings.Cut(elems, " }")
+	var nets []netip.Prefix
+	for e := range strings.SplitSeq(elems, ", ") {
+		if p, err := netip.ParsePrefix(e); err == nil {
+			nets = append(nets, p)
+		}
+	}
+	return nets
+}
+
+// Route flags from the kernel's route.h and ipv6_route.h.
+const (
+	rtfUp      = 0x1
+	rtfGateway = 0x2
+	rtfReject  = 0x200
+	rtfAnycast = 0x100000
+	rtfCache   = 0x1000000
+	rtfLocal   = 0x80000000
+)
+
+// minOnLink is the widest on-link route taken as the host's own subnet. A
+// VPN can put a large part of the internet, or all of it, on its device
+// with no gateway, and the server would lose IPv6 if those counted.
+const minOnLink = 32
+
+// OnLink reads /proc/net/ipv6_route for the host's on-link prefixes: routes
+// with no gateway, not on loopback, and not already in the private ranges.
+func OnLink(r io.Reader) ([]netip.Prefix, error) {
+	var nets []netip.Prefix
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		// dest, dest len, src, src len, next hop, metric, refs, use, flags, device
+		f := strings.Fields(sc.Text())
+		if len(f) < 10 || f[9] == "lo" {
+			continue
+		}
+		flags, err := strconv.ParseUint(f[8], 16, 32)
+		if err != nil || flags&rtfUp == 0 || flags&(rtfGateway|rtfReject|rtfAnycast|rtfCache|rtfLocal) != 0 || strings.Trim(f[4], "0") != "" {
+			continue
+		}
+		bits, err := strconv.ParseUint(f[1], 16, 8)
+		if err != nil || bits < minOnLink || bits > 128 {
+			continue
+		}
+		raw, err := hex.DecodeString(f[0])
+		if err != nil || len(raw) != 16 {
+			continue
+		}
+		p, err := netip.AddrFrom16([16]byte(raw)).Prefix(int(bits))
+		if err == nil {
+			nets = append(nets, p)
+		}
+	}
+	return tidy(nets), sc.Err()
+}
+
+// tidy keeps the global unicast prefixes that the fixed ranges and each
+// other don't already cover, in order, so the file reads the same each time.
+func tidy(nets []netip.Prefix) []netip.Prefix {
+	fixed := make([]netip.Prefix, 0, len(lan6))
+	for _, s := range lan6 {
+		fixed = append(fixed, netip.MustParsePrefix(s))
+	}
+	// within says whether one of by holds p. A prefix isn't within itself.
+	within := func(p netip.Prefix, by []netip.Prefix) bool {
+		return slices.ContainsFunc(by, func(q netip.Prefix) bool { return q != p && q.Bits() <= p.Bits() && q.Contains(p.Addr()) })
+	}
+	var keep []netip.Prefix
+	for _, p := range nets {
+		p = p.Masked()
+		if !p.IsValid() || !p.Addr().Is6() || p.Addr().Is4In6() || !p.Addr().IsGlobalUnicast() || slices.Contains(fixed, p) || within(p, fixed) || slices.Contains(keep, p) {
+			continue
+		}
+		keep = append(keep, p)
+	}
+	var out []netip.Prefix
+	for _, p := range keep {
+		if !within(p, keep) {
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b netip.Prefix) int {
+		if c := a.Addr().Compare(b.Addr()); c != 0 {
+			return c
+		}
+		return a.Bits() - b.Bits()
+	})
+	return out
+}
 
 // Resolvers reads the nameserver lines of a resolv.conf.
 func Resolvers(r io.Reader) ([]netip.Addr, error) {
@@ -63,9 +291,8 @@ func Resolvers(r io.Reader) ([]netip.Addr, error) {
 	return addrs, sc.Err()
 }
 
-// Rules is firewall.nft for the config. dns are the resolvers the server may
-// still reach on port 53 when they're on the LAN or loopback.
-func Rules(c *config.Config, dns []netip.Addr) string {
+// Rules is firewall.nft for the config and the host.
+func Rules(c *config.Config, l Local) string {
 	var allow4, allow6 []string
 	anyone := false
 	for _, a := range c.AllowFrom {
@@ -84,7 +311,7 @@ func Rules(c *config.Config, dns []netip.Addr) string {
 		}
 	}
 	var dns4, dns6 []string
-	for _, a := range dns {
+	for _, a := range l.DNS {
 		if a.Is4() {
 			dns4 = append(dns4, a.String())
 		} else {
@@ -104,7 +331,11 @@ func Rules(c *config.Config, dns []netip.Addr) string {
 	w("")
 	w("table inet %s {", Table)
 	set(w, "lan4", "ipv4_addr", lan4, true)
-	set(w, "lan6", "ipv6_addr", lan6, true)
+	var mine []string
+	for _, p := range tidy(l.Nets) {
+		mine = append(mine, p.String())
+	}
+	set(w, "lan6", "ipv6_addr", append(slices.Clone(lan6), mine...), true)
 	if !anyone {
 		set(w, "allow4", "ipv4_addr", allow4, true)
 		set(w, "allow6", "ipv6_addr", allow6, true)
@@ -184,6 +415,9 @@ func Rules(c *config.Config, dns []netip.Addr) string {
 	}
 	w("\t\tip daddr @lan4 counter name out_lan goto refuse")
 	w("\t\tip6 daddr @lan6 counter name out_lan goto refuse")
+	// Multicast and broadcast reach the LAN too, such as SSDP to the router.
+	w("\t\tip daddr { 224.0.0.0/4, 255.255.255.255 } counter name out_lan goto refuse")
+	w("\t\tip6 daddr ff00::/8 counter name out_lan goto refuse")
 	if c.Egress == "web" {
 		w("\t\ttcp dport { 80, 443 } accept")
 		if c.Bedrock {

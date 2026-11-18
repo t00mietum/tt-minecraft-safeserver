@@ -5,6 +5,7 @@ package launch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -191,6 +192,20 @@ func TestSendCmd(t *testing.T) {
 	g.feed = []string{"[12:00:03 INFO]: There are 0 of a max of 20 players online\n"}
 	if err := g.d.SendCmd(context.Background(), "list"); err != nil || !strings.Contains(g.out.String(), "20 players") {
 		t.Errorf("docker: err %v, output %q", err, g.out.String())
+	}
+}
+
+// Ctrl-C while cmd waits for the answer fails, rather than exit 0 as if the
+// answer was all shown.
+func TestSendCmdInterrupt(t *testing.T) {
+	defer testid.Line(t, "df7ae")
+	g := newCmdRig(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.n.Sleep = func(time.Duration) { cancel() }
+	err := g.n.SendCmd(ctx, "list")
+	if !errors.Is(err, ErrInterrupted) || !reflect.DeepEqual(g.console.sent, []string{"list"}) {
+		t.Errorf("err %v, sent %q", err, g.console.sent)
 	}
 }
 

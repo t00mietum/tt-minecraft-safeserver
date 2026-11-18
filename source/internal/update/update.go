@@ -24,6 +24,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
@@ -369,7 +370,7 @@ func showReport(w io.Writer, version string, notes []agent.MoveNote) {
 		if n.Notes != "" {
 			what += ". " + n.Notes
 		}
-		fmt.Fprintf(w, "  - %s: %s\n", n.Jar, what)
+		fmt.Fprintf(w, "  - %s: %s\n", server.Clean(n.Jar), what)
 	}
 	fmt.Fprintln(w)
 }
@@ -511,8 +512,10 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 	}
 	fmt.Fprintf(u.Out, "%-7s %s approved\n", "FIXED", s.to.Name)
 	keep := []string{s.to.Name}
-	if s.from != nil && filepath.Dir(s.from.Target) == "." {
-		keep = append(keep, s.from.Target)
+	// Name, not Target: a link written as ./name or a full path never
+	// equals a file name, and the build it replaced would go.
+	if s.from != nil && s.from.Name != "" {
+		keep = append(keep, s.from.Name)
 	}
 	gone, err := paper.Prune(dir, keep...)
 	if len(gone) > 0 {
@@ -536,7 +539,7 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 		return nil, nil, err
 	}
 	for _, w := range warns {
-		fmt.Fprintf(u.Out, "warning: %s\n", w)
+		fmt.Fprintf(u.Out, "warning: %s\n", server.Clean(w.String()))
 	}
 	agentOn := u.agentOn()
 	for _, a := range approved {
@@ -551,10 +554,10 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 		case a.Source == "" && !agentOn:
 			continue
 		case project == "" && !agentOn:
-			fmt.Fprintf(u.Out, "%-7s %s: its source isn't one update knows yet, so it stays as it is\n", "SKIPPED", a.Name)
+			fmt.Fprintf(u.Out, "%-7s %s: its source isn't one update knows yet, so it stays as it is\n", "SKIPPED", server.Clean(a.Name))
 			continue
 		case gone:
-			fmt.Fprintf(u.Out, "%-7s %s: approved, but not in the server folder, so it stays out\n", "SKIPPED", a.Name)
+			fmt.Fprintf(u.Out, "%-7s %s: approved, but not in the server folder, so it stays out\n", "SKIPPED", server.Clean(a.Name))
 			continue
 		case project == "":
 			asks = append(asks, a)
@@ -562,7 +565,7 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 		}
 		b, err := u.Geyser.Latest(ctx, project)
 		if err != nil && u.Agent != nil {
-			fmt.Fprintf(u.Out, "warning: can't get %s: %v, so the update agent is asked about %s\n", geyser.Title(project), err, a.Name)
+			fmt.Fprintf(u.Out, "warning: can't get %s: %v, so the update agent is asked about %s\n", geyser.Title(project), err, server.Clean(a.Name))
 			asks = append(asks, a)
 			continue
 		}
@@ -572,11 +575,11 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 		what := fmt.Sprintf("%s %s build %d", geyser.Title(project), b.Version, b.ID)
 		switch {
 		case b.SHA256 == a.SHA256:
-			fmt.Fprintf(u.Out, "%-7s %s is the newest build, %s\n", "OK", a.Name, what)
+			fmt.Fprintf(u.Out, "%-7s %s is the newest build, %s\n", "OK", server.Clean(a.Name), what)
 			continue
 		case b.Path() != a.Name:
 			// It would sit beside the old one, and both would load.
-			fmt.Fprintf(u.Out, "%-7s %s: the newest build, %s, is named %s; replace it by hand\n", "SKIPPED", a.Name, what, b.Name)
+			fmt.Fprintf(u.Out, "%-7s %s: the newest build, %s, is named %s; replace it by hand\n", "SKIPPED", server.Clean(a.Name), what, b.Name)
 			continue
 		}
 		steps = append(steps, pluginStep{jar: a, old: oldAbout(file), to: b})

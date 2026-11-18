@@ -137,7 +137,9 @@ Common:  --config PATH, --set KEY=VALUE
 
 - The commands match `tt-monerod-safeserver`. `console` and `cmd` are new, since a Minecraft server gets managed from its console.
 
-- Exit codes are 0 for success, 1 for an error, and 2 for bad usage.
+- Exit codes are 0 for success, 1 for an error, and 2 for bad usage. The one exception is `start --foreground` in container mode, which exits with the server's own code when that isn't 0, so systemd sees a crash as a failure.
+
+- Ctrl-C, or SIGTERM, ends a wait at once and exits 1, with the server left as it is. That includes `stop`'s countdown and its wait for the save, `cmd`'s wait for the answer, and `start`'s wait for the load.
 
 - `--set KEY=VALUE` overrides one config key for this run, such as `--set heapMax=6G`. It can be given more than once. See [Configuration model](#configuration-model).
 
@@ -153,17 +155,20 @@ Common:  --config PATH, --set KEY=VALUE
 
 1. Load and check the config. Refuse when a Paper server is already running, under any account. That includes one the old scripts started.
 
-2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules.
+2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules. `--dry-run` runs both, since neither changes anything, so it asks for the password at the same point.
 
 3. Check the safe settings in `server.properties` and the other server files. Refuse when one is wrong, and name the setting and `repair` as the fix. See [Safe server settings](#safe-server-settings).
 
 4. Check every jar in `plugins/` against the approved list. Refuse when a jar is new or changed. See [Plugin pinning](#plugin-pinning).
 
-5. With `firewall` on, check through sudo that the tool's nftables table is loaded. Refuse to start without it.
+5. With `firewall` on, check that `/etc/tt-minecraftd/firewall.nft` is what the config and the host's network give, and through sudo that the tool's nftables table is loaded. Refuse to start when either fails, and name `repair` as the fix.
+	- The unit loads the file, and `repair` reloads it whenever it writes it, so the file stands for the loaded table.
+	- An IPv6 subnet the file has and the host doesn't is fine, since it only blocks more. At boot, the router's announcement can come after the server starts.
 
 6. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
 
 7. Launch in the configured mode. Then wait until the log says the server is done loading, or `startTimeout` runs out. When the process died, print the end of its log and exit 1.
+	- When `startTimeout` runs out, the server keeps running, and `start` exits 1. With `--foreground` that's only a warning, and it goes on to wait for the server's end. An exit there would end the boot unit, and systemd would run its `ExecStop`, so a big world or a slow host would never come up at boot.
 
 - `--debug` runs the server in the foreground with its console attached.
 
@@ -174,6 +179,7 @@ Common:  --config PATH, --set KEY=VALUE
 1. When the server isn't running, make sure the trees have gone back to the operator, and exit 0. That way the operator still gets them back after a crash.
 
 2. With `--warn N`, broadcast a countdown to the players for N seconds first.
+	- Ctrl-C ends the countdown at once. The players are told the stop is off, the server keeps running, and `stop` exits 1.
 
 3. Send the `stop` console command, so Paper saves the worlds and kicks the players with a message. Wait up to `stopTimeout` seconds. Send SIGTERM if it's still up, and SIGKILL after another 30 seconds.
 
@@ -278,7 +284,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- It needs no server folder. `setup` leaves it out of the update it runs on an existing install, since the binary setup runs is the one it installs.
 
 - `--paper` asks the PaperMC download API for the newest stable build of the current Minecraft version. It downloads the jar, checks its SHA-256 sum against the API, puts it beside the old ones, and points `paper.jar` at it. The last 2 builds stay on disk.
-	- The current version and build come from the name `paper.jar` links to, such as `paper-26.3-249.jar`. A `paper.jar` that's a plain file is refused, with how to rename it.
+	- The current version and build come from the name `paper.jar` links to, such as `paper-26.3-249.jar`. A `paper.jar` that's a plain file is refused, with how to rename it, and so is a link whose text has control characters.
 	- With no `paper.jar`, or a link to a build that's gone, it gets one the way `setup` does.
 	- The new build goes on the approved list. Other builds in `serverDir` are removed, except the one it replaced.
 	- `--mc-version V` moves to another Minecraft version. It needs a yes even with `--yes`, since worlds can't go back to an older version and plugins may not work on the new one. It takes a ZFS snapshot first.
@@ -331,14 +337,17 @@ Common:  --config PATH, --set KEY=VALUE
 	6. The safe settings are in place.
 	7. Every plugin jar is approved. This one is never fixed, only reported, unless `--approve-plugins` is given.
 	8. With `bedrock` on, Geyser and Floodgate are installed and set up to match the config, and the Floodgate key can only be read by the account and group.
-	9. With `firewall` on, the rules file matches the config, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
+	9. With `firewall` on, the rules file matches the config and the host's network, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
 		- A missing `nft` is reported with the command that adds it, the same as `catatonit`. A new rules file is loaded with `systemctl reload-or-restart`, so a running table is swapped in one go.
 		- Turning it off leaves the rules file in place.
+		- There's one rules file and one table. The file names the config it was written for. While that config's unit is installed, a second config's `repair` leaves the file, the unit, and the table alone, and says which config they're for. When the second config's rules come out different, that's FAILED. When they come out the same, the file does for both.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
 		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
+		- For ufw, an `ALLOW IN` or `LIMIT IN` rule counts, with a port, a port list, a range, or no port at all.
 	11. In container mode, the image is there, and a stopped container under the runtime `runMode` doesn't name gets removed. One under `runMode`'s runtime stays, so its `logs` works, and `start` removes it. In Podman mode, `catatonit` is installed. A missing one is reported with the command that adds it.
 	12. With a dataset configured, it exists and is mounted.
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
+		- A unit that runs another config is left alone, whatever this config's `startAtBoot` is. See [Boot](#boot).
 	14. Any Paper server that this tool didn't start is reported, and never killed.
 
 ## Project structure
@@ -504,7 +513,7 @@ cicd/                        build, test, and release scripts
 
 - Expected outside modules:
 	- The shcl Go module, `github.com/yottacore/shcl/source/go/v3`, at its latest published release, beta or not.
-	- A YAML package, for `paper-global.yml`, `spigot.yml`, and the Geyser and Floodgate configs.
+	- The YAML module `go.yaml.in/yaml/v3`, for `paper-global.yml`, `spigot.yml`, and the Geyser config.
 
 - At run time it calls `podman` or `docker` through sudo, or `systemd-run` and `tmux`, plus `sudo`, `systemctl`, and `ss`. It also calls `zfs` when snapshots are on, `nft` when the firewall is on, and `apt-get` in `setup` on Debian. `repair` calls `ufw` or `firewall-cmd` to read their rules, when one is active. `update` runs `agentCommand` as the operator, when `agent` is `command`.
 
@@ -659,6 +668,7 @@ cicd/                        build, test, and release scripts
 
 - Each tree in `ownerTrees` changes hands with `chown -R`. A missing tree gets a warning.
 	- Before a start, the trees go to `runUser`. After a stop, they go to `ownerAfterStop`.
+		- A start that fails after the hand-off, with the server down, hands them back. When the server is still up, or that can't be told, the error says `stop` hands them back. In the boot unit, `ExecStop` does it.
 	- The group is always `runGroup`, and the operator is in it. So logs and `status` work while the server runs.
 		- A login from before the operator joined the group, as right after setup, doesn't have it yet. Native `start` and `cmd` say to log in again before they change or send anything, and container `start` warns once the server is up.
 		- Container `start` reads the tree before it changes hands. After a crash the tree is still the server's, so when that read is refused, `start` gives the same reason.
@@ -704,6 +714,8 @@ cicd/                        build, test, and release scripts
 
 - Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is wrong, since Geyser's first start would write its own defaults and run with them, on port 19132 and with online mode logins. setup and `repair` write one with only the first 3 Geyser keys above, and make its folders when they're missing. Geyser keeps those keys and fills in the rest at its first start. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. The last 3 keys are the exception: Geyser's defaults for them are already right, so a missing one is fine. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
 
+- The YAML files are read the way Paper and Geyser read them, with flow style, anchors and merges. Every copy of a key has to be right, since Paper's YAML reader keeps the last copy of a key given twice. A file that isn't YAML, or holds more than one document, stops `start`. `repair` edits only a key's own line, to keep the comments, and checks the result again before writing it. It leaves a file it can't fix that way, such as one in flow style, and says to fix it by hand.
+
 - The server account can write the tree. So a settings file that's a link, or isn't a plain file, is refused, and `repair` puts a new file in place of the old one rather than writing into it.
 
 - An empty whitelist with `white-list` on locks everyone out. `setup` and `repair` warn about that, and print the `cmd` lines that add players.
@@ -730,6 +742,7 @@ cicd/                        build, test, and release scripts
 - `start` hashes every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and `paper.jar`. Extensions run with the same access as plugins. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
 	- `paper.jar` is checked as the build it links to, named by that build's path under `serverDir`, such as `paper-26.3-244.jar`. A `paper.jar` that links outside `serverDir` can't be approved, so it stops the start.
 	- With no approved list yet, every jar counts as new.
+	- A jar that's a pipe, a socket, a device, or a link to one counts as changed. Its kind is checked before it's opened, since opening a device runs its driver, as root in `repair`, setup, `update` and a boot start.
 	- `status` and `repair` run the same check.
 
 - `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`, or a Geyser extension's `extension.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
@@ -760,7 +773,7 @@ cicd/                        build, test, and release scripts
 	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents.
 	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
 
-- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.
+- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.
 
 - What it's told: the Minecraft version, the Paper build, and for each jar it's asked about, its path under `serverDir`, its name and version from `plugin.yml`, its SHA-256, and its source if it has one. Nothing else from the host, such as the config, addresses, or player names.
 
@@ -786,7 +799,7 @@ cicd/                        build, test, and release scripts
 
 - A `--dry-run` asks the agent too, and shows its suggestions as not checked, since it downloads nothing.
 
-- An answer that can't be read is reported, and so is each jar that fails a check. The rest of the plan still goes ahead after the usual question. `--set agent=none` skips the agent for one run.
+- An answer that can't be read is reported, and so is each jar that fails a check. A reply can quote the question or the answer's form first. Those are skipped, and the last other answer in it is used. The rest of the plan still goes ahead after the usual question. `--set agent=none` skips the agent for one run.
 
 ### Bedrock players
 
@@ -837,6 +850,7 @@ cicd/                        build, test, and release scripts
 - With `firewall` on, the tool puts its rules in its own nftables table, `inet tt_minecraftd`, so they apply to IPv4 and IPv6.
 
 - `setup` and `repair` write the rules to `/etc/tt-minecraftd/firewall.nft`, from the config. `tt-minecraftd-firewall.service` loads that file at boot.
+	- A comment line at the top names the config it was written for, so a second config's `repair` can leave it alone. `start` doesn't compare that line.
 	- It matches the service account by name, so nft looks it up as it loads the file.
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
 	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
@@ -857,6 +871,8 @@ cicd/                        build, test, and release scripts
 		- Its own game ports are allowed. Geyser sends to its own Bedrock port over loopback, and its STUN lookup gets no answer when those are dropped.
 		- DNS to the resolvers in `/etc/resolv.conf` is allowed ahead of that, wherever they are, such as systemd-resolved's 127.0.0.53. They're read when the rules are written.
 	- Ones to the private ranges get dropped, apart from DNS to the resolvers in `/etc/resolv.conf`.
+		- The host's own IPv6 subnets count as private here, since a home LAN's router, NAS, and printers have global addresses there. They're the on-link routes in `/proc/net/ipv6_route`, read when the rules are written. A route wider than /32 doesn't count, since a VPN can put much of the internet on its device. `allowFrom`'s `lan` stays the private ranges.
+		- Multicast and broadcast get dropped too, such as SSDP to the router.
 		- That includes the server's answer to a LAN client's broadcast. Conntrack keys the client's packet on the broadcast address, so an answer from the server's own address isn't a reply. An answer to a client that asked the server's address directly still goes out.
 		- With `bedrock` on, Bedrock LAN discovery is the exception. A LAN address in `allowFrom` that broadcasts to UDP 7551 is remembered for 10 seconds, with the port it sent from. The server may send from 7551 to that address and port only. Clients broadcast every 2 seconds, so a client that's still looking stays on the list.
 	- With `egress` set to `web`, ones to the internet are allowed on ports 80 and 443 only. Online mode, Geyser, and Floodgate need HTTPS to Mojang, Microsoft, and GeyserMC.
@@ -880,11 +896,15 @@ cicd/                        build, test, and release scripts
 
 	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
 	- The unit runs the tool from `/usr/local/bin`, where `setup` puts it, with `--config` when the config isn't the default one.
+		- The `.deb` and `.rpm` packages and the install script put it there too, so an upgrade changes what the operator and the unit run. A package in `/usr/bin` would sit behind a copy in `/usr/local/bin`, which comes first on PATH.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
+		- Only `ExecStop`'s `stop` hands the trees back. systemd runs it after every start, even when the server ended by itself, and sends SIGTERM to what's left once it's done, which would cut a second hand-back short and fail the unit. A SIGTERM that finds the server down is a clean stop.
 	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.
 
 - With `startAtBoot` off, `repair` disables and removes the unit.
 	- It doesn't stop a server the unit runs. That server keeps going until the next `stop`.
+
+- There's one unit, so only one config can start at boot. `repair` for a second config leaves a unit that runs another config alone, and names that config. With the second config's `startAtBoot` on too, that's FAILED.
 
 ### NixOS
 
@@ -950,6 +970,8 @@ cicd/                        build, test, and release scripts
 - Unit tests run with the fake command runner. They check the exact command lists for each mode, the config errors, the safe settings checks and fixes on sample server files, and the plugin check against changed and new jars. They also check the rendered `firewall.nft` for each mix of `allowFrom`, `egress`, and `bedrock`.
 
 - A smoke test starts a real Paper server in the container on a throwaway tree with a tiny world. It checks the hardening flags, that the server finishes loading, that `cmd` works, that the jars can't be written, and a clean exit on `stop`.
+
+- The root host checks run `setup`, `repair`, `start`, the firewall, and the ZFS snapshots as root in a privileged container. Fuzz targets, a soak test, race tests, CodeQL, and the arm64 run on a second host come with the full run and the merge gate.
 
 - A live start and stop on a real server checks ownership, the listening ports, that a Java and a Bedrock client can join, and that a player who isn't whitelisted gets turned away.
 

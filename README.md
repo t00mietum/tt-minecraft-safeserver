@@ -103,7 +103,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 - `setup` installs from scratch, or takes over an existing server folder with `--adopt`. `repair` checks the install and fixes what drifted.
 
-- `update` gets new Paper, Geyser, and Floodgate builds, checks each against its published hash, and keeps the Paper build it replaced. `--mc-version` moves to a new Minecraft version, after a ZFS snapshot when the world is on ZFS.
+- `update` gets new Paper, Geyser, and Floodgate builds, checks each against its published hash, and keeps the Paper build it replaced. `--mc-version` moves to a new Minecraft version, after a ZFS snapshot when `zfsDataset` is set.
 
 - `console` attaches to the server console, and `cmd` sends one command and prints the answer. `status` and `watch` need no sudo.
 
@@ -111,7 +111,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 ## Update agent
 
-`update --plugins` knows where to get Paper, Geyser, and Floodgate. For your other plugins it can ask an AI agent where the newer builds are. The agent only suggests. `tt-minecraftd` downloads and checks each jar it finds, and you say yes to each one yourself, even with `--yes`. It's off until `agent` is set in `/etc/tt-minecraftd/config.shcl`. [design.md](project/design.md#update-agent) has the details.
+`update --paper` knows where to get Paper, and `update --plugins` knows where to get Geyser and Floodgate. For your other plugins `update --plugins` can ask an AI agent where the newer builds are. The agent only suggests. `tt-minecraftd` downloads and checks each jar it finds, and you say yes to each one yourself, even with `--yes`. It's off until `agent` is set in `/etc/tt-minecraftd/config.shcl`. [design.md](project/design.md#update-agent) has the details.
 
 - When PaperMC's download API can't be reached, the agent can find the Paper build too, checked the same way. The container image isn't refreshed then, since only PaperMC says which Java a version needs. Before `update --mc-version`, it says which of your plugins have a build for the new version. That report changes nothing.
 

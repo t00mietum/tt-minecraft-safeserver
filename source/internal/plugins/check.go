@@ -15,8 +15,9 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"syscall"
 	"time"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // Check is how the jars in plugins/ compare with the approved list.
@@ -44,14 +45,15 @@ type seenSum struct {
 	sum  string
 }
 
-// ErrNotRegular is a jar that's a pipe, a device, or a folder. The server
-// owns plugins/, so it could leave one there to hang a reader.
-var ErrNotRegular = errors.New("not a regular file")
+// ErrNotRegular is a jar that's a pipe, a device, a socket, or a folder. The
+// server owns plugins/, so it could leave one there, or a link to one, to
+// hang a reader or have root open a device.
+var ErrNotRegular = server.ErrNotRegular
 
-// Sum gives the lower-case hex SHA-256 of the file, after links.
+// Sum gives the lower-case hex SHA-256 of the file, after links. Anything
+// but a regular file is refused before it's opened.
 func (s *Sums) Sum(file string) (string, error) {
-	// O_NONBLOCK, so a pipe doesn't hang the open.
-	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0) // #nosec G304 -- a jar under the configured serverDir
+	f, err := server.OpenRegular(file)
 	if err != nil {
 		return "", err
 	}
@@ -60,22 +62,26 @@ func (s *Sums) Sum(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("%s: %w", file, ErrNotRegular)
-	}
 	if old, ok := s.seen[file]; ok && old.size == fi.Size() && old.mod.Equal(fi.ModTime()) {
 		return old.sum, nil
 	}
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	sum, err := hashOf(f)
+	if err != nil {
 		return "", err
 	}
-	sum := hex.EncodeToString(h.Sum(nil))
 	if s.seen == nil {
 		s.seen = make(map[string]seenSum)
 	}
 	s.seen[file] = seenSum{fi.Size(), fi.ModTime(), sum}
 	return sum, nil
+}
+
+func hashOf(r io.Reader) (string, error) {
+	h := sha256.New()
+	if _, err := io.Copy(h, r); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // Folders whose jars start checks, besides paper.jar. Geyser extensions run
@@ -95,12 +101,16 @@ type Jar struct {
 func Jars(serverDir string) ([]Jar, error) {
 	var jars []Jar
 	for _, dir := range pinnedDirs {
-		found, err := filepath.Glob(filepath.Join(serverDir, filepath.FromSlash(dir), "*.jar"))
-		if err != nil {
-			return nil, err
-		}
-		for _, f := range found {
-			jars = append(jars, Jar{dir + "/" + filepath.Base(f), f})
+		// Not filepath.Glob, whose stat and then plain open of the folder
+		// leave a gap to swap in a link to a device. os.ReadDir opens with
+		// O_DIRECTORY, which no device passes. Like Glob, a folder that's
+		// missing or can't be read has no jars.
+		folder := filepath.Join(serverDir, filepath.FromSlash(dir))
+		entries, _ := os.ReadDir(folder)
+		for _, e := range entries {
+			if ok, _ := filepath.Match("*.jar", e.Name()); ok {
+				jars = append(jars, Jar{dir + "/" + e.Name(), filepath.Join(folder, e.Name())})
+			}
 		}
 	}
 	paper, err := filepath.EvalSymlinks(filepath.Join(serverDir, "paper.jar"))
@@ -116,7 +126,7 @@ func Jars(serverDir string) ([]Jar, error) {
 	}
 	rel, err := filepath.Rel(base, paper)
 	if err != nil || !insideServer(filepath.ToSlash(rel)) {
-		return nil, fmt.Errorf("paper.jar points to %s, outside %s, so it can't be approved", paper, serverDir)
+		return nil, fmt.Errorf("paper.jar points to %s, outside %s, so it can't be approved", server.Clean(paper), serverDir)
 	}
 	return append(jars, Jar{filepath.ToSlash(rel), paper}), nil
 }

@@ -157,9 +157,15 @@ func Prompt(q Question) string {
 }
 
 // Parse finds the answer in a reply, which may wrap it in prose or a code
-// fence.
+// fence. The question and the form in the instructions both have a jars
+// key, and a reply may quote either before it answers, so those are skipped
+// and the last other match wins.
 func Parse(reply string) (Answer, error) {
-	var last error
+	var (
+		found  *Answer
+		quoted bool
+		last   error
+	)
 	for i, tries := 0, 0; tries < 50; tries++ {
 		start := strings.IndexByte(reply[i:], '{')
 		if start < 0 {
@@ -171,26 +177,79 @@ func Parse(reply string) (Answer, error) {
 			Paper *PaperBuild   `json:"paper"`
 			Move  *[]MoveNote   `json:"moveReport"`
 		}
-		err := json.NewDecoder(strings.NewReader(reply[i:])).Decode(&probe)
-		if err == nil && (probe.Jars != nil || probe.Paper != nil || probe.Move != nil) {
-			a := Answer{Paper: probe.Paper}
-			if probe.Jars != nil {
-				a.Jars = *probe.Jars
-			}
-			if probe.Move != nil {
-				a.Move = *probe.Move
-			}
-			return a, nil
+		var raw json.RawMessage
+		dec := json.NewDecoder(strings.NewReader(reply[i:]))
+		err := dec.Decode(&raw)
+		if err == nil {
+			err = json.Unmarshal(raw, &probe)
 		}
-		if err != nil {
-			last = err
+		if err != nil || (probe.Jars == nil && probe.Paper == nil && probe.Move == nil) {
+			if err != nil {
+				last = err
+			}
+			i++
+			continue
 		}
-		i++
+		// Past the whole object, so a quoted question with many jars costs
+		// one try.
+		i += int(dec.InputOffset())
+		a := Answer{Paper: probe.Paper}
+		if probe.Jars != nil {
+			a.Jars = *probe.Jars
+		}
+		if probe.Move != nil {
+			a.Move = *probe.Move
+		}
+		if isQuestion(raw) || isForm(a) {
+			quoted = true
+			continue
+		}
+		found = &a
 	}
-	if last != nil {
+	switch {
+	case found != nil:
+		return *found, nil
+	case quoted:
+		return Answer{}, errors.New("the agent's reply only repeats the question or the answer's form")
+	case last != nil:
 		return Answer{}, fmt.Errorf("the agent's answer isn't the JSON asked for: %w", last)
 	}
 	return Answer{}, errors.New("the agent's answer has no list of jars in it")
+}
+
+// isQuestion tells whether obj is the question quoted back. It names the
+// Minecraft version, and none of its jars has a version or url, which the
+// answer's form always has.
+func isQuestion(obj []byte) bool {
+	var q struct {
+		Minecraft json.RawMessage              `json:"minecraftVersion"`
+		Jars      []map[string]json.RawMessage `json:"jars"`
+	}
+	if json.Unmarshal(obj, &q) != nil || q.Minecraft == nil {
+		return false
+	}
+	return !slices.ContainsFunc(q.Jars, func(j map[string]json.RawMessage) bool {
+		return j["version"] != nil || j["url"] != nil
+	})
+}
+
+// isForm tells whether a is the answer's form from the instructions, with
+// a <placeholder> for every jar and Paper version.
+func isForm(a Answer) bool {
+	var names []string
+	for _, s := range a.Jars {
+		names = append(names, s.Jar)
+	}
+	for _, m := range a.Move {
+		names = append(names, m.Jar)
+	}
+	if a.Paper != nil {
+		names = append(names, a.Paper.Version)
+	}
+	return len(names) > 0 && !slices.ContainsFunc(names, func(n string) bool {
+		n = strings.TrimSpace(n)
+		return len(n) < 2 || n[0] != '<' || n[len(n)-1] != '>'
+	})
 }
 
 // Checked sorts an answer by what can be told before anything is downloaded.

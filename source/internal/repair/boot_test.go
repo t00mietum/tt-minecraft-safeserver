@@ -4,7 +4,9 @@
 package repair
 
 import (
+	"context"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -73,4 +75,48 @@ func slicesHas(checks []Check, name string) bool {
 		}
 	}
 	return false
+}
+
+// There's one boot unit. A second config's repair leaves the one that runs
+// the first alone, whichever way its startAtBoot is, and says whose it is.
+func TestBootOtherConfig(t *testing.T) {
+	defer testid.Line(t, "df7a8")
+	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte("enabled\n"), nil })
+	first := h.ConfigPath
+	h.Cfg.StartAtBoot = true
+	if err := os.WriteFile(h.BootFile, []byte(boot.Unit(h.Cfg, first)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.ConfigPath = filepath.Join(filepath.Dir(first), "second.shcl")
+	h.Cfg.RunMode = "podman"
+	got := look(t, h, BootCheck)
+	if len(got) != 1 || !strings.Contains(got[0], "runs the config at "+first+"; there's one boot unit") || strings.HasSuffix(got[0], "[fix]") {
+		t.Errorf("on: %q", got)
+	}
+	h.Cfg.StartAtBoot = false
+	var lines []string
+	Run(context.Background(), h, []Check{BootCheck}, false, func(state, text string) { lines = append(lines, state+" "+text) })
+	if want := []string{"OK boot unit: tt-minecraftd.service runs the config at " + first + ", so it's left alone"}; !reflect.DeepEqual(lines, want) {
+		t.Errorf("off: %q", lines)
+	}
+	for _, on := range []bool{true, false} {
+		h.Cfg.StartAtBoot = on
+		if ran := fixAll(t, h, f, BootCheck); len(ran) != 0 {
+			t.Errorf("startAtBoot %v changed the first config's unit: %q", on, ran)
+		}
+	}
+
+	// The same file by another name is still this config's.
+	h.ConfigPath = filepath.Join(filepath.Dir(first), ".", filepath.Base(first))
+	if ran := fixAll(t, h, f, BootCheck); len(ran) != 3 {
+		t.Errorf("first config, off: %q", ran)
+	}
+	// So is a unit with no ExecStart it wrote.
+	h.ConfigPath = filepath.Join(filepath.Dir(first), "second.shcl")
+	if err := os.WriteFile(h.BootFile, []byte("[Service]\nExecStart=/bin/true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ran := fixAll(t, h, f, BootCheck); len(ran) != 3 {
+		t.Errorf("a unit it can't place: %q", ran)
+	}
 }

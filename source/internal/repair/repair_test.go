@@ -32,7 +32,7 @@ func testHost(t *testing.T, passwd, group string, reply func(c host.Cmd) ([]byte
 	}
 	h.Cfg.OwnerTrees = []string{h.Cfg.ServerDir}
 	h.ConfigPath = filepath.Join(dir, "config.shcl")
-	h.RulesFile, h.UnitFile, h.ResolvConf = filepath.Join(dir, "firewall.nft"), filepath.Join(dir, "fw.service"), filepath.Join(dir, "resolv.conf")
+	h.RulesFile, h.UnitFile, h.ResolvConf, h.Routes = filepath.Join(dir, "firewall.nft"), filepath.Join(dir, "fw.service"), filepath.Join(dir, "resolv.conf"), filepath.Join(dir, "ipv6_route")
 	h.BootFile = filepath.Join(dir, "boot.service")
 	for file, text := range map[string]string{h.Passwd: passwd, h.Group: group} {
 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
@@ -180,6 +180,14 @@ func TestAccountCheck(t *testing.T) {
 	}
 	if got := fixAll(t, h, f, accountCheck); !reflect.DeepEqual(got, want) {
 		t.Errorf("loose account: %q", got)
+	}
+
+	// The account there and its group not: one run makes the group and moves
+	// the account to it, in that order.
+	h, f = testHost(t, "minecraftd:x:999:100::/nonexistent:/usr/sbin/nologin\n", "users:x:100:\n", nil)
+	want = []string{"sudo groupadd --system minecraftd", "sudo usermod --gid minecraftd minecraftd"}
+	if got := fixAll(t, h, f, accountCheck); !reflect.DeepEqual(got, want) {
+		t.Errorf("group missing: %q", got)
 	}
 
 	for _, uid := range []string{"0", "1000"} {
@@ -632,6 +640,28 @@ func TestHostFirewallCheck(t *testing.T) {
 	ufw = "Status: active\nDefault: allow (incoming), allow (outgoing)\n"
 	if got := look(t, h, hostFirewallCheck); len(got) != 0 {
 		t.Errorf("ufw allows all: %q", got)
+	}
+	// ufw limit, allow from, and a port list each let players in.
+	head := "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\nNew profiles: skip\n\nTo                         Action      From\n--                         ------      ----\n"
+	for _, rules := range []string{
+		"25565/tcp                  LIMIT IN    Anywhere\n19132                      LIMIT IN    Anywhere\n",
+		"Anywhere                   ALLOW IN    192.168.0.0/16\n",
+		"Anywhere on eth0           ALLOW IN    Anywhere\n",
+		"19132,25565/tcp            ALLOW IN    Anywhere\n19132/udp                  ALLOW IN    Anywhere\n",
+		"80,19000:19200,25565/tcp   ALLOW IN    Anywhere\n19132/udp (v6)             ALLOW IN    Anywhere (v6)\n",
+	} {
+		ufw = head + rules
+		if got := look(t, h, hostFirewallCheck); len(got) != 0 {
+			t.Errorf("ufw %q: %q", rules, got)
+		}
+	}
+	ufw = head + "Anywhere/udp               ALLOW IN    Anywhere\n80,443,25566/tcp           LIMIT IN    Anywhere\nAnywhere                   DENY IN     10.0.0.0/8\n"
+	want = []string{
+		"ufw is active and doesn't let players in on 25565/tcp; sudo ufw allow 25565/tcp adds it",
+		"ufw is active and doesn't let players in on 19132/tcp; sudo ufw allow 19132/tcp adds it",
+	}
+	if got := look(t, h, hostFirewallCheck); !reflect.DeepEqual(got, want) {
+		t.Errorf("ufw other ports: %q", got)
 	}
 
 	units["ufw"], units["firewalld"] = false, true

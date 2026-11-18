@@ -4,10 +4,13 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"unicode"
@@ -20,17 +23,42 @@ func LogFile(serverDir string) string {
 	return filepath.Join(serverDir, "logs", "latest.log")
 }
 
-// OpenRegular opens a file in the server tree for reading. The server owns
-// the tree, so it could swap a file for a pipe or a device, to hang a reader
-// or feed it without end.
+// ErrNotRegular is a file in the server tree that's a pipe, a device, a
+// socket, or a folder.
+var ErrNotRegular = errors.New("not a regular file")
+
+// OpenRegular opens a file in the server tree for reading, after links. The
+// server owns the tree, so it could swap a file for a pipe, or a link to a
+// device, to hang a reader or feed it without end. Opening a device runs its
+// driver, and some act on the open alone, such as a watchdog that reboots
+// the host when it's closed without its stop byte, so the kind is checked
+// before the file is opened to read.
 func OpenRegular(file string) (*os.File, error) {
-	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0) // #nosec G304 -- under the configured serverDir
+	// O_PATH gets the inode without opening it: no driver runs and a pipe
+	// doesn't wait. Reopening through /proc/self/fd opens that same inode,
+	// so a link swapped after the check can't change what's read.
+	pfd, err := syscall.Open(file, oPath|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, err
+		return nil, &fs.PathError{Op: "open", Path: file, Err: err}
 	}
-	fi, err := f.Stat()
-	if err == nil && !fi.Mode().IsRegular() {
-		err = fmt.Errorf("%s isn't a regular file", file)
+	defer syscall.Close(pfd)
+	var want syscall.Stat_t
+	if err := syscall.Fstat(pfd, &want); err != nil {
+		return nil, &fs.PathError{Op: "stat", Path: file, Err: err}
+	}
+	if want.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return nil, fmt.Errorf("%s: %w", file, ErrNotRegular)
+	}
+	// O_NONBLOCK, in case the reopen isn't the same file after all.
+	fd, err := syscall.Open("/proc/self/fd/"+strconv.Itoa(pfd), syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: file, Err: err}
+	}
+	f := os.NewFile(uintptr(fd), file)
+	var got syscall.Stat_t
+	err = syscall.Fstat(fd, &got)
+	if err == nil && (got.Dev != want.Dev || got.Ino != want.Ino || got.Mode&syscall.S_IFMT != syscall.S_IFREG) {
+		err = fmt.Errorf("%s changed while it was opened: %w", file, ErrNotRegular)
 	}
 	if err != nil {
 		_ = f.Close() // only read from, so nothing is lost
@@ -50,6 +78,16 @@ func Clean(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// CleanLines is Clean for text of several lines, such as a log tail or an
+// error, and keeps the line breaks.
+func CleanLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = Clean(l)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // Cut shortens s to limit bytes on a character boundary, and marks the cut.

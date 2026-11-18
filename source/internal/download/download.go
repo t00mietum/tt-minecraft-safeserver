@@ -83,9 +83,18 @@ func (c Client) Get(ctx context.Context, url string) (*http.Response, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close() // the status is the error that matters
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
+		return nil, fmt.Errorf("%s: %s", url, Status(resp.StatusCode))
 	}
 	return resp, nil
+}
+
+// Status names an HTTP status by its code. Not resp.Status, whose text is
+// the server's own and can hold escape codes.
+func Status(code int) string {
+	if text := http.StatusText(code); text != "" {
+		return fmt.Sprintf("%d %s", code, text)
+	}
+	return fmt.Sprint(code)
 }
 
 // JSON reads an API answer of up to MaxJSON into v.
@@ -207,13 +216,26 @@ func (s *Staged) fill(file *os.File, fd int, body io.Reader, limit int64, st sys
 	return file.Sync()
 }
 
-// Open gives the staged file, for reading.
+// Open gives the staged file, for reading. The server can write the folder,
+// so it could put a pipe in its place: O_NONBLOCK keeps the open from
+// waiting on one, and only a regular file is given back.
 func (s *Staged) Open() (*os.File, error) {
-	fd, err := syscall.Openat(s.dirfd, s.Temp, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	name := s.dir + "/" + s.Temp
+	fd, err := syscall.Openat(s.dirfd, s.Temp, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: s.dir + "/" + s.Temp, Err: err}
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
-	return os.NewFile(uintptr(fd), s.dir+"/"+s.Temp), nil
+	f := os.NewFile(uintptr(fd), name)
+	var st syscall.Stat_t
+	err = syscall.Fstat(fd, &st)
+	if err == nil && st.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		err = fmt.Errorf("%s isn't a regular file", name)
+	}
+	if err != nil {
+		_ = f.Close() // only read from
+		return nil, err
+	}
+	return f, nil
 }
 
 // Keep renames the download over the name it's for.

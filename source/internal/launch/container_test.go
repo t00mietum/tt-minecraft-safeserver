@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -22,7 +24,11 @@ import (
 
 type fakeConsole struct{ sent []string }
 
-func (f *fakeConsole) Send(_ context.Context, line string) error {
+// Send refuses a done ctx, as a real send would.
+func (f *fakeConsole) Send(ctx context.Context, line string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.sent = append(f.sent, line)
 	return nil
 }
@@ -40,6 +46,8 @@ type rig struct {
 	states  []string
 	log     string
 	tables  string
+	// exit is what the runtime's wait prints, the container's exit code.
+	exit string
 	// sudoFree makes sudo -n work, as a NOPASSWD rule or a cached login does.
 	sudoFree bool
 }
@@ -80,12 +88,20 @@ func newRig(t *testing.T) *rig {
 	if err := os.WriteFile(list, []byte("jar: paper-26.3-244.jar\n\tsha256: "+empty+"\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+empty+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n"}
+	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n", exit: "0\n"}
 	g.r.Reply = g.reply
 	noRuntimes(t)
 	inGroup(t, groupHere)
+	// Firewall rules that match the config, with no IPv6 subnets.
+	fw := firewall.Files{Rules: filepath.Join(base, "firewall.nft"), ResolvConf: filepath.Join(base, "resolv.conf"), Routes: filepath.Join(base, "ipv6_route")}
+	if err := os.WriteFile(fw.ResolvConf, []byte("nameserver 127.0.0.53\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fw.Rules, []byte(firewall.Rules(&cfg, firewall.Local{DNS: []netip.Addr{netip.MustParseAddr("127.0.0.53")}})), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	g.d = &Boxed{
-		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
+		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, FirewallFiles: fw, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
 		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
@@ -120,6 +136,8 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 		return []byte(s + "\n"), nil
 	case len(c.Args) > 2 && c.Args[1] == "logs":
 		return []byte(g.log), nil
+	case len(c.Args) > 2 && c.Args[1] == "wait":
+		return []byte(g.exit), nil
 	case c.Args[0] == "nft":
 		return []byte(g.tables), nil
 	case host.Quote(c.Args) == "sudo -n true" && !g.sudoFree:
@@ -128,11 +146,13 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 	return nil, nil
 }
 
-// changes are the commands that aren't looks, as they'd print.
+// changes are the commands that aren't looks, as they'd print, with sudo -v
+// kept in, so each list also shows where sudo asks. It's a look, so dry run
+// asks there too.
 func (g *rig) changes() []string {
 	var lines []string
 	for i, c := range g.r.Ran {
-		if !c.Look {
+		if !c.Look || host.Quote(c.Args) == "sudo -v" {
 			lines = append(lines, g.r.Lines()[i])
 		}
 	}
@@ -201,8 +221,8 @@ func TestStartSudoNoPassword(t *testing.T) {
 				}
 			case "sudo -v":
 				asks++
-				if !c.Tty {
-					t.Errorf("sudo -v ran without the terminal")
+				if !c.Tty || !c.Look {
+					t.Errorf("sudo -v ran as %+v, want on the terminal, and as a look so dry run asks there too", c)
 				}
 			}
 		}
@@ -255,6 +275,82 @@ func TestDockerStartFails(t *testing.T) {
 	err = g.d.Start(context.Background(), StartMode{})
 	if err == nil || !strings.Contains(err.Error(), "didn't finish loading") || g.slept != 5*time.Second {
 		t.Errorf("slow: err %v, slept %s", err, g.slept)
+	}
+}
+
+// A start that fails after the hand-off, with the server down, hands the
+// trees back. One that leaves the server up, or can't tell, says how to get
+// them back. Inside the boot unit, ExecStop's stop does it.
+func TestFailedStartHandsBack(t *testing.T) {
+	defer testid.Line(t, "df7an")
+	back := "sudo chown -R -- alice:minecraftd "
+	failing := func(g *rig, step string, cancel func()) {
+		g.r.Reply = func(c host.Cmd) ([]byte, error) {
+			if len(c.Args) > 1 && c.Args[1] == step {
+				if cancel != nil {
+					cancel()
+				}
+				return nil, errors.New(step + ": image not known")
+			}
+			return g.reply(c)
+		}
+	}
+	for _, c := range []struct {
+		name, step string
+		states     []string
+		log        string
+		inUnit     bool
+		ctrlC      bool
+		handBack   bool
+		says       string
+	}{
+		{"create fails", "create", []string{"", ""}, "", false, false, true, "create: image not known"},
+		{"start fails", "start", []string{"", "created"}, "", false, false, true, "start: image not known"},
+		{"dies while loading", "", []string{"", "exited"}, "Error: Unable to access jarfile paper.jar\n", false, false, true, "exited while loading"},
+		{"slow load", "", []string{"", "running"}, "", false, false, false, "didn't finish loading"},
+		{"start fails, server up", "start", []string{"", "running"}, "", false, false, false, "the trees are still minecraftd's, and stop hands them back"},
+		{"Ctrl-C in create", "create", []string{"", ""}, "", false, true, false, "the trees are still minecraftd's, and stop hands them back"},
+		{"in the unit", "create", []string{"", ""}, "", true, false, false, "create: image not known"},
+	} {
+		g := newRig(t)
+		g.d.InUnit = c.inUnit
+		g.d.Cfg.RunUser = "minecraftd"
+		g.states, g.log = c.states, c.log
+		ctx, cancel := context.WithCancel(context.Background())
+		if c.step != "" {
+			var onFail func()
+			if c.ctrlC {
+				onFail = cancel
+			}
+			failing(g, c.step, onFail)
+		}
+		err := g.d.Start(ctx, StartMode{})
+		cancel()
+		got := g.changes()
+		if err == nil || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: err %v, want %q", c.name, err, c.says)
+		}
+		if handed := strings.HasPrefix(got[len(got)-1], back); handed != c.handBack {
+			t.Errorf("%s: hand-back %v, want %v; ran %q", c.name, handed, c.handBack, got)
+		}
+		if c.inUnit && strings.Contains(err.Error(), "stop hands them back") {
+			t.Errorf("%s: err %v", c.name, err)
+		}
+	}
+
+	// Native mode, when systemd-run fails.
+	n := newNativeRig(t)
+	n.states = []string{"inactive", "failed"}
+	inner := n.r.Reply
+	n.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if c.Args[0] == "systemd-run" {
+			return nil, errors.New("systemd-run: unit exists")
+		}
+		return inner(c)
+	}
+	err := n.n.Start(context.Background(), StartMode{})
+	if got := n.changes(); err == nil || !strings.HasPrefix(got[len(got)-1], back) {
+		t.Errorf("native, systemd-run fails: err %v, ran %q", err, got)
 	}
 }
 
@@ -315,6 +411,122 @@ func TestDockerStop(t *testing.T) {
 	want := []string{"sudo -v", "sudo chown -R -- alice:minecraftd " + host.Quote([]string{g.dir})}
 	if got := g.changes(); !reflect.DeepEqual(got, want) {
 		t.Errorf("ran %q, want %q", got, want)
+	}
+}
+
+// Ctrl-C in the countdown ends it at once, tells the players the stop is
+// off, and fails, with the server and its trees left as they were.
+func TestStopCountdownInterrupt(t *testing.T) {
+	defer testid.Line(t, "df7ab")
+	g := newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Sleep = func(d time.Duration) {
+		g.slept += d
+		cancel()
+	}
+	err := g.d.Stop(ctx, 300)
+	if !errors.Is(err, ErrInterrupted) || !strings.Contains(err.Error(), "wasn't stopped") {
+		t.Errorf("err %v", err)
+	}
+	if want := []string{"say The server stops in 300 seconds.", stopOff}; !reflect.DeepEqual(g.console.sent, want) {
+		t.Errorf("sent %q, want %q", g.console.sent, want)
+	}
+	if got := g.changes(); !reflect.DeepEqual(got, []string{"sudo -v"}) || g.slept != 240*time.Second {
+		t.Errorf("ran %q, slept %s", got, g.slept)
+	}
+
+	// Ctrl-C while a line goes out is the same.
+	g = newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Console = cancelConsole{fakeConsole: g.console, cancel: cancel}
+	err = g.d.Stop(ctx, 10)
+	if !errors.Is(err, ErrInterrupted) || !reflect.DeepEqual(g.console.sent, []string{stopOff}) || g.slept != 0 {
+		t.Errorf("in a send: err %v, sent %q, slept %s", err, g.console.sent, g.slept)
+	}
+
+	// Once the stop line is out, Ctrl-C leaves the server stopping.
+	g = newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Sleep = func(time.Duration) { cancel() }
+	err = g.d.Stop(ctx, 0)
+	if !errors.Is(err, ErrInterrupted) || !strings.Contains(err.Error(), "still stopping") || !reflect.DeepEqual(g.console.sent, []string{"stop"}) {
+		t.Errorf("in the save: err %v, sent %q", err, g.console.sent)
+	}
+}
+
+// cancelConsole is Ctrl-C while the first line goes out.
+type cancelConsole struct {
+	*fakeConsole
+	cancel func()
+}
+
+func (c cancelConsole) Send(ctx context.Context, line string) error {
+	c.cancel()
+	return c.fakeConsole.Send(ctx, line)
+}
+
+// The real clock's wait ends at Ctrl-C.
+func TestPauseInterrupt(t *testing.T) {
+	defer testid.Line(t, "df7ac")
+	k := &Kit{}
+	if err := k.pause(context.Background(), time.Millisecond); err != nil {
+		t.Errorf("short wait: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	start := time.Now()
+	if err := k.pause(ctx, time.Hour); !errors.Is(err, ErrInterrupted) || time.Since(start) > time.Minute {
+		t.Errorf("cut short: %v after %s", err, time.Since(start))
+	}
+	if err := k.pause(ctx, time.Hour); !errors.Is(err, ErrInterrupted) {
+		t.Errorf("already done: %v", err)
+	}
+}
+
+// In --foreground, as at boot, a slow load is only a warning and the wait
+// goes on, since an exit there makes systemd stop the server. The
+// container's exit code is passed on.
+func TestForegroundSlowLoad(t *testing.T) {
+	defer testid.Line(t, "df7ad")
+	g := newRig(t)
+	g.d.Root = true
+	g.states = []string{"", "running"}
+	if err := g.d.Start(context.Background(), StartMode{Foreground: true}); err != nil {
+		t.Fatalf("slow: %v", err)
+	}
+	lines := g.r.Lines()
+	if !strings.Contains(g.out.String(), "warning: the server didn't finish loading in 5s") || lines[len(lines)-2] != "sudo docker wait tt-minecraftd" ||
+		!strings.Contains(lines[len(lines)-1], "chown -R -- alice:minecraftd") {
+		t.Errorf("slow: ran %q, output %q", lines, g.out.String())
+	}
+
+	for _, c := range []struct {
+		exit string
+		code int
+		bad  bool
+	}{{"137\n", 137, false}, {"1\n", 1, false}, {"", 0, true}, {"Error: no such container\n", 0, true}} {
+		g = newRig(t)
+		g.d.Root = true
+		g.states = []string{"", "running"}
+		g.log = doneLine
+		g.exit = c.exit
+		err := g.d.Start(context.Background(), StartMode{Foreground: true})
+		var exit ExitError
+		got := g.changes()
+		switch {
+		case !strings.Contains(got[len(got)-1], "chown -R -- alice:minecraftd"):
+			t.Errorf("exit %q: no hand-back, ran %q", c.exit, got)
+		case c.bad && (err == nil || errors.As(err, &exit)):
+			t.Errorf("exit %q: err %v", c.exit, err)
+		case !c.bad && (!errors.As(err, &exit) || exit.Code != c.code):
+			t.Errorf("exit %q: err %v", c.exit, err)
+		}
 	}
 }
 
@@ -460,6 +672,41 @@ func TestStartChecksFirewall(t *testing.T) {
 		for _, c := range g.r.Ran {
 			if c.Args[0] == "nft" {
 				t.Errorf("native %v, firewall off: asked nft", native)
+			}
+		}
+	}
+}
+
+// Rules written for another config, or that miss a new IPv6 subnet, stop a
+// start in either mode before anything changes, even with the table loaded.
+func TestStartChecksFirewallRules(t *testing.T) {
+	defer testid.Line(t, "df7a5")
+	for _, native := range []bool{false, true} {
+		for what, change := range map[string]func(g *nativeRig){
+			"allowFrom": func(g *nativeRig) { g.d.Cfg.AllowFrom = []string{"any"} },
+			"runUser":   func(g *nativeRig) { g.d.Cfg.RunUser = "mc" },
+			"bedrock":   func(g *nativeRig) { g.d.Cfg.Bedrock = !g.d.Cfg.Bedrock },
+			"no file": func(g *nativeRig) {
+				if err := os.Remove(g.d.FirewallFiles.Rules); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"new subnet": func(g *nativeRig) {
+				route := "20010db8000100020000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n"
+				if err := os.WriteFile(g.d.FirewallFiles.Routes, []byte(route), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		} {
+			g := newNativeRig(t)
+			change(g)
+			start := g.d.Start
+			if native {
+				start = g.n.Start
+			}
+			err := start(context.Background(), StartMode{})
+			if err == nil || !strings.Contains(err.Error(), "firewall rules don't match") || !strings.Contains(err.Error(), "repair") || len(g.changes()) != 1 {
+				t.Errorf("native %v, %s: err %v, ran %q", native, what, err, g.changes())
 			}
 		}
 	}
@@ -652,5 +899,34 @@ func TestFindContainer(t *testing.T) {
 			t.Errorf("asked podman after finding docker's: %q", g.r.Lines())
 			break
 		}
+	}
+}
+
+// A jar's name comes from the server account, so start's refusal shows it
+// without its escape codes.
+func TestStartCleansJarName(t *testing.T) {
+	defer testid.Line(t, "df79s")
+	g := newRig(t)
+	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "\x1b]0;owned\x07\x1b[2K\rGeyser-Spigot.jar"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := g.d.Start(context.Background(), StartMode{})
+	out := g.out.String()
+	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "not approved: plugins/]0;owned[2KGeyser-Spigot.jar\n") {
+		t.Errorf("err %v, output %q", err, out)
+	}
+}
+
+// The log tail of a server that died while loading is the server's text, so
+// it's shown without escape codes, a line per line.
+func TestStartCleansLogTail(t *testing.T) {
+	defer testid.Line(t, "df79t")
+	g := newRig(t)
+	g.states = []string{"", "exited"}
+	g.log = "first \x1b]52;c;ZWNobyBoaQ==\x07line\r\nsecond\x1b[2J line\n"
+	err := g.d.Start(context.Background(), StartMode{})
+	out := g.out.String()
+	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "first ]52;c;ZWNobyBoaQ==line\nsecond[2J line\n") {
+		t.Errorf("err %v, output %q", err, out)
 	}
 }

@@ -6,9 +6,12 @@
 package settings
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 )
@@ -120,18 +123,19 @@ func scan(c *config.Config, fix bool) ([]Problem, error) {
 		}
 		byFile[name] = append(byFile[name], s)
 	}
+	// A YAML file that can't be read or fixed doesn't stop the others.
+	var errs []error
 	for _, name := range order {
 		found, err := scanYAML(top, byFile[name], fix)
 		problems = append(problems, found...)
-		if err != nil {
-			return problems, err
-		}
+		errs = append(errs, err)
 	}
-	if !c.Bedrock {
-		return problems, nil
+	if c.Bedrock {
+		found, err := scanGeyser(top, c, fix)
+		problems = append(problems, found...)
+		errs = append(errs, err)
 	}
-	found, err := scanGeyser(top, c, fix)
-	return append(problems, found...), err
+	return problems, errors.Join(errs...)
 }
 
 func joinName(dir, file string) string {
@@ -169,6 +173,8 @@ func scanProperties(top dir, rules []rule, fix bool) ([]Problem, error) {
 	return problems, top.Write(propertiesFile, props.bytes(), st)
 }
 
+func isFalse(have string) bool { return strings.EqualFold(have, "false") }
+
 func scanYAML(top dir, list []yamlSetting, fix bool) ([]Problem, error) {
 	d := top
 	if list[0].dir != "" {
@@ -190,22 +196,20 @@ func scanYAML(top dir, list []yamlSetting, fix bool) ([]Problem, error) {
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(string(text), "\n")
-	var problems []Problem
-	for _, s := range list {
-		i, ok := yamlFind(lines, s.path)
-		if !ok {
-			continue
+	keysFor := func(*yaml.Node) []yamlKey {
+		keys := make([]yamlKey, 0, len(list))
+		for _, s := range list {
+			keys = append(keys, yamlKey{path: s.path, want: "false", missingOK: true, ok: isFalse})
 		}
-		have := yamlValue(lines[i])
-		if strings.EqualFold(have, "false") {
-			continue
-		}
-		problems = append(problems, Problem{File: name, Key: strings.Join(s.path, "."), Have: have, Want: "false"})
-		lines[i] = yamlSet(lines[i], "false")
+		return keys
 	}
-	if !fix || len(problems) == 0 {
-		return problems, nil
+	if !fix {
+		problems, _, err := yamlScan(name, text, keysFor)
+		return problems, err
 	}
-	return problems, d.Write(list[0].file, []byte(strings.Join(lines, "\n")), st)
+	problems, fixed, err := yamlFix(name, text, keysFor)
+	if err != nil || len(problems) == 0 {
+		return problems, err
+	}
+	return problems, d.Write(list[0].file, fixed, st)
 }

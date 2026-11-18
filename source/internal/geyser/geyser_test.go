@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -135,6 +136,42 @@ func TestInstall(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(outside); len(entries) > 0 {
 		t.Errorf("wrote through the link: %v", entries)
+	}
+}
+
+// A new plugins/ that the server swaps for a link before its mode is set
+// leaves the link's target alone. A file outside stands in for /etc/passwd.
+func TestInstallSwappedFolder(t *testing.T) {
+	defer testid.Line(t, "df79m")
+	jar := []byte("PK not really a jar")
+	api := newAPI(t, &fakeAPI{name: "Geyser-Spigot.jar", sum: sum(jar), jar: jar})
+	b, err := api.Latest(context.Background(), "geyser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, target := t.TempDir(), filepath.Join(t.TempDir(), "passwd")
+	if err := os.WriteFile(target, []byte("root:x:0:0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	swapped := false
+	linksafe.AfterMkdirat = func(path string) {
+		if path != dir+"/plugins" {
+			return
+		}
+		swapped = true
+		if err := os.Remove(path); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { linksafe.AfterMkdirat = nil })
+	if err := api.Install(context.Background(), dir, b); err == nil {
+		t.Error("no error with plugins/ swapped for a link")
+	}
+	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o644 || !swapped {
+		t.Errorf("target %v %v, swapped %v", fi.Mode(), err, swapped)
 	}
 }
 

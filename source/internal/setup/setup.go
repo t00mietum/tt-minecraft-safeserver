@@ -204,6 +204,10 @@ func (s *Setup) existing(ctx context.Context) error {
 	if s.Adopt != "" {
 		return fmt.Errorf("%s is there already, so this isn't a new install; set serverDir in it to move to another server folder", s.ConfigPath)
 	}
+	// Geyser and Floodgate would land in a live server's plugins folder.
+	if err := s.refuseRunning(ctx); err != nil {
+		return err
+	}
 	cfg := s.Loaded
 	var bedrock []geyser.Build
 	// A missing tree is repair's to report.
@@ -481,7 +485,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		if about == "" {
 			about = "no plugin.yml"
 		}
-		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", j.Name, j.SHA256, about)
+		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", server.Clean(j.Name), j.SHA256, about)
 		if j.Source != "" {
 			fmt.Fprintf(w, "  source: %s\n", j.Source)
 		}
@@ -640,12 +644,13 @@ func (s *Setup) writeConfig(opts []config.Option) error {
 }
 
 // firewall is step 9, repair's firewall check with its fixes. A dry run may
-// not have nft yet, since apt only printed its install.
+// not have nft yet, since apt only printed its install. Without apt to get it,
+// the check runs and fails as the real run does.
 func (s *Setup) firewall(ctx context.Context, c *config.Config, report repair.Report) {
 	if !c.Firewall {
 		return
 	}
-	if s.DryRun && !hasNft() {
+	if s.DryRun && !hasNft() && slices.Contains(s.packages(*c), "nftables") {
 		report("PLAN", "firewall rules written to "+firewall.RulesFile+", and "+firewall.UnitName+" enabled and started")
 		return
 	}
@@ -743,7 +748,7 @@ func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser
 		return err
 	}
 	for _, j := range jars {
-		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", j.Name)
+		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", server.Clean(j.Name))
 	}
 	return nil
 }

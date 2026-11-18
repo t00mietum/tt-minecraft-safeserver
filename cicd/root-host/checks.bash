@@ -37,11 +37,34 @@ check() {
 # Native mode is off by a constant while it's deferred (backlog 2026111318002855),
 # and --native shows in start's help only when it's on.
 native() {
-	if tt-minecraftd start --help 2>&1 | grep -q -- '--native '; then check "${@}"; else printf 'SKIP %s %s (native mode is off)\n' "${1}" "${2}"; fi
+	if [[ "$(tt-minecraftd start --help 2>&1)" == *'--native '* ]]; then check "${@}"; else printf 'SKIP %s %s (native mode is off)\n' "${1}" "${2}"; fi
 }
 
+# Output that can run long goes to a file before the grep. A grep -q at the end
+# of a pipe can exit while the writer still writes, and pipefail then fails the
+# check on the writer's SIGPIPE.
 say() { printf '%s\n' "${*}"; }
 has() { grep -q -- "${1}" "${2}" || { say "no '${1}' in ${2}"; return 1; }; }
+# Paper logs a console line on its next tick, tens of ms after the tool typed
+# it and exited, so the log is read until it shows up.
+logged() {
+	local i
+	for ((i = 0; i < 100; i++)); do
+		sudo grep -q -- "${1}" "${2}" && return 0
+		sleep 0.1
+	done
+	say "no '${1}' in ${2} after 10s"
+	return 1
+}
+statusHas() {
+	local rc=0
+	tt-minecraftd status > status.out || rc=$?
+	cat status.out
+	((rc == 0)) && has "${1}" status.out
+}
+# The tool's own lines from the boot unit. The unit's journal also has the
+# container's output, since Podman leaves conmon in the unit's cgroup.
+toolJournal() { sudo journalctl --no-pager _SYSTEMD_UNIT=tt-minecraftd.service _COMM=tt-minecraftd | tail -20; }
 counter() { sudo nft -j list counter inet tt_minecraftd "${1}" | python3 -c 'import json,sys; print([c["counter"]["packets"] for c in json.load(sys.stdin)["nftables"] if "counter" in c][0])'; }
 gateway() { ip -4 route show default | awk '{print $3; exit}'; }
 # If cmd misses its answer, show what the log had.
@@ -82,14 +105,14 @@ fJarsInContainer() {
 	! sudo podman exec tt-minecraftd mv "${dir}/plugins/Geyser-Spigot.jar" "${dir}/plugins/x.jar"
 }
 
-fStatusPodman() { tt-minecraftd status | tee /dev/stderr | grep -q 'running in podman mode, as minecraftd'; }
+fStatusPodman() { statusHas 'running in podman mode, as minecraftd'; }
 
 fCmd() { tt-minecraftd cmd list | tee cmd.out; answered; }
 
 fConsole() {
 	local word="console-${RANDOM}"
 	python3 "${here}/console.py" "say ${word}" || return 1
-	has "${word}" "${log}" && tt-minecraftd status | grep -q 'running in'
+	has "${word}" "${log}" && statusHas 'running in'
 }
 
 fStun() {
@@ -108,6 +131,24 @@ fFirewallOut() {
 		[[ "$(counter "${t%%:*}")" -gt "${was}" ]] || { say "${t%%:*} didn't count"; return 1; }
 	done
 	sudo -u minecraftd curl -s -m 10 -o /dev/null https://fill.papermc.io/v3/projects/paper
+}
+
+fStopCancel() {
+	local pid rc=0
+	tt-minecraftd stop --warn 60 > cancel.out 2>&1 &
+	pid=$!
+	for _ in $(seq 30); do
+		grep -q 'The server stops in 60 seconds' "${log}" && break
+		sleep 1
+	done
+	# As Ctrl-C. The countdown's first wait is 30 seconds.
+	kill -INT "${pid}"
+	wait "${pid}" || rc=$?
+	cat cancel.out
+	((rc == 1)) || { say "stop exited ${rc}"; return 1; }
+	logged 'The stop is off' "${log}" && has 'interrupted' cancel.out || return 1
+	! grep -q 'Saving worlds' "${log}" || { say "it saved"; return 1; }
+	sudo podman ps --format '{{.Names}}' | grep -qx tt-minecraftd
 }
 
 fStopWarn() {
@@ -147,7 +188,7 @@ fNativeStart() {
 
 fNativeFollow() {
 	# runMode still says podman, as after start --native.
-	tt-minecraftd status | grep -q 'running in native mode' || return 1
+	statusHas 'running in native mode' || return 1
 	tt-minecraftd cmd list | tee cmd.out
 	answered && has 'runs in native mode' cmd.out || return 1
 	fConsole
@@ -159,8 +200,19 @@ fNativeStop() {
 	! systemctl is-active tt-minecraftd-server && [[ "$(stat -c %U "${dir}/world")" == op ]]
 }
 
+# A failed boot check would leave the unit enabled and the server up, and the
+# checks after it would fail on that.
 fBoot() {
-	echo 'startAtBoot: true' | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
+	fBootSteps && return 0
+	tt-minecraftd stop > /dev/null 2>&1
+	sudo sed -i '/^startAtBoot:/d; /^startTimeout:/d' /etc/tt-minecraftd/config.shcl
+	tt-minecraftd repair > /dev/null 2>&1
+	return 1
+}
+
+fBootSteps() {
+	# Paper takes longer than startTimeout, as a big world can at boot.
+	printf 'startAtBoot: true\nstartTimeout: 1\n' | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
 	tt-minecraftd repair | tee boot-on.out | grep -E '^(FIXED|FAILED)'
 	has 'tt-minecraftd.service enabled' boot-on.out && systemctl is-enabled tt-minecraftd.service || return 1
 	# repair never starts it.
@@ -174,17 +226,21 @@ fBoot() {
 		sleep 1
 	done
 	if ! systemctl is-active tt-minecraftd.service || ! sudo podman ps --format '{{.Names}}' | grep -qx tt-minecraftd; then
-		sudo journalctl -u tt-minecraftd.service | tail -20
+		toolJournal
 		return 1
 	fi
-	tt-minecraftd status | grep -q 'running in podman mode' || return 1
+	statusHas 'running in podman mode' || return 1
+	#  shellcheck disable=SC2024  ## The file is meant to be op's.
+	sudo journalctl --no-pager -u tt-minecraftd.service > boot-journal.out
+	has "warning: the server didn't finish loading" boot-journal.out || { say "the load wasn't slow"; toolJournal; return 1; }
 	tt-minecraftd stop --warn 2 | tee boot-stop.out || return 1
 	sudo grep -q 'Saving chunks' "${log}" || { say "no save in the log"; return 1; }
-	if systemctl is-active tt-minecraftd.service || [[ "$(stat -c %U "${dir}/world")" != op ]]; then
-		sudo journalctl -u tt-minecraftd.service | tail -20
+	# start --foreground exits with the server's code, which is 0 after stop.
+	if systemctl is-active tt-minecraftd.service || systemctl is-failed --quiet tt-minecraftd.service || [[ "$(stat -c %U "${dir}/world")" != op ]]; then
+		toolJournal
 		return 1
 	fi
-	sudo sed -i '/^startAtBoot:/d' /etc/tt-minecraftd/config.shcl
+	sudo sed -i '/^startAtBoot:/d; /^startTimeout:/d' /etc/tt-minecraftd/config.shcl
 	tt-minecraftd repair | tee boot-off.out | grep -E '^(FIXED|FAILED)'
 	has 'disabled and removed' boot-off.out && [[ ! -e /etc/systemd/system/tt-minecraftd.service ]]
 }
@@ -236,20 +292,25 @@ fAgentHandOff() {
 # host's kernel, so it's destroyed on the way out whatever happens.
 pool="${ZFS_POOL:-}"
 ds="${pool}/mc"
+# The privileged container sees every pool on the host, so only a name
+# root-host.bash makes is ever touched, whoever set ZFS_POOL.
+fZfsOurs() { [[ "${pool}" == ttmcss-test-* ]] || { say "refused: pool '${pool}' isn't a ttmcss-test-* one"; return 1; }; }
+[[ -z "${pool}" ]] || fZfsOurs || exit 2
 snaps() { sudo zfs list -H -o name -t snapshot -d 1 "${ds}" | sed 's/.*@//'; }
 # The pool's history lines for one zfs subcommand, with who ran it.
 hist() { sudo zpool history -l "${pool}" | grep -E "^[^ ]+ zfs ${1} " || true; }
 newest() { snaps | grep -E "_${1}\$" | tail -1; }
 
 fZfsGone() {
-	[[ -n "${pool}" ]] && sudo zpool list -H -o name "${pool}" > /dev/null 2>&1 || return 0
+	[[ -n "${pool}" ]] && fZfsOurs && sudo zpool list -H -o name "${pool}" > /dev/null 2>&1 || return 0
 	tt-minecraftd stop > /dev/null 2>&1
 	sudo zpool destroy -f "${pool}" && echo "destroyed pool ${pool}"
 }
 
 fZfsPool() {
 	local file="${ZFS_FILE:?}"
-	[[ "${pool}" == ttmcss-test-* && "${file}" == */tmp/*/zpool.img ]] || { say "bad pool ${pool} or file ${file}"; return 1; }
+	fZfsOurs || return 1
+	[[ "${file}" == */tmp/*/zpool.img ]] || { say "bad file ${file}"; return 1; }
 	# The run folder is the host user's, not op's.
 	sudo truncate -s 512M "${file}" || return 1
 	sudo zpool create -o cachefile=none -m none "${pool}" "${file}" || return 1
@@ -361,6 +422,7 @@ check df685 "cmd list in podman mode" fCmd
 check df686 "console line and Ctrl-C detach in podman mode" fConsole
 check df687 "Geyser STUN answers behind the firewall" fStun
 check df688 "firewall drops and counts the account's local, LAN, and non-web connections" fFirewallOut
+check df7ag "Ctrl-C in stop --warn's countdown calls the stop off" fStopCancel
 check df689 "stop --warn 10 saves and hands the trees back" fStopWarn
 check df68a "start refuses a changed jar" fRefuseChanged
 native df68b "native start, sandbox, and locked jars" fNativeStart
@@ -377,3 +439,6 @@ exit "${failed}"
 ##		- 2026-11-12: Created.
 ##		- 2026-11-12: Agent hand-off and ZFS snapshot checks.
 ##		- 2026-11-13: Boot unit checks. Native checks skip while native mode is off.
+##		- 2026-11-17: Ctrl-C in the stop countdown. The boot check loads past startTimeout, and checks the unit didn't fail.
+##		- 2026-11-18: Refuses a ZFS_POOL that isn't a ttmcss-test-* name, before anything runs and again before the destroy.
+##		- 2026-11-18: Waits for Paper to log the stop-off line. Long output goes to a file before its grep. A failed boot check stops the server and turns the unit off.

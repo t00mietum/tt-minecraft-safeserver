@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 )
 
 // API is an agent behind a chat API: OpenAI's chat completions, which local
@@ -40,9 +42,15 @@ func (a API) Ask(ctx context.Context, prompt string) (string, error) {
 	if a.Fetch == nil {
 		a.Fetch = &Fetcher{}
 	}
-	if a.Client == nil {
-		a.Client = &http.Client{Timeout: 5 * time.Minute}
+	c := &http.Client{Timeout: 5 * time.Minute}
+	if a.Client != nil {
+		own := *a.Client
+		c = &own
 	}
+	// On a 307 or 308 Go sends the POST again with its headers, the key
+	// included, to whatever host it names.
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	a.Client = c
 	turns := a.MaxTurns
 	if turns == 0 {
 		turns = 30
@@ -180,10 +188,13 @@ func (a API) post(ctx context.Context, path string, body, into any) error {
 	if resp.StatusCode != http.StatusOK {
 		says, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) // the status is the error either way
 		hint := ""
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		switch {
+		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 			hint = ". The key comes from TT_MINECRAFTD_AGENT_KEY"
+		case resp.StatusCode >= 300 && resp.StatusCode < 400:
+			hint = ". Redirects aren't followed, so agentURL needs the new address"
 		}
-		return fmt.Errorf("the agent's server said %s: %s%s", resp.Status, clean(string(says), 400), hint)
+		return fmt.Errorf("the agent's server said %s: %s%s", download.Status(resp.StatusCode), clean(string(says), 400), hint)
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIReply)).Decode(into); err != nil {
 		return fmt.Errorf("the agent's server sent something that isn't its JSON: %w", err)

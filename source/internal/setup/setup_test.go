@@ -137,7 +137,7 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		Exe:         filepath.Join(dir, "tt-minecraftd"),
 		Accounts: func(c *config.Config) *repair.Host {
 			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, BootFile: filepath.Join(dir, "boot.service")}
+				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, Routes: filepath.Join(dir, "ipv6_route"), BootFile: filepath.Join(dir, "boot.service")}
 		},
 		Paper:  &r.paper,
 		Geyser: &r.geyser,
@@ -620,8 +620,9 @@ func TestExistingInstall(t *testing.T) {
 		if !reflect.DeepEqual(r.repairs, c.want) {
 			t.Errorf("%s: repair runs %v, want %v", c.name, r.repairs, c.want)
 		}
-		if len(r.ran()) > 0 {
-			t.Errorf("%s: ran %q", c.name, r.ran())
+		// Only the running server check's ps; adopt is refused before it.
+		if ran := r.ran(); slices.ContainsFunc(ran, func(s string) bool { return !strings.HasPrefix(s, "ps ") }) {
+			t.Errorf("%s: ran %q", c.name, ran)
 		}
 	}
 }
@@ -818,6 +819,36 @@ func TestExistingBedrock(t *testing.T) {
 	}
 }
 
+// On an existing install, a running server stops setup before it downloads,
+// asks, repairs, or updates anything, dry run included.
+func TestExistingRefusesRunning(t *testing.T) {
+	defer testid.Line(t, "df7ar")
+	for _, dry := range []bool{false, true} {
+		r := newRig(t, nil, "y\n")
+		if err := os.MkdirAll(filepath.Join(r.server, "plugins"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(r.s.ConfigPath), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(r.s.ConfigPath, []byte("runMode: podman\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r.s.Loaded = &config.Config{RunMode: "podman", ServerDir: r.server, Bedrock: true}
+		r.s.DryRun = dry
+		r.ps = "safeserver 4242 java -Xmx4G -jar paper-26.3-244.jar --nogui\n"
+		updated := false
+		r.s.Update = func(context.Context, *config.Config) error { updated = true; return nil }
+		err := r.s.Do(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "pid 4242") || !strings.Contains(err.Error(), "stop it before setup") {
+			t.Errorf("dry run %t: error %v", dry, err)
+		}
+		if len(r.geyser.asked) > 0 || len(r.geyser.installed) > 0 || len(r.repairs) > 0 || updated || strings.Contains(r.out.String(), "?") {
+			t.Errorf("dry run %t: went on: asked %q, installed %q, repairs %v, updated %t\n%s", dry, r.geyser.asked, r.geyser.installed, r.repairs, updated, r.out)
+		}
+	}
+}
+
 // On an existing install, update runs after repair, even when a repair check
 // failed, since update can be what fixes it.
 func TestExistingUpdate(t *testing.T) {
@@ -907,6 +938,36 @@ func TestFirewall(t *testing.T) {
 		t.Fatalf("%v\n%s", err, r.out)
 	}
 	hasAll(t, "dry run", strings.Split(r.out.String(), "\n"), "PLAN    firewall rules written to /etc/tt-minecraftd/firewall.nft")
+}
+
+// With no nft and no apt to get it, the dry run stops at the firewall step
+// with the real run's FAILED line, rather than planning rules it can't load.
+func TestFirewallDryRunNoApt(t *testing.T) {
+	defer testid.Line(t, "df7aq")
+	failed := func(dry bool) (string, error) {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.nft = false
+		r.s.Yes, r.s.AcceptEULA, r.s.DryRun = true, true, dry
+		if dry {
+			r.f.Reply = func(host.Cmd) ([]byte, error) { return nil, nil }
+		}
+		err := r.s.Do(context.Background())
+		var lines []string
+		for _, l := range strings.Split(r.out.String(), "\n") {
+			if strings.HasPrefix(l, "FAILED") || strings.Contains(l, "firewall rules written") {
+				lines = append(lines, l)
+			}
+		}
+		return strings.Join(lines, "\n"), err
+	}
+	live, liveErr := failed(false)
+	dry, dryErr := failed(true)
+	if liveErr == nil || dryErr == nil || dryErr.Error() != liveErr.Error() {
+		t.Errorf("errors: real %v, dry run %v", liveErr, dryErr)
+	}
+	if !strings.Contains(live, "FAILED  nftables isn't installed") || dry != live {
+		t.Errorf("real run:\n%s\ndry run:\n%s", live, dry)
+	}
 }
 
 // Step 11 installs and enables the boot unit with startAtBoot on, after the

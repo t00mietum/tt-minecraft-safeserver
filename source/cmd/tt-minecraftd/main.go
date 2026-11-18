@@ -35,6 +35,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	setuppkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/setup"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -161,15 +162,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	if err := dispatch(ctx, inv, stdout); err != nil {
-		var code exitCode
-		if errors.As(err, &code) {
-			return int(code)
-		}
-		fmt.Fprintf(stderr, "tt-minecraftd: %v\n", err)
-		return exitError
+	return failed(dispatch(ctx, inv, stdout), stderr)
+}
+
+// failed shows err and gives the exit code for it.
+func failed(err error, stderr io.Writer) int {
+	if err == nil {
+		return exitOK
 	}
-	return exitOK
+	var code exitCode
+	if errors.As(err, &code) {
+		return int(code)
+	}
+	// Errors often name a file the server account named.
+	fmt.Fprintf(stderr, "tt-minecraftd: %s\n", server.CleanLines(err.Error()))
+	// The boot unit's start --foreground ends with the server's own code, so
+	// systemd sees a crash.
+	var exit launch.ExitError
+	if errors.As(err, &exit) && exit.Code > 0 && exit.Code < 256 {
+		return exit.Code
+	}
+	return exitError
 }
 
 func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
@@ -198,7 +211,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
-	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
+	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, InUnit: inUnit()}
 	if name == "start" || name == "stop" {
 		served, err := bootServes(ctx, inv.configPath)
 		switch {
@@ -242,11 +255,15 @@ var serverMode = func(ctx context.Context, c *config.Config) string {
 	return mode
 }
 
+// inUnit says whether this process runs inside the boot unit. A var so
+// tests don't depend on where they run.
+var inUnit = boot.InsideNow
+
 // bootServes says whether the boot unit is enabled for this config, from
 // outside the unit. Its own start --foreground and stop do the real work. A
 // var so tests don't read the host's units.
 var bootServes = func(ctx context.Context, configPath string) (bool, error) {
-	if boot.InsideNow() {
+	if inUnit() {
 		return false, nil
 	}
 	runner := host.NewExec(false)
@@ -501,7 +518,7 @@ func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	}
 	failed := false
 	report := func(state, text string) {
-		fmt.Fprintf(w, "%-7s %s\n", state, text)
+		fmt.Fprintf(w, "%-7s %s\n", state, server.CleanLines(text))
 		failed = failed || state == "FAILED"
 	}
 	h, before, after := repairSteps(inv)
@@ -546,7 +563,7 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 		return
 	}
 	for _, warn := range warns {
-		fmt.Fprintf(w, "warning: %s\n", warn)
+		fmt.Fprintf(w, "warning: %s\n", server.Clean(warn.String()))
 	}
 	c, err := plugins.CheckJars(inv.cfg.ServerDir, approved, &plugins.Sums{})
 	if err != nil {
@@ -606,7 +623,7 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 			state = "changed"
 		}
 		fmt.Fprintf(w, "\n%s (%s)\n  sha256: %s\n  size:   %d bytes\n  date:   %s\n  says:   %s\n",
-			j.Name, state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
+			server.Clean(j.Name), state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
 		// A changed jar keeps the source it has.
 		if p := geyser.Project(info.Name, info.About); state == "new" && p != "" {
 			info.Source = geyserAPI.Source(p)

@@ -6,6 +6,7 @@ package launch
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
@@ -45,6 +47,14 @@ func attachStandIn() int {
 	}
 	var got []byte
 	buf := make([]byte, 4096)
+	if mode == "stuck" {
+		// Reads, but never detaches.
+		for {
+			if _, err := os.Stdin.Read(buf); err != nil {
+				return 5
+			}
+		}
+	}
 	for {
 		n, err := os.Stdin.Read(buf)
 		if err != nil {
@@ -94,6 +104,13 @@ func TestAttachConsole(t *testing.T) {
 	t.Setenv("TT_ATTACH_STANDIN", "gone")
 	if err := c.Send(context.Background(), "list"); err == nil || !strings.Contains(err.Error(), "no container") {
 		t.Errorf("no container: %v", err)
+	}
+	// Ctrl-C is an interrupt, not an attach that didn't detach in time.
+	t.Setenv("TT_ATTACH_STANDIN", "stuck")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(300*time.Millisecond, cancel)
+	if err := c.Send(ctx, "list"); !errors.Is(err, ErrInterrupted) || strings.Contains(err.Error(), "didn't detach") {
+		t.Errorf("Ctrl-C: %v", err)
 	}
 	t.Setenv("TT_ATTACH_STANDIN", "docker")
 	if err := c.Send(context.Background(), "say hi\nop Steve"); err == nil {

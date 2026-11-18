@@ -29,16 +29,53 @@ type Kit struct {
 	Cfg     *config.Config
 	// PluginsFile is the approved jar list, plugins.shcl.
 	PluginsFile string
-	Out         io.Writer
-	Root        bool
-	DryRun      bool
-	Sleep       func(time.Duration)
+	// FirewallFiles are the firewall's files, which tests point elsewhere.
+	FirewallFiles firewall.Files
+	Out           io.Writer
+	Root          bool
+	DryRun        bool
+	// Sleep stands in for the clock in tests. Nil is the real one, which
+	// Ctrl-C cuts short.
+	Sleep func(time.Duration)
 	// Now named the start and stop snapshots, which are gone.
 	// Now func() time.Time
 	// Boot is set when the boot unit is enabled for this config, so start and
 	// stop go through systemctl. Inside the unit it's never set.
-	Boot   bool
+	Boot bool
+	// InUnit is set inside the boot unit, as start --foreground and its
+	// ExecStop run. There start leaves the hand-back to ExecStop's stop.
+	InUnit bool
 	sudoed bool
+}
+
+// ErrInterrupted is a wait cut short by Ctrl-C or SIGTERM.
+var ErrInterrupted = errors.New("interrupted")
+
+// errSlowLoad is a server that's still up but hasn't finished loading.
+var errSlowLoad = errors.New("the server didn't finish loading")
+
+// stopOff goes to the players when Ctrl-C ends the countdown.
+const stopOff = "say The stop is off. The server stays up."
+
+// pause waits d, or until ctx ends.
+func (k *Kit) pause(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return ErrInterrupted
+	}
+	if k.Sleep != nil {
+		k.Sleep(d)
+	} else {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+		case <-t.C:
+		}
+	}
+	if ctx.Err() != nil {
+		return ErrInterrupted
+	}
+	return nil
 }
 
 // Running says whether the server runs in the configured mode.
@@ -64,8 +101,19 @@ type engine interface {
 	kill(ctx context.Context) error
 }
 
+// say cleans what it's given, since jar names, settings values, and the log
+// tail come from the server account.
 func (k *Kit) say(format string, a ...any) {
-	fmt.Fprintf(k.Out, format+"\n", a...)
+	clean := make([]any, len(a))
+	for i, v := range a {
+		switch v.(type) {
+		case string, error, fmt.Stringer:
+			clean[i] = server.CleanLines(fmt.Sprint(v))
+		default:
+			clean[i] = v
+		}
+	}
+	fmt.Fprintf(k.Out, format+"\n", clean...)
 }
 
 func (k *Kit) warn(warns []string) {
@@ -85,7 +133,8 @@ func (k *Kit) sudoUp(ctx context.Context) error {
 		k.sudoed = true
 		return nil
 	}
-	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Tty: true})
+	// A look, so dry run asks here too, rather than at its first sudo look.
+	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Look: true, Tty: true})
 	k.sudoed = err == nil
 	return err
 }
@@ -162,11 +211,20 @@ func (k *Kit) checkPlugins() error {
 	return errors.New("a jar is new or changed; sudo tt-minecraftd repair --approve-plugins shows each one and asks")
 }
 
-// checkFirewall refuses a start without the tool's nftables table, so the
-// server never runs unfenced. See design.md, Firewall.
+// checkFirewall refuses a start without the tool's nftables table, or with
+// rules written for another config or another network, so the server never
+// runs unfenced. The file stands in for the table, since the unit loads it
+// and repair reloads it whenever it writes it. See design.md, Firewall.
 func (k *Kit) checkFirewall(ctx context.Context) error {
 	if !k.Cfg.Firewall {
 		return nil
+	}
+	same, err := firewall.Matches(k.Cfg, k.FirewallFiles)
+	if err != nil {
+		return fmt.Errorf("can't check the firewall rules: %w", err)
+	}
+	if !same {
+		return errors.New("the firewall rules don't match the config or the host's network; sudo tt-minecraftd repair writes and loads them")
 	}
 	up, err := firewall.Loaded(ctx, k.Run)
 	if err != nil {
@@ -217,9 +275,23 @@ func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 			k.say("%s", tail)
 			return errors.New("the server exited while loading")
 		}
-		k.Sleep(time.Second)
+		if err := k.pause(ctx, time.Second); err != nil {
+			return fmt.Errorf("%w while the server loads; it's still running, so see status or %s", err, e.logHint())
+		}
 	}
-	return fmt.Errorf("the server didn't finish loading in %s; it's still running, so see status or %s", k.Cfg.StartTimeout, e.logHint())
+	return fmt.Errorf("%w in %s; it's still running, so see status or %s", errSlowLoad, k.Cfg.StartTimeout, e.logHint())
+}
+
+// slowAtBoot says whether a failed wait for the load is only a warning, and
+// gives it. In --foreground the server outlives a slow load: an exit there
+// ends the boot unit, and systemd then runs its ExecStop, so a big world or
+// a slow host would never come up at boot.
+func (k *Kit) slowAtBoot(mode StartMode, err error) bool {
+	if !mode.Foreground || !errors.Is(err, errSlowLoad) {
+		return false
+	}
+	k.say("warning: %s", err)
+	return true
 }
 
 // stop runs design.md's stop steps that are built so far. warn is the
@@ -317,13 +389,30 @@ func (k *Kit) countDown(ctx context.Context, warn int) error {
 			unit = "second"
 		}
 		if err := k.Console.Send(ctx, fmt.Sprintf("say The server stops in %d %s.", m, unit)); err != nil {
+			if ctx.Err() != nil {
+				return k.callOff(ctx)
+			}
 			return err
 		}
 		if !k.DryRun {
-			k.Sleep(time.Duration(m-marks[i+1]) * time.Second)
+			if err := k.pause(ctx, time.Duration(m-marks[i+1])*time.Second); err != nil {
+				return k.callOff(ctx)
+			}
 		}
 	}
 	return nil
+}
+
+// callOff tells the players the stop is off, after Ctrl-C ended the
+// countdown. ctx is done by then, so the line goes out on one of its own.
+func (k *Kit) callOff(ctx context.Context) error {
+	tell, cancel := context.WithTimeout(context.WithoutCancel(ctx), attachTimeout)
+	defer cancel()
+	err := fmt.Errorf("%w; the server wasn't stopped", ErrInterrupted)
+	if sendErr := k.Console.Send(tell, stopOff); sendErr != nil {
+		return errors.Join(err, fmt.Errorf("the players weren't told the stop is off: %w", sendErr))
+	}
+	return err
 }
 
 func (k *Kit) waitStopped(ctx context.Context, e engine) error {
@@ -337,10 +426,52 @@ func (k *Kit) waitStopped(ctx context.Context, e engine) error {
 			k.say("The server stopped.")
 			return nil
 		}
-		k.Sleep(time.Second)
+		if err := k.pause(ctx, time.Second); err != nil {
+			return fmt.Errorf("%w while the server saves; it's still stopping, and stop again hands the trees back once it's down", err)
+		}
 	}
 	k.say("The server is still up after %s; sending SIGTERM.", k.Cfg.StopTimeout)
 	return e.kill(ctx)
+}
+
+// startHandBack is the hand-back at the end of a start. Inside the boot unit
+// it's left to ExecStop's stop. systemd runs that after every start, even
+// when the server ended by itself, and sends SIGTERM to the unit once stop
+// is done, which would cut a second chown short and fail the unit.
+func (k *Kit) startHandBack(ctx context.Context) error {
+	if k.InUnit {
+		return nil
+	}
+	return k.handBack(ctx)
+}
+
+// failedStart is a start that failed after the hand-off. With the server
+// down, the trees come back, so they don't stay with the service account. A
+// slow or cut-short load leaves the server up, and its error says so.
+func (k *Kit) failedStart(ctx context.Context, e engine, err error) error {
+	if k.InUnit || errors.Is(err, errSlowLoad) || errors.Is(err, ErrInterrupted) {
+		return err
+	}
+	// After Ctrl-C a chown would get the same SIGINT.
+	if ctx.Err() == nil {
+		if up, upErr := e.running(ctx); upErr == nil && !up {
+			return errors.Join(err, k.handBack(ctx))
+		}
+	}
+	return fmt.Errorf("%w; the trees are still %s's, and stop hands them back", err, k.Cfg.RunUser)
+}
+
+// stoppedByUnit says whether start --foreground's wait for the server's end
+// was cut short only by systemd's SIGTERM, after ExecStop's stop brought the
+// server down. That's a clean stop, not a failure of the unit.
+func (k *Kit) stoppedByUnit(ctx context.Context, e engine) bool {
+	if !k.InUnit || ctx.Err() == nil {
+		return false
+	}
+	look, cancel := context.WithTimeout(context.WithoutCancel(ctx), attachTimeout)
+	defer cancel()
+	up, err := e.running(look)
+	return err == nil && !up
 }
 
 func (k *Kit) handBack(ctx context.Context) error {

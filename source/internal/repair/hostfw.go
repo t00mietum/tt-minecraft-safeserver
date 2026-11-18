@@ -29,23 +29,32 @@ func gamePorts(c *config.Config) []port {
 	return ports
 }
 
-// covers says whether a rule's port spec, such as 25565, 25565/tcp, or
-// 25000:26000/tcp in ufw and 25000-26000/tcp in firewalld, lets p in.
+// covers says whether a rule's port spec lets p in. ufw gives 25565,
+// 25565/tcp, 25000:26000/tcp, a list such as 19132,25565/tcp, and Anywhere
+// for a rule with no port. firewalld gives 25000-26000/tcp.
 func covers(spec string, p port) bool {
 	nums, proto, hasProto := strings.Cut(spec, "/")
 	if hasProto && proto != p.proto {
 		return false
 	}
-	lo, hi, isRange := strings.Cut(nums, ":")
-	if !isRange {
-		lo, hi, isRange = strings.Cut(nums, "-")
+	if nums == "Anywhere" {
+		return true
 	}
-	if !isRange {
-		hi = lo
+	for one := range strings.SplitSeq(nums, ",") {
+		lo, hi, isRange := strings.Cut(one, ":")
+		if !isRange {
+			lo, hi, isRange = strings.Cut(one, "-")
+		}
+		if !isRange {
+			hi = lo
+		}
+		from, err1 := strconv.Atoi(lo)
+		to, err2 := strconv.Atoi(hi)
+		if err1 == nil && err2 == nil && from <= p.num && p.num <= to {
+			return true
+		}
 	}
-	from, err1 := strconv.Atoi(lo)
-	to, err2 := strconv.Atoi(hi)
-	return err1 == nil && err2 == nil && from <= p.num && p.num <= to
+	return false
 }
 
 // hostFirewallCheck only reports. Changing another tool's rules is the
@@ -98,10 +107,11 @@ func ufwMissing(ctx context.Context, h *Host) ([]port, error) {
 		if strings.HasPrefix(line, "Default:") && strings.Contains(line, "allow (incoming)") {
 			return nil, nil
 		}
-		// verbose always names the direction; ALLOW OUT and ALLOW FWD don't let players in
+		// verbose always names the direction; ALLOW OUT and ALLOW FWD don't let players in.
+		// LIMIT IN does, and only refuses an address that connects 6 times in 30 s.
 		f := strings.Fields(line)
 		for i, word := range f {
-			if word == "ALLOW" && i > 0 && i+1 < len(f) && f[i+1] == "IN" {
+			if (word == "ALLOW" || word == "LIMIT") && i > 0 && i+1 < len(f) && f[i+1] == "IN" {
 				specs = append(specs, f[:i]...)
 				break
 			}
