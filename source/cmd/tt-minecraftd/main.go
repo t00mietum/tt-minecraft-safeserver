@@ -162,16 +162,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	if err := dispatch(ctx, inv, stdout); err != nil {
-		var code exitCode
-		if errors.As(err, &code) {
-			return int(code)
-		}
-		// Errors often name a file the server account named.
-		fmt.Fprintf(stderr, "tt-minecraftd: %s\n", server.CleanLines(err.Error()))
-		return exitError
+	return failed(dispatch(ctx, inv, stdout), stderr)
+}
+
+// failed shows err and gives the exit code for it.
+func failed(err error, stderr io.Writer) int {
+	if err == nil {
+		return exitOK
 	}
-	return exitOK
+	var code exitCode
+	if errors.As(err, &code) {
+		return int(code)
+	}
+	// Errors often name a file the server account named.
+	fmt.Fprintf(stderr, "tt-minecraftd: %s\n", server.CleanLines(err.Error()))
+	// The boot unit's start --foreground ends with the server's own code, so
+	// systemd sees a crash.
+	var exit launch.ExitError
+	if errors.As(err, &exit) && exit.Code > 0 && exit.Code < 256 {
+		return exit.Code
+	}
+	return exitError
 }
 
 func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
@@ -200,7 +211,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
-	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
+	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun}
 	if name == "start" || name == "stop" {
 		served, err := bootServes(ctx, inv.configPath)
 		switch {

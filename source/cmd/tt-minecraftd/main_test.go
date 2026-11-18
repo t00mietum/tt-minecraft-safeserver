@@ -826,3 +826,25 @@ func TestRunCleansError(t *testing.T) {
 		t.Errorf("exit %d, stderr %q", code, msg)
 	}
 }
+
+// start --foreground's error for a server that exited with a code of its own
+// exits with that code, so systemd sees a crash at boot as a failure.
+func TestServerExitCode(t *testing.T) {
+	defer testid.Line(t, "df7af")
+	for _, c := range []struct {
+		err  error
+		code int
+	}{
+		{nil, exitOK},
+		{launch.ExitError{Code: 137}, 137},
+		{errors.Join(errors.New("hand-back failed"), launch.ExitError{Code: 1}), 1},
+		{launch.ExitError{Code: -1}, exitError},
+		{launch.ExitError{Code: 300}, exitError},
+		{errors.New("other"), exitError},
+	} {
+		var msg bytes.Buffer
+		if got := failed(c.err, &msg); got != c.code || (c.err != nil) != strings.HasPrefix(msg.String(), "tt-minecraftd: ") {
+			t.Errorf("%v: exit %d, stderr %q; want %d", c.err, got, msg.String(), c.code)
+		}
+	}
+}

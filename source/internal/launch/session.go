@@ -113,10 +113,9 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 	// A line with no thread goes with the one before it.
 	seen, quiet, ours := false, 0, true
 	for i := range answerMax {
-		if ctx.Err() != nil {
-			return nil
+		if err := k.pause(ctx, answerPoll); err != nil {
+			return fmt.Errorf("%w after the line was sent", err)
 		}
-		k.Sleep(answerPoll)
 		lines, err := log.next()
 		if err != nil {
 			return err

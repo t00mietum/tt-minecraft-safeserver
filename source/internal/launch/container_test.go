@@ -24,7 +24,11 @@ import (
 
 type fakeConsole struct{ sent []string }
 
-func (f *fakeConsole) Send(_ context.Context, line string) error {
+// Send refuses a done ctx, as a real send would.
+func (f *fakeConsole) Send(ctx context.Context, line string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.sent = append(f.sent, line)
 	return nil
 }
@@ -42,6 +46,8 @@ type rig struct {
 	states  []string
 	log     string
 	tables  string
+	// exit is what the runtime's wait prints, the container's exit code.
+	exit string
 	// sudoFree makes sudo -n work, as a NOPASSWD rule or a cached login does.
 	sudoFree bool
 }
@@ -82,7 +88,7 @@ func newRig(t *testing.T) *rig {
 	if err := os.WriteFile(list, []byte("jar: paper-26.3-244.jar\n\tsha256: "+empty+"\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+empty+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n"}
+	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n", exit: "0\n"}
 	g.r.Reply = g.reply
 	noRuntimes(t)
 	inGroup(t, groupHere)
@@ -130,6 +136,8 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 		return []byte(s + "\n"), nil
 	case len(c.Args) > 2 && c.Args[1] == "logs":
 		return []byte(g.log), nil
+	case len(c.Args) > 2 && c.Args[1] == "wait":
+		return []byte(g.exit), nil
 	case c.Args[0] == "nft":
 		return []byte(g.tables), nil
 	case host.Quote(c.Args) == "sudo -n true" && !g.sudoFree:
@@ -325,6 +333,122 @@ func TestDockerStop(t *testing.T) {
 	want := []string{"sudo -v", "sudo chown -R -- alice:minecraftd " + host.Quote([]string{g.dir})}
 	if got := g.changes(); !reflect.DeepEqual(got, want) {
 		t.Errorf("ran %q, want %q", got, want)
+	}
+}
+
+// Ctrl-C in the countdown ends it at once, tells the players the stop is
+// off, and fails, with the server and its trees left as they were.
+func TestStopCountdownInterrupt(t *testing.T) {
+	defer testid.Line(t, "df7ab")
+	g := newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Sleep = func(d time.Duration) {
+		g.slept += d
+		cancel()
+	}
+	err := g.d.Stop(ctx, 300)
+	if !errors.Is(err, ErrInterrupted) || !strings.Contains(err.Error(), "wasn't stopped") {
+		t.Errorf("err %v", err)
+	}
+	if want := []string{"say The server stops in 300 seconds.", stopOff}; !reflect.DeepEqual(g.console.sent, want) {
+		t.Errorf("sent %q, want %q", g.console.sent, want)
+	}
+	if got := g.changes(); !reflect.DeepEqual(got, []string{"sudo -v"}) || g.slept != 240*time.Second {
+		t.Errorf("ran %q, slept %s", got, g.slept)
+	}
+
+	// Ctrl-C while a line goes out is the same.
+	g = newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Console = cancelConsole{fakeConsole: g.console, cancel: cancel}
+	err = g.d.Stop(ctx, 10)
+	if !errors.Is(err, ErrInterrupted) || !reflect.DeepEqual(g.console.sent, []string{stopOff}) || g.slept != 0 {
+		t.Errorf("in a send: err %v, sent %q, slept %s", err, g.console.sent, g.slept)
+	}
+
+	// Once the stop line is out, Ctrl-C leaves the server stopping.
+	g = newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Sleep = func(time.Duration) { cancel() }
+	err = g.d.Stop(ctx, 0)
+	if !errors.Is(err, ErrInterrupted) || !strings.Contains(err.Error(), "still stopping") || !reflect.DeepEqual(g.console.sent, []string{"stop"}) {
+		t.Errorf("in the save: err %v, sent %q", err, g.console.sent)
+	}
+}
+
+// cancelConsole is Ctrl-C while the first line goes out.
+type cancelConsole struct {
+	*fakeConsole
+	cancel func()
+}
+
+func (c cancelConsole) Send(ctx context.Context, line string) error {
+	c.cancel()
+	return c.fakeConsole.Send(ctx, line)
+}
+
+// The real clock's wait ends at Ctrl-C.
+func TestPauseInterrupt(t *testing.T) {
+	defer testid.Line(t, "df7ac")
+	k := &Kit{}
+	if err := k.pause(context.Background(), time.Millisecond); err != nil {
+		t.Errorf("short wait: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	start := time.Now()
+	if err := k.pause(ctx, time.Hour); !errors.Is(err, ErrInterrupted) || time.Since(start) > time.Minute {
+		t.Errorf("cut short: %v after %s", err, time.Since(start))
+	}
+	if err := k.pause(ctx, time.Hour); !errors.Is(err, ErrInterrupted) {
+		t.Errorf("already done: %v", err)
+	}
+}
+
+// In --foreground, as at boot, a slow load is only a warning and the wait
+// goes on, since an exit there makes systemd stop the server. The
+// container's exit code is passed on.
+func TestForegroundSlowLoad(t *testing.T) {
+	defer testid.Line(t, "df7ad")
+	g := newRig(t)
+	g.d.Root = true
+	g.states = []string{"", "running"}
+	if err := g.d.Start(context.Background(), StartMode{Foreground: true}); err != nil {
+		t.Fatalf("slow: %v", err)
+	}
+	lines := g.r.Lines()
+	if !strings.Contains(g.out.String(), "warning: the server didn't finish loading in 5s") || lines[len(lines)-2] != "sudo docker wait tt-minecraftd" ||
+		!strings.Contains(lines[len(lines)-1], "chown -R -- alice:minecraftd") {
+		t.Errorf("slow: ran %q, output %q", lines, g.out.String())
+	}
+
+	for _, c := range []struct {
+		exit string
+		code int
+		bad  bool
+	}{{"137\n", 137, false}, {"1\n", 1, false}, {"", 0, true}, {"Error: no such container\n", 0, true}} {
+		g = newRig(t)
+		g.d.Root = true
+		g.states = []string{"", "running"}
+		g.log = doneLine
+		g.exit = c.exit
+		err := g.d.Start(context.Background(), StartMode{Foreground: true})
+		var exit ExitError
+		got := g.changes()
+		switch {
+		case !strings.Contains(got[len(got)-1], "chown -R -- alice:minecraftd"):
+			t.Errorf("exit %q: no hand-back, ran %q", c.exit, got)
+		case c.bad && (err == nil || errors.As(err, &exit)):
+			t.Errorf("exit %q: err %v", c.exit, err)
+		case !c.bad && (!errors.As(err, &exit) || exit.Code != c.code):
+			t.Errorf("exit %q: err %v", c.exit, err)
+		}
 	}
 }
 

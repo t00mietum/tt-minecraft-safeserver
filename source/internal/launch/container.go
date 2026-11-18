@@ -214,7 +214,7 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if d.DryRun {
 		return nil
 	}
-	if err := d.waitLoaded(ctx, d); err != nil {
+	if err := d.waitLoaded(ctx, d); err != nil && !d.slowAtBoot(mode, err) {
 		return err
 	}
 	// The container's log comes through the runtime, but cmd and status
@@ -225,10 +225,33 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if !mode.Foreground {
 		return nil
 	}
-	if _, err := d.Run.Run(ctx, d.box(true, "wait", Container)); err != nil {
+	out, err := d.Run.Run(ctx, d.box(true, "wait", Container))
+	if err != nil {
 		return err
 	}
-	return d.handBack(ctx)
+	return errors.Join(d.handBack(ctx), exited(out))
+}
+
+// ExitError is the server's own exit code, when it isn't 0. start
+// --foreground exits with it, so systemd sees a crash as a failure.
+type ExitError struct{ Code int }
+
+func (e ExitError) Error() string { return "the server exited with code " + strconv.Itoa(e.Code) }
+
+// exited reads the exit code that the runtime's wait prints.
+func exited(out []byte) error {
+	lines := strings.Fields(string(out))
+	if len(lines) == 0 {
+		return errors.New("wait gave no exit code for the server")
+	}
+	code, err := strconv.Atoi(lines[len(lines)-1])
+	switch {
+	case err != nil:
+		return fmt.Errorf("wait gave %q, not the server's exit code", lines[len(lines)-1])
+	case code != 0:
+		return ExitError{Code: code}
+	}
+	return nil
 }
 
 func (d *Boxed) running(ctx context.Context) (bool, error) {

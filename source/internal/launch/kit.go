@@ -34,13 +34,45 @@ type Kit struct {
 	Out           io.Writer
 	Root          bool
 	DryRun        bool
-	Sleep         func(time.Duration)
+	// Sleep stands in for the clock in tests. Nil is the real one, which
+	// Ctrl-C cuts short.
+	Sleep func(time.Duration)
 	// Now named the start and stop snapshots, which are gone.
 	// Now func() time.Time
 	// Boot is set when the boot unit is enabled for this config, so start and
 	// stop go through systemctl. Inside the unit it's never set.
 	Boot   bool
 	sudoed bool
+}
+
+// ErrInterrupted is a wait cut short by Ctrl-C or SIGTERM.
+var ErrInterrupted = errors.New("interrupted")
+
+// errSlowLoad is a server that's still up but hasn't finished loading.
+var errSlowLoad = errors.New("the server didn't finish loading")
+
+// stopOff goes to the players when Ctrl-C ends the countdown.
+const stopOff = "say The stop is off. The server stays up."
+
+// pause waits d, or until ctx ends.
+func (k *Kit) pause(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return ErrInterrupted
+	}
+	if k.Sleep != nil {
+		k.Sleep(d)
+	} else {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+		case <-t.C:
+		}
+	}
+	if ctx.Err() != nil {
+		return ErrInterrupted
+	}
+	return nil
 }
 
 // Running says whether the server runs in the configured mode.
@@ -239,9 +271,23 @@ func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 			k.say("%s", tail)
 			return errors.New("the server exited while loading")
 		}
-		k.Sleep(time.Second)
+		if err := k.pause(ctx, time.Second); err != nil {
+			return fmt.Errorf("%w while the server loads; it's still running, so see status or %s", err, e.logHint())
+		}
 	}
-	return fmt.Errorf("the server didn't finish loading in %s; it's still running, so see status or %s", k.Cfg.StartTimeout, e.logHint())
+	return fmt.Errorf("%w in %s; it's still running, so see status or %s", errSlowLoad, k.Cfg.StartTimeout, e.logHint())
+}
+
+// slowAtBoot says whether a failed wait for the load is only a warning, and
+// gives it. In --foreground the server outlives a slow load: an exit there
+// ends the boot unit, and systemd then runs its ExecStop, so a big world or
+// a slow host would never come up at boot.
+func (k *Kit) slowAtBoot(mode StartMode, err error) bool {
+	if !mode.Foreground || !errors.Is(err, errSlowLoad) {
+		return false
+	}
+	k.say("warning: %s", err)
+	return true
 }
 
 // stop runs design.md's stop steps that are built so far. warn is the
@@ -339,13 +385,30 @@ func (k *Kit) countDown(ctx context.Context, warn int) error {
 			unit = "second"
 		}
 		if err := k.Console.Send(ctx, fmt.Sprintf("say The server stops in %d %s.", m, unit)); err != nil {
+			if ctx.Err() != nil {
+				return k.callOff(ctx)
+			}
 			return err
 		}
 		if !k.DryRun {
-			k.Sleep(time.Duration(m-marks[i+1]) * time.Second)
+			if err := k.pause(ctx, time.Duration(m-marks[i+1])*time.Second); err != nil {
+				return k.callOff(ctx)
+			}
 		}
 	}
 	return nil
+}
+
+// callOff tells the players the stop is off, after Ctrl-C ended the
+// countdown. ctx is done by then, so the line goes out on one of its own.
+func (k *Kit) callOff(ctx context.Context) error {
+	tell, cancel := context.WithTimeout(context.WithoutCancel(ctx), attachTimeout)
+	defer cancel()
+	err := fmt.Errorf("%w; the server wasn't stopped", ErrInterrupted)
+	if sendErr := k.Console.Send(tell, stopOff); sendErr != nil {
+		return errors.Join(err, fmt.Errorf("the players weren't told the stop is off: %w", sendErr))
+	}
+	return err
 }
 
 func (k *Kit) waitStopped(ctx context.Context, e engine) error {
@@ -359,7 +422,9 @@ func (k *Kit) waitStopped(ctx context.Context, e engine) error {
 			k.say("The server stopped.")
 			return nil
 		}
-		k.Sleep(time.Second)
+		if err := k.pause(ctx, time.Second); err != nil {
+			return fmt.Errorf("%w while the server saves; it's still stopping, and stop again hands the trees back once it's down", err)
+		}
 	}
 	k.say("The server is still up after %s; sending SIGTERM.", k.Cfg.StopTimeout)
 	return e.kill(ctx)

@@ -110,6 +110,24 @@ fFirewallOut() {
 	sudo -u minecraftd curl -s -m 10 -o /dev/null https://fill.papermc.io/v3/projects/paper
 }
 
+fStopCancel() {
+	local pid rc=0
+	tt-minecraftd stop --warn 60 > cancel.out 2>&1 &
+	pid=$!
+	for _ in $(seq 30); do
+		grep -q 'The server stops in 60 seconds' "${log}" && break
+		sleep 1
+	done
+	# As Ctrl-C. The countdown's first wait is 30 seconds.
+	kill -INT "${pid}"
+	wait "${pid}" || rc=$?
+	cat cancel.out
+	((rc == 1)) || { say "stop exited ${rc}"; return 1; }
+	has 'The stop is off' "${log}" && has 'interrupted' cancel.out || return 1
+	! grep -q 'Saving worlds' "${log}" || { say "it saved"; return 1; }
+	sudo podman ps --format '{{.Names}}' | grep -qx tt-minecraftd
+}
+
 fStopWarn() {
 	tt-minecraftd stop --warn 10 || return 1
 	has 'The server stops in 1 second' "${log}" && has 'Saving worlds' "${log}" || return 1
@@ -160,7 +178,8 @@ fNativeStop() {
 }
 
 fBoot() {
-	echo 'startAtBoot: true' | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
+	# Paper takes longer than startTimeout, as a big world can at boot.
+	printf 'startAtBoot: true\nstartTimeout: 1\n' | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
 	tt-minecraftd repair | tee boot-on.out | grep -E '^(FIXED|FAILED)'
 	has 'tt-minecraftd.service enabled' boot-on.out && systemctl is-enabled tt-minecraftd.service || return 1
 	# repair never starts it.
@@ -178,13 +197,15 @@ fBoot() {
 		return 1
 	fi
 	tt-minecraftd status | grep -q 'running in podman mode' || return 1
+	sudo journalctl -u tt-minecraftd.service | grep -q "warning: the server didn't finish loading" || { say "the load wasn't slow"; return 1; }
 	tt-minecraftd stop --warn 2 | tee boot-stop.out || return 1
 	sudo grep -q 'Saving chunks' "${log}" || { say "no save in the log"; return 1; }
-	if systemctl is-active tt-minecraftd.service || [[ "$(stat -c %U "${dir}/world")" != op ]]; then
+	# start --foreground exits with the server's code, which is 0 after stop.
+	if systemctl is-active tt-minecraftd.service || systemctl is-failed --quiet tt-minecraftd.service || [[ "$(stat -c %U "${dir}/world")" != op ]]; then
 		sudo journalctl -u tt-minecraftd.service | tail -20
 		return 1
 	fi
-	sudo sed -i '/^startAtBoot:/d' /etc/tt-minecraftd/config.shcl
+	sudo sed -i '/^startAtBoot:/d; /^startTimeout:/d' /etc/tt-minecraftd/config.shcl
 	tt-minecraftd repair | tee boot-off.out | grep -E '^(FIXED|FAILED)'
 	has 'disabled and removed' boot-off.out && [[ ! -e /etc/systemd/system/tt-minecraftd.service ]]
 }
@@ -361,6 +382,7 @@ check df685 "cmd list in podman mode" fCmd
 check df686 "console line and Ctrl-C detach in podman mode" fConsole
 check df687 "Geyser STUN answers behind the firewall" fStun
 check df688 "firewall drops and counts the account's local, LAN, and non-web connections" fFirewallOut
+check df7ag "Ctrl-C in stop --warn's countdown calls the stop off" fStopCancel
 check df689 "stop --warn 10 saves and hands the trees back" fStopWarn
 check df68a "start refuses a changed jar" fRefuseChanged
 native df68b "native start, sandbox, and locked jars" fNativeStart
@@ -377,3 +399,4 @@ exit "${failed}"
 ##		- 2026-11-12: Created.
 ##		- 2026-11-12: Agent hand-off and ZFS snapshot checks.
 ##		- 2026-11-13: Boot unit checks. Native checks skip while native mode is off.
+##		- 2026-11-17: Ctrl-C in the stop countdown. The boot check loads past startTimeout, and checks the unit didn't fail.

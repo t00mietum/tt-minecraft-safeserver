@@ -22,6 +22,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- At a boot unit stop, both start --foreground and its ExecStop hand the trees back, and a slow hand-back can fail the unit
+	- ID: 2026111719172263
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-191722
+	- Opened by:
+	- Related IDs: 2026111715274978
+	- Incorrect behavior [Bug]: On systemctl stop, ExecStop's stop and start --foreground each run the hand-back once the server is down. When ExecStop ends first, systemd sends SIGTERM to start --foreground, which cuts its chown short and exits 1, so the unit ends as failed. A big tree makes that more likely.
+	- Expected behavior [Bug]: One hand-back, and a clean stop leaves the unit inactive, not failed.
+	- Reproduced [Bug]: No. Read only.
+	- Possible cause [Bug]: Kit.stop and Boxed.Start's --foreground end both call handBack. Inside the unit, one of them could leave it to the other, or start --foreground could finish its hand-back after SIGTERM.
+	- Progress log:
+		- 20261117: Found while fixing 2026111715274978.
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -354,34 +370,65 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Ctrl-C does nothing during a stop --warn countdown, then stop fails with the server still up
 	- ID: 2026111715274958
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting for testing
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
 	- Opened by:
 	- Incorrect behavior [Bug]: The warning wait is a plain sleep that ignores Ctrl-C. Ctrl-C 5 seconds into `stop --warn 300` waits about 4 minutes, then the next console send fails with "context canceled". Players were told the server stops, and it doesn't. Ctrl-C during `cmd` exits 0.
 	- Expected behavior [Bug]: Ctrl-C ends the countdown at once, tells players the stop is off, and exits 1.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 20261117. df7ab, df7ae and df5xw fail on the unfixed code: stop waits out the countdown and fails with "context canceled" with nothing sent, cmd exits 0, and attach says it didn't detach in 15s.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 10. Detail in detail_backlog.md.
-	- Origin: 3a04d86 native mode start and stop, 5c5b023 console and cmd. Not seen before. Plausible.
+		- 20261117: Verified: df7ab, df7ae and df5xw fail on the unfixed code and pass with the fix. The quick gate passed, and race tests of launch and cli.
+		- Swept: every Kit.Sleep caller (countdown, waitLoaded, waitStopped, cmd, native foreground) now uses pause. Outside launch only soak.go sleeps, and agent/command.go already tells a deadline from a cancel. attach.go's Sweep line is fixed under this item.
+		- df7ag is new in the root host check: SIGINT in stop --warn 60 must exit 1, put the stop-off line in the log, skip the save, and leave the container up. Not run yet.
+	- Origin: 3a04d86 native mode start and stop, 5c5b023 console and cmd. Not seen before. Confirmed.
 	- Sweep: attach.go reports a Ctrl-C as a detach timeout.
+	- Needs local test suite run?: the root host check df7ag, in the same run as df78x for 2026111715274978.
+	- Actual cause [Bug]: Every wait in launch went through Kit.Sleep, which main set to time.Sleep, so it ignored Ctrl-C. cmd returned nil on a done context. AttachConsole read any end of its own timeout context as a slow detach.
+	- Actual effort: Avg
+	- Actual fix [Bug]: Waits go through Kit.pause, which ends at Ctrl-C or SIGTERM. A countdown cut short says "The stop is off. The server stays up." to the players and exits 1, with the server and trees as they were. Ctrl-C in stop's save wait, cmd's answer wait, start's load wait, and attach exits 1 and says interrupted.
+	- Branch: fixes-2026111715274958
+	- Commit: d480072
+	- Test case: df7ab, df7ac, df7ae, df5xw, and the root host check df7ag
+	- Decisions:
+		- Kit.Sleep stays as the tests' clock, and is nil outside tests. pause uses a timer and the context, which is a smaller change than giving Sleep a context.
+		- Exit 1, not 130, since design.md has 0, 1 and 2 only. design.md's Commands says Ctrl-C and SIGTERM end a wait.
+		- The stop-off line goes on a context of its own, capped at attach's 15 s, since Ctrl-C has ended the run's. A failed send is shown with the interrupt.
+		- Ctrl-C after the stop line is out leaves the server stopping, and says another stop hands the trees back.
+		- The test console now refuses a done context, as a real send does.
 
 - At boot, a server slower to load than startTimeout gets stopped again
 	- ID: 2026111715274978
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting for testing
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
 	- Opened by:
 	- Incorrect behavior [Bug]: `start --foreground` exits 1 when the load takes longer than startTimeout, 300 seconds by default, and says it's still running. systemd then runs ExecStop, which stops the server. So a big world or a slow host never comes up at boot. The container's exit code is also ignored, so a crash ends the unit as a clean exit.
 	- Expected behavior [Bug]: In foreground a slow load is a warning, and the run goes on to wait. The container's exit code becomes the tool's.
-	- Reproduced [Bug]: No. Read, with systemd's documented ExecStop behavior.
+	- Reproduced [Bug]: 20261117. df7ad and df5y4 fail on the unfixed code: start --foreground exits 1 on a slow load in both modes, and a container exit of 137 or 1 comes back as success.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 11. Detail in detail_backlog.md.
-	- Origin: 3a04d86 native mode start and stop, 58531cc podman mode. Not seen before. Plausible.
+		- 20261117: Verified: df7ad and df5y4's new case fail on the unfixed code and pass with the fix. df7af pins main's exit code. The quick gate passed, and race tests of launch and cli.
+		- Swept: native.go's foreground start takes the same warning. Native's other waitLoaded caller is plain start, which still fails. No other caller of wait or waitLoaded.
+		- df78x now adds startTimeout: 1 with startAtBoot, expects the warning in the journal, and fails when the unit is failed after stop. That also checks that Paper's normal stop exits 0 in the container. Not run yet.
+	- Origin: 3a04d86 native mode start and stop, 58531cc podman mode. Not seen before. Confirmed.
 	- Sweep: native.go has the same timeout.
+	- Needs local test suite run?: the root host check df78x, which now loads past a 1 s startTimeout at boot and checks the unit isn't failed after stop.
+	- Actual cause [Bug]: waitLoaded's timeout was an error in every start mode. Boxed.Start dropped what the runtime's wait printed.
+	- Actual effort: Avg
+	- Actual fix [Bug]: With --foreground, a slow load is a warning, and start goes on to wait for the server's end, in both modes. In container mode, start --foreground exits with the code wait prints when it isn't 0, after the hand-back. Plain start still exits 1 on a slow load.
+	- Branch: fixes-2026111715274958
+	- Commit: d480072
+	- Test case: df7ad, df7af, df5y4, df5xs, and the root host check df78x
+	- Decisions:
+		- Only --foreground warns, since only the boot unit runs it and an exit there makes systemd stop the server. A plain start still says it's slow and exits 1, with the server up, as design.md says.
+		- The code is the last line of wait's output. Output that isn't a number is an error, never success. Codes outside 1 to 255 exit 1. design.md's exit codes line says start --foreground is the exception.
+		- Native passes no exit code, since its server runs inside tmux in a collected unit, and native mode is deferred.
+		- df78x's boot run now loads past startTimeout every time, which still covers start and stop through the unit. The test rig's wait prints 0 by default.
 
 - A docs-only push to main skips the merge gate, but the gate's tests read design.md
 	- ID: 2026111715274995

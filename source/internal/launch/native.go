@@ -114,7 +114,7 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if n.DryRun {
 		return nil
 	}
-	if err := n.waitLoaded(ctx, n); err != nil {
+	if err := n.waitLoaded(ctx, n); err != nil && !n.slowAtBoot(mode, err) {
 		return err
 	}
 	n.dropOldLog()
@@ -129,7 +129,9 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 		if !up {
 			return n.handBack(ctx)
 		}
-		n.Sleep(foregroundPoll)
+		if err := n.pause(ctx, foregroundPoll); err != nil {
+			return fmt.Errorf("%w; stop stops the server if it's still up", err)
+		}
 	}
 }
 

@@ -137,7 +137,9 @@ Common:  --config PATH, --set KEY=VALUE
 
 - The commands match `tt-monerod-safeserver`. `console` and `cmd` are new, since a Minecraft server gets managed from its console.
 
-- Exit codes are 0 for success, 1 for an error, and 2 for bad usage.
+- Exit codes are 0 for success, 1 for an error, and 2 for bad usage. The one exception is `start --foreground` in container mode, which exits with the server's own code when that isn't 0, so systemd sees a crash as a failure.
+
+- Ctrl-C, or SIGTERM, ends a wait at once and exits 1, with the server left as it is. That includes `stop`'s countdown and its wait for the save, `cmd`'s wait for the answer, and `start`'s wait for the load.
 
 - `--set KEY=VALUE` overrides one config key for this run, such as `--set heapMax=6G`. It can be given more than once. See [Configuration model](#configuration-model).
 
@@ -166,6 +168,7 @@ Common:  --config PATH, --set KEY=VALUE
 6. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
 
 7. Launch in the configured mode. Then wait until the log says the server is done loading, or `startTimeout` runs out. When the process died, print the end of its log and exit 1.
+	- When `startTimeout` runs out, the server keeps running, and `start` exits 1. With `--foreground` that's only a warning, and it goes on to wait for the server's end. An exit there would end the boot unit, and systemd would run its `ExecStop`, so a big world or a slow host would never come up at boot.
 
 - `--debug` runs the server in the foreground with its console attached.
 
@@ -176,6 +179,7 @@ Common:  --config PATH, --set KEY=VALUE
 1. When the server isn't running, make sure the trees have gone back to the operator, and exit 0. That way the operator still gets them back after a crash.
 
 2. With `--warn N`, broadcast a countdown to the players for N seconds first.
+	- Ctrl-C ends the countdown at once. The players are told the stop is off, the server keeps running, and `stop` exits 1.
 
 3. Send the `stop` console command, so Paper saves the worlds and kicks the players with a message. Wait up to `stopTimeout` seconds. Send SIGTERM if it's still up, and SIGKILL after another 30 seconds.
 
