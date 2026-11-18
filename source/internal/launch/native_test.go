@@ -5,14 +5,17 @@ package launch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -127,6 +130,30 @@ func TestNativeStartLog(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "exited while loading") || !strings.Contains(g.out.String(), "OutOfMemoryError") ||
 		strings.Count(g.out.String(), "filler") != 19 {
 		t.Errorf("died: err %v, output %q", err, g.out.String())
+	}
+}
+
+// A latest.log the server swaps for a pipe stops the wait for the Done line
+// with an error, rather than hanging the read.
+func TestNativeStartLogPipe(t *testing.T) {
+	defer testid.Line(t, "df79k")
+	g := newNativeRig(t)
+	g.states = []string{"inactive", "active"}
+	g.launch = func() {
+		path := filepath.Join(g.dir, "logs", "latest.log")
+		if err := syscall.Mkfifo(path, 0o600); err != nil {
+			t.Error(err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- g.n.Start(context.Background(), StartMode{}) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, server.ErrNotRegular) {
+			t.Errorf("err %v, want ErrNotRegular", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("start hung reading a pipe for latest.log")
 	}
 }
 

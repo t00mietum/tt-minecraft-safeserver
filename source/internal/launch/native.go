@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -247,18 +248,24 @@ func (n *Native) latestLog() string {
 // log is this run's latest.log. Paper moves the last run's aside as it
 // starts, so until then there's nothing.
 func (n *Native) log(context.Context) ([]byte, error) {
-	fi, err := os.Stat(n.latestLog())
+	f, err := server.OpenRegular(n.latestLog())
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
 	case err != nil:
 		return nil, err
-	case n.oldLog != nil:
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if n.oldLog != nil {
 		if old, err := n.oldLog.Stat(); err == nil && os.SameFile(old, fi) {
 			return nil, nil
 		}
 	}
-	return os.ReadFile(n.latestLog())
+	return io.ReadAll(f)
 }
 
 func (n *Native) dropOldLog() {

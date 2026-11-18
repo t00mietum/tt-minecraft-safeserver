@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
@@ -40,16 +39,12 @@ type Info struct {
 	Source string
 }
 
-// Describe gives the jar's hash, size, date, and what it says it is.
+// Describe gives the jar's hash, size, date, and what it says it is, all
+// from one open, so the hash is of the jar the rest describes. Anything but
+// a regular file is refused before it's opened.
 func Describe(j Jar) (Info, error) {
 	info := Info{Jar: j}
-	var sums Sums
-	sum, err := sums.Sum(j.File)
-	if err != nil {
-		return info, err
-	}
-	info.SHA256 = sum
-	f, err := os.OpenFile(j.File, os.O_RDONLY|syscall.O_NONBLOCK, 0) // #nosec G304 -- a jar under the configured serverDir
+	f, err := server.OpenRegular(j.File)
 	if err != nil {
 		return info, err
 	}
@@ -58,10 +53,11 @@ func Describe(j Jar) (Info, error) {
 	if err != nil {
 		return info, err
 	}
-	info.Size, info.Mod = fi.Size(), fi.ModTime()
-	if fi.Mode().IsRegular() {
-		info.About = about(f, fi.Size())
+	if info.SHA256, err = hashOf(f); err != nil {
+		return info, err
 	}
+	info.Size, info.Mod = fi.Size(), fi.ModTime()
+	info.About = about(f, fi.Size())
 	return info, nil
 }
 

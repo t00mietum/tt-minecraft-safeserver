@@ -730,6 +730,7 @@ cicd/                        build, test, and release scripts
 - `start` hashes every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and `paper.jar`. Extensions run with the same access as plugins. A jar that isn't listed, or doesn't match, stops the start. The message names the jar and `repair --approve-plugins`.
 	- `paper.jar` is checked as the build it links to, named by that build's path under `serverDir`, such as `paper-26.3-244.jar`. A `paper.jar` that links outside `serverDir` can't be approved, so it stops the start.
 	- With no approved list yet, every jar counts as new.
+	- A jar that's a pipe, a socket, a device, or a link to one counts as changed. Its kind is checked before it's opened, since opening a device runs its driver, as root in `repair`, setup, `update` and a boot start.
 	- `status` and `repair` run the same check.
 
 - `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`, or a Geyser extension's `extension.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.

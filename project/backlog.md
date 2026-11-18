@@ -76,7 +76,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Root opens a device or pipe that a link in plugins/ points to, before it checks the file kind
 	- ID: 2026111715274815
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261117-152748
@@ -86,13 +87,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: a link to `/dev/tty` with no controlling terminal made `Sum` and `CheckJars` fail with the driver's own error. The watchdog reboot wasn't tried.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 1. Detail in detail_backlog.md.
+		- 2026-11-17: Reproduced by df79h and df79j on the old code: a link to a pipe was opened, as inotify showed, and a link to a socket failed with the driver's ENXIO.
 	- Origin: ba0f959 status and watch, 9058841 plugin pinning. Not seen by an earlier round. Confirmed for the open, Plausible for the reboot. Same class as 2026111709090977, whose fix covered root writes but not reads.
 	- Sweep: Every caller of `plugins.Sums.Sum` and `plugins.Describe`: launch/kit.go, main.go repairPlugins, setup.go, update.go, status.go and update/agent.go.
+	- Actual cause [Bug]: `Sums.Sum`, `Describe` and `server.OpenRegular` opened the path to read, after links, and checked its kind only after the open.
+	- Actual fix [Bug]: `server.OpenRegular` opens with O_PATH, which runs no driver and doesn't wait on a pipe. It refuses anything but a regular file, then reopens that same inode through `/proc/self/fd` to read. `Sum` and `Describe` go through it, and `Describe` now takes the hash and the claims from one open. A jar that's a pipe, socket or device, or links to one, counts as changed rather than failing the check. design.md's Plugin pinning says so.
+	- Decisions:
+		- Links are still followed, as before. Only the kind of what they reach is judged, before the open.
+		- The reopen goes through `/proc/self/fd`, so a link swapped after the check can't change what's read. Without `/proc` the open fails, which refuses the jar.
+		- `ErrNotRegular` is now the server package's, and `plugins.ErrNotRegular` is the same value.
+	- Swept: every caller in the Sweep row goes through the fixed `Sum` or `Describe`, as do `server.OpenRegular`'s own callers (native start's old log, the log follower, status's log tail). Twins fixed in the same commit: native start's log read used `os.ReadFile`, which hangs on a pipe (df79k), and `download.Staged.Open` had no O_NONBLOCK or kind check (df79n). `plugins.Jars` listed its folders with `filepath.Glob`, which stats and then opens the folder plainly, so a swap between the two could open a device. It now uses `os.ReadDir`, which opens with O_DIRECTORY, and df79j pins a linked extensions folder.
+		- Left alone: the O_NOFOLLOW opens in linksafe, update/agent.go `claimedName` and selfupdate `statAt` follow no link, and the server account can't make a device node in the tree. The container drops every capability, the native unit has none, and fs.protected_hardlinks plus `/dev` being its own filesystem stop a hard link. `geyser.Installed`, repair's `walkTree` and `boxLinks` read folders through `os.ReadDir`: on go1.26.2, `Installed` with plugins/ a link to a pipe returned an error at once rather than hanging.
+	- Test case: df79h, df79j, df79k, df79n
+	- Verified: df79h, df79j, df79k and df79n fail on the old code and pass with the fix. df79h and df79j failed on the pipe open and the socket's driver error, and df79k and df79n hung on a pipe until their 10 s limit. Breaking `Jars` to open the folder plainly turns df79j red. The quick gate passes. Only the non-root path ran.
+	- Branch: fixes-2026111715274815
+	- Commit: 23c4eb9
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261117-174657
 
 - geyser sets the mode of a new plugins folder through a link
 	- ID: 2026111715274830
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152748
@@ -102,8 +119,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: with `plugins` already a link to a 0644 file, `chownLike` left the file at 0770.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 2. Detail in detail_backlog.md.
+		- 2026-11-17: Reproduced by df79m on the old code, with a hook at the same point: the server swapped the new plugins/ for a link to a 0644 file, and the file became 0770.
 	- Origin: 9f30908 setup gets geyser and floodgate. The sweep of 2026111709090977 listed geyser's plugins folder as safe and missed it. Confirmed.
 	- Sweep: selfupdate.go has the same call, in deferred code and a folder only root can write.
+	- Actual cause [Bug]: `chownLike` set the mode with `Fchmodat` on the folder's name after `Mkdirat`, and that call follows a link.
+	- Actual fix [Bug]: geyser's `Install` makes `plugins/` with `linksafe.Mkdir`, which opens the new folder without following a link and sets its owner and mode through that handle. `chownLike` is gone. `linksafe.Dir` gained `Fd`, for the download into the folder.
+	- Decisions:
+		- `linksafe.AfterMkdirat` is a test hook between the mkdir and the open, nil outside tests. It's exported since the geyser test is in another package.
+	- Swept: selfupdate.go's `Fchmodat` on its temp name is left, as the Sweep row says. paper.go's `Fchownat` doesn't follow links. `grep -rn 'Fchmodat\|os.Chmod\|os.Chown\|os.Lchown' source` finds no other path chmod or chown in the tree, only `plugins.shcl` and `update/image.go` under `/etc`.
+	- Test case: df79m
+	- Verified: df79m fails on the old code and passes with the fix, df65y still passes, and the quick gate passes. Only the non-root path ran. The root-only fchown is `linksafe.Mkdir`'s, which the root host check covers through `plugins.Refuse`.
+	- Branch: fixes-2026111715274815
+	- Commit: f7098de
+	- Acceptance signoff: Self-closed: df79m fails on the old code and passes now.
+	- Closed: 20261117-174657
 
 - A serverDir with glob characters in its path skips every plugin check
 	- ID: 2026111715274846
