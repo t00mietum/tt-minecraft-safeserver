@@ -50,10 +50,78 @@ func quote(s string) string {
 	return `"` + r.Replace(s) + `"`
 }
 
+// unquote undoes quote. false when s isn't something quote gives.
+func unquote(s string) (string, bool) {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return "", false
+	}
+	inner := s[1 : len(s)-1]
+	var b strings.Builder
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		switch {
+		case c == '\\' || c == '%' || c == '$':
+			if i+1 == len(inner) {
+				return "", false
+			}
+			next := inner[i+1]
+			if (c == '\\' && next != '\\' && next != '"') || (c != '\\' && next != c) {
+				return "", false
+			}
+			b.WriteByte(next)
+			i++
+		case c == '"':
+			return "", false
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String(), true
+}
+
 // ExecStart is the unit's ExecStart line, which also tells whose config the
 // unit serves.
 func ExecStart(configPath string) string {
 	return "ExecStart=" + Command(configPath) + " start --foreground"
+}
+
+// Owner is the config a unit's ExecStart runs, read back from what
+// ExecStart writes. false when there's no such line.
+func Owner(unit string) (string, bool) {
+	for line := range strings.Lines(unit) {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ExecStart="+Bin)
+		if !ok {
+			continue
+		}
+		if rest, ok = strings.CutSuffix(rest, " start --foreground"); !ok {
+			continue
+		}
+		if rest == "" {
+			return config.DefaultPath, true
+		}
+		if rest, ok = strings.CutPrefix(rest, " --config "); !ok {
+			continue
+		}
+		if path, ok := unquote(rest); ok {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// SameConfig says whether 2 config paths name the same file, the way
+// Command and ExecStart see them. Empty is the default config.
+func SameConfig(a, b string) bool {
+	abs := func(p string) string {
+		if p == "" {
+			return config.DefaultPath
+		}
+		if full, err := filepath.Abs(p); err == nil {
+			return full
+		}
+		return filepath.Clean(p)
+	}
+	return abs(a) == abs(b)
 }
 
 // Unit is tt-minecraftd.service for the config at configPath.

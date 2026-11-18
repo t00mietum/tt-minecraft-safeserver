@@ -106,3 +106,47 @@ func TestInsideAndServes(t *testing.T) {
 		t.Error("disabled, but it serves")
 	}
 }
+
+// Owner reads back the config any unit Unit writes runs, however odd its
+// path, and nothing from a unit it didn't write. See design.md, Boot.
+func TestOwner(t *testing.T) {
+	defer testid.Line(t, "df7a6")
+	c := config.Defaults()
+	rel, err := filepath.Abs("rel/c.shcl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		config.DefaultPath:              config.DefaultPath,
+		"":                              config.DefaultPath,
+		"/srv/mc/config.shcl":           "/srv/mc/config.shcl",
+		"/etc/other dir/50%$x\".shcl":   "/etc/other dir/50%$x\".shcl",
+		`/a\b\\"c "start --foreground"`: `/a\b\\"c "start --foreground"`,
+		"/x/$$%%/\"\"":                  "/x/$$%%/\"\"",
+		"rel/c.shcl":                    rel,
+	} {
+		got, ok := Owner(Unit(&c, path))
+		if !ok || got != want {
+			t.Errorf("Owner of the unit for %q: %q, %v, want %q", path, got, ok, want)
+		}
+		if !SameConfig(got, path) {
+			t.Errorf("SameConfig(%q, %q) is false", got, path)
+		}
+	}
+	for _, unit := range []string{
+		"",
+		"[Service]\nExecStart=/usr/bin/java -jar paper.jar\n",
+		"ExecStart=" + Bin + " --config /etc/x.shcl start --foreground\n",
+		"ExecStart=" + Bin + ` --config "/a"b" start --foreground` + "\n",
+		"ExecStart=" + Bin + ` --config "/a%b" start --foreground` + "\n",
+		"ExecStart=" + Bin + ` --config "/a\" start --foreground` + "\n",
+		"ExecStart=" + Bin + " start\n",
+	} {
+		if got, ok := Owner(unit); ok {
+			t.Errorf("Owner(%q) is %q", unit, got)
+		}
+	}
+	if !SameConfig("/etc/tt-minecraftd/../tt-minecraftd/config.shcl", "") || SameConfig("/etc/other.shcl", config.DefaultPath) {
+		t.Error("SameConfig")
+	}
+}

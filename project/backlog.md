@@ -289,7 +289,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair on a second config removes or rewrites the main config's boot unit and firewall
 	- ID: 2026111715274925
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152749
@@ -301,6 +301,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: Code review 20261117 item 8. Detail in detail_backlog.md.
 	- Origin: cb5f7cf start at boot, 4b8af66 setup and repair install the firewall. Not seen before. Confirmed.
 	- Sweep: repair/boot.go and repair/firewall.go.
+	- Closed reason: Done
+	- Actual cause [Bug]: The boot and firewall checks took the one boot unit and the one rules file as this config's, whatever config wrote them.
+	- Actual fix [Bug]: firewall.nft names its config in a comment line, which start doesn't compare. repair leaves a boot unit whose ExecStart runs another config alone, and so does a rules file another config wrote while its unit is installed. It names that config, as OK when this config's setting is off, and as FAILED when it's on, unless the rules come out the same.
+	- Test case: df7a8, df7a9 (repair), df7a6 (boot.Owner), df7a7 (the rules file's config line)
+	- Verified: df7a8 and df7a9 fail on the old checks, where a second config removed the first's unit and firewall, and pass after. The quick gate passed.
+	- Swept: BootCheck and FirewallCheck are the only writers of the boot unit, firewall.nft and the firewall unit, and setup's steps 9 and 11 run them. start's firewall.Matches skips the line. bootServes still compares the exact ExecStart.
+	- Decisions:
+		- One config owns the boot unit and the firewall. Files named per config would need a table and units per config too. Check: entry in questions.md.
+		- A rules file with no config line, from an older build, counts as this config's, so the main config's next repair writes the line. One left by a config that turned its firewall off is anyone's.
+		- When a second config's rules come out the same as the file's, the file does for both and isn't rewritten.
+		- A unit with no ExecStart the tool wrote counts as this config's, as before.
+		- repair's Finding has a Note, shown as OK with its text, for what's left alone on purpose.
+		- 20261117: df66g's written-file assert now expects the config line, ForConfig(Rules(...)), where it expected Rules(...) alone. Nothing else in it changed.
+		- design.md's repair checks 9 and 13, Firewall, and Boot say so.
+	- Branch: fixes-2026111715274925
+	- Commit: 791c7c4
+	- Acceptance signoff: Self-closed: its tests failed before and pass after, per the standing close policy.
+	- Closed: 20261117-185127
 
 - The update agent's answer is ignored when the reply repeats the question first
 	- ID: 2026111715274941
@@ -473,7 +491,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair makes a missing group but leaves the account's primary group wrong until the next run
 	- ID: 2026111715275105
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152751
@@ -484,11 +502,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 19. Detail in detail_backlog.md.
 	- Origin: b42345a repair checks. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The primary group check ran only when the group was already there.
+	- Actual fix [Bug]: With the group missing, repair also moves the account to it with usermod --gid, after groupadd.
+	- Test case: df5zc
+	- Verified: df5zc fails on the old check, which ran only groupadd, and passes after. The quick gate passed.
+	- Swept: setup's step 2 runs the same account check. A new account gets the group from useradd --gid.
+	- Branch: fixes-2026111715274925
+	- Commit: fd15d98
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-185140
 
 - repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
 	- ID: 2026111715275121
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Waits on a call about LIMIT IN, which reverses a recorded decision. Check: entry in questions.md. The Anywhere and port list parts need nothing more.
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152751
@@ -499,6 +528,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 20. Detail in detail_backlog.md.
 	- Origin: b42345a repair checks, a80d620 repair fixes. Related to 2026111709090987. Confirmed.
+	- Actual cause [Bug]: ufwMissing took only ALLOW IN lines, and covers read one port or one range.
+	- Actual fix [Bug]: LIMIT IN counts too, a To of Anywhere covers every port, and a port list is split on its commas.
+	- Against: 2026111709090987's decision that LIMIT IN rules don't count as open. ufw limit lets players in, and refuses only an address that connects 6 times in 30 s.
+	- Test case: df5zm
+	- Verified: df5zm fails on the old check for all 5 new rule sets and passes after. The quick gate passed.
+	- Swept: covers is shared with firewalld, whose --list-ports never gives Anywhere or a list. ufwMissing is the only ufw rule reader.
+	- Decisions:
+		- The From column isn't read, as before, so a rule that lets in only the LAN counts.
+		- A rule only for IPv6 still counts, as before. Looked at and left alone.
+		- design.md's repair check 10 says which ufw rules count.
+	- Branch: fixes-2026111715274925
+	- Commit: 5e52b19
 
 - setup --dry-run plans firewall rules that the real run can't write
 	- ID: 2026111715275137

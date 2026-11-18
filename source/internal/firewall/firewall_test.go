@@ -412,3 +412,44 @@ func TestMatches(t *testing.T) {
 	write(f.Routes, home)
 	check("a wider subnet", true)
 }
+
+// The rules file names the config it was written for, so a second config's
+// repair can leave it alone, and start's check skips that line, since 2
+// configs can give the same rules.
+func TestOwnerLine(t *testing.T) {
+	defer testid.Line(t, "df7a7")
+	dir := t.TempDir()
+	f := Files{Rules: filepath.Join(dir, "firewall.nft"), ResolvConf: filepath.Join(dir, "resolv.conf"), Routes: filepath.Join(dir, "ipv6_route")}
+	if err := os.WriteFile(f.ResolvConf, []byte("nameserver 192.168.1.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := config.Defaults()
+	l, err := ReadLocal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := Rules(&c, l)
+	if Owner(rules) != "" || StripOwner(rules) != rules {
+		t.Errorf("rules without the line: owner %q", Owner(rules))
+	}
+	for _, path := range []string{"/etc/tt-minecraftd/config.shcl", "/srv/a b/\"x\"\n# Config: \"/etc/y\".shcl", "/srv/mé/c.shcl"} {
+		w := ForConfig(rules, path)
+		if Owner(w) != path || StripOwner(w) != rules || !strings.HasPrefix(w, "#!/usr/sbin/nft -f\n# Written by") {
+			t.Errorf("for %q: owner %q, wrote\n%s", path, Owner(w), w)
+		}
+		if err := os.WriteFile(f.Rules, []byte(w), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := Matches(&c, f); !ok || err != nil {
+			t.Errorf("for %q: Matches %v, %v", path, ok, err)
+		}
+		nftCheck(t, w)
+	}
+	if Owner(ForConfig(rules, "")) != config.DefaultPath {
+		t.Error("an empty path isn't the default config")
+	}
+	// Only the header counts.
+	if Owner(rules+"# Config: \"/etc/z.shcl\"\n") != "" {
+		t.Error("read a line past the header")
+	}
+}

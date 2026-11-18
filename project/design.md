@@ -336,11 +336,14 @@ Common:  --config PATH, --set KEY=VALUE
 	9. With `firewall` on, the rules file matches the config and the host's network, its unit is enabled, and the table is loaded. With it off, the unit and the table get removed.
 		- A missing `nft` is reported with the command that adds it, the same as `catatonit`. A new rules file is loaded with `systemctl reload-or-restart`, so a running table is swapped in one go.
 		- Turning it off leaves the rules file in place.
+		- There's one rules file and one table. The file names the config it was written for. While that config's unit is installed, a second config's `repair` leaves the file, the unit, and the table alone, and says which config they're for. When the second config's rules come out different, that's FAILED. When they come out the same, the file does for both.
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
 		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
+		- For ufw, an `ALLOW IN` or `LIMIT IN` rule counts, with a port, a port list, a range, or no port at all.
 	11. In container mode, the image is there, and a stopped container under the runtime `runMode` doesn't name gets removed. One under `runMode`'s runtime stays, so its `logs` works, and `start` removes it. In Podman mode, `catatonit` is installed. A missing one is reported with the command that adds it.
 	12. With a dataset configured, it exists and is mounted.
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
+		- A unit that runs another config is left alone, whatever this config's `startAtBoot` is. See [Boot](#boot).
 	14. Any Paper server that this tool didn't start is reported, and never killed.
 
 ## Project structure
@@ -842,6 +845,7 @@ cicd/                        build, test, and release scripts
 - With `firewall` on, the tool puts its rules in its own nftables table, `inet tt_minecraftd`, so they apply to IPv4 and IPv6.
 
 - `setup` and `repair` write the rules to `/etc/tt-minecraftd/firewall.nft`, from the config. `tt-minecraftd-firewall.service` loads that file at boot.
+	- A comment line at the top names the config it was written for, so a second config's `repair` can leave it alone. `start` doesn't compare that line.
 	- It matches the service account by name, so nft looks it up as it loads the file.
 	- It loads it again whenever `nftables.service` starts, restarts, or reloads. Debian's `nftables.conf` flushes every table, the tool's included.
 	- The file deletes the old table and adds the new one in a single nft transaction, so the host is never without the rules.
@@ -892,6 +896,8 @@ cicd/                        build, test, and release scripts
 
 - With `startAtBoot` off, `repair` disables and removes the unit.
 	- It doesn't stop a server the unit runs. That server keeps going until the next `stop`.
+
+- There's one unit, so only one config can start at boot. `repair` for a second config leaves a unit that runs another config alone, and names that config. With the second config's `startAtBoot` on too, that's FAILED.
 
 ### NixOS
 

@@ -39,11 +39,12 @@ func NewHost(r host.Runner, c *config.Config, configPath string) *Host {
 }
 
 // Finding is one thing a check found wrong. Fix is nil when repair only
-// reports it.
+// reports it. A Note is fine as it is, and shows as OK with Problem saying why.
 type Finding struct {
 	Problem string
 	Fixed   string
 	Fix     func(ctx context.Context) error
+	Note    bool
 }
 
 // Check is one of design.md's repair checks.
@@ -75,6 +76,10 @@ func Run(ctx context.Context, h *Host, checks []Check, checkOnly bool, report Re
 			continue
 		}
 		for _, f := range found {
+			if f.Note {
+				report("OK", c.Name+": "+f.Problem)
+				continue
+			}
 			if checkOnly || f.Fix == nil {
 				report("FAILED", f.Problem)
 				continue

@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -118,7 +119,54 @@ func Matches(c *config.Config, f Files) (bool, error) {
 		return false, err
 	}
 	l.Nets = append(l.Nets, fileNets(string(have))...)
-	return string(have) == Rules(c, l), nil
+	return StripOwner(string(have)) == Rules(c, l), nil
+}
+
+// ownerTag starts the header line that names the config a rules file was
+// written for. There's one rules file, and a second config's repair leaves
+// it alone. Matches skips the line, since 2 configs can give the same rules.
+const ownerTag = "# Config: "
+
+// ForConfig is rules with a header line naming the config at configPath.
+func ForConfig(rules, configPath string) string {
+	if configPath == "" {
+		configPath = config.DefaultPath
+	}
+	if abs, err := filepath.Abs(configPath); err == nil {
+		configPath = abs
+	}
+	head, body, _ := strings.Cut(rules, "\n\n")
+	return head + "\n" + ownerTag + strconv.QuoteToASCII(configPath) + "\n\n" + body
+}
+
+// Owner is the config a rules file names, or "" when it names none, as one
+// from an older build doesn't.
+func Owner(text string) string {
+	for line := range strings.Lines(text) {
+		if !strings.HasPrefix(line, "#") {
+			break
+		}
+		if q, ok := strings.CutPrefix(strings.TrimSuffix(line, "\n"), ownerTag); ok {
+			if path, err := strconv.Unquote(q); err == nil {
+				return path
+			}
+		}
+	}
+	return ""
+}
+
+// StripOwner is a rules file without the line ForConfig adds.
+func StripOwner(text string) string {
+	var b strings.Builder
+	head := true
+	for line := range strings.Lines(text) {
+		head = head && strings.HasPrefix(line, "#")
+		if head && strings.HasPrefix(line, ownerTag) {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 // fileNets are the prefixes in a rules file's lan6 set past the fixed ones.
