@@ -39,6 +39,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261117: Found while fixing 2026111715274978.
 		- 20261117: Verified: df7am fails on the unfixed code (start --foreground hands back inside the unit, and a SIGTERM in its wait with the server down fails it, in both modes) and passes with the fix. The quick gate passed, and race tests of launch and cli.
 		- Not run against a real systemd unit here. df78x does that.
+		- 20261117: Verified: df78x passed in a root host container on ca9d851, with the unit inactive and not failed after stop. The root host run itself is still to run.
 	- Needs local test suite run?: the root host check df78x, which fails when the boot unit is failed after stop.
 	- Actual cause [Bug]: Inside the boot unit, start --foreground handed back after the server's end, and so did ExecStop's stop. systemd sends SIGTERM to the unit once ExecStop is done, which cut start's chown short. A wait that SIGTERM cut short with the server down was also an error, and native mode's 5 s poll is nearly always in that wait.
 	- Actual effort: Low
@@ -396,6 +397,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261117: Verified: df7ab, df7ae and df5xw fail on the unfixed code and pass with the fix. The quick gate passed, and race tests of launch and cli.
 		- Swept: every Kit.Sleep caller (countdown, waitLoaded, waitStopped, cmd, native foreground) now uses pause. Outside launch only soak.go sleeps, and agent/command.go already tells a deadline from a cancel. attach.go's Sweep line is fixed under this item.
 		- df7ag is new in the root host check: SIGINT in stop --warn 60 must exit 1, put the stop-off line in the log, skip the save, and leave the container up. Not run yet.
+		- 20261117: The root host run on fixes failed df7ag. The check read latest.log as soon as stop exited, but Paper logs a console line on its next tick, 14 to 51 ms after it's typed. The check now waits up to 10 s for the stop-off line (ca9d851).
+		- Verified: in a root host container on ca9d851, df7ag passed. Read the old way, right after stop exited, the stop-off line was missing in 2 of 3 runs, and there 2 s later.
 	- Origin: 3a04d86 native mode start and stop, 5c5b023 console and cmd. Not seen before. Confirmed.
 	- Sweep: attach.go reports a Ctrl-C as a detach timeout.
 	- Needs local test suite run?: the root host check df7ag, in the same run as df78x for 2026111715274978.
@@ -411,6 +414,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The stop-off line goes on a context of its own, capped at attach's 15 s, since Ctrl-C has ended the run's. A failed send is shown with the interrupt.
 		- Ctrl-C after the stop line is out leaves the server stopping, and says another stop hands the trees back.
 		- The test console now refuses a done context, as a real send does.
+		- The df7ag check waits for the stop-off line, and stop doesn't wait for Paper to log it. Its job ends once the console has the line, as for the countdown lines.
 
 - At boot, a server slower to load than startTimeout gets stopped again
 	- ID: 2026111715274978
@@ -428,6 +432,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261117: Verified: df7ad and df5y4's new case fail on the unfixed code and pass with the fix. df7af pins main's exit code. The quick gate passed, and race tests of launch and cli.
 		- Swept: native.go's foreground start takes the same warning. Native's other waitLoaded caller is plain start, which still fails. No other caller of wait or waitLoaded.
 		- df78x now adds startTimeout: 1 with startAtBoot, expects the warning in the journal, and fails when the unit is failed after stop. That also checks that Paper's normal stop exits 0 in the container. Not run yet.
+		- 20261117: The root host run on fixes failed df78x with 'the load wasn't slow'. The check piped journalctl into grep -q under pipefail. Podman leaves conmon in the unit's cgroup, so the unit's journal also holds Paper's output, and journalctl died of SIGPIPE after grep's match. The check now greps a copy of the journal, and shows the tool's own journal lines when it fails (ca9d851).
+		- A failed df78x now stops the server and turns the unit off, so df68e and df76n don't fail after it, as they did in that run.
+		- Verified: in a root host container on ca9d851, setup and df78x passed with the warning in the journal, and the old pipeline exited 141 on that journal 5 times of 5. With a failure put in after the unit started, the check left the unit removed and no server up. df68e, df68f and df76n passed after it.
+		- Swept: every pipe into grep -q in checks.bash. status and start --help now go to a file or a variable first. The podman ps, podman image ls, id and find pipes print a line or 2, and stay.
 	- Origin: 3a04d86 native mode start and stop, 58531cc podman mode. Not seen before. Confirmed.
 	- Sweep: native.go has the same timeout.
 	- Needs local test suite run?: the root host check df78x, which now loads past a 1 s startTimeout at boot and checks the unit isn't failed after stop.
