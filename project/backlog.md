@@ -22,38 +22,60 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- At a boot unit stop, both start --foreground and its ExecStop hand the trees back, and a slow hand-back can fail the unit
-	- ID: 2026111719172263
+- repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
+	- ID: 2026111715275121
 	- Type: Bug
-	- Status: Closed
+	- Status: Waiting on signoff
+		- Waits on a call about LIMIT IN, which reverses a recorded decision. Check: entry in questions.md. The Anywhere and port list parts need nothing more.
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
-	- Opened: 20261117-191722
+	- Opened: 20261117-152751
 	- Opened by:
-	- Related IDs: 2026111715274978
-	- Incorrect behavior [Bug]: On systemctl stop, ExecStop's stop and start --foreground each run the hand-back once the server is down. When ExecStop ends first, systemd sends SIGTERM to start --foreground, which cuts its chown short and exits 1, so the unit ends as failed. A big tree makes that more likely.
-	- Expected behavior [Bug]: One hand-back, and a clean stop leaves the unit inactive, not failed.
-	- Reproduced [Bug]: 20261117: df7am fails on the unfixed code, with the fake runner. Not seen on a real unit.
-	- Possible cause [Bug]: Kit.stop and Boxed.Start's --foreground end both call handBack. Inside the unit, one of them could leave it to the other, or start --foreground could finish its hand-back after SIGTERM.
+	- Incorrect behavior [Bug]: `ufw limit 25565/tcp`, `ufw allow from 192.168.0.0/16` and a rule for `19132,25565/tcp` each count as missing. repair exits 1, setup's final check fails, and the suggested command adds a duplicate rule.
+	- Expected behavior [Bug]: Those rule forms count as letting players in.
+	- Reproduced [Bug]: 2026-11-17: a test with that ufw output reported all 3 ports missing.
 	- Progress log:
-		- 20261117: Found while fixing 2026111715274978.
-		- 20261117: Verified: df7am fails on the unfixed code (start --foreground hands back inside the unit, and a SIGTERM in its wait with the server down fails it, in both modes) and passes with the fix. The quick gate passed, and race tests of launch and cli.
-		- Not run against a real systemd unit here. df78x does that.
-		- 20261117: Verified: df78x passed in a root host container on ca9d851, with the unit inactive and not failed after stop. The root host run itself is still to run.
-	- Needs local test suite run?: No. Passed 20261117.
-	- Actual cause [Bug]: Inside the boot unit, start --foreground handed back after the server's end, and so did ExecStop's stop. systemd sends SIGTERM to the unit once ExecStop is done, which cut start's chown short. A wait that SIGTERM cut short with the server down was also an error, and native mode's 5 s poll is nearly always in that wait.
-	- Actual effort: Low
-	- Actual fix [Bug]: Inside the boot unit, told by its cgroup, start --foreground leaves the hand-back to ExecStop's stop, in both modes. A SIGTERM in its wait with the server down is a clean stop, exit 0. Outside the unit nothing changes. design.md's Boot section says so.
-	- Branch: fixes-2026111719172263
-	- Commit: 99599e1
-	- Test case: df7am, and the root host check df78x
+		- 2026-11-17: Code review 20261117 item 20. Detail in detail_backlog.md.
+	- Origin: b42345a repair checks, a80d620 repair fixes. Related to 2026111709090987. Confirmed.
+	- Actual cause [Bug]: ufwMissing took only ALLOW IN lines, and covers read one port or one range.
+	- Actual fix [Bug]: LIMIT IN counts too, a To of Anywhere covers every port, and a port list is split on its commas.
+	- Against: 2026111709090987's decision that LIMIT IN rules don't count as open. ufw limit lets players in, and refuses only an address that connects 6 times in 30 s.
+	- Test case: df5zm
+	- Verified: df5zm fails on the old check for all 5 new rule sets and passes after. The quick gate passed.
+	- Swept: covers is shared with firewalld, whose --list-ports never gives Anywhere or a list. ufwMissing is the only ufw rule reader.
 	- Decisions:
-		- ExecStop's stop keeps the hand-back rather than start, since systemd runs ExecStop after every start, even when the server ended by itself, and only ExecStop finishes before the SIGTERM.
-		- A SIGTERM counts as clean only when the server is down. With it still up, start still fails.
-		- Swept: the hand-backs at start's end are container.go's foreground end and native.go's foreground loop, both changed. The --debug paths can't run in the unit. stop's hand-backs stay.
-	- Closed reason: Done
-	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed df7ag and df78x, with df68e and df76n after them, 4 native SKIPs.
-	- Closed: 20261117-204121
+		- The From column isn't read, as before, so a rule that lets in only the LAN counts.
+		- A rule only for IPv6 still counts, as before. Looked at and left alone.
+		- design.md's repair check 10 says which ufw rules count.
+	- Branch: fixes-2026111715274925
+	- Commit: 5e52b19
+
+- start --dry-run says it would run sudo -v, then sudo asks for a password anyway
+	- ID: 2026111715275268
+	- Type: Bug
+	- Status: Waiting on signoff
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
+	- Expected behavior [Bug]: sudo -v runs in dry run too, since it changes nothing.
+	- Reproduced [Bug]: 20261117: the built binary's start --dry-run, with a stand-in sudo whose sudo -n fails, printed would run: sudo -v and never ran it.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
+		- Waiting on signoff for the Against line: the dry-run plan no longer shows a would run: sudo -v line, and sudo's own prompt takes its place.
+		- 20261117: Verified: df79e fails on the unfixed code (sudo -v isn't a look) and passes with the fix. The built binary's start --dry-run ran sudo -v through the stand-in, and the unfixed build printed it. The quick gate passed, and race tests of launch and cli.
+	- Origin: 3a04d86. Related to 2026111410134553. Confirmed.
+	- Actual cause [Bug]: sudoUp ran sudo -v as a change, so dry run printed it instead of running it.
+	- Actual effort: Low
+	- Actual fix [Bug]: sudo -v is a look, so dry run runs it, and asks for the password where a real run does. It still runs only when sudo -n true fails. design.md's start step 2 says so.
+	- Branch: fixes-2026111719172263
+	- Commit: 3923e56
+	- Test case: df79e
+	- Against: 2026111410134553's decision that dry run prints sudo -v only when sudo -n true fails. It still comes only then, and now runs rather than prints, as this item asks.
+	- Decisions:
+		- 20261117: the launch rig's changes() keeps sudo -v in its list, though it's now a look, so each test's list still shows sudo asked up front. No assert changed. df79e checks it's a look and on the terminal.
+		- Swept: kit.go's sudoUp is the only sudo -v. setup, update, and repair run themselves through sudo, and skip it under dry run.
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
@@ -105,6 +127,329 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
+
+- Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
+	- ID: 2026111715275425
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
+	- Note: No. Paper's loader wasn't checked.
+	- Origin: 9058841 plugin pinning. Not seen before. Plausible.
+
+- repair counts a Paper started by hand as runUser as the tool's own
+	- ID: 2026111715275170
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
+	- Expected behavior [Bug]: repair tells them apart the way status does.
+	- Reproduced [Bug]: No. Read only. df5zk pins the uid-only rule.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
+	- Origin: b42345a repair checks. Not seen before. Plausible.
+
+- cmd's stop and restart guard misses namespaced forms such as minecraft:stop
+	- ID: 2026111715275187
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: `checkCmd` accepts `minecraft:stop`, `bukkit:restart` and `execute run stop`. Each stops the server without handing the trees back, which design.md says cmd prevents.
+	- Expected behavior [Bug]: cmd refuses those forms too.
+	- Reproduced [Bug]: 2026-11-17: `checkCmd` passed each form in a test. Paper running them is Plausible.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 24. Detail in detail_backlog.md.
+	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed for the check.
+
+- watch --interval with a huge value panics
+	- ID: 2026111715275203
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `watch --interval 9300000000` overflows the duration, and the ticker panics with a stack trace and exit 2.
+	- Expected behavior [Bug]: A value that large is refused with a plain message.
+	- Reproduced [Bug]: 2026-11-17: ran a build with an empty config.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 25. Detail in detail_backlog.md.
+	- Origin: ba0f959 status and watch. Not seen before. Confirmed.
+
+- console counts any exit 1 as a detach
+	- ID: 2026111715275221
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `attachDetached` treats any exit 1 as a detach. sudo exits 1 after failed password tries, and Docker exits 1 on its own errors. Either one prints that the server is still running and exits 0, though the operator never attached. cmd's own check also reads stderr.
+	- Expected behavior [Bug]: console counts a detach only from what Docker says on a detach.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 26. Detail in detail_backlog.md.
+	- Origin: 5c5b023 console and cmd. Not seen before. Plausible.
+
+- Two jar links to the same file give the same mount twice, and start fails
+	- ID: 2026111715275253
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `LockedJars` drops duplicates only against paper.jar. With 2 plugin jars linking to one file, the same mount destination is passed twice, and Docker refuses it.
+	- Expected behavior [Bug]: Each file is mounted once.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 28. Detail in detail_backlog.md.
+	- Origin: ba09f6c docker mode start and stop. Not seen before. Plausible.
+
+- From a root shell, ownerAfterStop becomes root
+	- ID: 2026111715275300
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: With `SUDO_USER=root` or `USER=root`, ownerAfterStop defaults to root, so stop hands the trees to root, and repair offers to add root to the server group. design.md's table says the default is the operator unless that's root.
+	- Expected behavior [Bug]: The default skips root.
+	- Reproduced [Bug]: 2026-11-17: a test with `USER=root` and with `SUDO_USER=root` got root.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 31. Detail in detail_backlog.md.
+	- Origin: 715f9b3 config defaults, c076344. Not seen before. Confirmed.
+
+- A checked download can be changed by the folder's owner before it's renamed into place
+	- ID: 2026111715275315
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The hash is taken while the file is written, then the temp file is given to the folder's owner at 0660. It waits through the name check and the operator's yes. While the server runs, server code can rewrite it, and the changed bytes then replace the good jar. start refuses them later, so the good jar is lost but nothing runs.
+	- Expected behavior [Bug]: The temp file stays root-owned and 0600 until just before the rename.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 32. Detail in detail_backlog.md.
+	- Origin: 9f30908, cfd6be9. Not seen before. Plausible.
+
+- IPv4-mapped addresses in allowFrom and bindIP load without a warning and never match
+	- ID: 2026111715275330
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: `allowFrom: [::ffff:10.0.0.1]` is kept as IPv6, goes in the IPv6 set, and never matches the IPv4 client. That client is blocked, with no warning. bindIP keeps the mapped form too.
+	- Expected behavior [Bug]: Mapped addresses are read as IPv4, or warned about.
+	- Reproduced [Bug]: 2026-11-17: a config probe kept the mapped form. The firewall side was read.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 33. Detail in detail_backlog.md.
+	- Origin: e3a0636 shcl config reader. Not seen before. Confirmed for config.
+
+- test-id.bash misses root host checks run through native, so their IDs can be reused
+	- ID: 2026111715275346
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The ID list only reads lines that start with `check`, so df68j, df68b, df68c and df68d aren't listed. A Go test that reuses one passes `--check`, and a check ID used twice in checks.bash is hidden too.
+	- Expected behavior [Bug]: Every test ID in checks.bash is listed and checked for reuse.
+	- Reproduced [Bug]: 2026-11-17: `--list` left them out, and a fake tree that reused df68b passed `--check`.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 34. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+
+- A quick run leaves a stale SHA256SUMS beside new binaries in the release folder
+	- ID: 2026111715275362
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The build step writes binaries into the release version's folder in every mode, but only the package step writes SHA256SUMS, and a quick run skips it. Dev builds then sit beside sums that don't match them.
+	- Expected behavior [Bug]: The sums are written with the binaries, or the stale file is removed.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 35. Detail in detail_backlog.md.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Plausible.
+
+- install-dev.bash --dir=~/path makes a folder named ~
+	- ID: 2026111715275377
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: Bash doesn't expand `~` after `--dir=`, so the path becomes a folder literally named `~` under the current folder. Cleaning that up with `rm -rf ~` would delete the home folder.
+	- Expected behavior [Bug]: A leading `~/` is read as the home folder, or refused.
+	- Reproduced [Bug]: 2026-11-17: `echo --dir=~/x` printed it unexpanded.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 36. Detail in detail_backlog.md.
+	- Origin: d701e7a dev install. Not seen before. Confirmed.
+
+- start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
+	- ID: 2026111715275408
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Incorrect behavior [Bug]: A link such as `world -> /etc/hostname` gets told it needs to point at `/etc/hostname`, which is where it points. A folder the operator can't read hides its links, and the check passes.
+	- Expected behavior [Bug]: A link out of the trees is called that, and a folder that can't be read is reported.
+	- Reproduced [Bug]: 2026-11-17: a test showed both.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 38. Detail in detail_backlog.md.
+	- Origin: 1b3d301 link fixes. Follows 2026111409374443. Confirmed.
+
+- Give linksafe tests of its own
+	- ID: 2026111715275441
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Link refusal at each step, the rename fallback, temp file cleanup on error, and Mkdir's chown are only tested through callers. Its coverage is 50 to 60 percent, and it's the code root relies on in the server tree.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
+	- Origin: Not seen before.
+
+- Keep the join rate limit working when its address set fills
+	- ID: 2026111715275456
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: The per-address sets hold 65536 addresses for 2 minutes. A flood of spoofed SYNs fills them, and then no new address is limited at all, so a real bot flood goes through.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 41. Detail in detail_backlog.md.
+	- Note: 2026-11-17: a size-2 set in a namespace limited only the first 2 addresses.
+	- Origin: 88f3d3f. Not seen before. Confirmed.
+
+- Hold the agent's download redirects to agentHosts
+	- ID: 2026111715275472
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Only the agent's first URL is checked against agentHosts. A redirect can take the download to any public https host, while the plan says the jar was found on the first one.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 42. Detail in detail_backlog.md.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before. Plausible.
+
+- Refuse NAT64 and 6to4 forms of LAN addresses in the agent's fetch, and don't tell the model which address was refused
+	- ID: 2026111715275500
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: fetch lets through NAT64 and 6to4 forms of LAN addresses and a few reserved ranges. A refused fetch tells the model the address a name resolved to, which design.md says the agent shouldn't learn.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 43. Detail in detail_backlog.md.
+	- Note: 2026-11-17: each address passed the check in a test.
+	- Origin: 91a46c8. Not seen before. Confirmed.
+
+- Send the vendor API key only to the vendor's own host
+	- ID: 2026111715275517
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before.
+
+- Add a README section on using the server after setup
+	- ID: 2026111715275532
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
+	- Origin: Not seen before.
+
+- Have install.bash always install the binary owned by root
+	- ID: 2026111715275548
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: When `/usr/local/bin` or the old binary is writable by the user, it installs without sudo, and the file stays user-owned. setup's sudo run and the boot unit then run a file the operator account can change. repair doesn't check it.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 46. Detail in detail_backlog.md.
+	- Note: No.
+	- Origin: 9d7cb3e install script. Not seen before. Plausible.
+
+- At a boot unit stop, both start --foreground and its ExecStop hand the trees back, and a slow hand-back can fail the unit
+	- ID: 2026111719172263
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-191722
+	- Opened by:
+	- Related IDs: 2026111715274978
+	- Incorrect behavior [Bug]: On systemctl stop, ExecStop's stop and start --foreground each run the hand-back once the server is down. When ExecStop ends first, systemd sends SIGTERM to start --foreground, which cuts its chown short and exits 1, so the unit ends as failed. A big tree makes that more likely.
+	- Expected behavior [Bug]: One hand-back, and a clean stop leaves the unit inactive, not failed.
+	- Reproduced [Bug]: 20261117: df7am fails on the unfixed code, with the fake runner. Not seen on a real unit.
+	- Possible cause [Bug]: Kit.stop and Boxed.Start's --foreground end both call handBack. Inside the unit, one of them could leave it to the other, or start --foreground could finish its hand-back after SIGTERM.
+	- Progress log:
+		- 20261117: Found while fixing 2026111715274978.
+		- 20261117: Verified: df7am fails on the unfixed code (start --foreground hands back inside the unit, and a SIGTERM in its wait with the server down fails it, in both modes) and passes with the fix. The quick gate passed, and race tests of launch and cli.
+		- Not run against a real systemd unit here. df78x does that.
+		- 20261117: Verified: df78x passed in a root host container on ca9d851, with the unit inactive and not failed after stop. The root host run itself is still to run.
+	- Needs local test suite run?: No. Passed 20261117.
+	- Actual cause [Bug]: Inside the boot unit, start --foreground handed back after the server's end, and so did ExecStop's stop. systemd sends SIGTERM to the unit once ExecStop is done, which cut start's chown short. A wait that SIGTERM cut short with the server down was also an error, and native mode's 5 s poll is nearly always in that wait.
+	- Actual effort: Low
+	- Actual fix [Bug]: Inside the boot unit, told by its cgroup, start --foreground leaves the hand-back to ExecStop's stop, in both modes. A SIGTERM in its wait with the server down is a clean stop, exit 0. Outside the unit nothing changes. design.md's Boot section says so.
+	- Branch: fixes-2026111719172263
+	- Commit: 99599e1
+	- Test case: df7am, and the root host check df78x
+	- Decisions:
+		- ExecStop's stop keeps the hand-back rather than start, since systemd runs ExecStop after every start, even when the server ended by itself, and only ExecStop finishes before the SIGTERM.
+		- A SIGTERM counts as clean only when the server is down. With it still up, start still fails.
+		- Swept: the hand-backs at start's end are container.go's foreground end and native.go's foreground loop, both changed. The --debug paths can't run in the unit. stop's hand-backs stay.
+	- Closed reason: Done
+	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed df7ag and df78x, with df68e and df76n after them, 4 native SKIPs.
+	- Closed: 20261117-204121
 
 - Root opens a device or pipe that a link in plugins/ points to, before it checks the file kind
 	- ID: 2026111715274815
@@ -601,20 +946,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Closed: 20261117-194121
 	- Commit: 2464337
 
-- Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
-	- ID: 2026111715275425
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Avg
-	- Opened: 20261117-152754
-	- Opened by:
-	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
-	- Note: No. Paper's loader wasn't checked.
-	- Origin: 9058841 plugin pinning. Not seen before. Plausible.
-
 - how-to-connect's Bedrock whitelist example loses its quotes
 	- ID: 2026111715275073
 	- Type: Bug
@@ -688,34 +1019,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
 	- Closed: 20261117-185140
 
-- repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
-	- ID: 2026111715275121
-	- Type: Bug
-	- Status: Waiting on signoff
-		- Waits on a call about LIMIT IN, which reverses a recorded decision. Check: entry in questions.md. The Anywhere and port list parts need nothing more.
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152751
-	- Opened by:
-	- Incorrect behavior [Bug]: `ufw limit 25565/tcp`, `ufw allow from 192.168.0.0/16` and a rule for `19132,25565/tcp` each count as missing. repair exits 1, setup's final check fails, and the suggested command adds a duplicate rule.
-	- Expected behavior [Bug]: Those rule forms count as letting players in.
-	- Reproduced [Bug]: 2026-11-17: a test with that ufw output reported all 3 ports missing.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 20. Detail in detail_backlog.md.
-	- Origin: b42345a repair checks, a80d620 repair fixes. Related to 2026111709090987. Confirmed.
-	- Actual cause [Bug]: ufwMissing took only ALLOW IN lines, and covers read one port or one range.
-	- Actual fix [Bug]: LIMIT IN counts too, a To of Anywhere covers every port, and a port list is split on its commas.
-	- Against: 2026111709090987's decision that LIMIT IN rules don't count as open. ufw limit lets players in, and refuses only an address that connects 6 times in 30 s.
-	- Test case: df5zm
-	- Verified: df5zm fails on the old check for all 5 new rule sets and passes after. The quick gate passed.
-	- Swept: covers is shared with firewalld, whose --list-ports never gives Anywhere or a list. ufwMissing is the only ufw rule reader.
-	- Decisions:
-		- The From column isn't read, as before, so a rule that lets in only the LAN counts.
-		- A rule only for IPv6 still counts, as before. Looked at and left alone.
-		- design.md's repair check 10 says which ufw rules count.
-	- Branch: fixes-2026111715274925
-	- Commit: 5e52b19
-
 - setup --dry-run plans firewall rules that the real run can't write
 	- ID: 2026111715275137
 	- Type: Bug
@@ -769,66 +1072,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refuse on an existing install too, rather than limit design.md's rule to a new install, per the recorded setup decision that it never changes a tree under a live server. design.md lets `repair` and `update` run by themselves while it runs. A `Check:` entry is in questions.md.
 		- 20261117: df65h's assert that an existing install runs no host command now allows the `ps` look. It was no commands, and is now only `ps`.
 
-- repair counts a Paper started by hand as runUser as the tool's own
-	- ID: 2026111715275170
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152751
-	- Opened by:
-	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
-	- Expected behavior [Bug]: repair tells them apart the way status does.
-	- Reproduced [Bug]: No. Read only. df5zk pins the uid-only rule.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
-	- Origin: b42345a repair checks. Not seen before. Plausible.
-
-- cmd's stop and restart guard misses namespaced forms such as minecraft:stop
-	- ID: 2026111715275187
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152751
-	- Opened by:
-	- Incorrect behavior [Bug]: `checkCmd` accepts `minecraft:stop`, `bukkit:restart` and `execute run stop`. Each stops the server without handing the trees back, which design.md says cmd prevents.
-	- Expected behavior [Bug]: cmd refuses those forms too.
-	- Reproduced [Bug]: 2026-11-17: `checkCmd` passed each form in a test. Paper running them is Plausible.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 24. Detail in detail_backlog.md.
-	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed for the check.
-
-- watch --interval with a huge value panics
-	- ID: 2026111715275203
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152752
-	- Opened by:
-	- Incorrect behavior [Bug]: `watch --interval 9300000000` overflows the duration, and the ticker panics with a stack trace and exit 2.
-	- Expected behavior [Bug]: A value that large is refused with a plain message.
-	- Reproduced [Bug]: 2026-11-17: ran a build with an empty config.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 25. Detail in detail_backlog.md.
-	- Origin: ba0f959 status and watch. Not seen before. Confirmed.
-
-- console counts any exit 1 as a detach
-	- ID: 2026111715275221
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152752
-	- Opened by:
-	- Incorrect behavior [Bug]: `attachDetached` treats any exit 1 as a detach. sudo exits 1 after failed password tries, and Docker exits 1 on its own errors. Either one prints that the server is still running and exits 0, though the operator never attached. cmd's own check also reads stderr.
-	- Expected behavior [Bug]: console counts a detach only from what Docker says on a detach.
-	- Reproduced [Bug]: No. Read only.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 26. Detail in detail_backlog.md.
-	- Origin: 5c5b023 console and cmd. Not seen before. Plausible.
-
 - A start that fails after the hand-off leaves the trees with the service account
 	- ID: 2026111715275237
 	- Type: Bug
@@ -860,48 +1103,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Inside the boot unit, start leaves the hand-back to ExecStop's stop, per 2026111719172263.
 		- Swept: native.go's jar lock, systemd-run, and load wait take the same step. Both --debug paths already hand back. repair's tree.ToServer isn't a start.
 
-- Two jar links to the same file give the same mount twice, and start fails
-	- ID: 2026111715275253
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152752
-	- Opened by:
-	- Incorrect behavior [Bug]: `LockedJars` drops duplicates only against paper.jar. With 2 plugin jars linking to one file, the same mount destination is passed twice, and Docker refuses it.
-	- Expected behavior [Bug]: Each file is mounted once.
-	- Reproduced [Bug]: No. Read only.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 28. Detail in detail_backlog.md.
-	- Origin: ba09f6c docker mode start and stop. Not seen before. Plausible.
-
-- start --dry-run says it would run sudo -v, then sudo asks for a password anyway
-	- ID: 2026111715275268
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152752
-	- Opened by:
-	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
-	- Expected behavior [Bug]: sudo -v runs in dry run too, since it changes nothing.
-	- Reproduced [Bug]: 20261117: the built binary's start --dry-run, with a stand-in sudo whose sudo -n fails, printed would run: sudo -v and never ran it.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
-		- Waiting on signoff for the Against line: the dry-run plan no longer shows a would run: sudo -v line, and sudo's own prompt takes its place.
-		- 20261117: Verified: df79e fails on the unfixed code (sudo -v isn't a look) and passes with the fix. The built binary's start --dry-run ran sudo -v through the stand-in, and the unfixed build printed it. The quick gate passed, and race tests of launch and cli.
-	- Origin: 3a04d86. Related to 2026111410134553. Confirmed.
-	- Actual cause [Bug]: sudoUp ran sudo -v as a change, so dry run printed it instead of running it.
-	- Actual effort: Low
-	- Actual fix [Bug]: sudo -v is a look, so dry run runs it, and asks for the password where a real run does. It still runs only when sudo -n true fails. design.md's start step 2 says so.
-	- Branch: fixes-2026111719172263
-	- Commit: 3923e56
-	- Test case: df79e
-	- Against: 2026111410134553's decision that dry run prints sudo -v only when sudo -n true fails. It still comes only then, and now runs rather than prints, as this item asks.
-	- Decisions:
-		- 20261117: the launch rig's changes() keeps sudo -v in its list, though it's now a look, so each test's list still shows sudo asked up front. No assert changed. df79e checks it's a look and on the terminal.
-		- Swept: kit.go's sudoUp is the only sudo -v. setup, update, and repair run themselves through sudo, and skip it under dry run.
-
 - An API agent's key goes along when its URL redirects to another host
 	- ID: 2026111715275284
 	- Type: Bug
@@ -930,96 +1131,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Closed: 20261117-190113
 	- Commit: 1fd93a9
 
-- From a root shell, ownerAfterStop becomes root
-	- ID: 2026111715275300
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152753
-	- Opened by:
-	- Incorrect behavior [Bug]: With `SUDO_USER=root` or `USER=root`, ownerAfterStop defaults to root, so stop hands the trees to root, and repair offers to add root to the server group. design.md's table says the default is the operator unless that's root.
-	- Expected behavior [Bug]: The default skips root.
-	- Reproduced [Bug]: 2026-11-17: a test with `USER=root` and with `SUDO_USER=root` got root.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 31. Detail in detail_backlog.md.
-	- Origin: 715f9b3 config defaults, c076344. Not seen before. Confirmed.
-
-- A checked download can be changed by the folder's owner before it's renamed into place
-	- ID: 2026111715275315
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152753
-	- Opened by:
-	- Incorrect behavior [Bug]: The hash is taken while the file is written, then the temp file is given to the folder's owner at 0660. It waits through the name check and the operator's yes. While the server runs, server code can rewrite it, and the changed bytes then replace the good jar. start refuses them later, so the good jar is lost but nothing runs.
-	- Expected behavior [Bug]: The temp file stays root-owned and 0600 until just before the rename.
-	- Reproduced [Bug]: No. Read only.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 32. Detail in detail_backlog.md.
-	- Origin: 9f30908, cfd6be9. Not seen before. Plausible.
-
-- IPv4-mapped addresses in allowFrom and bindIP load without a warning and never match
-	- ID: 2026111715275330
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152753
-	- Opened by:
-	- Incorrect behavior [Bug]: `allowFrom: [::ffff:10.0.0.1]` is kept as IPv6, goes in the IPv6 set, and never matches the IPv4 client. That client is blocked, with no warning. bindIP keeps the mapped form too.
-	- Expected behavior [Bug]: Mapped addresses are read as IPv4, or warned about.
-	- Reproduced [Bug]: 2026-11-17: a config probe kept the mapped form. The firewall side was read.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 33. Detail in detail_backlog.md.
-	- Origin: e3a0636 shcl config reader. Not seen before. Confirmed for config.
-
-- test-id.bash misses root host checks run through native, so their IDs can be reused
-	- ID: 2026111715275346
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152753
-	- Opened by:
-	- Incorrect behavior [Bug]: The ID list only reads lines that start with `check`, so df68j, df68b, df68c and df68d aren't listed. A Go test that reuses one passes `--check`, and a check ID used twice in checks.bash is hidden too.
-	- Expected behavior [Bug]: Every test ID in checks.bash is listed and checked for reuse.
-	- Reproduced [Bug]: 2026-11-17: `--list` left them out, and a fake tree that reused df68b passed `--check`.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 34. Detail in detail_backlog.md.
-	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
-
-- A quick run leaves a stale SHA256SUMS beside new binaries in the release folder
-	- ID: 2026111715275362
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152753
-	- Opened by:
-	- Incorrect behavior [Bug]: The build step writes binaries into the release version's folder in every mode, but only the package step writes SHA256SUMS, and a quick run skips it. Dev builds then sit beside sums that don't match them.
-	- Expected behavior [Bug]: The sums are written with the binaries, or the stale file is removed.
-	- Reproduced [Bug]: No. Read only.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 35. Detail in detail_backlog.md.
-	- Origin: bb4ab14 cicd pipeline. Not seen before. Plausible.
-
-- install-dev.bash --dir=~/path makes a folder named ~
-	- ID: 2026111715275377
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152753
-	- Opened by:
-	- Incorrect behavior [Bug]: Bash doesn't expand `~` after `--dir=`, so the path becomes a folder literally named `~` under the current folder. Cleaning that up with `rm -rf ~` would delete the home folder.
-	- Expected behavior [Bug]: A leading `~/` is read as the home folder, or refused.
-	- Reproduced [Bug]: 2026-11-17: `echo --dir=~/x` printed it unexpanded.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 36. Detail in detail_backlog.md.
-	- Origin: d701e7a dev install. Not seen before. Confirmed.
-
 - README and design.md say things the code doesn't do
 	- ID: 2026111715275393
 	- Type: Bug
@@ -1039,117 +1150,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: none, doc lines
 	- Acceptance signoff: Self-closed: mechanical doc fixes
 	- Closed: 20261117-200539
-
-- start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
-	- ID: 2026111715275408
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152754
-	- Opened by:
-	- Incorrect behavior [Bug]: A link such as `world -> /etc/hostname` gets told it needs to point at `/etc/hostname`, which is where it points. A folder the operator can't read hides its links, and the check passes.
-	- Expected behavior [Bug]: A link out of the trees is called that, and a folder that can't be read is reported.
-	- Reproduced [Bug]: 2026-11-17: a test showed both.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 38. Detail in detail_backlog.md.
-	- Origin: 1b3d301 link fixes. Follows 2026111409374443. Confirmed.
-
-- Give linksafe tests of its own
-	- ID: 2026111715275441
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152754
-	- Opened by:
-	- Requirements [Feature]: Link refusal at each step, the rename fallback, temp file cleanup on error, and Mkdir's chown are only tested through callers. Its coverage is 50 to 60 percent, and it's the code root relies on in the server tree.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
-	- Origin: Not seen before.
-
-- Keep the join rate limit working when its address set fills
-	- ID: 2026111715275456
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152754
-	- Opened by:
-	- Requirements [Feature]: The per-address sets hold 65536 addresses for 2 minutes. A flood of spoofed SYNs fills them, and then no new address is limited at all, so a real bot flood goes through.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 41. Detail in detail_backlog.md.
-	- Note: 2026-11-17: a size-2 set in a namespace limited only the first 2 addresses.
-	- Origin: 88f3d3f. Not seen before. Confirmed.
-
-- Hold the agent's download redirects to agentHosts
-	- ID: 2026111715275472
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152754
-	- Opened by:
-	- Requirements [Feature]: Only the agent's first URL is checked against agentHosts. A redirect can take the download to any public https host, while the plan says the jar was found on the first one.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 42. Detail in detail_backlog.md.
-	- Note: No.
-	- Origin: 91a46c8. Not seen before. Plausible.
-
-- Refuse NAT64 and 6to4 forms of LAN addresses in the agent's fetch, and don't tell the model which address was refused
-	- ID: 2026111715275500
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: fetch lets through NAT64 and 6to4 forms of LAN addresses and a few reserved ranges. A refused fetch tells the model the address a name resolved to, which design.md says the agent shouldn't learn.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 43. Detail in detail_backlog.md.
-	- Note: 2026-11-17: each address passed the check in a test.
-	- Origin: 91a46c8. Not seen before. Confirmed.
-
-- Send the vendor API key only to the vendor's own host
-	- ID: 2026111715275517
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
-	- Note: No.
-	- Origin: 91a46c8. Not seen before.
-
-- Add a README section on using the server after setup
-	- ID: 2026111715275532
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
-	- Origin: Not seen before.
-
-- Have install.bash always install the binary owned by root
-	- ID: 2026111715275548
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: When `/usr/local/bin` or the old binary is writable by the user, it installs without sudo, and the file stays user-owned. setup's sudo run and the boot unit then run a file the operator account can change. repair doesn't check it.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 46. Detail in detail_backlog.md.
-	- Note: No.
-	- Origin: 9d7cb3e install script. Not seen before. Plausible.
 
 - setup runs apt-get for catatonit on a box without apt
 	- ID: 2026111714065925
