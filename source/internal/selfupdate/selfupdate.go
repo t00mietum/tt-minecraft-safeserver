@@ -219,13 +219,15 @@ func ready(dirfd int, dir string, s *download.Staged, r Release, old syscall.Sta
 	case s.SHA256 != r.SHA256:
 		return fmt.Errorf("%s: SHA-256 doesn't match the release's %s; not used", r.Asset, SumsName)
 	}
+	// No setuid or setgid, even if the old one had them. Keep sets these
+	// again through its fd; they're set here so --version can run.
+	s.UID, s.GID, s.Mode = int(old.Uid), int(old.Gid), old.Mode&0o777|0o100
 	if os.Geteuid() == 0 {
-		if err := syscall.Fchownat(dirfd, s.Temp, int(old.Uid), int(old.Gid), atSymlinkNoFollow); err != nil {
+		if err := syscall.Fchownat(dirfd, s.Temp, s.UID, s.GID, atSymlinkNoFollow); err != nil {
 			return fmt.Errorf("chown %s: %w", s.Temp, err)
 		}
 	}
-	// No setuid or setgid, even if the old one had them.
-	if err := syscall.Fchmodat(dirfd, s.Temp, old.Mode&0o777|0o100, 0); err != nil {
+	if err := syscall.Fchmodat(dirfd, s.Temp, s.Mode, 0); err != nil {
 		return fmt.Errorf("chmod %s: %w", s.Temp, err)
 	}
 	return checkVersion(filepath.Join(dir, s.Temp), r.Tag)

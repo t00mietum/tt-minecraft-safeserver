@@ -287,17 +287,31 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A checked download can be changed by the folder's owner before it's renamed into place
 	- ID: 2026111715275315
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
 	- Opened by:
 	- Incorrect behavior [Bug]: The hash is taken while the file is written, then the temp file is given to the folder's owner at 0660. It waits through the name check and the operator's yes. While the server runs, server code can rewrite it, and the changed bytes then replace the good jar. start refuses them later, so the good jar is lost but nothing runs.
 	- Expected behavior [Bug]: The temp file stays root-owned and 0600 until just before the rename.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 2026-11-19, by df7b3 and df7b4 on the old code: the staged jar was 0660 as soon as it was written, and a file put in its place was renamed over the good jar.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 32. Detail in detail_backlog.md.
-	- Origin: 9f30908, cfd6be9. Not seen before. Plausible.
+	- Origin: 9f30908, cfd6be9. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `download.Stage` gave the temp file the folder's owner and mode 0660 right after writing it, before the checks and the operator's yes. `Keep` renamed whatever file had the temp name by then.
+	- Actual fix [Bug]: The temp file stays root's at 0600 while it waits. `Keep` sets its owner and mode through its own handle just before the rename. `Open` and `Keep` refuse a file at the temp name that isn't the one `Stage` wrote. `Staged` gained `UID`, `GID` and `Mode`, which selfupdate sets to the old binary's.
+	- Decisions:
+		- A short race is left between `Keep`'s check of the temp name and the rename. A swap there only replaces a jar in a folder the server can already write, and start refuses it by hash.
+		- `Stage` swaps its write handle for a read one on the same file once written, since a file open for writing can't be run, and selfupdate runs the new build's --version.
+	- Swept: `download.Stage` callers: `Into` (paper, geyser), update/agent.go's 2 agent downloads, and selfupdate's `Install`, which now sets `Staged` mode and owner so `Keep` keeps them (df77j fails without it). linksafe `Write` chowns just before its rename, with no check or wait between, so it's left alone.
+	- Test case: df7b3, df7b4
+	- Verified: df7b3 and df7b4 fail on the old code and pass with the fix. df77j fails when selfupdate doesn't set the new fields. The quick gate passes, CodeQL included. Only the non-root path ran.
+	- Branch: nov19-2026111715275315
+	- Commit: c9903e3
+	- Acceptance signoff: Self-closed: df7b3 and df7b4 fail on the old code and pass now.
+	- Closed: 20261119-114533
+	- Note: The root-only fchown is the same call as before, moved into `Keep`. Root host check df76n's agent download goes through it.
 
 - IPv4-mapped addresses in allowFrom and bindIP load without a warning and never match
 	- ID: 2026111715275330

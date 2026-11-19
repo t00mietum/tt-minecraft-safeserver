@@ -93,3 +93,76 @@ func TestStatusByCode(t *testing.T) {
 		t.Errorf("Status(599) = %q", got)
 	}
 }
+
+// stageJar stages a small download in a new temp folder.
+func stageJar(t *testing.T, body string) (string, *Staged) {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(ts.Close)
+	dir := t.TempDir()
+	dirfd, err := OpenDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Close(dirfd) })
+	s, err := Client{HTTP: ts.Client()}.Stage(context.Background(), dirfd, dir, "x.jar", ts.URL, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Drop)
+	return dir, s
+}
+
+// The checked download stays 0600 while it waits for the operator, so the
+// server account can't rewrite it, and gets 0660 only as it's kept.
+func TestStagedPrivateUntilKept(t *testing.T) {
+	defer testid.Line(t, "df7b3")
+	dir, s := stageJar(t, "PK good jar")
+	fi, err := os.Lstat(filepath.Join(dir, s.Temp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("staged mode %o, want 600", got)
+	}
+	if err := s.Keep(); err != nil {
+		t.Fatal(err)
+	}
+	fi, err = os.Lstat(filepath.Join(dir, "x.jar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o660 {
+		t.Errorf("kept mode %o, want 660", got)
+	}
+}
+
+// A file the server puts in place of the staged one isn't renamed over the
+// good jar.
+func TestStagedSwapRefused(t *testing.T) {
+	defer testid.Line(t, "df7b4")
+	dir, s := stageJar(t, "PK good jar")
+	good := filepath.Join(dir, "x.jar")
+	if err := os.WriteFile(good, []byte("PK old jar"), 0o660); err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(dir, s.Temp)
+	if err := os.Remove(tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmp, []byte("PK bad jar"), 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := s.Open(); err == nil {
+		_ = f.Close()
+		t.Error("Open gave back the swapped file")
+	}
+	if err := s.Keep(); err == nil {
+		t.Error("Keep took the swapped file")
+	}
+	if b, _ := os.ReadFile(good); string(b) != "PK old jar" {
+		t.Errorf("x.jar is now %q", b)
+	}
+}
