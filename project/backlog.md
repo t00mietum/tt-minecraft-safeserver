@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - test-id.bash's header says to take an ID from the clock, against the next-after-highest rule
 	- ID: 2026111911594103
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261119-115941
 	- Opened by:
@@ -33,6 +33,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to df7b7 and df7b8.
 		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
+		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
+		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
+	- Decisions:
+		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
+	- Test case: n/a: comment-only change in a header. The lint step's test ID check still passes.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical, a header comment.
+	- Closed reason: Done
+	- Closed: 20261119-120500
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150

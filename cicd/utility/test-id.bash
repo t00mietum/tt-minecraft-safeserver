@@ -4,9 +4,10 @@
 
 ##	Purpose:
 ##		- Checks that every Go test has its own ID, and lists them.
-##		- An ID is the whole minutes from 2000-01-01 UTC to when the test was written, in lowercase
-##		  Crockford base 32 (0-9, a-z less i, l, o, u). A minute another test already has goes to the
-##		  next free one.
+##		- An ID is a number of minutes since 2000-01-01 UTC in lowercase Crockford base 32 (0-9, a-z
+##		  less i, l, o, u). A new test takes the next free one after the highest in use, not the
+##		  clock: find the highest from the `testid.Line` calls under source and the `check` calls in
+##		  cicd/root-host/checks.bash, and add 1.
 ##		- A Go test has it as the first line of its body, `defer testid.Line(t, "<id>")`, or `f` in a
 ##		  fuzz target. A root host check has it as the first argument of a `check` call in
 ##		  cicd/root-host/checks.bash, or of a function there that hands its arguments to `check`.
