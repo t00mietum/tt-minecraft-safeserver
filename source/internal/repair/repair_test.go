@@ -35,6 +35,7 @@ func testHost(t *testing.T, passwd, group string, reply func(c host.Cmd) ([]byte
 	h.RulesFile, h.UnitFile, h.ResolvConf, h.Routes = filepath.Join(dir, "firewall.nft"), filepath.Join(dir, "fw.service"), filepath.Join(dir, "resolv.conf"), filepath.Join(dir, "ipv6_route")
 	h.BootFile = filepath.Join(dir, "boot.service")
 	h.PkgBin, h.LocalBin = filepath.Join(dir, "usr-bin-tt-minecraftd"), filepath.Join(dir, "usr-local-bin-tt-minecraftd")
+	h.OldBuilds = filepath.Join(dir, "old-builds")
 	for file, text := range map[string]string{h.Passwd: passwd, h.Group: group} {
 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
@@ -584,10 +585,28 @@ func TestDatasetCheck(t *testing.T) {
 	hasAll(t, "missing", look(t, h, datasetCheck), "dataset tank/mc doesn't exist, or zfs can't be asked: dataset does not exist")
 }
 
+// boxCID is a container id for the othersCheck process tables.
+const boxCID = "4f1e0c5b2a3d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7"
+
+// procCgroups gives a ReadFile for /proc/<pid>/cgroup from a pid -> path
+// map. Any other pid can't be read.
+func procCgroups(paths map[string]string) func(string) ([]byte, error) {
+	return func(name string) ([]byte, error) {
+		for pid, path := range paths {
+			if name == "/proc/"+pid+"/cgroup" {
+				return []byte("0::" + path + "\n"), nil
+			}
+		}
+		return nil, os.ErrNotExist
+	}
+}
+
 func TestOthersCheck(t *testing.T) {
 	defer testid.Line(t, "df5zk")
-	ps := "  990  100 java -Xmx4G -jar /srv/mc/paper.jar nogui\n 1000  200 /usr/bin/java -jar paper-26.3-244.jar\n 1000  300 bash\n 1234  400 java -jar paper.jar\n"
+	ps := "  990    99     1  60 catatonit -- sh -c " + launch.Wrapper + " sh java -Xmx4G -jar paper.jar --nogui\n" +
+		"  990   100    99  60 java -Xmx4G -jar /srv/mc/paper.jar nogui\n 1000   200     1  60 /usr/bin/java -jar paper-26.3-244.jar\n 1000   300     1  60 bash\n 1234   400     1  60 java -jar paper.jar\n"
 	h, f := testHost(t, goodPasswd, goodGroup, func(host.Cmd) ([]byte, error) { return []byte(ps), nil })
+	h.ReadFile = procCgroups(map[string]string{"100": "/machine.slice/libpod-" + boxCID + ".scope/container", "200": "/user.slice/user-1000.slice/session-2.scope"})
 	found := look(t, h, othersCheck)
 	want := []string{
 		"a Paper server this tool didn't start is running, pid 200 as alice; it's left alone, and start refuses until it's stopped",
@@ -598,6 +617,41 @@ func TestOthersCheck(t *testing.T) {
 	}
 	if got := fixAll(t, h, f, othersCheck); len(got) != 0 {
 		t.Errorf("fixed: %q", got)
+	}
+}
+
+// A Paper under runUser's uid is the tool's only when status would call it
+// so: in the native unit, or in a container under the wrapper.
+func TestOthersCheckSameUID(t *testing.T) {
+	defer testid.Line(t, "df7ay")
+	cases := []struct {
+		name, cgroup, parent string
+		ours                 bool
+	}{
+		{"by hand", "/user.slice/user-990.slice/session-5.scope", "bash", false},
+		{"old scripts in tmux", "/user.slice/user-990.slice/user@990.service/tmux-spawn-1.scope", "tmux new -d -s mc", false},
+		{"another container", "/machine.slice/libpod-" + boxCID + ".scope/container", "/run/podman-init -- java -jar paper.jar", false},
+		{"no cgroup read", "", "sh -c " + launch.Wrapper + " sh java", false},
+		{"podman", "/machine.slice/libpod-" + boxCID + ".scope/container", "/run/podman-init -- sh -c " + launch.Wrapper + " sh java -jar paper.jar", true},
+		{"docker", "/system.slice/docker-" + boxCID + ".scope", "docker-init -- sh -c " + launch.Wrapper + " sh java -jar paper.jar", true},
+		{"native", "/system.slice/" + launch.Unit, "tmux new -d -s mc", true},
+	}
+	for _, c := range cases {
+		ps := "  990    50     1  60 " + c.parent + "\n  990    51    50  60 java -Xmx4G -jar paper.jar --nogui\n"
+		h, _ := testHost(t, goodPasswd, goodGroup, func(host.Cmd) ([]byte, error) { return []byte(ps), nil })
+		paths := map[string]string{}
+		if c.cgroup != "" {
+			paths["51"] = c.cgroup
+		}
+		h.ReadFile = procCgroups(paths)
+		found := look(t, h, othersCheck)
+		want := []string(nil)
+		if !c.ours {
+			want = []string{"a Paper server this tool didn't start is running, pid 51 as minecraftd; it's left alone, and start refuses until it's stopped"}
+		}
+		if !reflect.DeepEqual(found, want) {
+			t.Errorf("%s: found %q", c.name, found)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
@@ -122,8 +123,8 @@ func TestBootOtherConfig(t *testing.T) {
 }
 
 // A package installed after setup's copy moves the unit to the package's
-// binary, and the copy is reported as coming first on PATH, never removed.
-// Check 15. See design.md, Boot.
+// binary, and the copy, which comes first on PATH, is moved to the
+// old-builds folder. Check 15. See design.md, Boot.
 func TestPackageOverCopy(t *testing.T) {
 	defer testid.Line(t, "df7av")
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte("enabled\n"), nil })
@@ -132,6 +133,10 @@ func TestPackageOverCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(h.LocalBin, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
+	if err := os.Chtimes(h.LocalBin, mtime, mtime); err != nil {
 		t.Fatal(err)
 	}
 	if got := look(t, h, BootCheck); len(got) != 0 {
@@ -147,26 +152,44 @@ func TestPackageOverCopy(t *testing.T) {
 	if got := fixAll(t, h, f, BootCheck); len(got) != 2 || !strings.Contains(string(f.Ran[0].Stdin), "\nExecStart="+boot.PkgBin+" --config ") {
 		t.Errorf("package there: ran %q, wrote %q", got, f.Ran[0].Stdin)
 	}
-	want := "/usr/local/bin/tt-minecraftd comes before the package's /usr/bin/tt-minecraftd on PATH, so a package upgrade doesn't change what runs; remove it with: sudo rm /usr/local/bin/tt-minecraftd"
+	// 2026-11-19: it said "remove it with: sudo rm", and the fix left the copy alone (2026111911125756).
+	want := "/usr/local/bin/tt-minecraftd comes before the package's /usr/bin/tt-minecraftd on PATH, so a package upgrade doesn't change what runs; repair moves it to /var/lib/tt-minecraftd/old-builds/tt-minecraftd.20261119-111257 [fix]"
 	if got := look(t, h, shadowCheck); !reflect.DeepEqual(got, []string{want}) {
 		t.Errorf("copy over the package: %q", got)
 	}
 	if ran := fixAll(t, h, f, shadowCheck); len(ran) != 0 {
-		t.Errorf("the copy was touched: %q", ran)
+		t.Errorf("the move ran commands: %q", ran)
+	}
+	if b, err := os.ReadFile(filepath.Join(h.OldBuilds, "tt-minecraftd.20261119-111257")); err != nil || string(b) != "old" {
+		t.Errorf("the copy wasn't kept: %q %v", b, err)
+	}
+	if got := look(t, h, shadowCheck); len(got) != 0 {
+		t.Errorf("after the move: %q", got)
 	}
 	if !slicesHas(After, shadowCheck.Name) || After[len(After)-1].Name != shadowCheck.Name {
 		t.Error("repair doesn't run the PATH check last")
 	}
 
 	// A link to the package's runs the package's.
-	if err := os.Remove(h.LocalBin); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.Symlink(h.PkgBin, h.LocalBin); err != nil {
 		t.Fatal(err)
 	}
 	if got := look(t, h, shadowCheck); len(got) != 0 {
 		t.Errorf("a link to the package's: %q", got)
+	}
+	// A link to some other file is reported, with nothing to keep.
+	other := filepath.Join(t.TempDir(), "tt-minecraftd")
+	if err := os.WriteFile(other, []byte("other"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(h.LocalBin); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, h.LocalBin); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, shadowCheck); len(got) != 1 || !strings.HasSuffix(got[0], "it's a link, so remove it with: sudo rm /usr/local/bin/tt-minecraftd") {
+		t.Errorf("a link to another file: %q", got)
 	}
 	if err := os.Remove(h.LocalBin); err != nil {
 		t.Fatal(err)

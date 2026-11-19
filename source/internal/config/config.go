@@ -412,7 +412,9 @@ func checkAddr(s string) (string, error) {
 	if err != nil || addr.Zone() != "" {
 		return "", fmt.Errorf("%q isn't an IP address", s)
 	}
-	return addr.String(), nil
+	// An IPv4 client never shows up as ::ffff:a.b.c.d to nft or Paper, so a
+	// mapped form would sit in the IPv6 set and match nothing.
+	return addr.Unmap().String(), nil
 }
 
 // checkAllow takes lan, any, an address, or a range.
@@ -425,7 +427,11 @@ func checkAllow(s string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("%q isn't an address range", s)
 		}
-		return prefix.Masked().String(), nil
+		prefix = prefix.Masked()
+		if prefix.Addr().Is4In6() && prefix.Bits() >= 96 {
+			prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96)
+		}
+		return prefix.String(), nil
 	}
 	if addr, err := checkAddr(s); err == nil {
 		return addr, nil

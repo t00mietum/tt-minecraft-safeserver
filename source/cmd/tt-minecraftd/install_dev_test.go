@@ -181,6 +181,27 @@ func TestInstallDevScript(t *testing.T) {
 		}
 	})
 
+	t.Run("a leading ~ in --dir is the home folder, and ~user is refused", func(t *testing.T) {
+		r := newDevRig(t)
+		r.have("1.24.4")
+		// The shell hands over --dir=~/x unexpanded, as a quoted ~ does here.
+		out, code := r.run("--yes", "--dir=~/src/tilde")
+		if code != 0 || !r.cloned(filepath.Join(r.home, "src", "tilde")) {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+		if _, err := os.Stat(filepath.Join(r.home, "~")); err == nil {
+			t.Errorf("made a folder named ~ in the working folder")
+		}
+		out, code = r.run("--yes", "--dir", "~")
+		if code == 0 || !strings.Contains(out, "already there") {
+			t.Errorf("--dir ~ is the home folder, which isn't a clone: code %d\n%s", code, out)
+		}
+		out, code = r.run("--yes", "--dir=~bob/x")
+		if code != 2 || !strings.Contains(out, "starts with ~") || r.logText() != "" {
+			t.Errorf("~bob: code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
 	t.Run("a fork's clone counts, an empty folder is used, anything else is refused", func(t *testing.T) {
 		r := newDevRig(t)
 		r.have("1.24.4")

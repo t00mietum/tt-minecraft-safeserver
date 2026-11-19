@@ -68,6 +68,7 @@ func Defaults() Config {
 			"hangar.papermc.io", "hangarcdn.papermc.io",
 			"modrinth.com", "api.modrinth.com", "cdn.modrinth.com",
 			"github.com", "api.github.com",
+			"release-assets.githubusercontent.com", "objects.githubusercontent.com", "raw.githubusercontent.com", // where github.com sends downloads
 			"download.geysermc.org",
 			"fill.papermc.io", "fill-data.papermc.io",
 		},
@@ -172,14 +173,29 @@ func (c *Config) derive() []Warning {
 
 // operator is who gets the trees back after a stop. It's empty when no
 // usable name turns up, as when systemd starts the boot unit as root.
+// Root is skipped, since a root shell sets SUDO_USER or USER to root, and
+// stop would then hand the trees to root.
 func operator() string {
 	for _, name := range []string{os.Getenv("SUDO_USER"), os.Getenv("USER"), Account()} {
-		if s, err := checkAccount(name); err == nil {
+		if s, err := checkAccount(name); err == nil && !isRoot(s) {
 			return s
 		}
 	}
 	return ""
 }
+
+// isRoot is true for root and any other name for uid 0. A name that can't be
+// looked up isn't root.
+func isRoot(name string) bool {
+	if name == "root" {
+		return true
+	}
+	u, err := lookupUser(name)
+	return err == nil && u.Uid == "0"
+}
+
+// lookupUser is a var so tests can add a second uid 0 name.
+var lookupUser = user.Lookup
 
 // Account names the account this runs as, for cron and the like, which
 // don't set USER. Root gives "", or the boot unit's stop would hand the

@@ -15,14 +15,15 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
-// proc is one line of psArgs.
+// proc is one line of PsArgs.
 type proc struct {
 	uid, pid, ppid string
 	age            time.Duration
 	args           string
 }
 
-var psArgs = []string{"ps", "-eo", "uid=,pid=,ppid=,etimes=,args="}
+// PsArgs lists the processes, which needs no sudo.
+var PsArgs = []string{"ps", "-eo", "uid=,pid=,ppid=,etimes=,args="}
 
 var procLine = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.*)$`)
 
@@ -53,11 +54,14 @@ type sighting struct {
 // find looks in the process table, which needs no sudo, unlike asking a
 // rootful runtime. The server's cgroup gives its mode, whatever runMode says.
 func (p *Probe) find(ctx context.Context) (sighting, error) {
-	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: psArgs})
+	out, err := p.Run.Run(ctx, host.Cmd{Look: true, Args: PsArgs})
 	if err != nil {
 		return sighting{}, err
 	}
-	procs := readProcs(out)
+	return sight(readProcs(out), p.ReadFile), nil
+}
+
+func sight(procs []proc, readFile func(string) ([]byte, error)) sighting {
 	byPID := make(map[string]proc, len(procs))
 	for _, pr := range procs {
 		byPID[pr.pid] = pr
@@ -67,14 +71,31 @@ func (p *Probe) find(ctx context.Context) (sighting, error) {
 		if !server.IsPaper(pr.args) {
 			continue
 		}
-		mode := p.ours(pr, byPID)
+		mode := ours(pr, byPID, readFile)
 		if mode == "" || s.mode != "" {
 			s.others = append(s.others, pr)
 			continue
 		}
 		s.mode, s.proc = mode, pr
 	}
-	return s, nil
+	return s
+}
+
+// Other is a Paper server this tool didn't start. UID is as ps gave it.
+type Other struct {
+	UID, PID string
+}
+
+// Others picks the Paper servers this tool didn't start out of the output of
+// PsArgs, told apart by cgroup and wrapper as status does. A second server
+// that looks like ours counts too, since start runs only one. readFile reads
+// /proc.
+func Others(ps []byte, readFile func(string) ([]byte, error)) []Other {
+	var found []Other
+	for _, o := range sight(readProcs(ps), readFile).others {
+		found = append(found, Other{UID: o.uid, PID: o.pid})
+	}
+	return found
 }
 
 // Mode is the mode the tool's server runs in, whatever runMode says, or ""
@@ -84,9 +105,10 @@ func (p *Probe) Mode(ctx context.Context) (string, error) {
 	return s.mode, err
 }
 
-// ours gives the mode of a Paper process this tool started, or "".
-func (p *Probe) ours(pr proc, byPID map[string]proc) string {
-	cg, err := p.ReadFile("/proc/" + pr.pid + "/cgroup")
+// ours gives the mode of a Paper process this tool started, or "". Its uid
+// doesn't tell, since a Paper started by hand as runUser has the same one.
+func ours(pr proc, byPID map[string]proc, readFile func(string) ([]byte, error)) string {
+	cg, err := readFile("/proc/" + pr.pid + "/cgroup")
 	if err != nil {
 		return ""
 	}

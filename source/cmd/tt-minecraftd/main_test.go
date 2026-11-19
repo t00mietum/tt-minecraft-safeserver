@@ -71,7 +71,7 @@ func noHostRunner(t *testing.T) (*host.Fake, *int) {
 		return fake, func(c *config.Config) *repairpkg.Host {
 			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
 				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), Routes: filepath.Join(etc, "ipv6_route"), BootFile: filepath.Join(etc, "boot.service"),
-				PkgBin: filepath.Join(etc, "usr-bin-tt-minecraftd"), LocalBin: filepath.Join(etc, "usr-local-bin-tt-minecraftd"),
+				PkgBin: filepath.Join(etc, "usr-bin-tt-minecraftd"), LocalBin: filepath.Join(etc, "usr-local-bin-tt-minecraftd"), OldBuilds: filepath.Join(etc, "old-builds"),
 				NftThere: func() bool { return false }}
 		}
 	}
@@ -175,6 +175,7 @@ func TestUsageErrors(t *testing.T) {
 		{"stop", "--warn", "-1"},
 		{"stop", "--warn", "soon"},
 		{"watch", "--interval", "0"},
+		{"watch", "--interval", "9300000000"},
 		{"repair", "--approve-plugins", "--check"},
 		{"repair", "--approve-plugins", "--dry-run"},
 		{"status", "--set", "heapMax"},
@@ -866,5 +867,43 @@ func TestDryRunsNoPrompt(t *testing.T) {
 		if noPrompt(h.Run) != check {
 			t.Errorf("repair --check %v: NoPrompt is %v", check, !check)
 		}
+	}
+}
+
+// install.bash's hidden retire-build keeps the build it replaces in the
+// old-builds folder, and takes only a full path to a tt-minecraftd. It isn't
+// in the help.
+func TestRetireBuild(t *testing.T) {
+	defer testid.Line(t, "df7be")
+	old := oldBuilds
+	oldBuilds = filepath.Join(t.TempDir(), "old-builds")
+	t.Cleanup(func() { oldBuilds = old })
+	bin := filepath.Join(t.TempDir(), "tt-minecraftd")
+	if err := os.WriteFile(bin, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
+	if err := os.Chtimes(bin, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	kept := filepath.Join(oldBuilds, "tt-minecraftd.20261119-111257")
+	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || out.String() != "Moved "+bin+" to "+kept+".\n" {
+		t.Fatalf("code %d\n%s%s", code, out.String(), errOut.String())
+	}
+	if b, err := os.ReadFile(kept); err != nil || string(b) != "old" {
+		t.Errorf("kept %q %v", b, err)
+	}
+	for _, args := range [][]string{{"retire-build"}, {"retire-build", "tt-minecraftd"}, {"retire-build", "/etc/passwd"}, {"retire-build", bin, bin}} {
+		out.Reset()
+		errOut.Reset()
+		if code := run(args, &out, &errOut); code != exitError || !strings.Contains(errOut.String(), "takes the full path of one tt-minecraftd build") {
+			t.Errorf("%q: code %d\n%s", args, code, errOut.String())
+		}
+	}
+	out.Reset()
+	run([]string{"--help"}, &out, &errOut)
+	if strings.Contains(out.String(), "retire") {
+		t.Errorf("in the help:\n%s", out.String())
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -185,6 +186,7 @@ func TestDockerStart(t *testing.T) {
 		"sudo docker rm tt-minecraftd",
 		"sudo chown -R -- minecraftd:minecraftd " + q(g.dir),
 		"sudo chmod -R ug+rwX,o-rwx -- " + q(g.dir),
+		"sudo -u minecraftd -- rm -rf --one-file-system -- " + q(g.dir+"/libraries") + " " + q(g.dir+"/plugins/.paper-remapped"),
 		"sudo " + host.Quote(run),
 		"sudo docker start tt-minecraftd",
 	}
@@ -361,7 +363,7 @@ func TestDockerStartModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := g.changes()
-	if len(got) != 5 || !strings.HasPrefix(got[3], "sudo docker run --name") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[4], "chown -R -- alice:minecraftd") {
+	if len(got) != 6 || !strings.HasPrefix(got[4], "sudo docker run --name") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[5], "chown -R -- alice:minecraftd") {
 		t.Errorf("debug ran %q", got)
 	}
 
@@ -926,5 +928,52 @@ func TestStartCleansLogTail(t *testing.T) {
 	out := g.out.String()
 	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "first ]52;c;ZWNobyBoaQ==line\nsecond[2J line\n") {
 		t.Errorf("err %v, output %q", err, out)
+	}
+}
+
+// Two plugin jars that link to one file give one mount, since Docker and
+// Podman refuse a destination given twice.
+func TestStartJarLinksOneMount(t *testing.T) {
+	defer testid.Line(t, "df7b1")
+	g := newRig(t)
+	g.d.DryRun = true
+	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	f, err := os.OpenFile(g.d.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"one.jar", "two.jar"} {
+		if err := os.Symlink("Geyser-Spigot.jar", filepath.Join(g.dir, "plugins", name)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString("jar: plugins/" + name + "\n\tsha256: " + empty + "\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Close()
+	// So do two trees that are one folder.
+	alias := filepath.Join(filepath.Dir(g.dir), "alias")
+	if err := os.Symlink("server", alias); err != nil {
+		t.Fatal(err)
+	}
+	g.d.Cfg.OwnerTrees = []string{g.dir, alias, g.dir}
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(g.dir, "plugins", "Geyser-Spigot.jar")
+	create := g.r.Lines()[len(g.r.Ran)-2]
+	if n := strings.Count(create, "dst="+real+","); n != 1 {
+		t.Errorf("%d mounts of %s in %q", n, real, create)
+	}
+	if n := strings.Count(create, "dst="+g.dir+" "); n != 1 {
+		t.Errorf("%d mounts of %s in %q", n, g.dir, create)
+	}
+	// Native mode takes the same list for its read-only paths.
+	jars, err := LockedJars(g.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{filepath.Join(g.dir, "paper-26.3-244.jar"), real}; !slices.Equal(jars, want) {
+		t.Errorf("LockedJars gave %q, want %q", jars, want)
 	}
 }

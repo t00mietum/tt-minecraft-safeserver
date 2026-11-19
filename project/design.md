@@ -166,6 +166,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- An IPv6 subnet the file has and the host doesn't is fine, since it only blocks more. At boot, the router's announcement can come after the server starts.
 
 6. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
+	- Then, as the service account, remove Paper's plugin library cache and its remapped plugin jars. See [Plugin pinning](#plugin-pinning).
 
 7. Launch in the configured mode. Then wait until the log says the server is done loading, or `startTimeout` runs out. When the process died, print the end of its log and exit 1.
 	- When `startTimeout` runs out, the server keeps running, and `start` exits 1. With `--foreground` that's only a warning, and it goes on to wait for the server's end. An exit there would end the boot unit, and systemd would run its `ExecStop`, so a big world or a slow host would never come up at boot.
@@ -224,6 +225,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- The lines come from `logs/latest.log`, in both modes. It waits up to 3 seconds for the first one, then until half a second goes by with nothing new, and 10 seconds at most.
 		- Only lines from the server thread count for those waits, since console commands run there. Lines from other threads are shown but don't count, since Geyser's STUN lookup logs from its own thread just after a start, and could end the wait before the answer came.
 	- `cmd stop` and `cmd restart` are refused, since `stop` also hands the trees back, and Paper's `restart` only stops without a restart script.
+		- So are their namespaced names, such as `minecraft:stop` and `bukkit:restart`, and either one after a `run` in `execute` or `return`, such as `execute run stop`.
 
 - RCON is never used. See [Safe server settings](#safe-server-settings).
 
@@ -261,6 +263,7 @@ Common:  --config PATH, --set KEY=VALUE
 	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else, unless the `.deb` or `.rpm` package has put it in `/usr/bin`. See [Boot](#boot).
+		- The copy is owned by root. A different build already there is moved to the old-builds folder first, the same as `repair` does in check 15. The same build, by SHA-256, is left alone, and no copy is made.
 	13. Ends with `repair --check`.
 
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
@@ -349,7 +352,10 @@ Common:  --config PATH, --set KEY=VALUE
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
 		- A unit that runs another config is left alone, whatever this config's `startAtBoot` is. See [Boot](#boot).
 	14. Any Paper server that this tool didn't start is reported, and never killed.
-	15. When the package's `/usr/bin/tt-minecraftd` is there, no other copy in `/usr/local/bin` comes before it on PATH. One is reported with the command that removes it, and never removed. See [Boot](#boot).
+		- It's told apart the way `status` tells it, by its cgroup and the container's wrapper, since one started by hand as `runUser` has the same uid.
+	15. When the package's `/usr/bin/tt-minecraftd` is there, no other copy in `/usr/local/bin` comes before it on PATH. One is moved to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, rather than removed, since someone may have put that build there on purpose. See [Boot](#boot).
+		- `--check` and `--dry-run` only report it, and say where it would go.
+		- A link to the package's binary passes. A link to some other file is reported with the command that removes it, since there's no build to keep.
 
 ## Project structure
 
@@ -371,6 +377,7 @@ source/internal/fetch/       downloads and hash checks
 source/internal/update/
 source/internal/repair/
 source/internal/boot/        systemd unit
+source/internal/oldbuild/    replaced builds kept and rotated
 nix/                         NixOS module and flake, deferred
 project/                     design, backlog, and notes
 cicd/                        build, test, and release scripts
@@ -546,7 +553,7 @@ cicd/                        build, test, and release scripts
 | `runMode`           | `podman`                          | `podman` or `docker`, and `native` once it's back. `setup` picks one
 | `runUser`           | `minecraftd`
 | `runGroup`          | same as `runUser`                 | Stays the group before and after a run
-| `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`, else the account it runs as, unless that's root
+| `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`, else the account it runs as, skipping root at each step
 | `serverDir`         | `/srv/tt-minecraftd/server`
 | `ownerTrees`        | `[<serverDir>]`                   | Every tree that changes hands, such as a world on another dataset
 | `zfsDataset`        | none                              | No snapshots when unset
@@ -562,7 +569,7 @@ cicd/                        build, test, and release scripts
 | `gamePort`          | `25565`                           | TCP, for Java players
 | `bedrock`           | `true`                            | Geyser and Floodgate
 | `bedrockPort`       | `19132`                           | TCP and UDP, for Bedrock players. Can't be `gamePort`
-| `allowFrom`         | `[lan]`                           | Who may connect to the game ports. `lan`, `any`, or addresses and ranges
+| `allowFrom`         | `[lan]`                           | Who may connect to the game ports. `lan`, `any`, or addresses and ranges. An IPv4-mapped address, such as `::ffff:10.0.0.1`, is read as IPv4
 | `joinRateLimit`     | `20`                              | New connections per minute from one address
 | `egress`            | `web`                             | What the server may connect out to. `web` or `open`
 | `hideOnlinePlayers` | `true`
@@ -579,7 +586,7 @@ cicd/                        build, test, and release scripts
 
 ### Saves and persistence
 
-- The tool doesn't store any state of its own, apart from the approved plugin list. Whether the server runs comes from the container runtime or systemd. Ownership comes from the the files.
+- The tool doesn't store any state of its own, apart from the approved plugin list and the builds it kept in `/var/lib/tt-minecraftd/old-builds/`. See [Boot](#boot). Whether the server runs comes from the container runtime or systemd. Ownership comes from the the files.
 
 - Server tree layout, as Paper makes it:
 
@@ -641,7 +648,7 @@ cicd/                        build, test, and release scripts
 - Container mode runs `podman` or `docker` through sudo, and the container under the service account's uid and gid. Both get the same flags:
 	- `--read-only`, and a tmpfs on `/tmp`. The tmpfs allows exec, since Netty and other libraries extract native code there and load it.
 	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work. The working folder is `serverDir`'s real path.
-		- A link in a tree that works on the host but goes through a path the container doesn't have, such as a link to another link outside the trees, stops `start`. It names the link and the path to point it at.
+		- A link in a tree that works on the host but goes through a path the container doesn't have, such as a link to another link outside the trees, stops `start`. It names the link and the path to point it at, or says the link leads out of the trees when that's where its target is. A folder `start` can't read gives a warning that its links weren't checked, and doesn't stop the start.
 	- `paper.jar` and each plugin and Geyser extension jar mounted read-only over their own paths.
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.
@@ -746,6 +753,12 @@ cicd/                        build, test, and release scripts
 	- A jar that's a pipe, a socket, a device, or a link to one counts as changed. Its kind is checked before it's opened, since opening a device runs its driver, as root in `repair`, setup, `update` and a boot start.
 	- `status` and `repair` run the same check.
 
+- Paper also loads code that it writes into the tree while it runs, which can't be pinned. `start` removes it after the hand-off, as the service account, and Paper writes it again:
+	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256). So each start downloads them again, and a plugin whose libraries can't be downloaded, such as with no internet, doesn't load.
+	- Paper's own libraries in `libraries/`, and the server in `versions/`, are checked against hashes inside the pinned `paper.jar` at every start, and put back when they differ. Removing them costs about a second.
+	- `plugins/.paper-remapped/` held the copies of plugins that Paper remapped before 26.1, reused by the original jar's hash alone.
+	- Code that a plugin keeps in its own folder, such as libraries it downloads itself, isn't covered. Approving such a plugin trusts it with that.
+
 - `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`, or a Geyser extension's `extension.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
 	- A Paper build that's refused stays where it is, still not approved, since moving it would only break `paper.jar`.
 	- When the answers run out, such as at the end of piped input, the jars not asked about yet stay where they are, not approved, and `repair` exits 1.
@@ -774,12 +787,12 @@ cicd/                        build, test, and release scripts
 	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents.
 	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
 
-- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.
+- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. The usual one goes only to its vendor's own API, so a gateway or other server in `agentURL` gets `TT_MINECRAFTD_AGENT_KEY` or nothing. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.
 
 - What it's told: the Minecraft version, the Paper build, and for each jar it's asked about, its path under `serverDir`, its name and version from `plugin.yml`, its SHA-256, and its source if it has one. Nothing else from the host, such as the config, addresses, or player names.
 
 - What it may do:
-	- Read web pages and APIs over HTTPS, through the one tool `update` gives the API kinds, `fetch`. It only sends GET, only follows `https`, refuses loopback, LAN, and link-local addresses, caps each page's size, and gives back text. A run has a cap on its fetches too.
+	- Read web pages and APIs over HTTPS, through the one tool `update` gives the API kinds, `fetch`. It only sends GET, only follows `https`, refuses loopback, LAN, and link-local addresses, caps each page's size, and gives back text. The NAT64 and 6to4 forms of those addresses and the reserved ranges are refused too, and a refusal doesn't say which address a name led to. A run has a cap on its fetches too.
 	- A `command` agent uses its own web tools instead. Its flags should allow web reads and nothing else, such as no shell and no file writes.
 
 - What it can't do:
@@ -790,7 +803,7 @@ cicd/                        build, test, and release scripts
 	- Get past `egress`. That limits the service account, and the agent runs as the operator, so neither one changes the other.
 
 - Each jar it finds is checked like any other download, and then a person approves it:
-	- The download address and the hash page are `https`, on a host in `agentHosts`. The default is the main plugin hosts: Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from another host is listed as skipped, with the host, so the operator can add it.
+	- The download address and the hash page are `https`, on a host in `agentHosts`, and so is every redirect from them. The default is the main plugin hosts: Hangar, Modrinth, GitHub and the hosts its downloads redirect to, GeyserMC, and PaperMC. A jar from another host is listed as skipped, with the host, so the operator can add it.
 	- The jar's size is capped, and its SHA-256 or SHA-512 has to match the hash the agent gave. The tool fetches the hash page itself, and that hash has to be in it. A source that publishes no hash is allowed, and the jar is shown with a warning.
 	- The new jar's `plugin.yml`, `paper-plugin.yml`, or `extension.yml` has to name the same plugin as the old one.
 	- The plan shows each jar's host, old and new versions, and hash, plus the agent's notes, such as config changes. The agent's text has its control characters dropped.
@@ -863,6 +876,7 @@ cicd/                        build, test, and release scripts
 	- Ones from an address that's not in `allowFrom` get dropped.
 	- Past `joinRateLimit` a minute from one address, the rest get dropped. That slows down bot join floods.
 		- A burst of `joinRateLimit` is allowed too, so a minute's worth can come at once.
+		- Each address is kept on the list for a minute after its last new connection, up to 65536 IPv4 and 65536 IPv6 addresses. Spoofed addresses can fill it, so the ones left out when it's full share a single `joinRateLimit` a minute.
 
 - Inbound, new connections from anywhere but loopback get dropped on the RCON, query, and management ports, even though the server should never open them.
 	- Those are RCON's default port 25575 over TCP, and `gamePort` over UDP for query. The management server has no fixed default port, so it's left to the safe settings.
@@ -898,7 +912,13 @@ cicd/                        build, test, and release scripts
 	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
 	- The unit runs the tool from `/usr/bin` when the `.deb` or `.rpm` package put it there, and otherwise from `/usr/local/bin`, where `setup` and the install script put it. It adds `--config` when the config isn't the default one.
 		- The packages follow the FHS and Debian policy, which give a package `/usr/bin` and leave `/usr/local/bin` to hand installs. A package upgrade then changes what the unit runs. `start` and `stop` take a unit that runs either path as this config's.
-		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` reports one it finds, without removing it.
+		- `setup` and the install script always install it owned by root, even where the folder lets the operator write, since `setup`'s sudo run and the boot unit run it.
+		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` moves one it finds to the old-builds folder.
+	- A hand-installed build that's replaced or in the way is kept, not deleted. `repair`, `setup`'s copy and the install script move it to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, with the mtime as `YYYYmmDD-HHMMSS`. Someone who put it there on purpose can copy it back.
+		- The folder is off PATH, and it's the same on every distro. It's made root-owned, mode 0755, when it's missing. `/var` can be on another filesystem, so the move falls back to a copy and then a remove.
+		- After each move the folder is GFS-rotated, as cicd keeps its demo renders: the newest build in each of the last few finished hours, days, weeks, months, and years, plus the newest 10 and the very first.
+		- The install script has the build it's about to install do the move, through a command left out of the help, so the rules live in one place.
+		- `update --self` is deferred. When it comes back, it gets the same move.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
 		- Only `ExecStop`'s `stop` hands the trees back. systemd runs it after every start, even when the server ended by itself, and sends SIGTERM to what's left once it's done, which would cut a second hand-back short and fail the unit. A SIGTERM that finds the server down is a clean stop.
 	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.

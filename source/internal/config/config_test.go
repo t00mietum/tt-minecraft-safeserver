@@ -323,3 +323,23 @@ func TestKeysMatchDesign(t *testing.T) {
 		t.Errorf("%s is read but not in design.md", name)
 	}
 }
+
+// An IPv4-mapped address or range is read as IPv4, since that's how nft and
+// Paper see an IPv4 client.
+func TestMappedAddressesReadAsIPv4(t *testing.T) {
+	defer testid.Line(t, "df7b5")
+	c := before()
+	text := "bindIP: \"::ffff:192.168.1.123\"\n" +
+		"allowFrom: [\"::ffff:10.0.0.1\", \"::ffff:10.1.2.3/104\", \"::FFFF:0:0/96\", \"::ffff:10.0.0.0/80\", \"2001:db8::1\"]\n"
+	if warns := mustRead(t, text, &c); len(warns) != 0 {
+		t.Fatalf("warnings: %v", warns)
+	}
+	if c.BindIP != "192.168.1.123" {
+		t.Errorf("bindIP = %q", c.BindIP)
+	}
+	// A range wider than the mapped block isn't all IPv4, so it stays IPv6.
+	want := []string{"10.0.0.1", "10.0.0.0/8", "0.0.0.0/0", "::/80", "2001:db8::1"}
+	if !reflect.DeepEqual(c.AllowFrom, want) {
+		t.Errorf("allowFrom = %q, want %q", c.AllowFrom, want)
+	}
+}

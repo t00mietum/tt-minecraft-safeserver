@@ -4,16 +4,17 @@
 
 ##	Purpose:
 ##		- Checks that every Go test has its own ID, and lists them.
-##		- An ID is the whole minutes from 2000-01-01 UTC to when the test was written, in lowercase
-##		  Crockford base 32 (0-9, a-z less i, l, o, u). A minute another test already has goes to the
-##		  next free one.
+##		- An ID is a number of minutes since 2000-01-01 UTC in lowercase Crockford base 32 (0-9, a-z
+##		  less i, l, o, u). A new test takes the next free one after the highest in use, not the
+##		  clock: find the highest from the `testid.Line` calls under source and the `check` calls in
+##		  cicd/root-host/checks.bash, and add 1.
 ##		- A Go test has it as the first line of its body, `defer testid.Line(t, "<id>")`, or `f` in a
 ##		  fuzz target. A root host check has it as the first argument of a `check` call in
-##		  cicd/root-host/checks.bash.
+##		  cicd/root-host/checks.bash, or of a function there that hands its arguments to `check`.
 ##	Syntax:
 ##		test-id.bash --check [-q] [--root DIR]
 ##		test-id.bash --list [--root DIR]
-##		  --check     fail on a Go test with no ID, a malformed ID, or an ID used twice
+##		  --check     fail on a Go test with no ID, a malformed ID, or an ID used twice by any test
 ##		  --list      print "<id> <label>" for each test, once each
 ##		  -q          print findings only
 ##	Exit: 0 clean, 1 findings, 2 bad usage.
@@ -54,11 +55,19 @@ fGoTests(){
 		FNR == 1 && name != "" { }
 		END { if (name != "") printf "-\t%s\t%s\n", fileOf, name }'
 }
-## "<id>\t<name>" per root host check.
+## "<id>\t<name>" per root host check, once per call, so a repeat shows. A check runs through
+## `check` or through a function that hands its arguments to it, as `native` does, so those
+## names come from the file rather than a list here. A commented-out call doesn't count.
+# shellcheck disable=SC2016  ## the awk program is single-quoted on purpose
 fRootChecks(){
-	local f="${root}/cicd/root-host/checks.bash"
+	local f="${root}/cicd/root-host/checks.bash" names
 	[[ -f "${f}" ]] || return 0
-	sed -nE 's/^[[:space:]]*check[[:space:]]+([0-9a-z]{5})[[:space:]]+"?([^"]*)"?[[:space:]].*$/\1\t\2/p' "${f}"
+	names="$(awk '
+		match($0, /^[A-Za-z_][A-Za-z0-9_]*\(\)/) { fn = substr($0, 1, RLENGTH - 2) }
+		fn != "" && /(^|[^A-Za-z0-9_])check "\$(\{@\}|@)"/ { print fn }
+		/^}/ { fn = "" }' "${f}" | sort -u | paste -sd'|' -)"
+	names="check${names:+|${names}}"
+	sed -nE "s/^[[:space:]]*(${names})[[:space:]]+([0-9a-z]{5})[[:space:]]+\"?([^\"]*)\"?[[:space:]].*\$/\2\t\3/p" "${f}"
 }
 
 if [[ "${mode}" == list ]]; then
@@ -73,7 +82,7 @@ while IFS=$'\t' read -r id file name; do
 	if [[ "${id}" == - ]]; then printf 'no ID: %s %s\n' "${rel}" "${name}"; bad=1
 	elif [[ ! "${id}" =~ ${re} ]]; then printf 'bad ID "%s": %s %s\n' "${id}" "${rel}" "${name}"; bad=1; fi
 done < <(fGoTests)
-dups="$({ fGoTests | awk -F'\t' '$1 != "-" { print $1 }'; fRootChecks | cut -f1 | sort -u; } | sort | uniq -d)"
+dups="$({ fGoTests | awk -F'\t' '$1 != "-" { print $1 }'; fRootChecks | cut -f1; } | sort | uniq -d)"
 if [[ -n "${dups}" ]]; then printf 'ID used twice: %s\n' "${dups//$'\n'/ }"; bad=1; fi
 ((bad)) || { ((quiet)) || printf 'test IDs: every test has its own\n'; }
 exit "${bad}"
@@ -82,3 +91,5 @@ exit "${bad}"
 ##	History:
 ##		- 2026-11-12: Created.
 ##		- 2026-11-13: Fuzz targets take their ID the same way, from `f`.
+##		- 2026-11-19: Root host checks run through `native`, or any function that hands its
+##		  arguments to `check`, count too, and a check ID used twice in checks.bash is a repeat.

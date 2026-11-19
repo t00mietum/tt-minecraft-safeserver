@@ -32,8 +32,13 @@ type Host struct {
 	// PkgBin and LocalBin stand in for boot.PkgBin and boot.LocalBin. Empty
 	// means the real ones.
 	PkgBin, LocalBin string
+	// OldBuilds stands in for oldbuild.Dir. Empty means the real one.
+	OldBuilds string
 	// NftThere, when set, stands in for HasNft.
 	NftThere func() bool
+	// ReadFile reads /proc, for which process is the tool's server. nil
+	// means os.ReadFile.
+	ReadFile func(string) ([]byte, error)
 }
 
 // NewHost gives a Host on the real account files.

@@ -64,6 +64,28 @@ func TestExecError(t *testing.T) {
 	}
 }
 
+// A Tty command's stderr still goes to the terminal, and to ErrCopy too, for
+// console to tell docker attach's detach from sudo's or docker's own exit 1.
+func TestExecTtyErrCopy(t *testing.T) {
+	defer testid.Line(t, "df7b0")
+	term, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	keep := os.Stderr
+	os.Stderr = term
+	defer func() { os.Stderr = keep }()
+	var copied bytes.Buffer
+	e := &Exec{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}
+	_, err = e.Run(context.Background(), Cmd{Args: []string{"sh", "-c", "echo read escape sequence >&2; exit 1"}, Tty: true, ErrCopy: &copied})
+	os.Stderr = keep
+	shown, _ := os.ReadFile(term.Name())
+	if err == nil || copied.String() != "read escape sequence\n" || string(shown) != "read escape sequence\n" {
+		t.Errorf("err %v, copied %q, shown %q", err, copied.String(), shown)
+	}
+}
+
 // A command run as the service account goes through sudo -u, or runuser
 // when the tool is already root, since root may have no sudo.
 func TestExecAs(t *testing.T) {

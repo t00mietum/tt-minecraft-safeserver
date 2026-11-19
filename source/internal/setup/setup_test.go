@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
@@ -136,10 +137,12 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		Out:         r.out,
 		Exe:         filepath.Join(dir, "tt-minecraftd"),
 		PkgBin:      filepath.Join(dir, "usr-bin-tt-minecraftd"),
+		LocalBin:    filepath.Join(dir, "usr-local-bin-tt-minecraftd"),
+		OldBuilds:   filepath.Join(dir, "old-builds"),
 		Accounts: func(c *config.Config) *repair.Host {
 			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group,
 				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, Routes: filepath.Join(dir, "ipv6_route"), BootFile: filepath.Join(dir, "boot.service"),
-				PkgBin: r.s.PkgBin, LocalBin: filepath.Join(dir, "usr-local-bin-tt-minecraftd")}
+				PkgBin: r.s.PkgBin, LocalBin: r.s.LocalBin, OldBuilds: r.s.OldBuilds}
 		},
 		Paper:  &r.paper,
 		Geyser: &r.geyser,
@@ -201,7 +204,8 @@ func TestNewInstall(t *testing.T) {
 		"sudo gpasswd --add alice minecraftd",
 		"sudo install -d -o alice -g minecraftd -m 0770 "+r.server,
 		"sudo podman pull docker.io/library/eclipse-temurin:",
-		"sudo install -m 0755 "+r.s.Exe+" "+BinPath,
+		// 2026-11-19: was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd" (2026111911125756, 2026111715275548).
+		"sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin,
 	)
 	if slices.ContainsFunc(r.ran(), func(s string) bool { return strings.Contains(s, "apt-get") }) {
 		t.Errorf("apt-get ran with podman and catatonit there:\n%s", strings.Join(r.ran(), "\n"))
@@ -1024,11 +1028,67 @@ func TestPackageInstall(t *testing.T) {
 				unit = string(c.Stdin)
 			}
 		}
-		copied := slices.Contains(r.ran(), "sudo install -m 0755 "+r.s.Exe+" "+BinPath)
+		// 2026-11-19: was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd" (2026111911125756, 2026111715275548).
+		copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
 		said := strings.Contains(r.out.String(), "Copy "+r.s.Exe+" to "+BinPath)
 		bin := map[bool]string{false: "/usr/local/bin/tt-minecraftd", true: "/usr/bin/tt-minecraftd"}[pkg]
 		if copied == pkg || said == pkg || !strings.Contains(unit, "\nExecStart="+bin+" start --foreground\n") {
 			t.Errorf("package %v: copied %v, in the plan %v, unit:\n%s\n%s", pkg, copied, said, unit, strings.Join(r.ran(), "\n"))
+		}
+	}
+}
+
+// Another build in /usr/local/bin is moved to the old-builds folder before
+// the copy, rather than written over. The same build, by SHA-256, is left
+// alone, and a dry run only says what it would do.
+func TestCopyKeepsOldBuild(t *testing.T) {
+	defer testid.Line(t, "df7bd")
+	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
+	kept := "tt-minecraftd.20261119-111257"
+	for _, c := range []struct {
+		name      string
+		old       string
+		dry       bool
+		moved     bool
+		copied    bool
+		planMoved bool
+	}{
+		{"another build", "old build", false, true, true, true},
+		{"the same build", "this build", false, false, false, false},
+		{"dry run", "old build", true, false, true, true},
+		{"none there", "", false, false, true, false},
+	} {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.s.Yes, r.s.AcceptEULA, r.s.DryRun = true, true, c.dry
+		if err := os.WriteFile(r.s.Exe, []byte("this build"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if c.old != "" {
+			if err := os.WriteFile(r.s.LocalBin, []byte(c.old), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(r.s.LocalBin, mtime, mtime); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("%s: %v\n%s", c.name, err, r.out)
+		}
+		b, err := os.ReadFile(filepath.Join(r.s.OldBuilds, kept))
+		moved := err == nil && string(b) == c.old
+		copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
+		planMoved := strings.Contains(r.out.String(), "Move the other build in "+BinPath+" to /var/lib/tt-minecraftd/old-builds/"+kept+", where old builds are kept.")
+		if moved != c.moved || copied != c.copied || planMoved != c.planMoved {
+			t.Errorf("%s: moved %v, copied %v, in the plan %v\n%s\n%s", c.name, moved, copied, planMoved, strings.Join(r.ran(), "\n"), r.out)
+		}
+		if c.moved {
+			if _, err := os.Lstat(r.s.LocalBin); !os.IsNotExist(err) {
+				t.Errorf("%s: still in place: %v", c.name, err)
+			}
+		} else if c.old != "" {
+			if b, _ := os.ReadFile(r.s.LocalBin); string(b) != c.old {
+				t.Errorf("%s: changed to %q", c.name, b)
+			}
 		}
 	}
 }

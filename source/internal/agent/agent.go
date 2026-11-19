@@ -103,16 +103,33 @@ func New(cfg *config.Config) (Asker, error) {
 		if cfg.AgentModel == "" {
 			return nil, fmt.Errorf("agent is %s, but agentModel isn't set", cfg.Agent)
 		}
+		home := vendorURL[cfg.Agent]
 		api := API{Kind: cfg.Agent, URL: cfg.AgentURL, Model: cfg.AgentModel, Key: getenv("TT_MINECRAFTD_AGENT_KEY")}
 		if api.URL == "" {
-			api.URL = map[string]string{"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1"}[cfg.Agent]
+			api.URL = home
 		}
-		if api.Key == "" {
+		// The vendor's own key is for the vendor, not a gateway agentURL names.
+		if api.Key == "" && sameHost(api.URL, home) {
 			api.Key = getenv(strings.ToUpper(cfg.Agent) + "_API_KEY")
 		}
 		return api, nil
 	}
 	return nil, errors.New("no agent is set")
+}
+
+var vendorURL = map[string]string{"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1"}
+
+func sameHost(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	host := func(u *url.URL) string { return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".") }
+	return ua.Scheme == "https" && ua.Scheme == ub.Scheme && host(ua) == host(ub)
 }
 
 // getenv is a var so tests don't see the operator's keys.

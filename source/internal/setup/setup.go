@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
@@ -26,6 +27,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
@@ -57,8 +59,9 @@ type Setup struct {
 	// Exe is the running binary, copied to BinPath when it's elsewhere and
 	// no package has put the tool in place.
 	Exe string
-	// PkgBin stands in for boot.PkgBin. Empty means the real one.
-	PkgBin string
+	// PkgBin, LocalBin and OldBuilds stand in for boot.PkgBin, BinPath and
+	// oldbuild.Dir. Empty means the real ones.
+	PkgBin, LocalBin, OldBuilds string
 	// Accounts gives the Host the account checks look at.
 	Accounts func(c *config.Config) *repair.Host
 	// Repair runs the repair command on c, with check for --check.
@@ -184,7 +187,10 @@ func (s *Setup) Do(ctx context.Context) error {
 		}
 	}
 	if exe != "" {
-		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", exe, BinPath}}); err != nil {
+		if err := s.retire(); err != nil {
+			return err
+		}
+		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", "-o", "root", "-g", "root", exe, s.binPath()}}); err != nil {
 			return err
 		}
 	}
@@ -440,10 +446,54 @@ func (s *Setup) copyTarget() string {
 	if err != nil {
 		exe = s.Exe
 	}
-	if bin, err := filepath.EvalSymlinks(BinPath); err == nil && bin == exe {
+	if bin, err := filepath.EvalSymlinks(s.binPath()); err == nil && bin == exe {
+		return ""
+	}
+	if oldbuild.Same(exe, s.binPath()) {
 		return ""
 	}
 	return exe
+}
+
+func (s *Setup) binPath() string {
+	if s.LocalBin != "" {
+		return s.LocalBin
+	}
+	return BinPath
+}
+
+func (s *Setup) oldBuilds() string {
+	if s.OldBuilds != "" {
+		return s.OldBuilds
+	}
+	return oldbuild.Dir
+}
+
+// replaced is where the other build in BinPath goes before the copy, or
+// empty when there's no plain file there to keep.
+func (s *Setup) replaced() string {
+	if fi, err := os.Lstat(s.binPath()); err != nil || !fi.Mode().IsRegular() {
+		return ""
+	}
+	to, err := oldbuild.Where(s.binPath(), s.oldBuilds())
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(oldbuild.Dir, filepath.Base(to))
+}
+
+// retire moves the other build in BinPath out of the way, as repair's
+// check 15 does, rather than write over it.
+func (s *Setup) retire() error {
+	if s.DryRun || s.replaced() == "" {
+		return nil
+	}
+	to, err := oldbuild.Retire(s.binPath(), s.oldBuilds(), time.Now())
+	if err != nil {
+		return fmt.Errorf("moving the other build out of the way: %w", err)
+	}
+	fmt.Fprintf(s.Out, "Moved %s to %s.\n", BinPath, filepath.Join(oldbuild.Dir, filepath.Base(to)))
+	return nil
 }
 
 func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info, exe string, build *paper.Build, bedrock []geyser.Build) {
@@ -479,6 +529,9 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Install and enable %s, which starts the server at boot.\n", boot.UnitName)
 	}
 	if exe != "" {
+		if to := s.replaced(); to != "" {
+			fmt.Fprintf(w, "  - Move the other build in %s to %s, where old builds are kept.\n", BinPath, to)
+		}
 		fmt.Fprintf(w, "  - Copy %s to %s.\n", exe, BinPath)
 	}
 	fmt.Fprintf(w, "  - Write %s, with %s.\n", s.ConfigPath, keyList(opts))

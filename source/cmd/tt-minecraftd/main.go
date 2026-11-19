@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -32,6 +33,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
@@ -52,6 +54,9 @@ const (
 	exitOK    = 0
 	exitError = 1
 	exitUsage = 2
+
+	// Most whole seconds a time.Duration holds.
+	maxWatchInterval = math.MaxInt64 / int64(time.Second)
 )
 
 type options struct {
@@ -156,6 +161,9 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == retireCmd {
+		return failed(retireBuild(args[1:], stdout), stderr)
+	}
 	inv, code, done := prepare(args, stdout, stderr)
 	if done {
 		return code
@@ -331,6 +339,8 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 	// With no path to it, the copy to /usr/local/bin is left out.
 	exe, _ := os.Executable()
 	runner, accounts := setupSteps(inv)
+	// Tests give stand-ins for these through the Host; empty means the real ones.
+	bins := accounts(&inv.cfg)
 	s := &setuppkg.Setup{
 		Run:         runner,
 		Loaded:      &inv.cfg,
@@ -344,6 +354,9 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		In:          bufio.NewScanner(in),
 		Out:         w,
 		Exe:         exe,
+		PkgBin:      bins.PkgBin,
+		LocalBin:    bins.LocalBin,
+		OldBuilds:   bins.OldBuilds,
 		Accounts:    accounts,
 		Paper:       paperAPI,
 		Geyser:      geyserAPI,
@@ -364,6 +377,26 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		},
 	}
 	return s.Do(ctx)
+}
+
+// retireCmd is left out of the help. install.bash runs it through sudo,
+// from the build it's about to install, so the build it replaces is kept
+// the same way setup and repair keep one. See design.md, Boot.
+const retireCmd = "retire-build"
+
+// oldBuilds is a var so tests don't reach the real folder.
+var oldBuilds = oldbuild.Dir
+
+func retireBuild(args []string, w io.Writer) error {
+	if len(args) != 1 || filepath.Base(args[0]) != "tt-minecraftd" || !filepath.IsAbs(args[0]) {
+		return errors.New(retireCmd + " takes the full path of one tt-minecraftd build")
+	}
+	to, err := oldbuild.Retire(args[0], oldBuilds, time.Now())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Moved %s to %s.\n", args[0], to)
+	return nil
 }
 
 var userAgent = "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
@@ -811,8 +844,9 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		return usageErr("stop: --warn takes 0 or more seconds")
 	case o.approve && o.check:
 		return usageErr("repair: --approve-plugins and --check don't go together")
-	case name == "watch" && o.interval < 1:
-		return usageErr("watch: --interval takes 1 or more seconds")
+	case name == "watch" && (o.interval < 1 || int64(o.interval) > maxWatchInterval):
+		// The upper bound keeps Duration(n)*Second from overflowing, which makes NewTicker panic.
+		return usageErr("watch: --interval takes %d to %d seconds", 1, maxWatchInterval)
 	}
 	inv.opts = o
 	inv.args = args

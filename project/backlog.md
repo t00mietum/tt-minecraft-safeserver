@@ -22,6 +22,77 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- repair counts a Paper started by hand as runUser as the tool's own
+	- ID: 2026111715275170
+	- Type: Bug
+	- Status: Waiting on signoff
+		- Against a recorded decision, so it waits on the Check: entry in questions.md.
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
+	- Expected behavior [Bug]: repair tells them apart the way status does.
+	- Reproduced [Bug]: 2026-11-19: a Paper as runUser in a login session's cgroup passed the old check, with no finding.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
+		- Verified: df7ay fails on the old check, which found nothing for a hand-started Paper as runUser, and passes now. df5zk passes with its process table in the new form. The quick gate passes.
+	- Origin: b42345a repair checks. Not seen before. Confirmed.
+	- Actual cause [Bug]: The check took any Paper under runUser's uid as the tool's own. status decides by the process's cgroup and the container's wrapper.
+	- Actual fix [Bug]: The check reads the same process table as status and calls `status.Others`, which uses status's own cgroup and wrapper test. A Paper as runUser outside the native unit, or in a container not under the wrapper, is reported.
+	- Decisions:
+		- `status.Others` is the one place both use, so the 2 can't drift apart again. `repair.Host.ReadFile` reads `/proc`, nil meaning the real one.
+		- A second Paper that looks like ours is reported too, as status does, since start runs only one.
+		- design.md's check 14 now says how it tells them apart.
+	- Against: 2026111111065763's "Other Paper servers are told apart by uid". The uid can't tell a hand-started Paper as runUser from ours.
+	- Sweep: other places that pick out the tool's own Paper.
+	- Swept: status goes through the same `sight`. start's `refuseOthers` and setup's `refuseRunning` refuse any Paper, whoever runs it, so the uid never mattered there. `grep -rn 'PaperProcs\|IsPaper\|RunningPaper' source` finds no other caller.
+	- Branch: nov19-2026111715275170
+	- Commit: 1466e71
+	- Test case: df7ay, df5zk
+
+- Send the vendor API key only to the vendor's own host
+	- ID: 2026111715275517
+	- Type: Enhancement
+	- Status: Waiting on signoff
+		- It narrows a recorded call and changes README's wording. A person checks the README lines and OKs the narrower key rule, per the Check entry in questions.md.
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
+		- Verified: df7bv fails on the old code, where the vendor key went to OpenRouter, a look-alike host, a local server, and the other vendor's host, and passes now. df761 still passes. The quick gate passed.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before.
+	- Test case: df7bv, df761
+	- Branch: nov19-2026111715275472
+	- Commit: aab781b
+	- Decisions:
+		- With no `TT_MINECRAFTD_AGENT_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes only when agentURL is https on that kind's own API host. A gateway or local server gets `TT_MINECRAFTD_AGENT_KEY` or no key, and a 401 already names that variable.
+		- design.md's key line and README's key line and OpenRouter example say so.
+	- Against: 2026111210033649's "The key is TT_MINECRAFTD_AGENT_KEY, else OPENAI_API_KEY or ANTHROPIC_API_KEY". The fallback now holds only for the vendor's own API.
+	- Swept: the key is read only in `agent.New`, by a grep for _API_KEY under source.
+
+- Add a README section on using the server after setup
+	- ID: 2026111715275532
+	- Type: Enhancement
+	- Status: Waiting on UAT
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
+		- Waiting on UAT: README wording is a matter of taste. Someone should read the new sections.
+	- Origin: Not seen before.
+	- Branch: nov19-2026111715275532
+	- Commit: 61984e5
+	- Test case: none, README text. Markdownlint and the quick gate pass.
+	- Actual effort: Low
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -73,10 +144,31 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
+- test-id.bash's header says to take an ID from the clock, against the next-after-highest rule
+	- ID: 2026111911594103
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261119-115941
+	- Opened by:
+	- Estimated effort: Low
+	- Progress log:
+		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to df7b7 and df7b8.
+		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
+		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
+		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
+	- Decisions:
+		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
+	- Test case: n/a: comment-only change in a header. The lint step's test ID check still passes.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical, a header comment.
+	- Closed reason: Done
+	- Closed: 20261119-120500
+
 - Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
 	- ID: 2026111911125756
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261119-111257
@@ -92,45 +184,67 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- design.md's setup, repair check 15, Boot and file paths, and README's Installing section, say so.
 	- Progress log:
 		- 2026-11-19: t00mietum's answer to the check 15 question: rename the copy and GFS rotate the old ones, rather than report it with `sudo rm`.
+		- Verified: df7ba to df7be, df7av and df798 pass, and the quick gate passes, CodeQL included. df798 passes under Bash 3.2 with busybox tools too. Each new check failed with its part taken out: the move in repair, setup and install.bash, setup's SHA-256 skip, and each rotation rule.
+		- Not verified: the move and the folder as root. Only the non-root path ran here, and root host check df7bf waits for the round's run.
+		- Verified: root host run 20261119-130556_002 on nov19 passed df7bf, 17 PASS, native checks skipped.
 	- Decisions:
 		- 2026-11-19: The move keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can copy it back.
 		- 2026-11-19: t00mietum widened it to install.bash and setup's copy, which wrote over the old build in place.
 		- 2026-11-19: `update --self` is Deferred. It gets the same move when it comes back.
 		- 2026-11-19: Moved from `tt-minecraftd_old_<mtime>` beside the binary to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>` (t00mietum). Off PATH, on every distro, and a dot suffix is the usual form for a dated copy. `/var/backups` is Debian's only.
+		- 2026-11-19: install.bash has the build it's about to install do the move, with a hidden retire-build command, run through sudo from a staged copy beside the target. One Go version of the move and the rotation then serves all 3, and Bash 3.2 never needs one. The staged copy is renamed into place, so the swap is one step.
+		- 2026-11-19: Kept names stay tt-minecraftd.`<mtime>`, without the role suffix gfs-rotate.bash adds. The counts are its defaults: 10 newest, 4 hours, 5 days, 4 weeks, 4 months, 2 years, and the first. A build from the same second as a kept one gets .2, .3 and so on.
+		- 2026-11-19: A /usr/local/bin link to some file other than the package's has no build to keep, so check 15 still reports it with sudo rm. install.bash and setup write over a link as before.
+		- 2026-11-19: When the same build, by SHA-256, is in /usr/local/bin already, setup leaves out its copy, as install.bash already did.
+		- 2026-11-19: The folder is refused as root when it's a link, or someone other than root could write to it.
+		- 2026-11-19: df7av: the expected text was "...; remove it with: sudo rm /usr/local/bin/tt-minecraftd" with no fix, and is now "...; repair moves it to /var/lib/tt-minecraftd/old-builds/tt-minecraftd.`<mtime>` [fix]". Its other checks are unchanged.
+		- 2026-11-19: df65d and df7at: setup's copy was "sudo install -m 0755 `<exe>` /usr/local/bin/tt-minecraftd", and is now "sudo install -m 0755 -o root -g root `<exe>` `<LocalBin>`", with LocalBin a stand-in path in the test.
+	- Needs local test suite run?: No
+	- Branch: nov19-2026111911125756
+	- Commit: 32e1415
+	- Test case: df7ba, df7bb, df7bc (the move, the copy across filesystems, the rotation), df7av (repair check 15), df7bd (setup's copy), df7be (retire-build), df798 (install.bash), and root host check df7bf
+	- Actual effort: Avg
+	- Swept: every write to /usr/local/bin/tt-minecraftd: repair check 15, setup's copy, install.bash, and cicd's dogfood step. Dogfood puts each dev build on the dev box and is left as it is. install-dev.bash doesn't install the tool. update --self is deferred, per Decisions.
+	- Closed reason: Done
+	- Closed: 20261119
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152754
 	- Opened by:
 	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
+	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
+		- 2026-11-19: Reproduced on Paper 26.3 build 256: a jar written over a plugin library in `libraries/` was loaded at the next start, with no download and no check. 26.3 makes no `plugins/.paper-remapped/`, since 26.1 dropped the remapper. Paperclip put back a changed server library and `versions/` jar from the hashes in `paper.jar`.
+		- 2026-11-19: start removes `libraries/` and `plugins/.paper-remapped/` after the hand-off, as the service account, in both modes. Paper then downloaded the library again, matching Maven Central's SHA-1. design.md's start and Plugin pinning sections say so.
+		- Verified: df7bg and df7bh fail with the removal taken out, with `.paper-remapped` left off the list, and with the removal run through plain sudo, and pass with the fix. The quick gate's format, tests and CodeQL pass, and so do vet, staticcheck, gosec, shellcheck and the test ID check. Its markdownlint step fails on backlog lines from round commit f741e0d, not this item.
+		- 2026-11-19: Asserts updated for the new rm line: df5xp and df5y1 have it in their lists. Change counts went from 5 to 6 in df5xs, 7 to 8 in df5y3, and 7 to 8 and 8 to 9 in df5y4.
 	- Note: No. Paper's loader wasn't checked.
-	- Origin: 9058841 plugin pinning. Not seen before. Plausible.
-
-- repair counts a Paper started by hand as runUser as the tool's own
-	- ID: 2026111715275170
-	- Type: Bug
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152751
-	- Opened by:
-	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
-	- Expected behavior [Bug]: repair tells them apart the way status does.
-	- Reproduced [Bug]: No. Read only. df5zk pins the uid-only rule.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
-	- Origin: b42345a repair checks. Not seen before. Plausible.
+	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
+	- Decisions:
+		- Clear rather than pin or mount read-only. The running server writes plugin libraries, so pinning them would approve the server's own writes, and a read-only mount stops Paper adding a new plugin's libraries. Check: entry in questions.md, for the download at each start.
+		- All of `libraries/` goes, not only the plugins' part. Paperclip checks its own part anyway and puts it back in about a second, so no list from `paper.jar` is needed.
+		- The rm runs as `runUser`, so a link in the tree reaches nothing that account couldn't change already. A link at `libraries` itself is removed, not followed (df7bg).
+		- A failed removal stops the start before the launch, and hands the trees back (df7bh).
+		- Left alone: code a plugin downloads into its own folder, which approving the plugin trusts it with. `cache/` and `versions/` are checked by Paperclip at every start.
+		- Swept: both launching start paths, `Boxed.Start` (shared by `--debug`, `--foreground` and the boot unit's `start --foreground`) and `Native.Start`. No other code launches Paper.
+	- Branch: nov19-2026111715275425
+	- Commit: 6ca2410
+	- Test case: df7bg, df7bh
+	- Acceptance signoff: Self-closed: reproduced on Paper 26.3, and its tests fail without the fix and pass with it. The download at each start is a Check: entry.
+	- Closed: 20261119-123825
 
 - cmd's stop and restart guard misses namespaced forms such as minecraft:stop
 	- ID: 2026111715275187
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152751
@@ -140,12 +254,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: `checkCmd` passed each form in a test. Paper running them is Plausible.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 24. Detail in detail_backlog.md.
+		- 20261119: Verified: df7az and df5z7 fail on the unfixed code (every namespaced and execute form was sent) and pass with the fix. The quick gate passed.
 	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed for the check.
+	- Sweep: other places that test a console command's name.
+	- Swept: `checkCmd` is the only guard on a console line. `cmd` in both modes goes through `Kit.command`, which calls it first. `console` is typed by hand, and `stop` there hands the trees back (design.md). The only other "stop" sent to the console is `stop`'s own.
+	- Actual cause [Bug]: `checkCmd` matched only the first word, as `stop` or `restart` with an optional slash.
+	- Actual effort: Low
+	- Actual fix [Bug]: `checkCmd` drops a `namespace:` prefix from the command name, and for `execute` and `return` also tries every word after a `run`. It splits on any whitespace. design.md's console and cmd section says so.
+	- Decisions:
+		- 20261119: every word after any `run` is tried, rather than parsing execute's grammar. It covers nested forms in one linear pass, and a player, score or chat text with `run stop` in it is refused rather than sent, which is the safe side.
+		- 20261119: aliases from Bukkit's `commands.yml` and plugins that run commands for the console aren't covered. Their names can't be known here.
+	- Branch: nov19-2026111715275187
+	- Commit: a7115f6
+	- Test case: df7az, df5z7
+	- Acceptance signoff: Self-closed: the tests fail on the old code and pass now, and the change only refuses more.
+	- Closed: 20261119-112650
 
 - watch --interval with a huge value panics
 	- ID: 2026111715275203
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
@@ -156,41 +285,80 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 25. Detail in detail_backlog.md.
 	- Origin: ba0f959 status and watch. Not seen before. Confirmed.
+	- Actual cause [Bug]: The option check only refused values under 1, so a count of seconds past what a duration holds overflowed in `time.Duration(n)*time.Second` and went negative, which `NewTicker` panics on.
+	- Actual fix [Bug]: `watch` refuses an `--interval` above 9223372036 seconds, the most a duration holds, with a usage message that gives the range and exit 2.
+	- Test case: df5xk TestUsageErrors, with the case `watch --interval 9300000000`.
+	- Verified: the case panicked on the old code with "non-positive interval for NewTicker" and passes now. `go run ... watch --interval 9300000000` prints the message and exits 2. `cicd/cicd.bash --backlog-run-quick cli` passes.
+	- Swept: `interval` is the only duration built from an option count in the command (grep of `time.Duration(` and `interval` in source/cmd). `stop --warn` isn't a duration.
+	- Decisions:
+		- The cap is the overflow limit rather than a smaller sensible one such as a day, so no value that worked before is refused.
+	- Branch: nov19-2026111715275203
+	- Commit: 9329cf1
+	- Acceptance signoff: Self-closed: the case fails on the old code and passes now.
+	- Closed: 20261119-193000
 
 - console counts any exit 1 as a detach
 	- ID: 2026111715275221
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
 	- Opened by:
 	- Incorrect behavior [Bug]: `attachDetached` treats any exit 1 as a detach. sudo exits 1 after failed password tries, and Docker exits 1 on its own errors. Either one prints that the server is still running and exits 0, though the operator never attached. cmd's own check also reads stderr.
 	- Expected behavior [Bug]: console counts a detach only from what Docker says on a detach.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 20261119, by df5z6: with any stderr, or none, an attach that exits 1 printed "Detached" and returned no error.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 26. Detail in detail_backlog.md.
-	- Origin: 5c5b023 console and cmd. Not seen before. Plausible.
+	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed.
+	- Actual cause [Bug]: console ran attach on the operator's terminal and never saw its stderr, so it had only the exit code to go on.
+	- Actual effort: Low
+	- Verified: df5z6 and df7b0 fail on the old code and pass with the fix. Under real Docker and rootless Podman, attach to a busybox container on a pty, with stderr through a pipe, detached on Ctrl-C with the container still up. Docker exited 1 and said "read escape sequence" on stderr; Podman exited 0.
+	- Decisions:
+		- `host.Cmd` has an `ErrCopy` writer that also gets a Tty command's stderr, which still goes to the terminal. `session` keeps the last 4 KB of it.
+		- console uses `detachedDocker`, the same test as `cmd`'s attach, so the 2 can't drift apart. `attachDetached` is gone.
+		- 20261119: df5z6's exit 1 case now writes "read escape sequence" on stderr. It was a bare exit 1, which counted as a detach.
+	- Against: 2026111111065750's "`docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach". It now follows 2026111116104058's newer rule, which also needs the message on stderr.
+	- Sweep: other places that read an exit code as a detach.
+	- Swept: `grep -rn 'ExitCode()' source` finds only `detachedDocker`, and main's mapping of a failed command to its exit code. Native console and `start --debug` pass no detach test. Container `start --debug` doesn't count a detach.
+	- Actual fix [Bug]: console counts docker's exit 1 as a detach only with "read escape sequence" on stderr. sudo's and docker's own exit 1 are errors.
+	- Branch: nov19-2026111715275221
+	- Commit: 8804491
+	- Test case: df5z6, df7b0
+	- Acceptance signoff: Self-closed: reproduced, and the tests fail before and pass after.
+	- Closed: 20261119-113306
 
 - Two jar links to the same file give the same mount twice, and start fails
 	- ID: 2026111715275253
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
 	- Opened by:
 	- Incorrect behavior [Bug]: `LockedJars` drops duplicates only against paper.jar. With 2 plugin jars linking to one file, the same mount destination is passed twice, and Docker refuses it.
 	- Expected behavior [Bug]: Each file is mounted once.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 2026-11-19, by df7b1 on the old code: 2 plugin links to one jar gave that jar 3 read-only mounts in the create command.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 28. Detail in detail_backlog.md.
-	- Origin: ba09f6c docker mode start and stop. Not seen before. Plausible.
+	- Origin: ba09f6c docker mode start and stop. Not seen before. Confirmed.
+	- Actual cause [Bug]: `LockedJars` compared each jar's real path only with paper.jar's, not with the jars before it.
+	- Actual fix [Bug]: `LockedJars` keeps each real path once. Container start also mounts each tree once when 2 `ownerTrees` entries lead to one folder, the same fault in the same function.
+	- Swept: `LockedJars` callers: container start's mounts, native start's `ReadOnlyPaths`, and repair's skip map, which a repeat never hurt. `Boxed.runArgs` is the one place mounts are built, and its tree loop had the twin. Left alone: native `ReadWritePaths` with a repeated tree, since systemd is expected to take a path given twice (unverified).
+	- Test case: df7b1
+	- Verified: df7b1 fails on the old code, with 3 mounts of the jar and 3 of the tree, and passes with the fix. The quick gate passes.
+	- Branch: nov19-2026111715275253
+	- Commit: a1ce8e4
+	- Acceptance signoff: Self-closed: reproduced, and the test fails before and passes after.
+	- Closed: 20261119-113637
 
 - From a root shell, ownerAfterStop becomes root
 	- ID: 2026111715275300
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -200,27 +368,55 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: a test with `USER=root` and with `SUDO_USER=root` got root.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 31. Detail in detail_backlog.md.
+		- Verified: df7b2 fails on the old code with root from `SUDO_USER` or `USER`, and passes after. It fails too with the uid 0 lookup taken out. The quick gate passed.
+		- Swept: `operator` is the one place the default is made. Account already skipped root by uid. setup refuses an empty operator, repair skips the group check when it's empty, and stop leaves the trees with runUser, as design.md says. The root host checks run setup as the operator, not root.
 	- Origin: 715f9b3 config defaults, c076344. Not seen before. Confirmed.
+	- Actual cause [Bug]: The default took the first valid name from `SUDO_USER`, `USER` and the running account, and only the last one left root out.
+	- Actual fix [Bug]: Each of the three is skipped when it's root or another name for uid 0. design.md's table says root is skipped at each step.
+	- Decisions:
+		- A name that looks up to uid 0, such as `toor`, counts as root, as Account already did by uid. A name that can't be looked up isn't root.
+		- An `ownerAfterStop: root` set by hand is kept, since it's the operator's own call.
+	- Test case: df7b2
+	- Branch: nov19-2026111715275300
+	- Commit: bd0d0c1
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: reproduced, its test failed before the fix and passes after.
+	- Closed: 20261119-114006
 
 - A checked download can be changed by the folder's owner before it's renamed into place
 	- ID: 2026111715275315
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
 	- Opened by:
 	- Incorrect behavior [Bug]: The hash is taken while the file is written, then the temp file is given to the folder's owner at 0660. It waits through the name check and the operator's yes. While the server runs, server code can rewrite it, and the changed bytes then replace the good jar. start refuses them later, so the good jar is lost but nothing runs.
 	- Expected behavior [Bug]: The temp file stays root-owned and 0600 until just before the rename.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 2026-11-19, by df7b3 and df7b4 on the old code: the staged jar was 0660 as soon as it was written, and a file put in its place was renamed over the good jar.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 32. Detail in detail_backlog.md.
-	- Origin: 9f30908, cfd6be9. Not seen before. Plausible.
+	- Origin: 9f30908, cfd6be9. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `download.Stage` gave the temp file the folder's owner and mode 0660 right after writing it, before the checks and the operator's yes. `Keep` renamed whatever file had the temp name by then.
+	- Actual fix [Bug]: The temp file stays root's at 0600 while it waits. `Keep` sets its owner and mode through its own handle just before the rename. `Open` and `Keep` refuse a file at the temp name that isn't the one `Stage` wrote. `Staged` gained `UID`, `GID` and `Mode`, which selfupdate sets to the old binary's.
+	- Decisions:
+		- A short race is left between `Keep`'s check of the temp name and the rename. A swap there only replaces a jar in a folder the server can already write, and start refuses it by hash.
+		- `Stage` swaps its write handle for a read one on the same file once written, since a file open for writing can't be run, and selfupdate runs the new build's --version.
+	- Swept: `download.Stage` callers: `Into` (paper, geyser), update/agent.go's 2 agent downloads, and selfupdate's `Install`, which now sets `Staged` mode and owner so `Keep` keeps them (df77j fails without it). linksafe `Write` chowns just before its rename, with no check or wait between, so it's left alone.
+	- Test case: df7b3, df7b4
+	- Verified: df7b3 and df7b4 fail on the old code and pass with the fix. df77j fails when selfupdate doesn't set the new fields. The quick gate passes, CodeQL included. Only the non-root path ran.
+	- Branch: nov19-2026111715275315
+	- Commit: c9903e3
+	- Acceptance signoff: Self-closed: df7b3 and df7b4 fail on the old code and pass now.
+	- Closed: 20261119-114533
+	- Note: The root-only fchown is the same call as before, moved into `Keep`. Root host check df76n's agent download goes through it.
 
 - IPv4-mapped addresses in allowFrom and bindIP load without a warning and never match
 	- ID: 2026111715275330
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -231,11 +427,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 33. Detail in detail_backlog.md.
 	- Origin: e3a0636 shcl config reader. Not seen before. Confirmed for config.
+	- Actual cause [Bug]: `checkAddr` and `checkAllow` kept an address or range in its IPv4-mapped IPv6 form. nft and Paper see an IPv4 client as IPv4, so a mapped entry in the IPv6 set matched nothing.
+	- Actual fix [Bug]: Both unmap. A mapped address is read as the IPv4 address, and a mapped range of /96 or narrower as the IPv4 range, so `::ffff:10.1.2.3/104` is `10.0.0.0/8`. bindIP goes through `checkAddr` too. design.md's allowFrom row says so.
+	- Test case: df7b5 (config reads mapped forms as IPv4), df7b6 (a config file's mapped allowFrom lands in the firewall's allow4 set)
+	- Verified: df7b5 and df7b6 fail on the old reader and pass with the fix. The quick gate passed.
+	- Swept: `netip.Parse` across `source`. Config's `loopback` uses `IsLoopback`, which already unmaps. The agent's `publicOnly` and the firewall's resolver read already unmap. firewall's `is4` and route reads take only checked config values or kernel output. `start --set` goes through the same setters.
+	- Branch: nov19-2026111715275330
+	- Commit: ff4ef78
+	- Acceptance signoff: Self-closed: its tests fail before and pass after, per the standing close policy.
+	- Closed: 20261119-114901
+	- Decisions:
+		- Unmap rather than warn, since a mapped entry has only one meaning here. A range wider than /96 isn't all IPv4, so it stays IPv6.
 
 - test-id.bash misses root host checks run through native, so their IDs can be reused
 	- ID: 2026111715275346
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -245,27 +452,55 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: `--list` left them out, and a fake tree that reused df68b passed `--check`.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 34. Detail in detail_backlog.md.
+		- 20261119: Verified: df7b7 fails 3 of its 4 cases on the old test-id.bash and passes all 4 on the new one. The control, the real checks.bash with a free Go ID, passes on both. The quick gate passed, with df7b7 in the container run too.
+		- Swept: `fRootChecks` is the only reader of checks.bash in test-id.bash, and test-id.bash the only ID reader. cicd.bash's `--list` and lint step call it. The commented-out ZFS checks df781 to df784 aren't counted, as before, and no Go test uses those IDs.
 	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Actual cause [Bug]: `fRootChecks` matched only lines that start with `check`, and the repeat check ran `sort -u` over its IDs before looking for repeats.
+	- Actual fix [Bug]: test-id.bash reads the names of the functions in checks.bash that hand their arguments to `check`, now only `native`, and counts calls through those too. Each call counts once, so a repeat within checks.bash fails `--check`.
+	- Decisions:
+		- The wrapper names come from checks.bash rather than a fixed list, so a new wrapper is counted without an edit here. A wrapper of a wrapper isn't followed.
+		- A commented-out call still doesn't count, to match the Go side, where only a live `func Test` counts.
+	- Test case: df7b7
+	- Branch: nov19-2026111715275346
+	- Commit: 056e08d
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: the test fails on the old code and passes now.
+	- Closed reason: Done
+	- Closed: 20261119-115315
 
 - A quick run leaves a stale SHA256SUMS beside new binaries in the release folder
 	- ID: 2026111715275362
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
 	- Opened by:
 	- Incorrect behavior [Bug]: The build step writes binaries into the release version's folder in every mode, but only the package step writes SHA256SUMS, and a quick run skips it. Dev builds then sit beside sums that don't match them.
 	- Expected behavior [Bug]: The sums are written with the binaries, or the stale file is removed.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: Yes. df7b8, on the unfixed cicd.bash, left the older run's SHA256SUMS beside the new binaries, and `sha256sum -c` failed on both.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 35. Detail in detail_backlog.md.
-	- Origin: bb4ab14 cicd pipeline. Not seen before. Plausible.
+		- 2026-11-19: Verified: df7b8 fails on the unfixed cicd.bash and passes after. Quick gate passed.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Actual cause [Bug]: Only the package step wrote SHA256SUMS, so a run that built without packaging kept the older run's file.
+	- Actual fix [Bug]: The build step writes SHA256SUMS over the binaries it just built. The package step writes it again over every file in the folder. Both go through one function, `fReleaseSums`.
+	- Decisions:
+		- Sums are written rather than the file removed, so a quick or `--no-package` build can still be checked against them.
+		- After a build without the package step, packages from an older run stay in the folder but aren't listed in SHA256SUMS, since they hold an older build. They aren't removed, since the build step never deleted files before.
+	- Swept: SHA256SUMS is written only in cicd.bash's build and package steps (`grep -rn SHA256SUMS cicd`). verify-release.bash and install.bash only read one. Dogfood reads the binary, not the sums.
+	- Branch: nov19-2026111715275362
+	- Commit: 3abffeb
+	- Test case: df7b8 TestReleaseSums (the build step as a quick run calls it, over an older run's SHA256SUMS and package; then the package step's sums)
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Closed: 20261119-115818
 
 - install-dev.bash --dir=~/path makes a folder named ~
 	- ID: 2026111715275377
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -276,11 +511,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 36. Detail in detail_backlog.md.
 	- Origin: d701e7a dev install. Not seen before. Confirmed.
+	- Actual cause [Bug]: `fMain` took the `--dir` value as given, and a `~` that Bash didn't expand became a relative path under the working folder.
+	- Actual fix [Bug]: `~` and `~/path` are read as `$HOME` and `$HOME/path`, in both the `--dir=~/path` and `--dir ~/path` forms. Any other leading `~`, such as `~bob/x`, is refused with exit 2, as is a `~` with no full-path `$HOME`.
+	- Decisions:
+		- `~user` is refused rather than looked up, since the script has no portable lookup that works in the Bash 3.2 and busybox rig.
+	- Test case: df799 TestInstallDevScript, subtest "a leading ~ in --dir is the home folder, and ~user is refused"
+	- Verified: the subtest fails on the old script (the clone went into a folder named `~`) and passes now. shellcheck and the quick run's cli and lint areas pass.
+	- Swept: `install.bash` has no `--dir` or other path option. Its only other value options are `--release` and `--any-distro`, which aren't paths.
+	- Branch: nov19-2026111715275377
+	- Acceptance signoff: Self-closed: the subtest fails on the old script and passes now.
+	- Closed: 20261119-120600
 
 - start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
 	- ID: 2026111715275408
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -291,11 +536,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 38. Detail in detail_backlog.md.
 	- Origin: 1b3d301 link fixes. Follows 2026111409374443. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `launch.boxLinks` gave every link that failed in the container the same fix, its host target, even when that target was outside every mount. Its walk dropped the error for a folder it couldn't read.
+	- Actual fix [Bug]: A link whose target isn't in any mount is called a link out of the trees. A folder the walk can't read gives a start warning that names it, and the start goes on. design.md's Run modes says so.
+	- Swept: `filepath.WalkDir` in source: repair's `walkTree` returns the error rather than dropping it. Native start has no link check, by 2026111409374443's decision.
+	- Test case: df7b9
+	- Verified: df7b9 fails on the old code, with the old fix message and no warning, and passes with the fix. df79c and the quick gate's launch area pass.
+	- Branch: nov19-2026111715275408
+	- Commit: d9394b5
+	- Acceptance signoff: Self-closed: reproduced, and the test fails before and passes after.
+	- Closed: 20261119-120708
+	- Decisions:
+		- An unreadable folder is a warning, not a refusal, which keeps 2026111409374443's decision that the walk never stops a start that worked before.
+		- The out-of-trees message names where the link leads and no fix, since moving the target into a tree or adding a tree are both the operator's call.
 
 - Give linksafe tests of its own
 	- ID: 2026111715275441
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -304,11 +562,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
 	- Origin: Not seen before.
+	- Closed reason: Done
+	- Actual fix: linksafe has its own tests. They cover a link or a file at each step of Walk and Sub, Read refusing a link, a pipe, a folder and an oversized file, Write replacing a link rather than writing through it and leaving no temp file when the rename fails, Move never replacing on both the RENAME_NOREPLACE path and the EINVAL fallback, and Mkdir's mode and its refusal of a folder swapped for a link. df7bq runs Mkdir's and Write's chown as root in a user namespace, including the chown failure path. Each error path also checks that no handle is left open.
+	- Test case: df7bj, df7bk, df7bm, df7bn, df7bp, df7bq
+	- Verified: all 6 pass, and the quick gate passes. Each was watched to fail: dropping Walk's close of a step, O_NOFOLLOW in Sub, Write's unlink of its temp file, the fallback's EEXIST, Mkdir's chown or its close on a failed chown, Mkdir's mode, and Read's O_NONBLOCK (hangs) each turn a test red. df7bq ran on the host with --map-auto, so it set an owner the test didn't have. In the gate's container it skips, since that has no user namespaces.
+	- Branch: nov19-2026111715275441
+	- Commit: 7ab8b2a
+	- Acceptance signoff: Self-closed: tests only, each watched to fail.
+	- Closed: 20261119-124430
+	- Decisions:
+		- renameat2 is now a package var, so df7bn can stand in for a filesystem that refuses RENAME_NOREPLACE. No filesystem here refuses it.
+		- Left alone: Move's fallback checks the new name with a path lstat, not through the folder handle, since package syscall has no Fstatat. A swap there only replaces a file in a folder the server can already write, per 2026111709090977's decision.
 
 - Keep the join rate limit working when its address set fills
 	- ID: 2026111715275456
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -318,11 +587,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: Code review 20261117 item 41. Detail in detail_backlog.md.
 	- Note: 2026-11-17: a size-2 set in a namespace limited only the first 2 addresses.
 	- Origin: 88f3d3f. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual effort: Low
+	- Test case: df7br (TestFloodSetFull), df66c (TestRules)
+	- Verified: df7br fails with the new rules taken out, where the address past the full set got through over IPv4 and IPv6, and passes with them in. With only the IPv6 rule taken out it fails too. df66c, df797 and df7a4 pass, and the quick gate passed. In the gate's container df7br skips like df797, since it has no nft, so the namespace run is from the host.
+	- Swept: both sets, flood4 and flood6, get the shared limit. They're the only dynamic sets with a limit. seek4 has no limit, and a full seek4 only drops a LAN answer.
+	- Branch: nov19-2026111715275456
+	- Commit: 3ba1fdb
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261119-125034
+	- Decisions:
+		- Addresses past the full set share a single bucket at joinRateLimit a minute, one for IPv4 and one for IPv6, counted in in_flood. A global limit over every new connection would hit addresses that already have their own bucket too, and dropping all of them would shut out every new player.
+		- The sets now keep an address for 1 minute, down from 2. Its bucket is full again by then, so nothing changes for that address, and a flood frees room twice as fast.
+		- A rules file written by an older build no longer matches, so start refuses until repair writes it again, as with any rules change.
+		- design.md's Firewall says so.
 
 - Hold the agent's download redirects to agentHosts
 	- ID: 2026111715275472
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -330,13 +613,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: Only the agent's first URL is checked against agentHosts. A redirect can take the download to any public https host, while the plan says the jar was found on the first one.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 42. Detail in detail_backlog.md.
+		- Verified: df7bt fails with the hold taken out, where the jar came through a redirect to a host not in agentHosts, and passes now. The quick gate passed.
 	- Note: No.
-	- Origin: 91a46c8. Not seen before. Plausible.
+	- Origin: 91a46c8. Not seen before. Confirmed by df7bt on the old code.
+	- Closed reason: Done
+	- Test case: df7bt
+	- Branch: nov19-2026111715275472
+	- Commit: 262b7f4
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261119-130030
+	- Decisions:
+		- update's `fetcher`, the one path for the agent's jars and hash pages, holds each redirect to the same check as the first address: https, the usual port, no user name, a host in agentHosts. It copies whatever client it's given, so tests run the hold too.
+		- `fetch` still follows redirects to any public host, since it only reads pages for the agent.
+		- The default agentHosts adds GitHub's `release-assets`, `objects` and `raw` githubusercontent hosts, where github.com sends downloads. A config with its own list needs them for GitHub, and the error names the host.
+	- Swept: the 3 `fetcher` uses (hash page, agent jar, agent Paper) share the hold. Known sources' downloads have fixed hosts and aren't the agent's, so they're left alone.
 
 - Refuse NAT64 and 6to4 forms of LAN addresses in the agent's fetch, and don't tell the model which address was refused
 	- ID: 2026111715275500
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152755
@@ -344,40 +639,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: fetch lets through NAT64 and 6to4 forms of LAN addresses and a few reserved ranges. A refused fetch tells the model the address a name resolved to, which design.md says the agent shouldn't learn.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 43. Detail in detail_backlog.md.
+		- Verified: df7bs fails on the old check, where all 24 addresses passed and a refusal named 127.0.0.1, and passes now. The quick gate passed.
+		- 2026-11-19: df767 `TestFetchOnlyReachesPublicAddresses` expects the refusal to say "doesn't lead to a public address", was "isn't a public address".
 	- Note: 2026-11-17: each address passed the check in a test.
 	- Origin: 91a46c8. Not seen before. Confirmed.
-
-- Send the vendor API key only to the vendor's own host
-	- ID: 2026111715275517
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
-	- Note: No.
-	- Origin: 91a46c8. Not seen before.
-
-- Add a README section on using the server after setup
-	- ID: 2026111715275532
-	- Type: Enhancement
-	- Status: Queued
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
-	- Origin: Not seen before.
+	- Closed reason: Done
+	- Test case: df7bs, df767
+	- Branch: nov19-2026111715275472
+	- Commit: 1d27f3b
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261119-130030
+	- Decisions:
+		- NAT64 (`64:ff9b::/96`) and 6to4 addresses are judged by the IPv4 address in them, so a public site over NAT64 still works. Teredo, the local-use NAT64 prefix, the old IPv4-compatible forms, and the reserved IPv4 and IPv6 ranges are refused outright.
+		- A failed fetch tells the agent only the kind of failure: refused, a failed lookup, or a connect error. Go's text with the resolved address, the resolver, or this host's own address is dropped. update's download errors go to the operator, and keep the address.
+	- Swept: `publicOnly` is the only outbound address check, by a grep for IsPrivate, IsGlobalUnicast and Dialer under source. update's agent downloads use the same dialer through `PublicClient`.
 
 - Have install.bash always install the binary owned by root
 	- ID: 2026111715275548
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152755
@@ -385,8 +665,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: When `/usr/local/bin` or the old binary is writable by the user, it installs without sudo, and the file stays user-owned. setup's sudo run and the boot unit then run a file the operator account can change. repair doesn't check it.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 46. Detail in detail_backlog.md.
+		- Verified: df798's first case fails on the old script, 14 cases fail with the old sudo rule put back, and 2 with the owner left out. All pass now, under Bash 3.2 with busybox tools too, and the quick gate passes. The test has no root, so the owner itself isn't checked; install -o root is.
+		- Done: install.bash always installs through sudo unless it runs as root, with install -o root -g root, even where the folder or the old binary lets the operator write. setup's copy names the owner too.
 	- Note: No.
-	- Origin: 9d7cb3e install script. Not seen before. Plausible.
+	- Origin: 9d7cb3e install script. Not seen before. Confirmed by df798.
+	- Closed reason: Done
+	- Branch: nov19-2026111911125756
+	- Commit: 32e1415
+	- Test case: df798
+	- Actual effort: Low
+	- Swept: setup's copy now installs with -o root -g root too. cicd's dogfood step copies without sudo into a writable folder, but it's a dev-box step, not a user install.
+	- Acceptance signoff: Self-closed: df798 fails on the old script and passes now.
+	- Closed: 20261119-122525
+	- Decisions: 2026-11-19: A binary that's already current is left alone, even when the operator owns it. The next release replaces it with a root-owned one. Done with 2026111911125756, since both change how install.bash puts the binary in place.
 
 - start --dry-run says it would run sudo -v, then sudo asks for a password anyway
 	- ID: 2026111715275268

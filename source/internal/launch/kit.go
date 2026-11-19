@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -350,6 +351,26 @@ func (k *Kit) preflight(ctx context.Context) error {
 		return err
 	}
 	return k.checkFirewall(ctx)
+}
+
+// caches are the folders under serverDir that Paper loads code from but
+// start can't pin: plugin libraries it downloads from Maven, and remapped
+// plugin jars before 26.1. Paper reuses what's there without checking it, so
+// start clears them and Paper fills them again. Its own jars in libraries/
+// come back from paper.jar in about a second.
+var caches = []string{"libraries", "plugins/.paper-remapped"}
+
+// clearCaches runs after the hand-off, as the service account, so a link in
+// the tree only leads where that account could write anyway.
+func (k *Kit) clearCaches(ctx context.Context) error {
+	args := []string{"rm", "-rf", "--one-file-system", "--"}
+	for _, c := range caches {
+		args = append(args, filepath.Join(k.Cfg.ServerDir, c))
+	}
+	if _, err := k.Run.Run(ctx, host.Cmd{Args: args, As: k.Cfg.RunUser}); err != nil {
+		return fmt.Errorf("clearing Paper's library cache: %w", err)
+	}
+	return nil
 }
 
 // startUnit is start when the boot unit is enabled. The checks that can

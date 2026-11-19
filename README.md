@@ -71,6 +71,8 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 - [Update agent](#update-agent)
 - [Installing](#installing)
 	- [Direct stable and dev install script](#direct-stable-and-dev-install-script)
+- [Using the server](#using-the-server)
+- [Uninstalling](#uninstalling)
 - [Developing](#developing)
 - [Building from source](#building-from-source)
 - [Copyright and license](#copyright-and-license)
@@ -117,9 +119,9 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 - Run `tt-minecraftd update` as yourself, not with sudo. It asks the agent as you, then runs itself through sudo. Started as root, it skips the agent and says so.
 
-- An API key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.
+- An API key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, which only go to OpenAI's or Anthropic's own API. A local server needs none.
 
-- Jars and hash pages may only come from the hosts in `agentHosts`. The default has Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from somewhere else is listed as skipped, with its host, so you can add it.
+- Jars and hash pages may only come from the hosts in `agentHosts`, redirects included. The default has Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from somewhere else is listed as skipped, with its host, so you can add it.
 
 - OpenAI, or any server with the same chat API:
 
@@ -128,7 +130,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 	agentModel: gpt-5-mini
 	~~~
 
-- OpenRouter:
+- OpenRouter, with its key in `TT_MINECRAFTD_AGENT_KEY`:
 
 	~~~text
 	agent: openai
@@ -164,7 +166,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 ### Direct stable and dev install script
 
-For Debian and its derivatives, on amd64 or arm64. It finds the newest release, checks the binary against the release's `SHA256SUMS`, puts it in `/usr/local/bin/tt-minecraftd`, and runs `tt-minecraftd setup`, which does the rest.
+For Debian and its derivatives, on amd64 or arm64. It finds the newest release, checks the binary against the release's `SHA256SUMS`, puts it in `/usr/local/bin/tt-minecraftd` owned by root, and runs `tt-minecraftd setup`, which does the rest.
 
 ~~~bash
 bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
@@ -176,9 +178,58 @@ Or with wget:
 bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
 ~~~
 
-It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`.
+It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`. The build it replaces goes to `/var/lib/tt-minecraftd/old-builds/`, named for its date, in case you want it back. Only a few of those are kept, spread out over time.
 
 On another distro with systemd, add `--any-distro` to the end of the line. Then nothing gets installed through a package manager, so Podman and catatonit, or Docker, and nftables have to be installed already. NixOS isn't supported yet.
+
+## Using the server
+
+Run these as yourself. The tool asks for sudo when it needs it, so don't put sudo in front.
+
+~~~bash
+tt-minecraftd start
+tt-minecraftd status
+tt-minecraftd cmd whitelist add Steve
+tt-minecraftd console
+tt-minecraftd stop --warn 60
+tt-minecraftd update
+tt-minecraftd repair
+~~~
+
+- `start` and `stop` do what they say. `stop --warn 60` counts down to the players for 60 seconds first, and then hands the server folder back to you.
+
+- `status` shows whether it's running, who's online, and whether the settings and plugin jars are still safe. `watch` redraws it every few seconds.
+
+- `cmd` sends one command to the server and prints what it answers. `console` attaches to the server console, and Ctrl-C detaches and leaves the server running.
+
+- `update` gets new Paper, Geyser, and Floodgate builds. `repair` checks the install and puts back whatever drifted, including the firewall rules. Add `--dry-run` to either to see what it would change.
+
+- The config is `/etc/tt-minecraftd/config.shcl`, owned by root. Edit it with sudo, then run `tt-minecraftd repair` so the firewall rules follow it. `--set KEY=VALUE` overrides one key for a single run. [design.md](project/design.md#configuration-model) lists every key.
+
+- The server is only open to your LAN at first, since `allowFrom` defaults to `lan`. Friends outside the home can't connect until `allowFrom: any` is in the config, `repair` has run, and the router forwards the game ports. The last part of [how-to-connect.md](how-to-connect.md#for-the-person-running-the-server) has the ports.
+
+- The whitelist is on. Nobody joins until they're added with `cmd`, as in [how-to-connect.md](how-to-connect.md#for-the-person-running-the-server).
+
+- To have the server start at boot, set `startAtBoot: true` in the config and run `tt-minecraftd repair`.
+
+## Uninstalling
+
+There's no uninstall command yet. This takes everything out, and it deletes the worlds, so copy `/srv/tt-minecraftd` first if you want them.
+
+1. Stop the server with `tt-minecraftd stop`.
+
+2. Remove the boot unit and the firewall rules with `tt-minecraftd repair --set startAtBoot=false --set firewall=false`.
+
+3. Remove the program. A package install is `sudo apt remove tt-minecraftd` or `sudo rpm -e tt-minecraftd`. Otherwise it's `sudo rm /usr/local/bin/tt-minecraftd`.
+
+4. In Podman or Docker mode, remove the container image with `sudo podman rmi` or `sudo docker rmi`, using the name from `image` in `config.shcl`.
+
+5. Remove the files and the account:
+
+	~~~bash
+	sudo rm -r /etc/tt-minecraftd /var/lib/tt-minecraftd /srv/tt-minecraftd
+	sudo userdel minecraftd
+	~~~
 
 ## Developing
 

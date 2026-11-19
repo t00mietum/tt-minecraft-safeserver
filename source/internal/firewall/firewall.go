@@ -49,6 +49,10 @@ var (
 	lan6 = []string{"fc00::/7", "fe80::/10"}
 )
 
+// floodSize is how many addresses each rate limit set tracks. A var so a test
+// can fill one.
+var floodSize = 65536
+
 // Local is what the rules take from the host rather than the config.
 type Local struct {
 	// DNS are the resolvers the server may still reach on port 53 when
@@ -347,7 +351,8 @@ func Rules(c *config.Config, l Local) string {
 		if n == "flood6" {
 			typ = "ipv6_addr"
 		}
-		w("\tset %s {\n\t\ttype %s\n\t\tflags dynamic,timeout\n\t\ttimeout 2m\n\t\tsize 65536\n\t}\n", n, typ)
+		// An address's bucket is full again after a minute, so it can go then.
+		w("\tset %s {\n\t\ttype %s\n\t\tflags dynamic,timeout\n\t\ttimeout 1m\n\t\tsize %d\n\t}\n", n, typ, floodSize)
 	}
 	if c.Bedrock {
 		// Who broadcast for LAN games lately. Clients repeat it every 2 s.
@@ -387,6 +392,11 @@ func Rules(c *config.Config, l Local) string {
 	rate := strconv.Itoa(c.JoinRateLimit)
 	w("\t\tupdate @flood4 { ip saddr limit rate over %s/minute burst %s packets } counter name in_flood drop", rate, rate)
 	w("\t\tupdate @flood6 { ip6 saddr limit rate over %s/minute burst %s packets } counter name in_flood drop", rate, rate)
+	// A full set adds nobody and the update above doesn't match, so a spoofed
+	// flood that fills it would let every new address through. The ones left
+	// out share a single limit.
+	w("\t\tip saddr != @flood4 limit rate over %s/minute burst %s packets counter name in_flood drop", rate, rate)
+	w("\t\tip6 saddr != @flood6 limit rate over %s/minute burst %s packets counter name in_flood drop", rate, rate)
 	w("\t}\n")
 
 	// A packet the kernel sends by itself, such as IPv6 neighbor discovery,

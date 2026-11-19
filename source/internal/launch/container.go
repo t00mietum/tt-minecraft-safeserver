@@ -195,6 +195,9 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err != nil {
 		return err
 	}
+	if err := d.clearCaches(ctx); err != nil {
+		return d.failedStart(ctx, d, err)
+	}
 
 	if mode.Debug {
 		d.say("Starting with the console attached. Type stop to stop the server.")
@@ -313,6 +316,11 @@ func (d *Boxed) runArgs() ([]string, error) {
 			// tree.ToServer warns about a missing tree.
 			continue
 		}
+		// Two trees may be one folder by way of a link, and a mount
+		// destination can't be given twice.
+		if slices.Contains(trees, real) {
+			continue
+		}
 		if args, err = appendMount(args, real, false); err != nil {
 			return nil, err
 		}
@@ -327,7 +335,9 @@ func (d *Boxed) runArgs() ([]string, error) {
 			return nil, err
 		}
 	}
-	if err := boxLinks(trees, append(slices.Clone(trees), jars...)); err != nil {
+	warns, err := boxLinks(trees, append(slices.Clone(trees), jars...))
+	d.warn(warns)
+	if err != nil {
 		return nil, err
 	}
 	args = append(args, c.Image, "sh", "-c", Wrapper, "sh")
@@ -359,12 +369,16 @@ func LockedJars(serverDir string) ([]string, error) {
 	}
 	jars := make([]string, 0, len(found))
 	jars = append(jars, paper)
+	// Several links may lead to one file, and Docker and Podman refuse a
+	// mount destination given twice.
+	seen := map[string]bool{paper: true}
 	for _, j := range found {
 		real, err := filepath.EvalSymlinks(j.File)
 		if err != nil {
 			return nil, err
 		}
-		if real != paper {
+		if !seen[real] {
+			seen[real] = true
 			jars = append(jars, real)
 		}
 	}
@@ -392,14 +406,7 @@ func (d *Boxed) OpenConsole(ctx context.Context) error {
 	d.say(consoleHello)
 	c := d.box(false, "attach", "--sig-proxy=false", "--detach-keys=ctrl-c", Container)
 	c.Tty = true
-	return d.session(ctx, d, c, attachDetached)
-}
-
-// attachDetached is docker attach's exit after the detach keys, which is 1.
-// Podman's is 0.
-func attachDetached(err error) bool {
-	var exit *exec.ExitError
-	return errors.As(err, &exit) && exit.ExitCode() == 1
+	return d.session(ctx, d, c, detachedDocker)
 }
 
 // SendCmd is cmd: one console line, and what the server says back.

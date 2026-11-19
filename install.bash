@@ -5,7 +5,9 @@
 ##	Purpose:
 ##		- One-line installer for tt-minecraftd on Debian and its derivatives. Finds the newest
 ##		  release on GitHub, checks the binary against the release's SHA256SUMS, puts it in
-##		  /usr/local/bin, and runs `tt-minecraftd setup`, which does the rest.
+##		  /usr/local/bin owned by root, and runs `tt-minecraftd setup`, which does the rest.
+##		- A different build already in /usr/local/bin is moved to /var/lib/tt-minecraftd/old-builds,
+##		  where the new build keeps the old ones GFS-rotated, rather than written over.
 ##		- States its plan and asks first. Re-running it is safe: a current binary is left alone,
 ##		  and setup on an existing install runs repair and update.
 ##		- With --any-distro it runs on other distros, and first checks that what setup would
@@ -31,6 +33,8 @@ apiUrl="https://api.github.com/repos/${repo}/releases?per_page=100"
 dlBase="https://github.com/${repo}/releases/download"
 ## setup and the boot unit both expect it here.
 destDir="/usr/local/bin"
+## For the plan only. The new build's retire-build owns the folder.
+oldDir="/var/lib/tt-minecraftd/old-builds"
 osRelease="/etc/os-release"
 ttyDev="/dev/tty"
 ## There only when systemd is what booted the box.
@@ -59,7 +63,8 @@ Options:
 	-- ..................... anything after it goes to setup, such as: -- --yes --accept-eula
 Notes:
 	- Options take "--name value" or "--name=value".
-	- Installs to /usr/local/bin/tt-minecraftd, through sudo when needed, then runs tt-minecraftd setup.
+	- Installs to /usr/local/bin/tt-minecraftd, owned by root, through sudo unless run as root, then
+	  runs tt-minecraftd setup. A different build there is moved to /var/lib/tt-minecraftd/old-builds.
 	- Debian and its derivatives, or another distro with --any-distro. The CPU is detected; builds
 	  exist for amd64 and arm64.
 	- With no stable release yet, stable takes the newest pre-release.
@@ -105,6 +110,11 @@ fFetch(){
 	local url="$1" out="${2:--}"
 	if [[ "${fetcher}" == curl ]]; then curl -fsSL -o "${out}" "${url}"
 	else wget -q -O "${out}" "${url}"; fi
+}
+
+## Through sudo when fMain set useSudo.
+fAsRoot(){
+	if ((useSudo)); then sudo "$@"; else "$@"; fi
 }
 
 ## Ctrl-D, or no terminal at all, reads as no.
@@ -205,10 +215,13 @@ fMain(){
 		if [[ -r "${destPath}" ]]; then haveSum="$(sha256sum < "${destPath}" || true)"; haveSum="${haveSum%% *}"; fi
 		[[ "${haveSum}" != "${want}" ]] || current=1
 	fi
-	if ((! current)) && [[ "$(id -u)" != 0 ]] && ! { [[ -d "${destDir}" && -w "${destDir}" ]] && { [[ ! -e "${destPath}" ]] || [[ -w "${destPath}" ]]; }; }; then
+	## Always root's, even where the folder lets the operator write, since setup's sudo run and the boot unit run it.
+	if ((! current)) && [[ "$(id -u)" != 0 ]]; then
 		useSudo=1
-		command -v sudo > /dev/null || fDie "${destDir} needs root to write to, and there's no sudo. Run this as root."
+		command -v sudo > /dev/null || fDie "the binary is installed as root, and there's no sudo. Run this as root."
 	fi
+	local retire=0
+	if ((! current)) && [[ -f "${destPath}" && ! -L "${destPath}" ]]; then retire=1; fi
 
 	## The plan.
 	fEcho "Plan"
@@ -223,6 +236,7 @@ fMain(){
 		if ((useSudo)); then how=", through sudo"; fi
 		if [[ "${haveVer}" == "${tag}" ]]; then was=" (replacing a ${tag} build that isn't the release's)"; fi
 		fEcho_Clean "    Install ....: ${destPath}${was}${how}"
+		if ((retire)); then fEcho_Clean "    Old build ..: moves to ${oldDir}, where old builds are kept"; fi
 	fi
 	fEcho_Clean "    Then .......: ${exeName} setup${setupArgs[0]+ ${setupArgs[*]}}, which shows its own plan and asks again"
 	echo
@@ -247,13 +261,15 @@ fMain(){
 		[[ "${got}" == "${want}" ]] || fDie "${asset} doesn't match SHA256SUMS (listed ${want}, got ${got}). Nothing was installed."
 
 		fEcho "Installing ${destPath}"
-		if ((useSudo)); then
-			sudo install -d -m 0755 "${destDir}"
-			sudo install -m 0755 "${work}/${asset}" "${destPath}"
-		else
-			install -d -m 0755 "${destDir}"
-			install -m 0755 "${work}/${asset}" "${destPath}"
+		## Staged beside it, so the new build can move the old one out of the way first, and the swap is one rename.
+		local stage="${destDir}/.${exeName}.new"
+		fAsRoot install -d -m 0755 "${destDir}" || fDie "couldn't make ${destDir}"
+		fAsRoot install -m 0755 -o root -g root "${work}/${asset}" "${stage}" || fDie "couldn't write ${stage}"
+		if ((retire)) && ! fAsRoot "${stage}" retire-build "${destPath}"; then
+			fAsRoot rm -f -- "${stage}" || true
+			fDie "couldn't move the old build out of the way, so nothing was installed"
 		fi
+		fAsRoot mv -f -- "${stage}" "${destPath}" || fDie "couldn't move ${stage} into place"
 		local nowVer; nowVer="$("${destPath}" --version 2> /dev/null || true)"
 		fEcho "Installed: ${nowVer%%$'\n'*}"
 		echo
@@ -291,3 +307,5 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##		- 2026-11-14: Created.
 ##		- 2026-11-17: A binary counts as current only when its SHA-256 matches the release's, not its version.
 ##		- 2026-11-17: Added --any-distro, and a systemd check.
+##		- 2026-11-19: The binary is always installed owned by root. A different build there is moved to
+##		  /var/lib/tt-minecraftd/old-builds by the new build's retire-build, rather than written over.

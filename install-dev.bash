@@ -103,6 +103,14 @@ fMain(){
 	esac; done
 	if ((installDocker && ! withDocker)); then printf '[ ERROR: --install-docker and --no-docker cancel each other out ]\n' >&2; return 2; fi
 	if ((installDocker && anyDistro)); then printf "[ ERROR: --any-distro installs nothing, so it doesn't go with --install-docker ]\n" >&2; return 2; fi
+	## Bash leaves a ~ after --dir= alone, which would make a folder named ~ here.
+	# shellcheck disable=SC2088  # a literal ~ is what is being matched
+	if [[ "${dir}" == "~" || "${dir}" == "~/"* ]]; then
+		[[ "${HOME:-}" == /* ]] || { printf "[ ERROR: --dir starts with ~, but HOME isn't set to a full path ]\n" >&2; return 2; }
+		dir="${HOME}${dir:1}"
+	elif [[ "${dir}" == "~"* ]]; then
+		printf "[ ERROR: --dir %s starts with ~, which only means the home folder as ~ or ~/path. Give a full path ]\n" "${dir}" >&2; return 2
+	fi
 	if [[ -z "${dir}" ]]; then dir="${PWD}/${projectName}"
 	elif [[ "${dir}" != /* ]]; then dir="${PWD}/${dir}"; fi
 	while [[ "${dir}" == ?*/ ]]; do dir="${dir%/}"; done

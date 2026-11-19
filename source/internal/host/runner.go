@@ -29,6 +29,9 @@ type Cmd struct {
 	Look bool
 	// Tty hands it the terminal, for sudo's password prompt or a console.
 	Tty bool
+	// ErrCopy also gets a Tty command's stderr, for a caller that tells its
+	// exits apart by what it says.
+	ErrCopy io.Writer
 	// Stdin is fed to it, such as a file for install to put in place.
 	Stdin []byte
 	// Quiet keeps its stderr off the terminal, for a try that has a fallback.
@@ -95,6 +98,9 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 	if c.Tty {
 		cmd.Stdin, cmd.Stdout = os.Stdin, os.Stdout
 		cmd.Stderr = os.Stderr
+		if c.ErrCopy != nil {
+			cmd.Stderr = io.MultiWriter(os.Stderr, c.ErrCopy)
+		}
 		if err := cmd.Run(); err != nil {
 			return nil, fmt.Errorf("%s: %w", Quote(argv), err)
 		}
