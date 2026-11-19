@@ -5,13 +5,14 @@ package repair
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 )
 
 var containerCheck = Check{
@@ -101,12 +102,13 @@ var datasetCheck = Check{
 	},
 }
 
-// othersCheck names Paper servers running as anyone but runUser. Both modes
-// run the server under runUser's uid on the host, the container included.
+// othersCheck names Paper servers this tool didn't start, told apart the way
+// status does. A uid doesn't tell them apart: one started by hand as runUser
+// has the tool's uid.
 var othersCheck = Check{
 	Name: "no other Paper servers",
 	Look: func(ctx context.Context, h *Host) ([]Finding, error) {
-		ps, err := h.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"ps", "-eo", "uid=,pid=,args="}})
+		ps, err := h.Run.Run(ctx, host.Cmd{Look: true, Args: status.PsArgs})
 		if err != nil {
 			return nil, err
 		}
@@ -114,17 +116,14 @@ var othersCheck = Check{
 		if err != nil {
 			return nil, err
 		}
-		ours := ""
-		if u, ok := a.user(h.Cfg.RunUser); ok {
-			ours = strconv.Itoa(u.uid)
+		readFile := h.ReadFile
+		if readFile == nil {
+			readFile = os.ReadFile
 		}
 		var found []Finding
-		for _, p := range server.PaperProcs(ps) {
-			if p.User == ours {
-				continue
-			}
-			name := p.User
-			if uid, err := strconv.Atoi(p.User); err == nil {
+		for _, p := range status.Others(ps, readFile) {
+			name := p.UID
+			if uid, err := strconv.Atoi(p.UID); err == nil {
 				name = a.userName(uid)
 			}
 			found = append(found, Finding{Problem: "a Paper server this tool didn't start is running, pid " + p.PID + " as " + name + "; it's left alone, and start refuses until it's stopped"})

@@ -349,6 +349,7 @@ Common:  --config PATH, --set KEY=VALUE
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
 		- A unit that runs another config is left alone, whatever this config's `startAtBoot` is. See [Boot](#boot).
 	14. Any Paper server that this tool didn't start is reported, and never killed.
+		- It's told apart the way `status` tells it, by its cgroup and the container's wrapper, since one started by hand as `runUser` has the same uid.
 	15. When the package's `/usr/bin/tt-minecraftd` is there, no other copy in `/usr/local/bin` comes before it on PATH. One is reported with the command that removes it, and never removed. See [Boot](#boot).
 
 ## Project structure

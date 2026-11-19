@@ -115,17 +115,31 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair counts a Paper started by hand as runUser as the tool's own
 	- ID: 2026111715275170
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on signoff
+		- Against a recorded decision, so it waits on the Check: entry in questions.md.
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152751
 	- Opened by:
 	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
 	- Expected behavior [Bug]: repair tells them apart the way status does.
-	- Reproduced [Bug]: No. Read only. df5zk pins the uid-only rule.
+	- Reproduced [Bug]: 2026-11-19: a Paper as runUser in a login session's cgroup passed the old check, with no finding.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
-	- Origin: b42345a repair checks. Not seen before. Plausible.
+		- Verified: df7ay fails on the old check, which found nothing for a hand-started Paper as runUser, and passes now. df5zk passes with its process table in the new form. The quick gate passes.
+	- Origin: b42345a repair checks. Not seen before. Confirmed.
+	- Actual cause [Bug]: The check took any Paper under runUser's uid as the tool's own. status decides by the process's cgroup and the container's wrapper.
+	- Actual fix [Bug]: The check reads the same process table as status and calls `status.Others`, which uses status's own cgroup and wrapper test. A Paper as runUser outside the native unit, or in a container not under the wrapper, is reported.
+	- Decisions:
+		- `status.Others` is the one place both use, so the 2 can't drift apart again. `repair.Host.ReadFile` reads `/proc`, nil meaning the real one.
+		- A second Paper that looks like ours is reported too, as status does, since start runs only one.
+		- design.md's check 14 now says how it tells them apart.
+	- Against: 2026111111065763's "Other Paper servers are told apart by uid". The uid can't tell a hand-started Paper as runUser from ours.
+	- Sweep: other places that pick out the tool's own Paper.
+	- Swept: status goes through the same `sight`. start's `refuseOthers` and setup's `refuseRunning` refuse any Paper, whoever runs it, so the uid never mattered there. `grep -rn 'PaperProcs\|IsPaper\|RunningPaper' source` finds no other caller.
+	- Branch: nov19-2026111715275170
+	- Commit: 1466e71
+	- Test case: df7ay, df5zk
 
 - cmd's stop and restart guard misses namespaced forms such as minecraft:stop
 	- ID: 2026111715275187

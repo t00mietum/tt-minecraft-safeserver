@@ -34,6 +34,9 @@ type Host struct {
 	PkgBin, LocalBin string
 	// NftThere, when set, stands in for HasNft.
 	NftThere func() bool
+	// ReadFile reads /proc, for which process is the tool's server. nil
+	// means os.ReadFile.
+	ReadFile func(string) ([]byte, error)
 }
 
 // NewHost gives a Host on the real account files.
