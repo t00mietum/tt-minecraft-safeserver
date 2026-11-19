@@ -43,11 +43,17 @@ func TestStartThroughUnit(t *testing.T) {
 
 	g = newRig(t)
 	g.d.Boot = true
-	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "new.jar"), []byte("x"), 0o600); err != nil {
+	// Was an unapproved jar until 2026111914334569 took approval out.
+	props := filepath.Join(g.dir, "server.properties")
+	text, err := os.ReadFile(props)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(props, []byte(strings.Replace(string(text), "white-list=true", "white-list=false", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.d.Start(context.Background(), StartMode{}); err == nil || strings.Contains(strings.Join(g.changes(), "\n"), "systemctl") {
-		t.Errorf("unapproved jar: %v, ran %q", err, g.changes())
+		t.Errorf("whitelist off: %v, ran %q", err, g.changes())
 	}
 }
 

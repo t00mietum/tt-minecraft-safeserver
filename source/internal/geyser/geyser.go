@@ -72,7 +72,7 @@ func (a API) fetch() download.Client {
 }
 
 // Source is the address update --plugins gets a project's newest jar from,
-// as the approved list keeps it.
+// as plugins.shcl keeps it.
 func (a API) Source(project string) string {
 	return a.base() + "/" + project + "/versions/latest/builds/latest/downloads/spigot"
 }
@@ -130,8 +130,8 @@ func (a API) Install(ctx context.Context, serverDir string, b Build) error {
 
 // Project is the GeyserMC project a jar in plugins/ is, when both its file
 // name and the plugin name it claims start with the project's name, or "".
-// setup and repair give such a jar GeyserMC's source when they first approve
-// it, so update --plugins keeps it current, as it does the ones setup got.
+// setup and repair give such a jar GeyserMC's source when it has none, so
+// update --plugins keeps it current, as it does the ones setup got.
 func Project(name, claim string) string {
 	if path.Dir(name) != "plugins" {
 		return ""

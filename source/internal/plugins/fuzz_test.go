@@ -18,8 +18,8 @@ import (
 
 var lowerHex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// Whatever the list says, a jar it approves has a path inside the server
-// folder and a whole hash, and a source only when it's an https URL.
+// Whatever the list says, a jar it keeps has a path inside the server folder,
+// a whole hash or none, and a source only when it's an https URL.
 func FuzzReadApproved(f *testing.F) {
 	defer testid.Line(f, "df78900")
 	f.Add("jar: plugins/Geyser-Spigot.jar\n\tsha256: " + sumA + "\n\tsource: https://download.geysermc.org/x\n")
@@ -36,8 +36,8 @@ func FuzzReadApproved(f *testing.F) {
 			t.Fatalf("ReadApproved: %v (warnings %v)", err, warns)
 		}
 		for _, j := range jars {
-			if !insideServer(j.Name) || !lowerHex64.MatchString(j.SHA256) {
-				t.Fatalf("approved %#v", j)
+			if !insideServer(j.Name) || j.SHA256 != "" && !lowerHex64.MatchString(j.SHA256) { // empty allowed since 2026111914334569
+				t.Fatalf("kept %#v", j)
 			}
 			if j.Source != "" {
 				if u, err := url.Parse(j.Source); err != nil || u.Scheme != "https" || u.Host == "" {

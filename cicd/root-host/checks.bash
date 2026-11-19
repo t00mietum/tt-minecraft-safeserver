@@ -79,7 +79,8 @@ fNewInstall() {
 	[[ "$(stat -c %U:%G "${dir}")" == op:minecraftd ]] || return 1
 	[[ "$(readlink "${dir}/paper.jar")" == paper-*.jar ]] || return 1
 	has 'eula=true' "${dir}/eula.txt" && has 'white-list=true' "${dir}/server.properties" || return 1
-	[[ "$(grep -c 'sha256:' /etc/tt-minecraftd/plugins.shcl)" -eq 3 ]] || return 1
+	# Only Geyser's and Floodgate's sources; nothing is pinned by hash (2026111914293176).
+	[[ "$(grep -c 'source:' /etc/tt-minecraftd/plugins.shcl)" -eq 2 ]] && ! grep -q 'sha256:' /etc/tt-minecraftd/plugins.shcl || return 1
 	has 'runMode: podman' /etc/tt-minecraftd/config.shcl || return 1
 	[[ -x /usr/local/bin/tt-minecraftd ]] && sudo podman image ls | grep -q eclipse-temurin || return 1
 	command -v catatonit || [[ -x /usr/libexec/podman/catatonit ]]
@@ -165,13 +166,14 @@ fSameLogin() {
 	has 'log in again' same.out
 }
 
-fRefuseChanged() {
-	local jar
-	jar="${dir}/$(readlink "${dir}/paper.jar")"
-	cp "${jar}" jar.keep && echo x >> "${jar}" || return 1
-	! tt-minecraftd start > start.out 2>&1
-	cp jar.keep "${jar}" && has 'changed since it was approved' start.out
-}
+# Commented out by 2026111914334569: start no longer refuses a changed jar, since plugin approval went.
+# fRefuseChanged() {
+# 	local jar
+# 	jar="${dir}/$(readlink "${dir}/paper.jar")"
+# 	cp "${jar}" jar.keep && echo x >> "${jar}" || return 1
+# 	! tt-minecraftd start > start.out 2>&1
+# 	cp jar.keep "${jar}" && has 'changed since it was approved' start.out
+# }
 
 fNativeStart() {
 	tt-minecraftd start --native || return 1
@@ -251,7 +253,8 @@ fAdopt() {
 	printf 'y\n' | tt-minecraftd setup --adopt /srv/mc/adopted --set heapMax=1GB | tee adopt.out | grep -E '^(FIXED|FAILED)'
 	has 'serverDir: /srv/mc/adopted' /etc/tt-minecraftd/config.shcl || return 1
 	[[ "$(stat -c %U:%G /srv/mc/adopted/world)" == op:minecraftd ]] || return 1
-	[[ "$(grep -n 'sha256: ' adopt.out | head -1 | cut -d: -f1)" -lt "$(grep -n 'Go ahead' adopt.out | cut -d: -f1)" ]] || return 1
+	# The jars that get a source are listed before the question. They were listed with hashes until 2026111914334569.
+	[[ "$(grep -n '  source: ' adopt.out | head -1 | cut -d: -f1)" -lt "$(grep -n 'Go ahead' adopt.out | cut -d: -f1)" ]] || return 1
 	# The adopted Geyser and Floodgate keep following GeyserMC.
 	for p in geyser floodgate; do
 		has "source: \"\\?https://download.geysermc.org/v2/projects/${p}/" /etc/tt-minecraftd/plugins.shcl || { say "no GeyserMC source for ${p}"; return 1; }
@@ -286,7 +289,7 @@ fOldBuild() {
 fAgentHandOff() {
 	# A jar with no source, and an agent that has nothing for it.
 	printf 'thing' > /srv/mc/adopted/plugins/Thing.jar || return 1
-	printf 'y\n' | tt-minecraftd repair --approve-plugins > approve.out || { cat approve.out; return 1; }
+	# It was approved through repair until 2026111914334569. Being in plugins/ with no source is what sends it to the agent.
 	cat > ask <<-'EOF'
 		#!/bin/sh
 		cat > /dev/null
@@ -441,7 +444,8 @@ check df68700 "Geyser STUN answers behind the firewall" fStun
 check df68800 "firewall drops and counts the account's local, LAN, and non-web connections" fFirewallOut
 check df7ag00 "Ctrl-C in stop --warn's countdown calls the stop off" fStopCancel
 check df68900 "stop --warn 10 saves and hands the trees back" fStopWarn
-check df68a00 "start refuses a changed jar" fRefuseChanged
+# Commented out by 2026111914334569, with fRefuseChanged.
+# check df68a00 "start refuses a changed jar" fRefuseChanged
 native df68b00 "native start, sandbox, and locked jars" fNativeStart
 native df68c00 "status, cmd, and console follow a native server" fNativeFollow
 native df68d00 "stop follows a native server" fNativeStop

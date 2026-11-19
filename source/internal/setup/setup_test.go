@@ -213,14 +213,16 @@ func TestNewInstall(t *testing.T) {
 	if !reflect.DeepEqual(r.paper.installed, []string{"paper-26.3-249.jar"}) {
 		t.Errorf("Paper installs: %q", r.paper.installed)
 	}
+	// 2026111914334569: was 3 entries with the Paper build first, approved
+	// by hash. Now only the sources go in.
 	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
-	if err != nil || len(approved) != 3 || approved[0].Name != "paper-26.3-249.jar" || approved[0].SHA256 != strings.Repeat("ab", 32) {
+	if err != nil || len(approved) != 2 || approved[0].Name != "plugins/Geyser-Spigot.jar" || approved[0].SHA256 != "" || approved[0].Source == "" {
 		t.Errorf("approved list: %v %v", approved, err)
 	}
 	if !reflect.DeepEqual(r.geyser.installed, []string{"Geyser-Spigot.jar", "floodgate-spigot.jar"}) {
 		t.Errorf("Geyser installs: %q", r.geyser.installed)
 	}
-	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "setup will:", "Pull docker.io/", "Download Paper 26.3 build 249", "FIXED   Paper 26.3 build 249 downloaded", "eula.txt: eula is now true", "server.properties: white-list is now", "Download Geyser 2.0 build 7 and Floodgate 2.0 build 7 into plugins/", "FIXED   plugins/floodgate-spigot.jar approved")
+	hasAll(t, "output", strings.Split(r.out.String(), "\n"), "setup will:", "Pull docker.io/", "Download Paper 26.3 build 249", "FIXED   Paper 26.3 build 249 downloaded", "eula.txt: eula is now true", "server.properties: white-list is now", "Download Geyser 2.0 build 7 and Floodgate 2.0 build 7 into plugins/", "FIXED   plugins/floodgate-spigot.jar gets its updates from https://example.com/floodgate")
 	if !reflect.DeepEqual(r.repairs, []bool{true}) {
 		t.Errorf("repair runs: %v, want one --check", r.repairs)
 	}
@@ -400,9 +402,11 @@ func TestAdopt(t *testing.T) {
 	if !strings.Contains(props, "white-list=true") || !strings.Contains(props, "motd=hi") {
 		t.Errorf("server.properties:\n%s", props)
 	}
+	// 2026111914334569: the plugin and paper.jar were approved here, and
+	// aren't now. Only Geyser's and Floodgate's sources are written.
 	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
-	if err != nil || len(approved) != 4 || !slices.ContainsFunc(approved, func(a plugins.Approved) bool { return a.Name == "paper.jar" }) {
-		t.Errorf("approved list, which should have the plugin and paper.jar: %v %v", approved, err)
+	if err != nil || len(approved) != 2 || slices.ContainsFunc(approved, func(a plugins.Approved) bool { return a.Name == "paper.jar" || a.Name == "plugins/Thing.jar" }) {
+		t.Errorf("list, which should have only Geyser and Floodgate: %v %v", approved, err)
 	}
 	if len(r.paper.installed) > 0 {
 		t.Errorf("Paper downloaded over an adopted paper.jar: %q", r.paper.installed)
@@ -412,9 +416,9 @@ func TestAdopt(t *testing.T) {
 	}
 }
 
-// An adopted tree's Geyser and Floodgate go on the approved list with
-// GeyserMC's source, so update --plugins keeps them current. A jar only
-// named like one doesn't, and a changed one keeps the source it had.
+// An adopted tree's Geyser and Floodgate go in plugins.shcl with GeyserMC's
+// source, so update --plugins keeps them current. A jar only named like one
+// doesn't, and one with a source keeps it.
 func TestAdoptGeyserSource(t *testing.T) {
 	defer testid.Line(t, "df76q00")
 	r := newRig(t, []string{"docker"}, "")
@@ -435,7 +439,7 @@ func TestAdoptGeyserSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := "https://example.org/own-floodgate"
-	if err := plugins.Approve(r.s.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: "plugins/floodgate-spigot.jar"}, SHA256: strings.Repeat("cd", 32), Source: own}}); err != nil {
+	if err := plugins.SetSources(r.s.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: "plugins/floodgate-spigot.jar"}, Source: own}}); err != nil {
 		t.Fatal(err)
 	}
 	r.s.Adopt = old
@@ -453,11 +457,11 @@ func TestAdoptGeyserSource(t *testing.T) {
 	for _, a := range approved {
 		got[a.Name] = a.Source
 	}
+	// 2026111914334569: paper.jar and the lookalike were approved with no
+	// source, and aren't listed now.
 	want := map[string]string{
-		"paper.jar":                    "",
 		"plugins/Geyser-Spigot.jar":    r.geyser.Source("geyser"),
 		"plugins/floodgate-spigot.jar": own,
-		"plugins/geyser-lookalike.jar": "",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("sources %v, want %v", got, want)
@@ -533,7 +537,8 @@ func writeJar(t *testing.T, file, pluginYML string) {
 }
 
 // The jars to approve show before Go ahead, so a yes covers jars that were
-// seen. A no approves none.
+// seen. A no approves none. Since 2026111914334569 that's the Geyser jar that
+// gets a source, not every jar.
 func TestJarsListedBeforeAsking(t *testing.T) {
 	defer testid.Line(t, "df67z00")
 	r := newRig(t, []string{"docker"}, "n\n")
@@ -546,12 +551,13 @@ func TestJarsListedBeforeAsking(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writeJar(t, filepath.Join(old, "plugins", "Geyser-Spigot.jar"), "name: Geyser-Spigot\nversion: 2.12.1\n")
 	r.s.Adopt = old
 	if err := r.s.Do(context.Background()); err == nil {
 		t.Fatal("went on after a no")
 	}
 	out := r.out.String()
-	listed, asked := strings.Index(out, "plugins/Thing.jar\n  sha256: "), strings.Index(out, "Go ahead?")
+	listed, asked := strings.Index(out, "plugins/Geyser-Spigot.jar\n  says: "), strings.Index(out, "Go ahead?")
 	if listed < 0 || asked < 0 || listed > asked {
 		t.Errorf("jar listed at %d, asked at %d:\n%s", listed, asked, out)
 	}
@@ -716,7 +722,8 @@ func TestBedrock(t *testing.T) {
 	}
 	got := approved(r)
 	for name, src := range map[string]string{"plugins/Geyser-Spigot.jar": "https://example.com/geyser", "plugins/floodgate-spigot.jar": "https://example.com/floodgate"} {
-		if got[name].Source != src || got[name].SHA256 != strings.Repeat("cd", 32) {
+		// 2026111914334569: the hash was strings.Repeat("cd", 32), and isn't written now.
+		if got[name].Source != src || got[name].SHA256 != "" {
 			t.Errorf("%s: %+v", name, got[name])
 		}
 	}

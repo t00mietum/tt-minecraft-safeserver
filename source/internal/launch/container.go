@@ -195,9 +195,6 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err != nil {
 		return err
 	}
-	if err := d.clearLibraries(ctx); err != nil {
-		return d.failedStart(ctx, d, err)
-	}
 
 	if mode.Debug {
 		d.say("Starting with the console attached. Type stop to stop the server.")
@@ -356,7 +353,7 @@ func appendMount(args []string, path string, readOnly bool) ([]string, error) {
 	return append(args, "--mount", m), nil
 }
 
-// LockedJars gives paper.jar and the jars plugins.Jars checks, after links, so
+// LockedJars gives paper.jar and the jars plugins.Jars lists, after links, so
 // each can be mounted read-only over itself.
 func LockedJars(serverDir string) ([]string, error) {
 	paper, err := filepath.EvalSymlinks(filepath.Join(serverDir, "paper.jar"))

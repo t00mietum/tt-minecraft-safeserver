@@ -19,61 +19,62 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
-func TestCheckJars(t *testing.T) {
-	defer testid.Line(t, "df5ye00")
-	dir := t.TempDir()
-	put := func(name, text string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	hash := func(text string) string {
-		s := sha256.Sum256([]byte(text))
-		return hex.EncodeToString(s[:])
-	}
-	put("plugins/a.jar", "a")
-	put("plugins/b.jar", "b")
-	put("plugins/notes.txt", "not a jar")
-	approved := []Approved{
-		{Name: "plugins/a.jar", SHA256: hash("a")},
-		{Name: "plugins/b.jar", SHA256: hash("old b")},
-		{Name: "plugins/gone.jar", SHA256: hash("gone")},
-		{Name: "paper-26.3-244.jar", SHA256: hash("paper")},
-	}
-	var sums Sums
-	c, err := CheckJars(dir, approved, &sums)
-	want := Check{Jars: 2, Changed: []string{"plugins/b.jar"}, Missing: []string{"plugins/gone.jar"}}
-	if err != nil || !reflect.DeepEqual(c, want) || c.OK() {
-		t.Errorf("CheckJars = %+v, %v; want %+v", c, err, want)
-	}
-
-	// A jar swapped for one of another size is hashed again, cache or not.
-	put("plugins/a.jar", "evil a")
-	put("plugins/c.jar", "c")
-	c, err = CheckJars(dir, approved, &sums)
-	if err != nil || !reflect.DeepEqual(c.Changed, []string{"plugins/a.jar", "plugins/b.jar"}) || !reflect.DeepEqual(c.New, []string{"plugins/c.jar"}) {
-		t.Errorf("after the swap: %+v, %v", c, err)
-	}
-
-	// Same size, new time: hashed again too.
-	put("plugins/a.jar", "a")
-	approved[1].SHA256 = hash("b")
-	if c, err := CheckJars(dir, approved[:2], &sums); err != nil || len(c.Changed) != 0 || !reflect.DeepEqual(c.New, []string{"plugins/c.jar"}) {
-		t.Errorf("after the fix: %+v, %v", c, err)
-	}
-	put("plugins/a.jar", "z")
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(filepath.Join(dir, "plugins/a.jar"), old, old); err != nil {
-		t.Fatal(err)
-	}
-	if c, _ := CheckJars(dir, approved[:2], &sums); !reflect.DeepEqual(c.Changed, []string{"plugins/a.jar"}) {
-		t.Errorf("same size swap missed: %+v", c)
-	}
-}
+// Commented out by 2026111914334569: CheckJars went with plugin approval. Sums is still covered by TestSumsRehash.
+// func TestCheckJars(t *testing.T) {
+// 	defer testid.Line(t, "df5ye00")
+// 	dir := t.TempDir()
+// 	put := func(name, text string) {
+// 		t.Helper()
+// 		if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 	}
+// 	hash := func(text string) string {
+// 		s := sha256.Sum256([]byte(text))
+// 		return hex.EncodeToString(s[:])
+// 	}
+// 	put("plugins/a.jar", "a")
+// 	put("plugins/b.jar", "b")
+// 	put("plugins/notes.txt", "not a jar")
+// 	approved := []Approved{
+// 		{Name: "plugins/a.jar", SHA256: hash("a")},
+// 		{Name: "plugins/b.jar", SHA256: hash("old b")},
+// 		{Name: "plugins/gone.jar", SHA256: hash("gone")},
+// 		{Name: "paper-26.3-244.jar", SHA256: hash("paper")},
+// 	}
+// 	var sums Sums
+// 	c, err := CheckJars(dir, approved, &sums)
+// 	want := Check{Jars: 2, Changed: []string{"plugins/b.jar"}, Missing: []string{"plugins/gone.jar"}}
+// 	if err != nil || !reflect.DeepEqual(c, want) || c.OK() {
+// 		t.Errorf("CheckJars = %+v, %v; want %+v", c, err, want)
+// 	}
+//
+// 	// A jar swapped for one of another size is hashed again, cache or not.
+// 	put("plugins/a.jar", "evil a")
+// 	put("plugins/c.jar", "c")
+// 	c, err = CheckJars(dir, approved, &sums)
+// 	if err != nil || !reflect.DeepEqual(c.Changed, []string{"plugins/a.jar", "plugins/b.jar"}) || !reflect.DeepEqual(c.New, []string{"plugins/c.jar"}) {
+// 		t.Errorf("after the swap: %+v, %v", c, err)
+// 	}
+//
+// 	// Same size, new time: hashed again too.
+// 	put("plugins/a.jar", "a")
+// 	approved[1].SHA256 = hash("b")
+// 	if c, err := CheckJars(dir, approved[:2], &sums); err != nil || len(c.Changed) != 0 || !reflect.DeepEqual(c.New, []string{"plugins/c.jar"}) {
+// 		t.Errorf("after the fix: %+v, %v", c, err)
+// 	}
+// 	put("plugins/a.jar", "z")
+// 	old := time.Now().Add(-time.Hour)
+// 	if err := os.Chtimes(filepath.Join(dir, "plugins/a.jar"), old, old); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if c, _ := CheckJars(dir, approved[:2], &sums); !reflect.DeepEqual(c.Changed, []string{"plugins/a.jar"}) {
+// 		t.Errorf("same size swap missed: %+v", c)
+// 	}
+// }
 
 // A jar in plugins/ that links to a pipe, a socket, or a device counts as
 // changed, and isn't opened: opening a device runs its driver, as root in
@@ -128,8 +129,13 @@ func TestJarLinksNotOpened(t *testing.T) {
 	}
 
 	var sums Sums
-	if c, err := CheckJars(dir, approved, &sums); err != nil || c.Jars != len(links) || len(c.Changed) != len(links) || len(c.New) != 0 {
-		t.Errorf("CheckJars = %+v, %v; want all %d changed", c, err, len(links))
+	// Commented out by 2026111914334569: CheckJars went with plugin approval.
+	// Jars still lists them, and Sum and Describe below still refuse them.
+	// if c, err := CheckJars(dir, approved, &sums); err != nil || c.Jars != len(links) || len(c.Changed) != len(links) || len(c.New) != 0 {
+	// 	t.Errorf("CheckJars = %+v, %v; want all %d changed", c, err, len(links))
+	// }
+	if jars, err := Jars(dir); err != nil || len(jars) != len(approved) {
+		t.Errorf("Jars = %+v, %v; want %d", jars, err, len(approved))
 	}
 	for name := range links {
 		file := filepath.Join(dir, name)
@@ -156,7 +162,8 @@ func TestJarLinksNotOpened(t *testing.T) {
 }
 
 // Glob characters in serverDir are part of its name, not a pattern. Read as a
-// pattern, mc[1] matches only mc1, so no jar was found and the check passed.
+// pattern, mc[1] matches only mc1, so no jar was found, and none was mounted
+// read-only.
 func TestJarsGlobInServerDir(t *testing.T) {
 	defer testid.Line(t, "df79p00")
 	for _, name := range []string{"mc[1]", "mc*", "mc?", `mc\x`, "[mc"} {
@@ -174,9 +181,15 @@ func TestJarsGlobInServerDir(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := []string{"plugins/evil.jar", "plugins/Geyser-Spigot/extensions/x.jar", "paper-1.jar"}
-		c, err := CheckJars(dir, nil, &Sums{})
-		if err != nil || c.OK() || c.Jars != len(want) || !reflect.DeepEqual(c.New, want) {
-			t.Errorf("%s: CheckJars = %+v, %v; want new %q", name, c, err, want)
+		// Was CheckJars until 2026111914334569 took approval out. Jars is what
+		// it listed with, and what the read-only mounts come from.
+		jars, err := Jars(dir)
+		var got []string
+		for _, j := range jars {
+			got = append(got, j.Name)
+		}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: Jars = %q, %v; want %q", name, got, err, want)
 		}
 	}
 }
@@ -199,4 +212,40 @@ func TestJarsOutsideCleaned(t *testing.T) {
 	if err == nil || strings.ContainsAny(err.Error(), "\x1b\x07") || !strings.Contains(err.Error(), "x]0;owned/paper-26.3-249.jar, outside") {
 		t.Errorf("%v", err)
 	}
+}
+
+// A jar swapped for another is hashed again, whether its size or only its
+// time changed.
+func TestSumsRehash(t *testing.T) {
+	defer testid.Line(t, "dfh9b00")
+	file := filepath.Join(t.TempDir(), "a.jar")
+	hash := func(text string) string {
+		s := sha256.Sum256([]byte(text))
+		return hex.EncodeToString(s[:])
+	}
+	var sums Sums
+	check := func(text, when string) {
+		t.Helper()
+		if got, err := sums.Sum(file); err != nil || got != hash(text) {
+			t.Errorf("%s: Sum = %s, %v; want the hash of %q", when, got, err, text)
+		}
+	}
+	put := func(text string) {
+		t.Helper()
+		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("a")
+	check("a", "first")
+	put("evil a")
+	check("evil a", "new size")
+	put("z")
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(file, old, old); err != nil {
+		t.Fatal(err)
+	}
+	check("z", "older time")
+	put("y")
+	check("y", "same size, new time")
 }

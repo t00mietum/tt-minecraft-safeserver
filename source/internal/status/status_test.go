@@ -5,8 +5,6 @@ package status
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -44,7 +42,7 @@ tcp   LISTEN 0 4096 *:19132 *:*
 udp   UNCONN 0 0   0.0.0.0:19132 0.0.0.0:*
 `
 
-// rig is a server tree, an approved list, and a fake host.
+// rig is a server tree and a fake host.
 type rig struct {
 	p       *Probe
 	r       *host.Fake
@@ -64,11 +62,6 @@ func write(t *testing.T, file, text string) {
 	}
 }
 
-func sum(text string) string {
-	s := sha256.Sum256([]byte(text))
-	return hex.EncodeToString(s[:])
-}
-
 func newRig(t *testing.T) *rig {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "srv", "server")
@@ -85,8 +78,6 @@ func newRig(t *testing.T) *rig {
 		fmt.Fprintf(&log, "[12:00:%02d INFO]: line %d\n", i, i)
 	}
 	write(t, filepath.Join(dir, "logs", "latest.log"), log.String())
-	list := filepath.Join(t.TempDir(), "plugins.shcl")
-	write(t, list, "jar: plugins/Geyser-Spigot.jar\n\tsha256: "+sum("geyser")+"\njar: plugins/floodgate.jar\n\tsha256: "+sum("floodgate")+"\njar: paper-26.3-244.jar\n\tsha256: "+sum("")+"\n")
 
 	cfg := config.Defaults()
 	cfg.RunMode = "docker"
@@ -109,7 +100,7 @@ func newRig(t *testing.T) *rig {
 	g.files = map[string]string{}
 	g.cgroup("4242", "/system.slice/docker-"+cid+".scope", 1<<30)
 	g.p = &Probe{
-		Run: g.r, Cfg: &cfg, PluginsFile: list,
+		Run: g.r, Cfg: &cfg,
 		ReadFile: func(f string) ([]byte, error) {
 			if s, ok := g.files[f]; ok {
 				return []byte(s), nil
@@ -172,7 +163,7 @@ func TestStatusDocker(t *testing.T) {
 		"Firewall:   on; run with sudo to see the drop counters",
 		"Whitelist:  3 players",
 		"Ops:        Steve, Evil[2J",
-		"Plugins:    3 jars, all approved",
+		"Plugins:    3 jars: plugins/Geyser-Spigot.jar, plugins/floodgate.jar, paper-26.3-244.jar", // was "3 jars, all approved" before 2026111914334569
 		"Boot unit:  enabled",
 		"Log:        "+filepath.Join(g.dir, "logs", "latest.log"),
 		"            [12:00:06 INFO]: line 6",
@@ -357,7 +348,7 @@ func TestStatusStopped(t *testing.T) {
 		"Ports:      tcp *:25565 listening, 2 connections",
 		"Firewall:   off in the config",
 		"Ops:        none",
-		"Plugins:    4 jars, NOT all approved, so start refuses; new: plugins/new.jar; changed: plugins/floodgate.jar",
+		"Plugins:    4 jars: plugins/Geyser-Spigot.jar, plugins/floodgate.jar, plugins/new.jar, paper-26.3-244.jar", // was "NOT all approved" before 2026111914334569
 		"Boot unit:  not installed",
 	)
 	if g.pinged != "" || strings.Contains(out, "udp") || strings.Contains(out, "Players:") {
@@ -372,14 +363,13 @@ func TestStatusBroken(t *testing.T) {
 	g.r.Reply = func(c host.Cmd) ([]byte, error) {
 		return nil, errors.New(c.Args[0] + ": permission denied")
 	}
-	g.p.PluginsFile = filepath.Join(t.TempDir(), "plugins.shcl")
 	write(t, filepath.Join(g.dir, "whitelist.json"), "{not json")
 	out := g.text(t, 30)
 	wantLines(t, out,
 		"Server:     can't list process",
 		"Ports:      can't list sockets",
 		"Whitelist:  can't read it: whi",
-		"Plugins:    no approved list a",
+		"Plugins:    3 jars: plugins/Ge", // was "no approved list" before 2026111914334569
 		"Boot unit:  can't ask systemd:",
 	)
 	for _, l := range strings.Split(out, "\n") {
@@ -463,7 +453,7 @@ func TestStatusHostileFiles(t *testing.T) {
 	go func() { done <- g.text(t, 0) }()
 	select {
 	case out := <-done:
-		wantLines(t, out, "Plugins:    3 jars, NOT all approved, so start refuses; changed: plugins/Geyser-Spigot.jar, plugins/floodgate.jar")
+		wantLines(t, out, "Plugins:    3 jars: plugins/Geyser-Spigot.jar, plugins/floodgate.jar, paper-26.3-244.jar") // was "NOT all approved" before 2026111914334569
 		for _, w := range []string{"Whitelist:  can't read it:", "Ops:        can't read them:", "Log:        can't read it:"} {
 			if !strings.Contains(out, w) {
 				t.Errorf("lacks %q:\n%s", w, out)
@@ -493,7 +483,7 @@ func TestStatusCleansServerText(t *testing.T) {
 	if strings.ContainsAny(out, "\x1b\x07\r\u202e") {
 		t.Errorf("control characters in status:\n%q", out)
 	}
-	for _, want := range []string{"Paper[2J (", ": Ev]52;c;aGk=il", "new: plugins/x]0;owned.jar"} {
+	for _, want := range []string{"Paper[2J (", ": Ev]52;c;aGk=il", "plugins/x]0;owned.jar"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status lacks %q:\n%s", want, out)
 		}

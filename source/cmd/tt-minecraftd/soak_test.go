@@ -58,12 +58,12 @@ func TestSoak(t *testing.T) {
 		t.Fatal("prepare stopped")
 	}
 	var fixed bytes.Buffer
-	if err := repair(context.Background(), inv, strings.NewReader(""), &fixed, true); err != nil {
+	if err := repair(context.Background(), inv, &fixed, true); err != nil {
 		t.Fatal(err, fixed.String())
 	}
 	cfg := config.Defaults()
 	cfg.ServerDir, cfg.OwnerTrees = dir, nil
-	probe := status.NewProbe(&host.Fake{}, &cfg, filepath.Join(dir, "plugins.shcl"))
+	probe := status.NewProbe(&host.Fake{}, &cfg)
 
 	steps := []struct {
 		args []string

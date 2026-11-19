@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -71,10 +72,9 @@ func newAgentRig(t *testing.T, answers string) *agentRig {
 	if err := os.WriteFile(filepath.Join(a.dir, "plugins", "Chunky.jar"), old, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Paper's build is approved too, and isn't the agent's to look up.
-	if err := plugins.Approve(a.u.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: "paper-26.3-244.jar"}, SHA256: sumOf("old")}, {Jar: plugins.Jar{Name: "plugins/Chunky.jar"}, SHA256: sumOfBytes(old)}}); err != nil {
-		t.Fatal(err)
-	}
+	// Paper's build and Chunky were approved here until 2026111914334585.
+	// update asks about the jars in the tree now, and Paper's build isn't the
+	// agent's to look up.
 	a.page = "Chunky 1.1 sha256 " + strings.ToUpper(sumOfBytes(a.newJar))
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.fetched = append(a.fetched, r.URL.Path)
@@ -154,7 +154,7 @@ func TestAgentJars(t *testing.T) {
 	if len(a.asked) != 1 || len(a.asked[0].Jars) != 1 || a.asked[0].Jars[0].About != "Chunky 1.0" || a.asked[0].Minecraft != "26.3" || a.asked[0].Paper != "244" {
 		t.Errorf("asked %+v", a.asked)
 	}
-	for _, want := range []string{"Update plugins/Chunky.jar from Chunky 1.0 to 1.1, which the update agent found on example.com", "No config changes.", "Use it in place of plugins/Chunky.jar? [y/n]", "FIXED   plugins/Chunky.jar approved"} {
+	for _, want := range []string{"Update plugins/Chunky.jar from Chunky 1.0 to 1.1, which the update agent found on example.com", "No config changes.", "Use it in place of plugins/Chunky.jar? [y/n]", "FIXED   Chunky 1.1 downloaded over plugins/Chunky.jar"} { // "approved" until 2026111914334585
 		if !strings.Contains(a.out.String(), want) {
 			t.Errorf("no %q:\n%s", want, a.out)
 		}
@@ -162,9 +162,9 @@ func TestAgentJars(t *testing.T) {
 	if !bytes.Equal(a.jar(t), a.newJar) {
 		t.Error("the new jar isn't in place")
 	}
-	list, _, err := plugins.ReadApproved(a.u.PluginsFile)
-	if err != nil || len(list) != 2 || list[1].SHA256 != sumOfBytes(a.newJar) || list[1].Source != "" {
-		t.Errorf("approved %+v %v", list, err)
+	// Since 2026111914334585 nothing is written to the list; it had the new hash.
+	if list, _, err := plugins.ReadApproved(a.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("list written: %+v %v", list, err)
 	}
 	a.noTemps(t)
 
@@ -307,7 +307,8 @@ func TestAgentAfterFailedLookup(t *testing.T) {
 	for _, j := range asked[0].Jars {
 		paths = append(paths, j.Path)
 	}
-	if strings.Join(paths, " ") != "plugins/Geyser-Spigot.jar plugins/floodgate-spigot.jar plugins/Thing.jar" {
+	// The order was plugins.shcl's until 2026111914334585, and is the folder's now.
+	if strings.Join(paths, " ") != "plugins/Geyser-Spigot.jar plugins/Thing.jar plugins/floodgate-spigot.jar" {
 		t.Errorf("asked about %q", paths)
 	}
 	if !strings.Contains(r.out.String(), "warning: can't get Geyser: no network, so the update agent is asked") || !strings.Contains(r.out.String(), "plugins/Thing.jar: no answer from the update agent") {
@@ -415,7 +416,7 @@ func TestAgentPaper(t *testing.T) {
 	if len(a.asked) != 1 || a.asked[0].FindPaper != "26.3" || len(a.asked[0].Jars) != 0 || a.asked[0].MoveTo != "" {
 		t.Errorf("asked %+v", a.asked)
 	}
-	for _, want := range []string{"warning: can't get Paper: no network, so the update agent's find is used", "from build 244 to build 249", "The update agent found it on example.com", "Use it, and point paper.jar at paper-26.3-249.jar? [y/n]", "FIXED   paper-26.3-249.jar approved", "older builds removed: paper-26.3-240.jar"} {
+	for _, want := range []string{"warning: can't get Paper: no network, so the update agent's find is used", "from build 244 to build 249", "The update agent found it on example.com", "Use it, and point paper.jar at paper-26.3-249.jar? [y/n]", "older builds removed: paper-26.3-240.jar"} { // "approved" until 2026111914334585
 		if !strings.Contains(a.out.String(), want) {
 			t.Errorf("no %q:\n%s", want, a.out)
 		}
@@ -423,11 +424,9 @@ func TestAgentPaper(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(a.dir, "paper.jar")); err != nil || !bytes.Equal(b, a.extra["/paper-26.3-249.jar"]) || a.linked(t) != "paper-26.3-249.jar" {
 		t.Errorf("paper.jar links to %q: %v", a.linked(t), err)
 	}
-	list, _, err := plugins.ReadApproved(a.u.PluginsFile)
-	if err != nil || !slices.ContainsFunc(list, func(p plugins.Approved) bool {
-		return p.Name == "paper-26.3-249.jar" && p.SHA256 == a.answer.Paper.SHA256
-	}) {
-		t.Errorf("approved %+v %v", list, err)
+	// The build went on the list with its hash until 2026111914334585.
+	if list, _, err := plugins.ReadApproved(a.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("list written: %+v %v", list, err)
 	}
 
 	a = newPaperAgentRig(t, "")
@@ -482,12 +481,13 @@ func TestAgentPaper(t *testing.T) {
 	}
 }
 
-// Before --mc-version the agent says which approved plugins have a build for
+// Before --mc-version the agent says which plugins have a build for
 // the new version. It's shown before the question, and changes nothing.
 func TestAgentMoveReport(t *testing.T) {
 	defer testid.Line(t, "df79300")
 	ctx := context.Background()
-	report := "The update agent's report on the approved plugins for Minecraft 26.4. It changes nothing.\n  - plugins/Chunky.jar: has no build yet. waiting on 26.4\n"
+	// "the approved plugins" until 2026111914334585.
+	report := "The update agent's report on the plugins for Minecraft 26.4. It changes nothing.\n  - plugins/Chunky.jar: has no build yet. waiting on 26.4\n"
 
 	a := newAgentRig(t, "n\n")
 	a.u.Parts, a.u.MCVersion = Parts{Paper: true}, "26.4"
@@ -528,8 +528,8 @@ func TestAgentMoveReport(t *testing.T) {
 	}
 }
 
-// Approved plugin libraries are Paper's to fetch, so the agent isn't asked
-// about them, for an update or for a move.
+// Plugin libraries are Paper's to fetch, so the agent isn't asked about
+// them, for an update or for a move, even when an old list names them.
 func TestAgentSkipsLibraries(t *testing.T) {
 	defer testid.Line(t, "dfh8a02")
 	ctx := context.Background()
@@ -542,7 +542,8 @@ func TestAgentSkipsLibraries(t *testing.T) {
 		if err := os.WriteFile(lib, []byte("a"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f, err := os.OpenFile(a.u.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
+		// O_CREATE since 2026111914334585, which leaves the rig with no list.
+		f, err := os.OpenFile(a.u.PluginsFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
 		if err == nil {
 			_, err = f.WriteString("jar: libraries/org/a/a/1/a-1.jar\n\tsha256: " + sumOf("a") + "\n")
 		}

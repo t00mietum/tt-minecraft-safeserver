@@ -69,7 +69,6 @@ type options struct {
 	warn       int
 	interval   int
 	check      bool
-	approve    bool
 	yes        bool
 	adopt      string
 	acceptEULA bool
@@ -112,7 +111,6 @@ var commands = []command{
 	{"repair", "Check the setup, and fix what's wrong", func(fs *flag.FlagSet, o *options) {
 		fs.BoolVar(&o.check, "check", false, "Only report, and change nothing. Doesn't need root")
 		fs.BoolVar(&o.check, "dry-run", false, "The same as --check")
-		fs.BoolVar(&o.approve, "approve-plugins", false, "Show each new or changed jar, and ask whether to approve it")
 	}},
 	{"setup", "Install the server, or adopt a server folder", func(fs *flag.FlagSet, o *options) {
 		if config.NativeMode {
@@ -130,7 +128,7 @@ var commands = []command{
 		// --self is deferred: packages and the install script update the binary (backlog 2026111318002865).
 		// fs.BoolVar(&o.parts.Self, "self", false, "Replace tt-minecraftd with its newest release from GitHub. On NixOS, say what to change")
 		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
-		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
+		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
 		fs.BoolVar(&o.parts.Image, "image", false, "Pull the newest build of the image's tag, check its Java, and pin its digest in the config")
 		fs.StringVar(&o.mcVersion, "mc-version", "", "Move Paper to Minecraft version `V`. Asks even with --yes, and takes a ZFS snapshot first")
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
@@ -198,7 +196,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	if name == "status" || name == "watch" {
 		runner := host.NewExec(false)
 		runner.QuietErr = true
-		probe := status.NewProbe(runner, &inv.cfg, inv.pluginsFile())
+		probe := status.NewProbe(runner, &inv.cfg)
 		if name == "status" {
 			width, _ := terminal(stdout)
 			return probe.Take(ctx).Write(stdout, width)
@@ -206,7 +204,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		return watch(ctx, probe, stdout, time.Duration(inv.opts.interval)*time.Second)
 	}
 	if name == "repair" {
-		return repair(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
+		return repair(ctx, inv, stdout, os.Geteuid() == 0)
 	}
 	if name == "setup" {
 		return setup(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
@@ -219,7 +217,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
-	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, InUnit: inUnit()}
+	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, InUnit: inUnit()}
 	if name == "start" || name == "stop" {
 		served, err := bootServes(ctx, inv.configPath)
 		switch {
@@ -259,7 +257,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 var serverMode = func(ctx context.Context, c *config.Config) string {
 	runner := host.NewExec(false)
 	runner.QuietErr = true
-	mode, _ := status.NewProbe(runner, c, "").Mode(ctx)
+	mode, _ := status.NewProbe(runner, c).Mode(ctx)
 	return mode
 }
 
@@ -292,8 +290,8 @@ func follow(ctx context.Context, c *config.Config, w io.Writer) {
 	c.RunMode = mode
 }
 
-// pluginsFile is the approved jar list, beside the config, so a second
-// --config gets its own.
+// pluginsFile is plugins.shcl, the plugins' sources for update, beside the
+// config, so a second --config gets its own.
 func (inv invocation) pluginsFile() string {
 	return filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl")
 }
@@ -364,8 +362,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 			again := inv
 			again.cfg = *c
 			again.opts.check = check
-			again.opts.approve = false
-			return repair(ctx, again, in, w, root)
+			return repair(ctx, again, w, root)
 		},
 		// setup asked already.
 		Update: func(ctx context.Context, c *config.Config) error {
@@ -451,6 +448,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		MCVersion: inv.opts.mcVersion,
 		Root:      root,
 	}
+	u.Running = func(ctx context.Context) (bool, error) { return launch.Running(ctx, u.Run, &inv.cfg) }
 	// Before sudo asks for a password.
 	if err := u.Check(); err != nil {
 		return err
@@ -544,9 +542,9 @@ var repairSteps = func(inv invocation) (h *repairpkg.Host, before, after []repai
 }
 
 // repair runs design.md's repair checks that are built so far. Each one prints
-// OK, FIXED, or FAILED. --approve-plugins asks on in. Fixing needs root, so
-// like setup it runs itself again through sudo.
-func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
+// OK, FIXED, or FAILED. Fixing needs root, so like setup it runs itself again
+// through sudo.
+func repair(ctx context.Context, inv invocation, w io.Writer, root bool) error {
 	if !inv.opts.check && !root {
 		return asRoot(inv.args)
 	}
@@ -578,7 +576,7 @@ func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	for _, warn := range settings.Warnings(inv.cfg.ServerDir) {
 		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
-	repairPlugins(inv, in, w, report)
+	repairPlugins(inv, w, report)
 	repairpkg.Run(ctx, h, after, inv.opts.check, report)
 	if failed {
 		return errors.New("not everything is in place")
@@ -586,20 +584,12 @@ func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	return nil
 }
 
-// repairPlugins reports jars that aren't approved, and with --approve-plugins
-// asks about each one. A refused jar moves to plugins-refused/. Running out of
-// answers leaves the rest as they are.
-func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state, text string)) {
-	answers := bufio.NewScanner(in)
-	repairPluginJars(inv, answers, w, report)
-	if inv.opts.approve {
-		repairLibraries(inv, answers, w, report)
-	}
-}
-
-func repairPluginJars(inv invocation, answers *bufio.Scanner, w io.Writer, report func(state, text string)) {
+// repairPlugins gives Geyser and Floodgate GeyserMC's source when
+// plugins.shcl has none for them, so update --plugins keeps them current.
+// Nothing else about a jar is checked since 2026111914293176.
+func repairPlugins(inv invocation, w io.Writer, report func(state, text string)) {
 	file := inv.pluginsFile()
-	approved, warns, err := plugins.ReadApproved(file)
+	_, warns, err := plugins.ReadApproved(file)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		report("FAILED", "plugins: "+err.Error())
 		return
@@ -607,192 +597,35 @@ func repairPluginJars(inv invocation, answers *bufio.Scanner, w io.Writer, repor
 	for _, warn := range warns {
 		fmt.Fprintf(w, "warning: %s\n", server.Clean(warn.String()))
 	}
-	c, err := plugins.CheckJars(inv.cfg.ServerDir, approved, &plugins.Sums{})
+	all, err := plugins.Unsourced(inv.cfg.ServerDir, file)
 	if err != nil {
 		report("FAILED", "plugins: "+err.Error())
 		return
 	}
-	if c.OK() {
-		report("OK", fmt.Sprintf("plugins: %d %s, all approved", c.Jars, plural(c.Jars, "jar")))
-		return
-	}
-	if !inv.opts.approve {
-		for _, name := range c.New {
-			report("FAILED", name+" isn't approved; repair --approve-plugins shows it and asks")
-		}
-		for _, name := range c.Changed {
-			report("FAILED", name+" changed since it was approved; repair --approve-plugins shows it and asks")
-		}
-		return
-	}
-
-	jars, err := plugins.Jars(inv.cfg.ServerDir)
-	if err != nil {
-		report("FAILED", "plugins: "+err.Error())
-		return
-	}
-	// true for a new jar, false for a changed one
-	asked := make(map[string]bool, len(c.New)+len(c.Changed))
-	for _, name := range c.New {
-		asked[name] = true
-	}
-	for _, name := range c.Changed {
-		asked[name] = false
-	}
-	var yes []plugins.Info
-	var left []string
-	for _, j := range jars {
-		isNew, ok := asked[j.Name]
-		if !ok {
-			continue
-		}
-		if len(left) > 0 {
-			left = append(left, j.Name)
-			continue
-		}
-		info, err := plugins.Describe(j)
-		if err != nil {
-			report("FAILED", j.Name+": "+err.Error())
-			continue
-		}
-		about := info.About
-		if about == "" {
-			about = "no plugin.yml"
-		}
-		state := "new"
-		if !isNew {
-			state = "changed"
-		}
-		fmt.Fprintf(w, "\n%s (%s)\n  sha256: %s\n  size:   %d bytes\n  date:   %s\n  says:   %s\n",
-			server.Clean(j.Name), state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
-		// A changed jar keeps the source it has.
-		if p := geyser.Project(info.Name, info.About); state == "new" && p != "" {
+	var jars []plugins.Info
+	for _, info := range all {
+		if p := geyser.Project(info.Name, info.About); p != "" {
 			info.Source = geyserAPI.Source(p)
-			fmt.Fprintf(w, "  source: %s\n", info.Source)
-		}
-		answer, ok := ask(answers, w, "Approve it? [y/n] ")
-		switch {
-		case !ok:
-			left = append(left, j.Name)
-		case answer:
-			yes = append(yes, info)
-		default:
-			dest, err := plugins.Refuse(inv.cfg.ServerDir, j, time.Now())
-			switch {
-			case err != nil:
-				report("FAILED", j.Name+" isn't approved: "+err.Error())
-			default:
-				report("FIXED", j.Name+" refused, and moved to "+dest)
-			}
+			jars = append(jars, info)
 		}
 	}
-	fmt.Fprintln(w)
-	if len(yes) > 0 {
-		if err := plugins.Approve(file, yes); err != nil {
-			report("FAILED", "plugins: can't write the approved list: "+err.Error())
-			return
-		}
-		for _, j := range yes {
-			report("FIXED", j.Name+" approved")
-		}
-	}
-	for _, name := range left {
-		report("FAILED", name+" isn't approved; no answer")
-	}
-}
-
-// repairLibraries shows the plugin libraries Paper downloaded that aren't
-// approved, and asks once about them all, since a plugin can need dozens and
-// they have no plugin.yml to tell them apart. Ones not approved stay where
-// they are, and the next start removes them.
-func repairLibraries(inv invocation, answers *bufio.Scanner, w io.Writer, report func(state, text string)) {
-	file := inv.pluginsFile()
-	approved, _, err := plugins.ReadApproved(file)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		report("FAILED", "libraries: "+err.Error())
-		return
-	}
-	c, err := plugins.CheckLibraries(inv.cfg.ServerDir, approved, &plugins.Sums{})
-	if err != nil {
-		report("FAILED", "libraries: "+err.Error())
-		return
-	}
-	if c.OK() {
-		return
-	}
-	jars, err := plugins.Libraries(inv.cfg.ServerDir)
-	if err != nil {
-		report("FAILED", "libraries: "+err.Error())
-		return
-	}
-	asked := make(map[string]string, len(c.New)+len(c.Changed))
-	for _, name := range c.New {
-		asked[name] = "new"
-	}
-	for _, name := range c.Changed {
-		asked[name] = "changed"
-	}
-	var yes []plugins.Info
-	fmt.Fprintf(w, "\nPlugin libraries that Paper downloaded, not approved yet:\n")
-	for _, j := range jars {
-		state, ok := asked[j.Name]
-		if !ok {
-			continue
-		}
-		info, err := plugins.Describe(j)
-		if err != nil {
-			report("FAILED", j.Name+": "+err.Error())
-			continue
-		}
-		fmt.Fprintf(w, "  %s (%s)\n    sha256: %s, %d bytes, %s\n", server.Clean(j.Name), state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"))
-		yes = append(yes, info)
-	}
-	if len(yes) == 0 {
-		return
-	}
-	prompt := "Approve it? [y/n] "
-	if len(yes) > 1 {
-		prompt = fmt.Sprintf("Approve all %d? [y/n] ", len(yes))
-	}
-	answer, ok := ask(answers, w, prompt)
-	fmt.Fprintln(w)
 	switch {
-	case !ok:
-		report("FAILED", "libraries: not approved; no answer")
-	case !answer:
-		report("OK", "libraries: left unapproved; the next start removes them")
-	default:
-		if err := plugins.Approve(file, yes); err != nil {
-			report("FAILED", "libraries: can't write the approved list: "+err.Error())
-			return
+	case len(jars) == 0:
+		report("OK", "plugin sources")
+		return
+	case inv.opts.check:
+		for _, j := range jars {
+			report("FAILED", j.Name+" has no source, so update --plugins skips it; repair gives it "+j.Source)
 		}
-		report("FIXED", fmt.Sprintf("libraries: %d approved", len(yes)))
+		return
 	}
-}
-
-// ask reads y or n, and asks again on anything else. ok is false when the
-// answers ran out.
-func ask(answers *bufio.Scanner, w io.Writer, prompt string) (yes, ok bool) {
-	for {
-		fmt.Fprint(w, prompt)
-		if !answers.Scan() {
-			fmt.Fprintln(w)
-			return false, false
-		}
-		switch strings.ToLower(strings.TrimSpace(answers.Text())) {
-		case "y", "yes":
-			return true, true
-		case "n", "no":
-			return false, true
-		}
+	if err := plugins.SetSources(file, jars); err != nil {
+		report("FAILED", "plugins: can't write "+file+": "+err.Error())
+		return
 	}
-}
-
-func plural(n int, word string) string {
-	if n == 1 {
-		return word
+	for _, j := range jars {
+		report("FIXED", j.Name+" gets its updates from "+j.Source)
 	}
-	return word + "s"
 }
 
 // watch redraws status until Ctrl-C. On a terminal each redraw replaces the
@@ -918,8 +751,6 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		return usageErr("start: --debug and --foreground don't go together")
 	case o.warn < 0:
 		return usageErr("stop: --warn takes 0 or more seconds")
-	case o.approve && o.check:
-		return usageErr("repair: --approve-plugins and --check don't go together")
 	case name == "watch" && (o.interval < 1 || int64(o.interval) > maxWatchInterval):
 		// The upper bound keeps Duration(n)*Second from overflowing, which makes NewTicker panic.
 		return usageErr("watch: --interval takes %d to %d seconds", 1, maxWatchInterval)
@@ -1011,7 +842,8 @@ func writeAbout(w io.Writer) {
 
 tt-minecraftd runs a Paper Minecraft server for friends, locked down. The
 server runs in a container, or in a systemd sandbox, as its own account. Every
-start checks the safe settings and the plugin jars first.
+start checks the safe settings first, and plugin jars are read-only while it
+runs.
 
 Copyright © 2026 t00mietum. GPL v2 or later.
 https://github.com/t00mietum/tt-minecraft-safeserver

@@ -22,11 +22,11 @@ import (
 	"github.com/yottacore/shcl/source/go/v3"
 )
 
-// RefusedDir is where repair --approve-plugins moves a refused jar, under
-// serverDir, so the server doesn't load it.
+// RefusedDir is where a refused jar goes, under serverDir, so the server
+// doesn't load it.
 const RefusedDir = "plugins-refused"
 
-// Info is what an operator sees about a jar before approving it.
+// Info is what an operator sees about a jar.
 type Info struct {
 	Jar
 	SHA256 string
@@ -63,7 +63,7 @@ func Describe(j Jar) (Info, error) {
 
 // about reads the name and version a jar claims. A jar that isn't a zip, or
 // has none of the files, gives "". The jar could say anything, so this is
-// only a hint for the person approving it.
+// only a hint.
 func about(r io.ReaderAt, size int64) string {
 	name, version := claims(r, size)
 	return strings.TrimSpace(name + " " + version)
@@ -131,11 +131,11 @@ func clean(s string) string {
 	return server.Cut(server.Clean(s), 80)
 }
 
-// Approve writes the hashes of jars into the approved list, adding the ones
-// it doesn't have, and a jar's source when it has one. Other entries,
-// comments, sources, and the operator's own lines stay byte for byte. A new
-// file is made readable by all, so status works without sudo.
-func Approve(file string, jars []Info) error {
+// SetSources writes each jar's source into plugins.shcl, adding the jars it
+// doesn't have. Other entries, comments, and the operator's own lines stay
+// byte for byte. A new file is made readable by all, so status works
+// without sudo.
+func SetSources(file string, jars []Info) error {
 	doc, st, err := shcl.LoadFileKeepLines(file, shcl.Standard)
 	fresh := st == shcl.FileNotFound
 	switch {
@@ -148,14 +148,10 @@ func Approve(file string, jars []Info) error {
 		if !insideServer(j.Name) {
 			return fmt.Errorf("%q isn't a path under the server folder", j.Name)
 		}
-		key := "jar(" + shcl.QuoteSegment(j.Name) + ").sha256"
-		if s := doc.SetString(key, j.SHA256); s != shcl.SetOk {
-			return fmt.Errorf("%s: can't add %s: %s", file, j.Name, s)
-		}
 		if j.Source == "" {
 			continue
 		}
-		key = "jar(" + shcl.QuoteSegment(j.Name) + ").source"
+		key := "jar(" + shcl.QuoteSegment(j.Name) + ").source"
 		if s := doc.SetString(key, j.Source); s != shcl.SetOk {
 			return fmt.Errorf("%s: can't add %s's source: %s", file, j.Name, s)
 		}
@@ -167,6 +163,36 @@ func Approve(file string, jars []Info) error {
 		return os.Chmod(file, 0o644) // #nosec G302 -- the list isn't secret, and status reads it without sudo
 	}
 	return nil
+}
+
+// Unsourced describes the jars in plugins/ that plugins.shcl gives no
+// source, so setup and repair can give Geyser and Floodgate theirs. No list
+// yet means none has one.
+func Unsourced(serverDir, file string) ([]Info, error) {
+	listed, _, err := ReadApproved(file)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	has := make(map[string]bool, len(listed))
+	for _, a := range listed {
+		has[a.Name] = a.Source != ""
+	}
+	jars, err := Jars(serverDir)
+	if err != nil {
+		return nil, err
+	}
+	var out []Info
+	for _, j := range jars {
+		if path.Dir(j.Name) != "plugins" || has[j.Name] {
+			continue
+		}
+		info, err := Describe(j)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", j.Name, err)
+		}
+		out = append(out, info)
+	}
+	return out, nil
 }
 
 // Refuse moves a jar from pinnedDirs into RefusedDir, owned like plugins/.

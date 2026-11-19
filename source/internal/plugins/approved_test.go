@@ -72,12 +72,12 @@ func TestBadEntriesAreLeftOut(t *testing.T) {
 	for _, j := range jars {
 		names = append(names, j.Name+"@"+j.Source)
 	}
-	if got := strings.Join(names, " "); got != "plugins/http.jar@ plugins/extra.jar@ plugins/same.jar@" {
+	// Since 2026111914293176 a missing or bad sha256 no longer drops the jar.
+	if got := strings.Join(names, " "); got != "plugins/good.jar@ plugins/nosum.jar@ plugins/short.jar@ plugins/http.jar@ plugins/twice.jar@ plugins/extra.jar@ plugins/same.jar@" {
 		t.Errorf("kept %s", got)
 	}
 	wantLines := map[int]string{
 		1:  "more than one sha256",
-		3:  "has no sha256",
 		5:  "isn't 64 hex digits",
 		6:  "isn't a path under the server folder",
 		8:  "isn't a path under the server folder",

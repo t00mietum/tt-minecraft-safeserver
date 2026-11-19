@@ -118,7 +118,7 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.needApt(cfg); err != nil {
 		return err
 	}
-	jars, err := s.newJars(cfg)
+	jars, err := s.unsourced(cfg)
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (s *Setup) Do(ctx context.Context) error {
 	if failed {
 		return stopped
 	}
-	if err := s.approve(jars); err != nil {
+	if err := s.sources(jars); err != nil {
 		return err
 	}
 	s.firewall(ctx, &cfg, report)
@@ -392,45 +392,22 @@ func (s *Setup) checkTree(c config.Config) error {
 	return nil
 }
 
-// newJars are the plugin jars that aren't approved yet, as on an adopted tree.
-func (s *Setup) newJars(c config.Config) ([]plugins.Info, error) {
-	if _, err := os.Stat(c.ServerDir); errors.Is(err, fs.ErrNotExist) {
+// unsourced are the Geyser and Floodgate jars in plugins/ that plugins.shcl
+// gives no source, as on an adopted tree, each with GeyserMC's.
+func (s *Setup) unsourced(c config.Config) ([]plugins.Info, error) {
+	if _, err := os.Stat(c.ServerDir); errors.Is(err, fs.ErrNotExist) || s.Geyser == nil {
 		return nil, nil
 	}
-	approved, _, err := plugins.ReadApproved(s.PluginsFile)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
-	check, err := plugins.CheckJars(c.ServerDir, approved, &plugins.Sums{})
-	if err != nil {
-		return nil, err
-	}
-	want := make(map[string]bool, len(check.New)+len(check.Changed))
-	for _, name := range check.New {
-		want[name] = true
-	}
-	for _, name := range check.Changed {
-		want[name] = false
-	}
-	all, err := plugins.Jars(c.ServerDir)
+	all, err := plugins.Unsourced(c.ServerDir, s.PluginsFile)
 	if err != nil {
 		return nil, err
 	}
 	var jars []plugins.Info
-	for _, j := range all {
-		isNew, ok := want[j.Name]
-		if !ok {
-			continue
-		}
-		info, err := plugins.Describe(j)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", j.Name, err)
-		}
-		// A changed jar keeps the source it has.
-		if p := geyser.Project(info.Name, info.About); isNew && p != "" && s.Geyser != nil {
+	for _, info := range all {
+		if p := geyser.Project(info.Name, info.About); p != "" {
 			info.Source = s.Geyser.Source(p)
+			jars = append(jars, info)
 		}
-		jars = append(jars, info)
 	}
 	return jars, nil
 }
@@ -509,7 +486,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Make %s, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
 	}
 	if build != nil {
-		fmt.Fprintf(w, "  - Download Paper %s build %d, check its SHA-256, approve it, and point paper.jar at it.\n", build.Version, build.ID)
+		fmt.Fprintf(w, "  - Download Paper %s build %d, check its SHA-256, and point paper.jar at it.\n", build.Version, build.ID)
 	}
 	if accepted, _ := settings.EULAAccepted(c.ServerDir); !accepted {
 		fmt.Fprintf(w, "  - Ask whether you accept the Minecraft EULA, and write eula.txt only after a yes.\n")
@@ -517,7 +494,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 	fmt.Fprintf(w, "  - Write the safe server settings.\n")
 	s.planBedrock(bedrock)
 	if n := len(jars); n > 0 {
-		fmt.Fprintf(w, "  - Approve the %d plugin %s there, listed with %s hashes below.\n", n, plural(n, "jar"), plural(n, "its", "their"))
+		fmt.Fprintf(w, "  - Give the %d Geyser and Floodgate %s there GeyserMC's source in %s, for update --plugins, listed below.\n", n, plural(n, "jar"), s.PluginsFile)
 	}
 	if c.Firewall {
 		fmt.Fprintf(w, "  - Write the firewall rules to %s, and enable and start %s.\n", firewall.RulesFile, firewall.UnitName)
@@ -538,14 +515,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 	fmt.Fprintf(w, "  - Check it all, as repair --check does.\n\n")
 	// Before the question, so the yes covers jars that were seen.
 	for _, j := range jars {
-		about := j.About
-		if about == "" {
-			about = "no plugin.yml"
-		}
-		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", server.Clean(j.Name), j.SHA256, about)
-		if j.Source != "" {
-			fmt.Fprintf(w, "  source: %s\n", j.Source)
-		}
+		fmt.Fprintf(w, "%s\n  says:   %s\n  source: %s\n", server.Clean(j.Name), j.About, j.Source)
 	}
 	if len(jars) > 0 {
 		fmt.Fprintln(w)
@@ -560,7 +530,7 @@ func (s *Setup) planBedrock(bedrock []geyser.Build) {
 	for i, b := range bedrock {
 		names[i] = fmt.Sprintf("%s %s build %d", geyser.Title(b.Project), b.Version, b.ID)
 	}
-	fmt.Fprintf(s.Out, "  - Download %s into plugins/, check %s SHA-256, and approve %s.\n", strings.Join(names, " and "), plural(len(bedrock), "its", "their"), plural(len(bedrock), "it", "them"))
+	fmt.Fprintf(s.Out, "  - Download %s into plugins/, and check %s SHA-256.\n", strings.Join(names, " and "), plural(len(bedrock), "its", "their"))
 }
 
 func keyList(opts []config.Option) string {
@@ -658,19 +628,22 @@ func configText(opts []config.Option) string {
 	return b.String()
 }
 
-// configDir makes the config's folder, which the approved list shares.
+// configDir makes the config's folder, which plugins.shcl shares.
 func (s *Setup) configDir() (string, error) {
 	dir := filepath.Dir(s.ConfigPath)
 	return dir, os.MkdirAll(dir, 0o755) // #nosec G301 -- status reads the config without sudo
 }
 
-// writeApproved adds jars to the approved list beside the config.
-func (s *Setup) writeApproved(jars []plugins.Info) error {
+// writeSources adds jars' sources to plugins.shcl beside the config.
+func (s *Setup) writeSources(jars []plugins.Info) error {
 	if _, err := s.configDir(); err != nil {
 		return err
 	}
-	if err := plugins.Approve(s.PluginsFile, jars); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
+	if err := plugins.SetSources(s.PluginsFile, jars); err != nil {
+		return fmt.Errorf("can't write %s: %w", s.PluginsFile, err)
+	}
+	for _, j := range jars {
+		fmt.Fprintf(s.Out, "%-7s %s gets its updates from %s\n", "FIXED", server.Clean(j.Name), j.Source)
 	}
 	return nil
 }
@@ -759,17 +732,12 @@ func (s *Setup) getPaper(ctx context.Context, c config.Config, b *paper.Build) e
 		return err
 	}
 	fmt.Fprintf(s.Out, "%-7s Paper %s build %d downloaded, and its SHA-256 matches; paper.jar points at %s\n", "FIXED", b.Version, b.ID, b.Name)
-	// start pins the build paper.jar points at, like a plugin.
-	if err := s.writeApproved([]plugins.Info{{Jar: plugins.Jar{Name: b.Name}, SHA256: b.SHA256, Size: b.Size}}); err != nil {
-		return err
-	}
-	fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", b.Name)
 	return nil
 }
 
 // bedrockBuilds are the Geyser and Floodgate builds to download with bedrock
 // on. A tree that has one already keeps it, as with paper.jar, and setup
-// approves it with the other jars.
+// gives it GeyserMC's source.
 func (s *Setup) bedrockBuilds(ctx context.Context, c config.Config) ([]geyser.Build, error) {
 	if !c.Bedrock {
 		return nil, nil
@@ -792,8 +760,8 @@ func (s *Setup) bedrockBuilds(ctx context.Context, c config.Config) ([]geyser.Bu
 	return builds, nil
 }
 
-// getBedrock downloads Geyser and Floodgate, and approves them with their
-// source, for update --plugins. The safe settings have written Geyser's keys
+// getBedrock downloads Geyser and Floodgate, and writes their source, for
+// update --plugins. The safe settings have written Geyser's keys
 // by then; Floodgate's config is left to its first start.
 func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser.Build) error {
 	if len(builds) == 0 {
@@ -811,15 +779,9 @@ func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser
 			return err
 		}
 		fmt.Fprintf(s.Out, "%-7s %s %s build %d downloaded, and its SHA-256 matches\n", "FIXED", geyser.Title(b.Project), b.Version, b.ID)
-		jars = append(jars, plugins.Info{Jar: plugins.Jar{Name: b.Path()}, SHA256: b.SHA256, Source: s.Geyser.Source(b.Project)})
+		jars = append(jars, plugins.Info{Jar: plugins.Jar{Name: b.Path()}, Source: s.Geyser.Source(b.Project)})
 	}
-	if err := s.writeApproved(jars); err != nil {
-		return err
-	}
-	for _, j := range jars {
-		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", server.Clean(j.Name))
-	}
-	return nil
+	return s.writeSources(jars)
 }
 
 // floodgateKey takes other accounts' access to the Floodgate key away on an
@@ -916,13 +878,9 @@ func (s *Setup) safeSettings(c *config.Config, report repair.Report) {
 	}
 }
 
-func (s *Setup) approve(jars []plugins.Info) error {
+func (s *Setup) sources(jars []plugins.Info) error {
 	if len(jars) == 0 || s.DryRun {
 		return nil
 	}
-	if err := s.writeApproved(jars); err != nil {
-		return err
-	}
-	fmt.Fprintf(s.Out, "%-7s %d plugin %s approved\n", "FIXED", len(jars), plural(len(jars), "jar"))
-	return nil
+	return s.writeSources(jars)
 }

@@ -92,13 +92,77 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- design.md's Summary, start, status, setup, update, repair, Plugin pinning, Update agent and Security, and README, say so. A Direction decisions entry records the reversal and the trade: a jar the server writes into `plugins/` while it runs would load at the next start.
 	- Progress log:
 		- 2026-11-19: t00mietum, after the plugin library answer: admins shouldn't have to investigate plugins or hashes. A plugin they add, or one another plugin needs, is OK unless it's on a public bad list.
+		- 2026-11-19: Split in 2: 2026111914334569 for start, status, repair, setup and the docs, and 2026111914334585 for update. The parent closes with the last child.
+		- 2026-11-19: Both children are worked and wait on the root host check: 2026111914334569 (bca9ac5) and 2026111914334585.
 	- Decisions:
 		- This reverses the hash pinning chosen at the start of the project (9058841). The library pinning in 2026111715275425 goes with it.
+
+- Stop checking jars against the approved list in start, status, repair and setup
+	- ID: 2026111914334569
+	- Type: Enhancement
+	- Status: Waiting for testing
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261119-143345
+	- Opened by:
+	- Parent ID: 2026111914293176
+	- Related IDs: 2026111715275425
+	- Requirements [Feature]: start, status and repair stop checking jars and paper.jar against the list, and start no longer refuses a new or changed jar. repair --approve-plugins and setup's approve step go. The library pinning from 2026111715275425 goes: start's removal, repair's prompt, and plugins.Libraries. plugins.shcl's sha256 is no longer needed. setup and repair give Geyser and Floodgate GeyserMC's source without asking. Jars stay read-only in container modes. design.md's Summary, start, status, setup, repair, Plugin pinning, Security and Direction decisions, and README, say so.
+	- Estimated effort: Avg
+	- Needs local test suite run?: The root host check, for df68000, df68e00 and df76n00, whose script changed with this item.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-19: start, status, repair and setup no longer read hashes. repair --approve-plugins, setup's approve step, start's library removal, repair's library prompt, and plugins.CheckJars and CheckLibraries are gone. A missing or bad sha256 in plugins.shcl is ignored. setup and repair give a Geyser or Floodgate jar with no source GeyserMC's, through the new plugins.SetSources and Unsourced. status lists the jars by name. design.md's Summary, start, status, setup, repair, Plugin jars (was Plugin pinning), Configuration model, Security and Direction decisions, and README, say so.
+		- Verified: dfh9c00 and dfh9h00 fail on 8bc0fd1 and pass with the change. The whole quick gate passes.
+		- Tests commented out, since approval went: df5ye00, dfh8a00, df7bg00, df7bh00, df5z400, df79s00, df5z500, dfh8a01, df76r00, df79z00, and root host check df68a00. The CheckJars asserts in df5z000 and df79j00 are commented out too, and df79p00 calls Jars in place of CheckJars.
+		- 2026-11-19 asserts updated for the change: df5x400 keeps the jars with no or bad sha256, and drops the line 3 warning. df78900 allows an empty hash. df5z000's error text went from "can't be approved" to ", outside ". The plugin lines in df5y700, df5y900, df5ya00, df5yh00 and df79r00 list jar names, not approval. df65d00's list went from 3 entries to 2, df65f00's from 4 to 2, df76q00 lost paper.jar and the lookalike, and df65z00's hash went from cd x 32 to empty. df67z00 lists a Geyser jar, and df78s00 refuses on the whitelist, in place of an unapproved jar.
+	- Decisions:
+		- plugins.Approve stays, for update, until 2026111914334585. So do Libraries and IsLibrary, which that item needs, and Refuse, which the known-bad check (2026111914262600) needs.
+		- The names Approved and ReadApproved stay, to keep the churn down.
+		- An old list's sha256 is read and not checked, with no warning. A bad one warns and is ignored, and no longer drops the jar.
+		- status lists the jars by name, and opens none, since nothing is hashed now.
+		- repair's check 7 is now the Geyser and Floodgate sources. --check reports a missing one as FAILED, since update then never gets Geyser's next build, and Bedrock players need it current. repair adds it without asking.
+		- setup's plan lists only the Geyser and Floodgate jars that get a source, and no hashes. Other jars need no yes.
+		- repair lost its input reader, since it asks nothing now.
+		- Swept: CheckJars, CheckLibraries, clearLibraries, checkPlugins and approve-plugins across source, cicd, the root host checks, demo.bash, design.md and README. The approval left is in update and the agent, which is 2026111914334585's.
+	- Branch: nov19c-2026111914293176
+	- Test case: dfh9b00, dfh9c00, dfh9h00
+	- Commit: bca9ac5
+
+- update: judge plugins by the file on disk, stop writing hashes, and clear plugin libraries
+	- ID: 2026111914334585
+	- Type: Enhancement
+	- Status: Waiting for testing
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261119-143345
+	- Opened by:
+	- Parent ID: 2026111914293176
+	- Related IDs: 2026111715275425
+	- Requirements [Feature]: update --plugins works on the jars in the tree, with their optional source from plugins.shcl, and calls a jar up to date by the hash of the file on disk. update, setup and the agent stop writing hashes to plugins.shcl. The agent's finds still need a yes. update --plugins, and a plain update, remove the plugins' libraries in libraries/ as runUser, with Paper's own left out by paper.jar's libraries.list, so Paper downloads fresh ones at the next start (2026111715275425's second answer). design.md's update, Update agent and Plugin pinning say so.
+	- Estimated effort: Avg
+	- Prereq IDs: 2026111914334569
+	- Needs local test suite run?: The root host check, for df76n00, which now finds Thing.jar in the tree with no list entry.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-19: update --plugins works on the jars in plugins/ and its extensions folder, with their source from plugins.shcl, and calls one up to date by the hash of the file on disk. update and the agent no longer write to plugins.shcl, and plugins.Approve and IsLibrary are gone. update --plugins, and a plain update, remove the plugins' libraries from Paper's cache as runUser, after the plugins, with Paper's own left out. design.md's update, Update agent and Plugin jars say so.
+		- Verified: dfh9v00 fails on bca9ac5 and passes with the change. dfh9s00 is new, for SetSources. The whole quick gate passes.
+		- Tests commented out: df5z200 (TestApprove), since Approve went. dfh8a02 now makes the list it appends to.
+		- 2026-11-19 asserts updated for the change: df66z00, df79200, df67200 and df76h00 lost their "approved" lines, and their list checks now want no list, or no hash. df76j00's order went from the list's to the folder's. df79300's report says "the plugins", not "the approved plugins". df67200's gone jar no longer says "not in the server folder".
+	- Decisions:
+		- A jar plugins.shcl names that isn't in the tree is left out with no message, since it isn't a jar now.
+		- The removal is left out while the server may be running, through Update.Running, since a running Paper can still open a library it hasn't read yet. A failed look counts as running.
+		- It runs as runUser, per 2026111715275425's answer, and needs the tree's group write that start gives it. A failed rm fails the update after the rest is done.
+		- It's in the plan, so an update with only libraries to clear still asks first.
+		- Swept: every plugins.Approve and IsLibrary caller, in update, the agent, setup and the tests. treeJars feeds pluginLookup and movePlugins, the 2 readers of the list in update.
+	- Branch: nov19c-2026111914293176
+	- Test case: dfh9s00, dfh9v00
+	- Commit: 4eb03ec
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152754
@@ -115,6 +179,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: Asserts back to their values before 6ca2410, since a rig with no library cache runs no rm now: df5xp and df5y1 lose the rm line. Change counts went from 6 to 5 in df5xs, 8 to 7 in df5y3, and 8 to 7 and 9 to 8 in df5y4.
 		- Verified: df7bg fails with start's removal taken out, and with Paper's own libraries not left out. dfh8a02 fails with the update skip taken out. dfh8a00, dfh8a01, df7bg and df7bh pass, and so does the whole quick gate. On a real Paper 26.3 build 256 tree, after Paperclip set it up, all 104 of Paper's own libraries were left out and a planted jar was listed.
 		- 20261119: Second answer: too complicated. No approval step for libraries, and no download again at each start. Set back to Queued.
+		- 2026-11-19: The library pinning, start's removal, repair's prompt and plugins.CheckLibraries were taken out in 2026111914334569. update's library skips and the removal at update are left for 2026111914334585.
+		- 2026-11-19: update's library removal is in 2026111914334585, and its library skips are gone. Both parts of this item are covered there and in 2026111914334569, which have the tests now (dfh9v00). df7bg00, df7bh00, dfh8a00 and dfh8a01 are commented out.
 	- Note: No. Paper's loader wasn't checked.
 	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
 	- Decisions:
@@ -142,6 +208,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: nov19-2026111715275425, nov19b-2026111715275425
 	- Commit: 6ca2410, 1cbed80
 	- Test case: df7bg, df7bh, dfh8a00, dfh8a01, dfh8a02
+	- Closed reason: Superseded
+	- Superseded by ID: 2026111914334569, 2026111914334585
+	- Closed: 20261119-145511
 
 - Test IDs follow the clock plus a fixed-length counter, not the next-after-highest rule
 	- ID: 2026111911594103

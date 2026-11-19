@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
@@ -28,8 +26,6 @@ type Kit struct {
 	Run     host.Runner
 	Console Console
 	Cfg     *config.Config
-	// PluginsFile is the approved jar list, plugins.shcl.
-	PluginsFile string
 	// FirewallFiles are the firewall's files, which tests point elsewhere.
 	FirewallFiles firewall.Files
 	Out           io.Writer
@@ -183,35 +179,6 @@ func (k *Kit) denied(err error) error {
 	return err
 }
 
-// checkPlugins refuses a start when a jar is new or changed since it was
-// approved. See design.md, Plugin pinning.
-func (k *Kit) checkPlugins() error {
-	approved, warns, err := plugins.ReadApproved(k.PluginsFile)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		// Nothing approved yet, so every jar is new.
-	case err != nil:
-		return fmt.Errorf("can't read the approved plugin list: %w", err)
-	}
-	for _, w := range warns {
-		k.say("warning: %s", w)
-	}
-	c, err := plugins.CheckJars(k.Cfg.ServerDir, approved, &plugins.Sums{})
-	if err != nil {
-		return k.denied(fmt.Errorf("can't check the plugin jars: %w", err))
-	}
-	if c.OK() {
-		return nil
-	}
-	for _, name := range c.New {
-		k.say("not approved: %s", name)
-	}
-	for _, name := range c.Changed {
-		k.say("changed since it was approved: %s", name)
-	}
-	return errors.New("a jar is new or changed; sudo tt-minecraftd repair --approve-plugins shows each one and asks")
-}
-
 // checkFirewall refuses a start without the tool's nftables table, or with
 // rules written for another config or another network, so the server never
 // runs unfenced. The file stands in for the table, since the unit loads it
@@ -347,47 +314,7 @@ func (k *Kit) preflight(ctx context.Context) error {
 	if err := k.checkSettings(); err != nil {
 		return err
 	}
-	if err := k.checkPlugins(); err != nil {
-		return err
-	}
 	return k.checkFirewall(ctx)
-}
-
-// clearLibraries removes the jars Paper would load from its library cache
-// that aren't approved, or changed since, so code the server wrote there
-// doesn't outlast a restart. Paper downloads them again. It runs after the
-// hand-off, as the service account, so a link only leads where that account
-// could write anyway. See design.md, Plugin pinning.
-func (k *Kit) clearLibraries(ctx context.Context) error {
-	approved, _, err := plugins.ReadApproved(k.PluginsFile)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("can't read the approved plugin list: %w", err)
-	}
-	c, err := plugins.CheckLibraries(k.Cfg.ServerDir, approved, &plugins.Sums{})
-	if err != nil {
-		return k.denied(fmt.Errorf("can't check Paper's library cache: %w", err))
-	}
-	doomed := append(c.New, c.Changed...)
-	if len(doomed) == 0 {
-		return nil
-	}
-	args := []string{"rm", "-f", "--"}
-	for _, name := range doomed {
-		args = append(args, filepath.Join(k.Cfg.ServerDir, filepath.FromSlash(name)))
-	}
-	if _, err := k.Run.Run(ctx, host.Cmd{Args: args, As: k.Cfg.RunUser}); err != nil {
-		return fmt.Errorf("clearing Paper's library cache: %w", err)
-	}
-	k.say("Removed %d plugin %s that %s approved, so Paper downloads %s again. sudo tt-minecraftd repair --approve-plugins approves them.",
-		len(doomed), plural(len(doomed), "library", "libraries"), plural(len(doomed), "isn't", "aren't"), plural(len(doomed), "it", "them"))
-	return nil
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }
 
 // startUnit is start when the boot unit is enabled. The checks that can
