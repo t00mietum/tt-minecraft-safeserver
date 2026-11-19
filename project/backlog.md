@@ -343,7 +343,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - test-id.bash misses root host checks run through native, so their IDs can be reused
 	- ID: 2026111715275346
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -353,7 +353,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: `--list` left them out, and a fake tree that reused df68b passed `--check`.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 34. Detail in detail_backlog.md.
+		- 20261119: Verified: df7b7 fails 3 of its 4 cases on the old test-id.bash and passes all 4 on the new one. The control, the real checks.bash with a free Go ID, passes on both. The quick gate passed, with df7b7 in the container run too.
+		- Swept: `fRootChecks` is the only reader of checks.bash in test-id.bash, and test-id.bash the only ID reader. cicd.bash's `--list` and lint step call it. The commented-out ZFS checks df781 to df784 aren't counted, as before, and no Go test uses those IDs.
 	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Actual cause [Bug]: `fRootChecks` matched only lines that start with `check`, and the repeat check ran `sort -u` over its IDs before looking for repeats.
+	- Actual fix [Bug]: test-id.bash reads the names of the functions in checks.bash that hand their arguments to `check`, now only `native`, and counts calls through those too. Each call counts once, so a repeat within checks.bash fails `--check`.
+	- Decisions:
+		- The wrapper names come from checks.bash rather than a fixed list, so a new wrapper is counted without an edit here. A wrapper of a wrapper isn't followed.
+		- A commented-out call still doesn't count, to match the Go side, where only a live `func Test` counts.
+	- Test case: df7b7
+	- Branch: nov19-2026111715275346
+	- Commit: 056e08d
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: the test fails on the old code and passes now.
+	- Closed reason: Done
+	- Closed: 20261119-115315
 
 - A quick run leaves a stale SHA256SUMS beside new binaries in the release folder
 	- ID: 2026111715275362
