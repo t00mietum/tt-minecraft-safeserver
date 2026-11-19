@@ -22,6 +22,57 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
+	- ID: 2026111412275150
+	- Type: Task
+	- Status: Waiting on signoff
+	- Target version: v1.0.0-beta.1
+	- Opened: 20261114-122751
+	- Opened by: JC
+	- Progress log:
+		- 2026-11-07: Left open from the Paper 26.3 update, done before this repo. TreeCapitator 1.0 and AntiCreeper 5.1 have no updates but load. Sleeping uses the players_sleeping_percentage game rule, at 0, in place of OnePlayerSleep.
+		- 2026-11-17: Logs since 11-07 show TreeCapitator 1.0 enabled with only the legacy api-version warning, and no plugin errors. Chopping and sleeping still need a player in game.
+	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
+	- Stand-in: none (20261117). Only a player in the game can judge tree felling, leaf decay and the sleep vote.
+
+- Move shared code to tt-safeserver
+	- ID: 2026111111303242
+	- Type: Task
+	- Status: Stalled
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261111-113032
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711
+	- Requirements:
+		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
+		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
+		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
+		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
+	- Decisions:
+		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
+		- GPL v2 or later.
+	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
+
+- Let Bedrock LAN discovery through, once Geyser answers it
+	- ID: 2026111318485184
+	- Type: Feature
+	- Status: Stalled
+		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261113-184851
+	- Opened by:
+	- Parent ID: 2026111111065829
+	- Requirements:
+		- When a released Geyser answers LAN discovery on UDP 7551, decide whether to turn it on. It's off by default in Geyser's pull request, and it loosens the login check for LAN joins.
+		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
+		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
+		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
+	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
+	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
+	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
+
 - Make a logged-in CLI subscription the recommended update agent kind
 	- ID: 2026111913431995
 	- Type: Enhancement
@@ -127,57 +178,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Closed reason: Done
 	- Closed: 20261119
 	- Acceptance signoff: 20261119, t00mietum: it's good
-
-- Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
-	- ID: 2026111412275150
-	- Type: Task
-	- Status: Waiting on signoff
-	- Target version: v1.0.0-beta.1
-	- Opened: 20261114-122751
-	- Opened by: JC
-	- Progress log:
-		- 2026-11-07: Left open from the Paper 26.3 update, done before this repo. TreeCapitator 1.0 and AntiCreeper 5.1 have no updates but load. Sleeping uses the players_sleeping_percentage game rule, at 0, in place of OnePlayerSleep.
-		- 2026-11-17: Logs since 11-07 show TreeCapitator 1.0 enabled with only the legacy api-version warning, and no plugin errors. Chopping and sleeping still need a player in game.
-	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
-	- Stand-in: none (20261117). Only a player in the game can judge tree felling, leaf decay and the sleep vote.
-
-- Move shared code to tt-safeserver
-	- ID: 2026111111303242
-	- Type: Task
-	- Status: Stalled
-	- Target version: v1.0.0-beta.1
-	- Priority: Avg
-	- Opened: 20261111-113032
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711
-	- Requirements:
-		- Move the parts that `tt-monerod-safeserver` needs too into a new Go module and repo, `tt-safeserver`, per `design.md`.
-		- Do it when `tt-monerod-safeserver` starts on code, so 2 tools test the interface.
-		- Create the GitHub repo first, plus the same working folder layout this project uses, with `repo/`, `private/`, and the doc links.
-		- Its backlog and docs get kept up from here, with the same style passes. Not while `tt-monerod-safeserver` is also being worked on.
-	- Decisions:
-		- One library module, with one binary per tool. A single binary for every service and a generic engine were weighed and left out.
-		- GPL v2 or later.
-	- Held for tt-monerod-safeserver to start on code, per the 2026-11-11 call to extract the shared module then.
-
-- Let Bedrock LAN discovery through, once Geyser answers it
-	- ID: 2026111318485184
-	- Type: Feature
-	- Status: Stalled
-		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
-	- Target version: v1.0.0-beta.1
-	- Priority: Avg
-	- Opened: 20261113-184851
-	- Opened by:
-	- Parent ID: 2026111111065829
-	- Requirements:
-		- When a released Geyser answers LAN discovery on UDP 7551, decide whether to turn it on. It's off by default in Geyser's pull request, and it loosens the login check for LAN joins.
-		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
-		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
-		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
-	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
-	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
-	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
 - Test IDs follow the clock plus a fixed-length counter, not the next-after-highest rule
 	- ID: 2026111911594103
