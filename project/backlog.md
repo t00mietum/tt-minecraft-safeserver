@@ -421,7 +421,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - install-dev.bash --dir=~/path makes a folder named ~
 	- ID: 2026111715275377
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -432,6 +433,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 36. Detail in detail_backlog.md.
 	- Origin: d701e7a dev install. Not seen before. Confirmed.
+	- Actual cause [Bug]: `fMain` took the `--dir` value as given, and a `~` that Bash didn't expand became a relative path under the working folder.
+	- Actual fix [Bug]: `~` and `~/path` are read as `$HOME` and `$HOME/path`, in both the `--dir=` and `--dir ` forms. Any other leading `~`, such as `~bob/x`, is refused with exit 2, as is a `~` with no full-path `$HOME`.
+	- Decisions:
+		- `~user` is refused rather than looked up, since the script has no portable lookup that works in the Bash 3.2 and busybox rig.
+	- Test case: df799 TestInstallDevScript, subtest "a leading ~ in --dir is the home folder, and ~user is refused"
+	- Verified: the subtest fails on the old script (the clone went into a folder named `~`) and passes now. shellcheck and the quick run's cli and lint areas pass.
+	- Swept: `install.bash` has no `--dir` or other path option. Its only other value options are `--release` and `--any-distro`, which aren't paths.
+	- Branch: nov19-2026111715275377
+	- Acceptance signoff: Self-closed: the subtest fails on the old script and passes now.
+	- Closed: 20261119-120600
 
 - start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
 	- ID: 2026111715275408
