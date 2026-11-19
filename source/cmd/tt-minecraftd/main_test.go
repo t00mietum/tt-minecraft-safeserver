@@ -71,6 +71,7 @@ func noHostRunner(t *testing.T) (*host.Fake, *int) {
 		return fake, func(c *config.Config) *repairpkg.Host {
 			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
 				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), Routes: filepath.Join(etc, "ipv6_route"), BootFile: filepath.Join(etc, "boot.service"),
+				PkgBin: filepath.Join(etc, "usr-bin-tt-minecraftd"), LocalBin: filepath.Join(etc, "usr-local-bin-tt-minecraftd"),
 				NftThere: func() bool { return false }}
 		}
 	}
@@ -845,6 +846,25 @@ func TestServerExitCode(t *testing.T) {
 		var msg bytes.Buffer
 		if got := failed(c.err, &msg); got != c.code || (c.err != nil) != strings.HasPrefix(msg.String(), "tt-minecraftd: ") {
 			t.Errorf("%v: exit %d, stderr %q; want %d", c.err, got, msg.String(), c.code)
+		}
+	}
+}
+
+// Dry runs and repair --check never ask for a sudo password, so their
+// runners put -n on every sudo (2026111715275268).
+func TestDryRunsNoPrompt(t *testing.T) {
+	defer testid.Line(t, "df7ax")
+	noPrompt := func(r host.Runner) bool {
+		e, ok := r.(*host.Exec)
+		return ok && e.NoPrompt
+	}
+	if !noPrompt(hostRunner(true)) || noPrompt(hostRunner(false)) {
+		t.Error("setup's and update's runner: NoPrompt doesn't follow --dry-run")
+	}
+	for _, check := range []bool{true, false} {
+		h, _, _ := repairSteps(invocation{opts: options{check: check}})
+		if noPrompt(h.Run) != check {
+			t.Errorf("repair --check %v: NoPrompt is %v", check, !check)
 		}
 	}
 }

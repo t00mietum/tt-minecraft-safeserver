@@ -34,8 +34,8 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
 
-// BinPath is where setup puts the tool, which the boot unit runs.
-const BinPath = boot.Bin
+// BinPath is where setup puts the tool when no package has.
+const BinPath = boot.LocalBin
 
 // Setup is one run's options. Accounts and Repair let tests stay off the
 // host's real accounts and checks.
@@ -54,8 +54,11 @@ type Setup struct {
 	AcceptEULA bool
 	In         *bufio.Scanner
 	Out        io.Writer
-	// Exe is the running binary, copied to BinPath when it's elsewhere.
+	// Exe is the running binary, copied to BinPath when it's elsewhere and
+	// no package has put the tool in place.
 	Exe string
+	// PkgBin stands in for boot.PkgBin. Empty means the real one.
+	PkgBin string
 	// Accounts gives the Host the account checks look at.
 	Accounts func(c *config.Config) *repair.Host
 	// Repair runs the repair command on c, with check for --check.
@@ -427,9 +430,10 @@ func (s *Setup) newJars(c config.Config) ([]plugins.Info, error) {
 }
 
 // copyTarget is the binary to copy to BinPath, or empty when it runs from
-// there already.
+// there already. A package's binary leaves the copy out, since one in
+// BinPath would come first on PATH and outlast the next package upgrade.
 func (s *Setup) copyTarget() string {
-	if s.Exe == "" {
+	if s.Exe == "" || boot.Bin(s.PkgBin) == boot.PkgBin {
 		return ""
 	}
 	exe, err := filepath.EvalSymlinks(s.Exe)

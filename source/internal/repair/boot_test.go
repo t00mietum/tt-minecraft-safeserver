@@ -24,7 +24,7 @@ func TestBootCheck(t *testing.T) {
 	enabled := "disabled\n"
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte(enabled), nil })
 	h.Cfg.StartAtBoot = true
-	unit := boot.Unit(h.Cfg, h.ConfigPath)
+	unit := boot.Unit(h.Cfg, h.ConfigPath, boot.LocalBin)
 
 	hasAll(t, "new", look(t, h, BootCheck), "is missing or doesn't match the config [fix]", "tt-minecraftd.service isn't enabled [fix]")
 	want := []string{
@@ -84,7 +84,7 @@ func TestBootOtherConfig(t *testing.T) {
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte("enabled\n"), nil })
 	first := h.ConfigPath
 	h.Cfg.StartAtBoot = true
-	if err := os.WriteFile(h.BootFile, []byte(boot.Unit(h.Cfg, first)), 0o600); err != nil {
+	if err := os.WriteFile(h.BootFile, []byte(boot.Unit(h.Cfg, first, boot.PkgBin)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	h.ConfigPath = filepath.Join(filepath.Dir(first), "second.shcl")
@@ -118,5 +118,60 @@ func TestBootOtherConfig(t *testing.T) {
 	}
 	if ran := fixAll(t, h, f, BootCheck); len(ran) != 3 {
 		t.Errorf("a unit it can't place: %q", ran)
+	}
+}
+
+// A package installed after setup's copy moves the unit to the package's
+// binary, and the copy is reported as coming first on PATH, never removed.
+// Check 15. See design.md, Boot.
+func TestPackageOverCopy(t *testing.T) {
+	defer testid.Line(t, "df7av")
+	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte("enabled\n"), nil })
+	h.Cfg.StartAtBoot = true
+	if err := os.WriteFile(h.BootFile, []byte(boot.Unit(h.Cfg, h.ConfigPath, boot.LocalBin)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.LocalBin, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, BootCheck); len(got) != 0 {
+		t.Errorf("no package, unit in place: %q", got)
+	}
+	if got := look(t, h, shadowCheck); len(got) != 0 {
+		t.Errorf("no package, only setup's copy: %q", got)
+	}
+
+	if err := os.WriteFile(h.PkgBin, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixAll(t, h, f, BootCheck); len(got) != 2 || !strings.Contains(string(f.Ran[0].Stdin), "\nExecStart="+boot.PkgBin+" --config ") {
+		t.Errorf("package there: ran %q, wrote %q", got, f.Ran[0].Stdin)
+	}
+	want := "/usr/local/bin/tt-minecraftd comes before the package's /usr/bin/tt-minecraftd on PATH, so a package upgrade doesn't change what runs; remove it with: sudo rm /usr/local/bin/tt-minecraftd"
+	if got := look(t, h, shadowCheck); !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("copy over the package: %q", got)
+	}
+	if ran := fixAll(t, h, f, shadowCheck); len(ran) != 0 {
+		t.Errorf("the copy was touched: %q", ran)
+	}
+	if !slicesHas(After, shadowCheck.Name) || After[len(After)-1].Name != shadowCheck.Name {
+		t.Error("repair doesn't run the PATH check last")
+	}
+
+	// A link to the package's runs the package's.
+	if err := os.Remove(h.LocalBin); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(h.PkgBin, h.LocalBin); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, shadowCheck); len(got) != 0 {
+		t.Errorf("a link to the package's: %q", got)
+	}
+	if err := os.Remove(h.LocalBin); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, shadowCheck); len(got) != 0 {
+		t.Errorf("package only: %q", got)
 	}
 }

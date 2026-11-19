@@ -682,13 +682,17 @@ fStepBuild(){
 }
 fStepPackage(){
 	local t arch f ver="${goVersion#v}" yaml epoch fmt named
-	## Where setup and install.bash put it, and the boot unit runs it, so an upgrade reaches both.
-	## Not /usr/bin, which comes after it on PATH. See design.md, Boot.
-	local dst="/usr/local/bin/${EXE_NAME}"
+	## A package's place per the FHS and Debian policy. /usr/local/bin is for hand installs: setup's
+	## copy, install.bash, dogfood. The build skips its copy and runs this one when it's there, so it
+	## has to name both, and nothing else. See design.md, Boot.
+	local dst="/usr/bin/${EXE_NAME}" hand want
 	epoch="$(fCommitEpoch)"
 	[[ -d "${relDir}" ]] || fDie "no build to package"
+	hand="$(sed -n 's/^destDir="\(.*\)"$/\1/p' install.bash)/${EXE_NAME}"
+	[[ "${hand}" != "${dst}" ]] || fDie "install.bash puts the binary where the packages do, ${dst}"
+	want="$(printf '%s\n' "${dst}" "${hand}" | sort -u)"
 	named="$(grep -aoE "/[a-z/]+/bin/${EXE_NAME}" "${runTmp}/build/${EXE_NAME}-linux-amd64" | sort -u || true)"
-	[[ "${named}" == "${dst}" ]] || fDie "the build runs itself from '${named//$'\n'/, }', but the packages put it in ${dst}"
+	[[ "${named}" == "${want}" ]] || fDie "the build names '${named//$'\n'/, }', not the package's ${dst} and install.bash's ${hand}"
 	for t in "${RELEASE_TARGETS[@]}"; do
 		arch="${t##*/}"
 		yaml="${runTmp}/nfpm_${arch}.yaml"
@@ -965,3 +969,4 @@ fEcho_Clean
 ##		- 2026-11-14: a whole merge gate on a clean tree records its commit, for the pre-push hook.
 ##		- 2026-11-18: the gate marker needs every step to PASS on the commit the run started on. gofmt runs
 ##		  in the image and its errors fail, govulncheck skips only a failed fetch, and the second build is from a copy.
+##		- 2026-11-19: the .deb and .rpm put the binary in /usr/bin, and the build has to name that path.

@@ -133,8 +133,8 @@ func (k *Kit) sudoUp(ctx context.Context) error {
 		k.sudoed = true
 		return nil
 	}
-	// A look, so dry run asks here too, rather than at its first sudo look.
-	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Look: true, Tty: true})
+	// Not a look: dry run prints it and never asks (2026111715275268).
+	_, err := k.Run.Run(ctx, host.Cmd{Args: []string{"sudo", "-v"}, Tty: true})
 	k.sudoed = err == nil
 	return err
 }

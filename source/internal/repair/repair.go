@@ -29,6 +29,9 @@ type Host struct {
 	RulesFile, UnitFile, ResolvConf, Routes string
 	// BootFile is the boot unit's file. Empty means the real one.
 	BootFile string
+	// PkgBin and LocalBin stand in for boot.PkgBin and boot.LocalBin. Empty
+	// means the real ones.
+	PkgBin, LocalBin string
 	// NftThere, when set, stands in for HasNft.
 	NftThere func() bool
 }
@@ -97,7 +100,7 @@ func Run(ctx context.Context, h *Host, checks []Check, checkOnly bool, report Re
 // and After the ones that follow them. See design.md, repair.
 var (
 	Before = []Check{configCheck, accountCheck, operatorCheck, serverTreeCheck, ownershipCheck}
-	After  = []Check{bedrockCheck, FirewallCheck, hostFirewallCheck, containerCheck, catatonitCheck, datasetCheck, BootCheck, othersCheck}
+	After  = []Check{bedrockCheck, FirewallCheck, hostFirewallCheck, containerCheck, catatonitCheck, datasetCheck, BootCheck, othersCheck, shadowCheck}
 	// AccountCheck and OperatorCheck are setup's second step.
 	AccountCheck, OperatorCheck = accountCheck, operatorCheck
 )

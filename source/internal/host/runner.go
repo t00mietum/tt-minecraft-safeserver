@@ -7,6 +7,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,11 +51,17 @@ type Exec struct {
 	// QuietErr keeps a failed command's stderr off the terminal, and puts
 	// its first line in the error instead, as watch needs to redraw cleanly.
 	QuietErr bool
+	// NoPrompt puts -n on the sudo it adds, so a look fails rather than
+	// asking for a password. Dry run and repair --check never ask.
+	NoPrompt bool
 }
+
+// ErrNoPassword is a sudo look that NoPrompt kept from asking.
+var ErrNoPassword = errors.New("a dry run or --check doesn't ask for one; sudo -v first lets it check this")
 
 // NewExec gives a runner on the process's own stdout and stderr.
 func NewExec(dryRun bool) *Exec {
-	return &Exec{DryRun: dryRun, Root: os.Geteuid() == 0, Out: os.Stdout, Err: os.Stderr}
+	return &Exec{DryRun: dryRun, NoPrompt: dryRun, Root: os.Geteuid() == 0, Out: os.Stdout, Err: os.Stderr}
 }
 
 // Run runs c. Under dry run it prints c instead, unless c is a Look.
@@ -63,13 +70,21 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 		return nil, fmt.Errorf("empty command")
 	}
 	argv := c.Args
+	sudo := []string{"sudo"}
+	if e.NoPrompt {
+		sudo = append(sudo, "-n")
+	}
+	noAsk := e.NoPrompt
 	switch {
 	case c.As != "" && e.Root:
 		argv = append([]string{"runuser", "-u", c.As, "--"}, argv...)
+		noAsk = false
 	case c.As != "":
-		argv = append([]string{"sudo", "-u", c.As, "--"}, argv...)
+		argv = append(append(sudo, "-u", c.As, "--"), argv...)
 	case c.Sudo && !e.Root:
-		argv = append([]string{"sudo"}, argv...)
+		argv = append(sudo, argv...)
+	default:
+		noAsk = false
 	}
 	if e.DryRun && !c.Look {
 		fmt.Fprintln(e.Out, "would run:", Quote(argv))
@@ -89,12 +104,21 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 		cmd.Stdin = bytes.NewReader(c.Stdin)
 	}
 	var errText strings.Builder
-	if e.QuietErr || c.Quiet {
+	quiet := e.QuietErr || c.Quiet
+	if quiet || noAsk {
 		cmd.Stderr = &errText
 	}
 	out, err := cmd.Output()
+	first, _, _ := strings.Cut(strings.TrimSpace(errText.String()), "\n")
+	// sudo's own lines start with its name, which isn't translated.
+	if err != nil && noAsk && strings.HasPrefix(first, "sudo:") && strings.Contains(first, "password") {
+		return out, fmt.Errorf("couldn't check %s without a password: %w", Quote(argv), ErrNoPassword)
+	}
+	if noAsk && !quiet && e.Err != nil {
+		_, _ = io.WriteString(e.Err, errText.String()) // as it would have, unbuffered
+	}
 	if err != nil {
-		if first, _, _ := strings.Cut(strings.TrimSpace(errText.String()), "\n"); first != "" {
+		if quiet && first != "" {
 			return out, fmt.Errorf("%s: %w: %s", Quote(argv), err, first)
 		}
 		return out, fmt.Errorf("%s: %w", Quote(argv), err)

@@ -146,13 +146,11 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 	return nil, nil
 }
 
-// changes are the commands that aren't looks, as they'd print, with sudo -v
-// kept in, so each list also shows where sudo asks. It's a look, so dry run
-// asks there too.
+// changes are the commands that aren't looks, as they'd print.
 func (g *rig) changes() []string {
 	var lines []string
 	for i, c := range g.r.Ran {
-		if !c.Look || host.Quote(c.Args) == "sudo -v" {
+		if !c.Look {
 			lines = append(lines, g.r.Lines()[i])
 		}
 	}
@@ -221,8 +219,8 @@ func TestStartSudoNoPassword(t *testing.T) {
 				}
 			case "sudo -v":
 				asks++
-				if !c.Tty || !c.Look {
-					t.Errorf("sudo -v ran as %+v, want on the terminal, and as a look so dry run asks there too", c)
+				if !c.Tty || c.Look {
+					t.Errorf("sudo -v ran as %+v, want on the terminal, and not a look, so dry run prints it and doesn't ask", c)
 				}
 			}
 		}

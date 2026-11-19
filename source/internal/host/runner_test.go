@@ -6,6 +6,9 @@ package host
 import (
 	"bytes"
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -124,5 +127,62 @@ func TestExecStdin(t *testing.T) {
 	e = &Exec{DryRun: true, Out: &printed}
 	if _, err := e.Run(context.Background(), Cmd{Args: []string{"install", "-T", "/dev/stdin", "/etc/x"}, Stdin: []byte("y")}); err != nil || printed.String() != "would run: install -T /dev/stdin /etc/x\n" {
 		t.Errorf("dry run printed %q, %v", printed.String(), err)
+	}
+}
+
+// NoPrompt puts -n on the sudo the runner adds, so a dry run's look never
+// asks for a password, and one sudo refuses says what it couldn't check.
+func TestExecNoPrompt(t *testing.T) {
+	defer testid.Line(t, "df7aw")
+	dir := t.TempDir()
+	log := filepath.Join(dir, "sudo.log")
+	// Without SUDO_CACHED, -n refuses as a run-out timestamp does, and
+	// anything else would ask.
+	script := "#!/bin/sh\necho \"$*\" >> '" + log + "'\n" +
+		"if [ \"$1\" = -n ]; then [ -n \"$SUDO_CACHED\" ] || { echo 'sudo: a password is required' >&2; exit 1; }; shift; fi\n" +
+		"[ \"$1\" = -u ] && shift 3\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "sudo"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SUDO_CACHED", "")
+	ctx := context.Background()
+	var out, errOut bytes.Buffer
+	e := &Exec{DryRun: true, NoPrompt: true, Out: &out, Err: &errOut}
+	for _, c := range []Cmd{
+		{Look: true, Sudo: true, Args: []string{"podman", "ps"}},
+		{Look: true, As: "minecraftd", Args: []string{"ls"}},
+	} {
+		_, err := e.Run(ctx, c)
+		if !errors.Is(err, ErrNoPassword) || !strings.Contains(err.Error(), "couldn't check sudo -n ") {
+			t.Errorf("%v: err %v, want it to say what it couldn't check", c.Args, err)
+		}
+	}
+	if errOut.Len() != 0 || out.Len() != 0 {
+		t.Errorf("printed %q, stderr %q", out.String(), errOut.String())
+	}
+
+	t.Setenv("SUDO_CACHED", "1")
+	got, err := e.Run(ctx, Cmd{Look: true, Sudo: true, Args: []string{"sh", "-c", "echo hi; echo warn >&2"}})
+	if err != nil || string(got) != "hi\n" || errOut.String() != "warn\n" {
+		t.Errorf("cached: got %q, %v, stderr %q", got, err, errOut.String())
+	}
+	errOut.Reset()
+	_, err = e.Run(ctx, Cmd{Look: true, Sudo: true, Args: []string{"sh", "-c", "echo nope >&2; exit 3"}})
+	if err == nil || errors.Is(err, ErrNoPassword) || errOut.String() != "nope\n" {
+		t.Errorf("a failed look: %v, stderr %q", err, errOut.String())
+	}
+
+	e = &Exec{Out: &out, Err: &errOut}
+	if _, err := e.Run(ctx, Cmd{Sudo: true, Args: []string{"true"}}); err != nil {
+		t.Fatal(err)
+	}
+	logged, _ := os.ReadFile(log)
+	want := "-n podman ps\n-n -u minecraftd -- ls\n-n sh -c echo hi; echo warn >&2\n-n sh -c echo nope >&2; exit 3\ntrue\n"
+	if string(logged) != want {
+		t.Errorf("sudo got\n%s\nwant\n%s", logged, want)
+	}
+	if !NewExec(true).NoPrompt || NewExec(false).NoPrompt {
+		t.Error("NoPrompt doesn't follow dry run")
 	}
 }
