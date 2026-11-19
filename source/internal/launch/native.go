@@ -98,6 +98,9 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err != nil {
 		return err
 	}
+	if err := n.clearCaches(ctx); err != nil {
+		return n.failedStart(ctx, n, err)
+	}
 	if err := n.lockJars(ctx, jars); err != nil {
 		return n.failedStart(ctx, n, err)
 	}

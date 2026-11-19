@@ -166,6 +166,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- An IPv6 subnet the file has and the host doesn't is fine, since it only blocks more. At boot, the router's announcement can come after the server starts.
 
 6. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
+	- Then, as the service account, remove Paper's plugin library cache and its remapped plugin jars. See [Plugin pinning](#plugin-pinning).
 
 7. Launch in the configured mode. Then wait until the log says the server is done loading, or `startTimeout` runs out. When the process died, print the end of its log and exit 1.
 	- When `startTimeout` runs out, the server keeps running, and `start` exits 1. With `--foreground` that's only a warning, and it goes on to wait for the server's end. An exit there would end the boot unit, and systemd would run its `ExecStop`, so a big world or a slow host would never come up at boot.
@@ -751,6 +752,12 @@ cicd/                        build, test, and release scripts
 	- With no approved list yet, every jar counts as new.
 	- A jar that's a pipe, a socket, a device, or a link to one counts as changed. Its kind is checked before it's opened, since opening a device runs its driver, as root in `repair`, setup, `update` and a boot start.
 	- `status` and `repair` run the same check.
+
+- Paper also loads code that it writes into the tree while it runs, which can't be pinned. `start` removes it after the hand-off, as the service account, and Paper writes it again:
+	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256). So each start downloads them again, and a plugin whose libraries can't be downloaded, such as with no internet, doesn't load.
+	- Paper's own libraries in `libraries/`, and the server in `versions/`, are checked against hashes inside the pinned `paper.jar` at every start, and put back when they differ. Removing them costs about a second.
+	- `plugins/.paper-remapped/` held the copies of plugins that Paper remapped before 26.1, reused by the original jar's hash alone.
+	- Code that a plugin keeps in its own folder, such as libraries it downloads itself, isn't covered. Approving such a plugin trusts it with that.
 
 - `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`, or a Geyser extension's `extension.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
 	- A Paper build that's refused stays where it is, still not approved, since moving it would only break `paper.jar`.

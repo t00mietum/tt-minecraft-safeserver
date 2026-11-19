@@ -195,6 +195,9 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err != nil {
 		return err
 	}
+	if err := d.clearCaches(ctx); err != nil {
+		return d.failedStart(ctx, d, err)
+	}
 
 	if mode.Debug {
 		d.say("Starting with the console attached. Type stop to stop the server.")

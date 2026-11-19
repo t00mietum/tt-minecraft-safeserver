@@ -137,16 +137,34 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152754
 	- Opened by:
 	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
+	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
+		- 2026-11-19: Reproduced on Paper 26.3 build 256: a jar written over a plugin library in `libraries/` was loaded at the next start, with no download and no check. 26.3 makes no `plugins/.paper-remapped/`, since 26.1 dropped the remapper. Paperclip put back a changed server library and `versions/` jar from the hashes in `paper.jar`.
+		- 2026-11-19: start removes `libraries/` and `plugins/.paper-remapped/` after the hand-off, as the service account, in both modes. Paper then downloaded the library again, matching Maven Central's SHA-1. design.md's start and Plugin pinning sections say so.
+		- Verified: df7bg and df7bh fail with the removal taken out, with `.paper-remapped` left off the list, and with the removal run through plain sudo, and pass with the fix. The quick gate's format, tests and CodeQL pass, and so do vet, staticcheck, gosec, shellcheck and the test ID check. Its markdownlint step fails on backlog lines from round commit f741e0d, not this item.
+		- 2026-11-19: Asserts updated for the new rm line: df5xp and df5y1 have it in their lists. Change counts went from 5 to 6 in df5xs, 7 to 8 in df5y3, and 7 to 8 and 8 to 9 in df5y4.
 	- Note: No. Paper's loader wasn't checked.
-	- Origin: 9058841 plugin pinning. Not seen before. Plausible.
+	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
+	- Decisions:
+		- Clear rather than pin or mount read-only. The running server writes plugin libraries, so pinning them would approve the server's own writes, and a read-only mount stops Paper adding a new plugin's libraries. Check: entry in questions.md, for the download at each start.
+		- All of `libraries/` goes, not only the plugins' part. Paperclip checks its own part anyway and puts it back in about a second, so no list from `paper.jar` is needed.
+		- The rm runs as `runUser`, so a link in the tree reaches nothing that account couldn't change already. A link at `libraries` itself is removed, not followed (df7bg).
+		- A failed removal stops the start before the launch, and hands the trees back (df7bh).
+		- Left alone: code a plugin downloads into its own folder, which approving the plugin trusts it with. `cache/` and `versions/` are checked by Paperclip at every start.
+		- Swept: both launching start paths, `Boxed.Start` (shared by `--debug`, `--foreground` and the boot unit's `start --foreground`) and `Native.Start`. No other code launches Paper.
+	- Branch: nov19-2026111715275425
+	- Commit: 6ca2410
+	- Test case: df7bg, df7bh
+	- Acceptance signoff: Self-closed: reproduced on Paper 26.3, and its tests fail without the fix and pass with it. The download at each start is a Check: entry.
+	- Closed: 20261119-123825
 
 - repair counts a Paper started by hand as runUser as the tool's own
 	- ID: 2026111715275170

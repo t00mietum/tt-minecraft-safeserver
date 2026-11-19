@@ -186,6 +186,7 @@ func TestDockerStart(t *testing.T) {
 		"sudo docker rm tt-minecraftd",
 		"sudo chown -R -- minecraftd:minecraftd " + q(g.dir),
 		"sudo chmod -R ug+rwX,o-rwx -- " + q(g.dir),
+		"sudo -u minecraftd -- rm -rf --one-file-system -- " + q(g.dir+"/libraries") + " " + q(g.dir+"/plugins/.paper-remapped"),
 		"sudo " + host.Quote(run),
 		"sudo docker start tt-minecraftd",
 	}
@@ -362,7 +363,7 @@ func TestDockerStartModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := g.changes()
-	if len(got) != 5 || !strings.HasPrefix(got[3], "sudo docker run --name") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[4], "chown -R -- alice:minecraftd") {
+	if len(got) != 6 || !strings.HasPrefix(got[4], "sudo docker run --name") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[5], "chown -R -- alice:minecraftd") {
 		t.Errorf("debug ran %q", got)
 	}
 
