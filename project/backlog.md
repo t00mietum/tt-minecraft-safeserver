@@ -22,34 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
-	- ID: 2026111715275121
-	- Type: Bug
-	- Status: Waiting on signoff
-		- Waits on a call about LIMIT IN, which reverses a recorded decision. Check: entry in questions.md. The Anywhere and port list parts need nothing more.
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152751
-	- Opened by:
-	- Incorrect behavior [Bug]: `ufw limit 25565/tcp`, `ufw allow from 192.168.0.0/16` and a rule for `19132,25565/tcp` each count as missing. repair exits 1, setup's final check fails, and the suggested command adds a duplicate rule.
-	- Expected behavior [Bug]: Those rule forms count as letting players in.
-	- Reproduced [Bug]: 2026-11-17: a test with that ufw output reported all 3 ports missing.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 20. Detail in detail_backlog.md.
-	- Origin: b42345a repair checks, a80d620 repair fixes. Related to 2026111709090987. Confirmed.
-	- Actual cause [Bug]: ufwMissing took only ALLOW IN lines, and covers read one port or one range.
-	- Actual fix [Bug]: LIMIT IN counts too, a To of Anywhere covers every port, and a port list is split on its commas.
-	- Against: 2026111709090987's decision that LIMIT IN rules don't count as open. ufw limit lets players in, and refuses only an address that connects 6 times in 30 s.
-	- Test case: df5zm
-	- Verified: df5zm fails on the old check for all 5 new rule sets and passes after. The quick gate passed.
-	- Swept: covers is shared with firewalld, whose --list-ports never gives Anywhere or a list. ufwMissing is the only ufw rule reader.
-	- Decisions:
-		- The From column isn't read, as before, so a rule that lets in only the LAN counts.
-		- A rule only for IPv6 still counts, as before. Looked at and left alone.
-		- design.md's repair check 10 says which ufw rules count.
-	- Branch: fixes-2026111715274925
-	- Commit: 5e52b19
-
 - start --dry-run says it would run sudo -v, then sudo asks for a password anyway
 	- ID: 2026111715275268
 	- Type: Bug
@@ -418,6 +390,38 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Note: No.
 	- Origin: 9d7cb3e install script. Not seen before. Plausible.
 
+- repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
+	- ID: 2026111715275121
+	- Type: Bug
+	- Status: Closed
+		- Waits on a call about LIMIT IN, which reverses a recorded decision. Check: entry in questions.md. The Anywhere and port list parts need nothing more.
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: `ufw limit 25565/tcp`, `ufw allow from 192.168.0.0/16` and a rule for `19132,25565/tcp` each count as missing. repair exits 1, setup's final check fails, and the suggested command adds a duplicate rule.
+	- Expected behavior [Bug]: Those rule forms count as letting players in.
+	- Reproduced [Bug]: 2026-11-17: a test with that ufw output reported all 3 ports missing.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 20. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum signed off on counting LIMIT IN, which replaces the call on 2026111709090987.
+	- Origin: b42345a repair checks, a80d620 repair fixes. Related to 2026111709090987. Confirmed.
+	- Actual cause [Bug]: ufwMissing took only ALLOW IN lines, and covers read one port or one range.
+	- Actual fix [Bug]: LIMIT IN counts too, a To of Anywhere covers every port, and a port list is split on its commas.
+	- Against: 2026111709090987's decision that LIMIT IN rules don't count as open. ufw limit lets players in, and refuses only an address that connects 6 times in 30 s.
+	- Test case: df5zm
+	- Verified: df5zm fails on the old check for all 5 new rule sets and passes after. The quick gate passed.
+	- Swept: covers is shared with firewalld, whose --list-ports never gives Anywhere or a list. ufwMissing is the only ufw rule reader.
+	- Decisions:
+		- The From column isn't read, as before, so a rule that lets in only the LAN counts.
+		- A rule only for IPv6 still counts, as before. Looked at and left alone.
+		- design.md's repair check 10 says which ufw rules count.
+	- Branch: fixes-2026111715274925
+	- Commit: 5e52b19
+	- Closed reason: Done
+	- Acceptance signoff: 20261119, t00mietum, as chosen: LIMIT IN counts as letting players in.
+	- Closed: 20261119-103705
+
 - At a boot unit stop, both start --foreground and its ExecStop hand the trees back, and a slow hand-back can fail the unit
 	- ID: 2026111719172263
 	- Type: Bug
@@ -554,6 +558,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: Code review 20261117 item 4. Detail in detail_backlog.md.
 		- Reproduced on Paper 26.3 build 253: with `bungeecord: false` then `bungeecord: true` in spigot.yml, Paper ran in BungeeCord mode and saved `true`. With `proxies: {velocity: {enabled: true, ...}}` in paper-global.yml, Paper read velocity as on, and turned it off only for the empty secret.
 		- Verified: df79q fails on the old reader, which passed 5 of its 10 file shapes, wrote broken YAML for 1, and passed the unreadable and Geyser cases. It passes now. Real files from Paper 26.3-253 and Geyser 2.12.1-1304 parse, and Fix then Check on them is clean with spigot.yml and paper-global.yml unchanged. FuzzFix ran 90 s, 37k inputs, clean. The quick gate passes.
+		- 2026-11-19: t00mietum kept the YAML module and the hand-edit fallback as built, and asked not to get too hung up on the format of YAML files we don't control.
 	- Origin: 91ac8da safe server settings check on start. Not seen before. Confirmed.
 	- Sweep: The Geyser config reader in settings/geyser.go.
 	- Closed reason: Done
@@ -647,6 +652,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 20261117: df7a5 on the old check: a changed allowFrom, runUser or bedrock, a missing rules file, and a new subnet each let start go on to launch the server.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 7. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum kept the start check on the firewall rules file as built, refusing after an IPv6 prefix change until repair runs.
 	- Origin: 88f3d3f firewall rules file and unit. Not seen before. Plausible.
 	- Closed reason: Done
 	- Cause [Bug]: checkFirewall only asked nft whether the table was loaded.
@@ -677,6 +683,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: a test wrote the unit for config A, then ran the boot check for config B, and its fix disabled and removed the unit.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 8. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum kept one config owning the boot unit and firewall as built, but said it's getting complex: keep it simple, and don't spend much development or run time checking third-party config files.
 	- Origin: cb5f7cf start at boot, 4b8af66 setup and repair install the firewall. Not seen before. Confirmed.
 	- Sweep: repair/boot.go and repair/firewall.go.
 	- Closed reason: Done
@@ -908,6 +915,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Verified: a .deb upgrade from the alpha.1 package, over a copy an older setup left in /usr/local/bin, removed /usr/bin/tt-minecraftd and put the new build in /usr/local/bin, owned by the package.
 		- Not verified: the .rpm upgrade.
 		- Swept: boot.Bin, setup's copy, install.bash, the demo, and the root host checks all use /usr/local/bin. No /usr/bin path for the tool is left in cicd or source.
+		- 2026-11-19: t00mietum kept the packages putting the binary in /usr/local/bin as built.
 	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
 	- Closed reason: Done
 	- Actual cause [Bug]: The package step put the binary in /usr/bin, a different path from the one setup, install.bash, and the boot unit use.
@@ -1057,6 +1065,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: No. Read only.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 22. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum kept setup refusing on an existing install while a server runs as built.
 	- Origin: b21d65f setup install steps. Not seen before. Plausible.
 	- Closed reason: Done
 	- Actual cause [Bug]: `refuseRunning` was called only on the new-install path.
@@ -1344,6 +1353,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Found in a code tidy pass. source/internal/repair/hostfw.go.
 		- Verified: df5zm fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-19: replaced by 2026111715275121, signed off: repair now counts a LIMIT IN rule as letting players in.
 	- Decisions:
 		- LIMIT IN rules still don't count as open, as before.
 		- Swept: ufwMissing is the only ufw rule reader. firewalld's --list-ports gives only inbound ports.
