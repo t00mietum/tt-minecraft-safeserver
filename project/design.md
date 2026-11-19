@@ -643,7 +643,7 @@ cicd/                        build, test, and release scripts
 - Container mode runs `podman` or `docker` through sudo, and the container under the service account's uid and gid. Both get the same flags:
 	- `--read-only`, and a tmpfs on `/tmp`. The tmpfs allows exec, since Netty and other libraries extract native code there and load it.
 	- Each tree in `ownerTrees` mounted at the same path it has on the host, so links between them still work. The working folder is `serverDir`'s real path.
-		- A link in a tree that works on the host but goes through a path the container doesn't have, such as a link to another link outside the trees, stops `start`. It names the link and the path to point it at.
+		- A link in a tree that works on the host but goes through a path the container doesn't have, such as a link to another link outside the trees, stops `start`. It names the link and the path to point it at, or says the link leads out of the trees when that's where its target is. A folder `start` can't read gives a warning that its links weren't checked, and doesn't stop the start.
 	- `paper.jar` and each plugin and Geyser extension jar mounted read-only over their own paths.
 	- `--cap-drop ALL`, `no-new-privileges`, a pid limit, the memory cap, and `--oom-score-adj 1000`.
 	- `--init`, so signals get passed on and child processes get reaped.

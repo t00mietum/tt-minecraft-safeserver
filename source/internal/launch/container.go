@@ -332,7 +332,9 @@ func (d *Boxed) runArgs() ([]string, error) {
 			return nil, err
 		}
 	}
-	if err := boxLinks(trees, append(slices.Clone(trees), jars...)); err != nil {
+	warns, err := boxLinks(trees, append(slices.Clone(trees), jars...))
+	d.warn(warns)
+	if err != nil {
 		return nil, err
 	}
 	args = append(args, c.Image, "sh", "-c", Wrapper, "sh")

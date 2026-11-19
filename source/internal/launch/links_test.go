@@ -70,3 +70,44 @@ func TestStartBoxLinks(t *testing.T) {
 		t.Errorf("link through a path outside: %v", err)
 	}
 }
+
+// A link out of the trees is called that, not given its own target as the
+// fix. A folder start can't read is a warning, and doesn't stop the start
+// (backlog 2026111715275408).
+func TestBoxLinksOutsideAndUnread(t *testing.T) {
+	defer testid.Line(t, "df7b9")
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every folder")
+	}
+	g := newRig(t)
+	world := filepath.Join(g.dir, "world")
+	if err := os.Symlink("/etc/hostname", world); err != nil {
+		t.Fatal(err)
+	}
+	_, err := g.d.runArgs()
+	if err == nil || !strings.Contains(err.Error(), world+" leads to /etc/hostname, which isn't in any tree") || strings.Contains(err.Error(), "needs to point at") {
+		t.Errorf("out of the trees: %v", err)
+	}
+	if err := os.Remove(world); err != nil {
+		t.Fatal(err)
+	}
+
+	hidden := filepath.Join(g.dir, "hidden")
+	if err := os.Mkdir(hidden, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/hostname", filepath.Join(hidden, "world")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(hidden, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(hidden, 0o700) })
+	g.out.Reset()
+	if _, err := g.d.runArgs(); err != nil {
+		t.Errorf("unreadable folder stopped the start: %v", err)
+	}
+	if out := g.out.String(); !strings.Contains(out, "warning: ") || !strings.Contains(out, "can't be read") || !strings.Contains(out, hidden) {
+		t.Errorf("unreadable folder: no warning in %q", out)
+	}
+}

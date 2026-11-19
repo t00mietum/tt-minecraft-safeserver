@@ -447,7 +447,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
 	- ID: 2026111715275408
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -458,6 +458,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 38. Detail in detail_backlog.md.
 	- Origin: 1b3d301 link fixes. Follows 2026111409374443. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `launch.boxLinks` gave every link that failed in the container the same fix, its host target, even when that target was outside every mount. Its walk dropped the error for a folder it couldn't read.
+	- Actual fix [Bug]: A link whose target isn't in any mount is called a link out of the trees. A folder the walk can't read gives a start warning that names it, and the start goes on. design.md's Run modes says so.
+	- Swept: `filepath.WalkDir` in source: repair's `walkTree` returns the error rather than dropping it. Native start has no link check, by 2026111409374443's decision.
+	- Test case: df7b9
+	- Verified: df7b9 fails on the old code, with the old fix message and no warning, and passes with the fix. df79c and the quick gate's launch area pass.
+	- Branch: nov19-2026111715275408
+	- Commit: d9394b5
+	- Acceptance signoff: Self-closed: reproduced, and the test fails before and passes after.
+	- Closed: 20261119-120708
+	- Decisions:
+		- An unreadable folder is a warning, not a refusal, which keeps 2026111409374443's decision that the walk never stops a start that worked before.
+		- The out-of-trees message names where the link leads and no fix, since moving the target into a tree or adding a tree are both the operator's call.
 
 - Give linksafe tests of its own
 	- ID: 2026111715275441
