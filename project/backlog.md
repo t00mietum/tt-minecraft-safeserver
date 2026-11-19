@@ -73,6 +73,102 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
+- Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
+	- ID: 2026111715275425
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
+		- 2026-11-19: Reproduced on Paper 26.3 build 256: a jar written over a plugin library in `libraries/` was loaded at the next start, with no download and no check. 26.3 makes no `plugins/.paper-remapped/`, since 26.1 dropped the remapper. Paperclip put back a changed server library and `versions/` jar from the hashes in `paper.jar`.
+		- 2026-11-19: start removes `libraries/` and `plugins/.paper-remapped/` after the hand-off, as the service account, in both modes. Paper then downloaded the library again, matching Maven Central's SHA-1. design.md's start and Plugin pinning sections say so.
+		- Verified: df7bg and df7bh fail with the removal taken out, with `.paper-remapped` left off the list, and with the removal run through plain sudo, and pass with the fix. The quick gate's format, tests and CodeQL pass, and so do vet, staticcheck, gosec, shellcheck and the test ID check. Its markdownlint step fails on backlog lines from round commit f741e0d, not this item.
+		- 2026-11-19: Asserts updated for the new rm line: df5xp and df5y1 have it in their lists. Change counts went from 5 to 6 in df5xs, 7 to 8 in df5y3, and 7 to 8 and 8 to 9 in df5y4.
+		- 2026-11-19: Per the answer, start no longer clears the whole cache. Library jars go on the approved list. start removes only the ones that aren't listed or don't match, and says how many, so Paper downloads just those. `repair --approve-plugins` lists them and asks once for all. Paper's own libraries are left out by `paper.jar`'s `META-INF/libraries.list`. `update --plugins` and the agent skip approved libraries. design.md's start, repair and Plugin pinning say so.
+		- 2026-11-19: Asserts back to their values before 6ca2410, since a rig with no library cache runs no rm now: df5xp and df5y1 lose the rm line. Change counts went from 6 to 5 in df5xs, 8 to 7 in df5y3, and 8 to 7 and 9 to 8 in df5y4.
+		- Verified: df7bg fails with start's removal taken out, and with Paper's own libraries not left out. dfh8a02 fails with the update skip taken out. dfh8a00, dfh8a01, df7bg and df7bh pass, and so does the whole quick gate. On a real Paper 26.3 build 256 tree, after Paperclip set it up, all 104 of Paper's own libraries were left out and a planted jar was listed.
+		- 20261119: Second answer: too complicated. No approval step for libraries, and no download again at each start. Set back to Queued.
+	- Note: No. Paper's loader wasn't checked.
+	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
+	- Decisions:
+		- Superseded by the 20261119 answer below: Clear rather than pin or mount read-only. The running server writes plugin libraries, so pinning them would approve the server's own writes, and a read-only mount stops Paper adding a new plugin's libraries. Check: entry in questions.md, for the download at each start.
+		- Superseded by the 20261119 answer below: All of `libraries/` goes, not only the plugins' part. Paperclip checks its own part anyway and puts it back in about a second, so no list from `paper.jar` is needed.
+		- The rm runs as `runUser`, so a link in the tree reaches nothing that account couldn't change already. A link at `libraries` itself is removed, not followed (df7bg).
+		- A failed removal stops the start before the launch, and hands the trees back (df7bh).
+		- Left alone: code a plugin downloads into its own folder, which approving the plugin trusts it with. `cache/` and `versions/` are checked by Paperclip at every start.
+		- Swept: both launching start paths, `Boxed.Start` (shared by `--debug`, `--foreground` and the boot unit's `start --foreground`) and `Native.Start`. No other code launches Paper.
+		- 20261119 answer: do whatever makes the most sense without deleting and downloading again at every start. So the clearing at start goes, and one of the other ways replaces it, such as pinning the libraries' hashes and approving them through repair after the first download, or mounting libraries/ read-only.
+		- Pin, and clear only what isn't approved. A refusal at the second start, after Paper's own download at the first, would surprise. Removing unapproved jars keeps the server running and still drops anything the server wrote. Once approved, they stay. Check: entry in questions.md.
+		- Not read-only: Paperclip writes its own libraries there after each Paper update, and Paper adds a new plugin's.
+		- Paper's own libraries are left out by path, whatever their hash, since Paperclip puts back any that differ before Paper runs. That also keeps old Paper builds' libraries from needing approval; start removes them.
+		- repair asks once for all the libraries, since a plugin can need dozens, and they have no `plugin.yml` to tell them apart. `repair --check` doesn't report them, since start takes care of them.
+		- Approved libraries aren't locked read-only like plugins. One changed while the server runs fails its hash at the next start and is removed, and it was loaded before the change anyway.
+		- A link to a folder, or a link at `libraries` itself, is listed and can never be approved, so start removes it and doesn't follow it (df7bg, dfh8a00).
+		- Left open: entries for libraries no longer on disk stay on the list, as old Paper builds do.
+		- Swept: both start paths call `clearLibraries`. Readers of the approved list that act per jar, `pluginLookup` and `movePlugins` in update, skip libraries (dfh8a02). status, setup and `CheckJars` list only `plugins.Jars`, which has no libraries.
+		- Superseded by the second answer below: the library pinning, the approval in repair, and start's removal of unapproved libraries.
+		- 20261119 second answer (t00mietum): way too complicated. No approval step for libraries, and nothing downloaded again at each start unless security needs it. Plugins update through `update`, not at each restart. A check for known-bad plugins is welcome if it's easy.
+		- So the library pinning goes: `plugins.Libraries` and its checks, start's `clearLibraries`, the repair prompt, and update's library skips. Start leaves `libraries/` alone.
+		- `update --plugins`, and a plain `update`, remove the plugins' libraries as `runUser` instead, Paper's own left out by `libraries.list`, so Paper downloads fresh ones at the next start. Code written there then lasts until the next update, not for good.
+		- design.md's start, repair, update and Plugin pinning say so. The known-bad check is its own item, 2026111914262600.
+	- Branch: nov19-2026111715275425, nov19b-2026111715275425
+	- Commit: 6ca2410, 1cbed80
+	- Test case: df7bg, df7bh, dfh8a00, dfh8a01, dfh8a02
+
+- Test IDs follow the clock plus a fixed-length counter, not the next-after-highest rule
+	- ID: 2026111911594103
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261119-115941
+	- Opened by:
+	- Estimated effort: Low
+	- Progress log:
+		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to df7b7 and df7b8.
+		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
+		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
+		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
+		- 20261119: Per the answer, an ID is now 7 characters: the clock's minute in 5, then a 2-character counter. Every existing ID took 00, in the Go tests and checks.bash. `test-id.bash --new` prints the next free ID, and `--check` refuses any other length, root host checks included. style_guide.md says the same, and cicd.bash's log greps match 7 characters.
+		- Verified: dfh7x00 fails all 3 of its cases on the old test-id.bash and passes on the new one. df7b700, with its IDs in the new form, fails all 4 on the old tool and passes on the new one. The quick gate passed, with the same 281 test lines as before the rename.
+		- Swept: the old rule was also in style_guide.md, missed by the first sweep, which skipped the repo root. Every `{5}` ID pattern in cicd, source and utility, and every test that names another test's ID (df7b700, linksafe's df7bq00), were moved. design.md and README.md name no IDs.
+		- 20261119: Second answer: the counter goes in before the Crockford step, at the base-10 minute. Set back to Queued.
+	- Decisions:
+		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
+		- 20261119 answer: follow the clock rule, minutes since 2000-01-01 UTC in Crockford. Add a counter after it for more granularity, and keep the length the same for every ID, such as a 00 counter where none is needed. This reverses the next-after-highest call, so test-id.bash's header, its form check, and the project notes change to match.
+		- The existing IDs took 00 rather than staying at 5 characters, so every ID has one length. Old IDs in backlog rows and notes still match a plain grep of a run log, since the old ID is the start of the new one. Check: entry in questions.md.
+		- The counter is 2 Crockford characters, 1024 IDs a minute, and `--new` takes the lowest free one, so 2 workers in one minute get different IDs unless they run it before either commits. `--check` still catches that repeat.
+		- Root host check IDs are checked for form too, so a 5-character one is refused rather than left out of the list.
+		- Superseded by the second answer below: the counter as 2 Crockford characters after the minute's 5.
+		- 20261119 second answer (t00mietum): the counter comes before the Crockford step, at the last base-10 integer stage.
+		- So an ID is Crockford of minutes x 100 + counter, padded to 7 characters, which lasts until about 2650. The counter runs 00 to 99, 100 IDs a minute.
+		- Every existing ID is re-encoded the same way with its counter, so all IDs follow one rule. Backlog rows, style_guide.md and the project notes that name an ID get the new form, and the old-to-new map goes in details.md.
+	- Test case: dfh7x00, df7b700
+	- Branch: nov19b-2026111911594103
+	- Commit: c7421ea
+	- Actual effort: Low
+	- Target version: v1.0.0-beta.1
+
+- Check plugins against a list of known-bad jars, if one is easy to use
+	- ID: 2026111914262600
+	- Type: Task
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261119-142626
+	- Opened by: JC
+	- Related IDs: 2026111715275425
+	- Requirements [Feature]:
+		- Look for a maintained list of malicious or known-bad Minecraft plugins, by hash or by name and version, that the tool could read without an account.
+		- If one exists and is easy to use, `update` or `repair` checks the approved jars against it, and removes or refuses a match.
+		- If none is easy, close it with what was found.
+	- Progress log:
+		- 2026-11-19: From t00mietum's answer on plugin libraries: checking for known-dangerous plugins and removing them is welcome, if easily possible.
+
 - Make a logged-in CLI subscription the recommended update agent kind
 	- ID: 2026111913431995
 	- Type: Enhancement
@@ -179,37 +275,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Closed: 20261119
 	- Acceptance signoff: 20261119, t00mietum: it's good
 
-- Test IDs follow the clock plus a fixed-length counter, not the next-after-highest rule
-	- ID: 2026111911594103
-	- Type: Bug
-	- Status: Closed
-	- Closed reason: Done
-	- Priority: Low
-	- Opened: 20261119-115941
-	- Opened by:
-	- Estimated effort: Low
-	- Progress log:
-		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to df7b7 and df7b8.
-		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
-		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
-		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
-		- 20261119: Per the answer, an ID is now 7 characters: the clock's minute in 5, then a 2-character counter. Every existing ID took 00, in the Go tests and checks.bash. `test-id.bash --new` prints the next free ID, and `--check` refuses any other length, root host checks included. style_guide.md says the same, and cicd.bash's log greps match 7 characters.
-		- Verified: dfh7x00 fails all 3 of its cases on the old test-id.bash and passes on the new one. df7b700, with its IDs in the new form, fails all 4 on the old tool and passes on the new one. The quick gate passed, with the same 281 test lines as before the rename.
-		- Swept: the old rule was also in style_guide.md, missed by the first sweep, which skipped the repo root. Every `{5}` ID pattern in cicd, source and utility, and every test that names another test's ID (df7b700, linksafe's df7bq00), were moved. design.md and README.md name no IDs.
-	- Decisions:
-		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
-		- 20261119 answer: follow the clock rule, minutes since 2000-01-01 UTC in Crockford. Add a counter after it for more granularity, and keep the length the same for every ID, such as a 00 counter where none is needed. This reverses the next-after-highest call, so test-id.bash's header, its form check, and the project notes change to match.
-		- The existing IDs took 00 rather than staying at 5 characters, so every ID has one length. Old IDs in backlog rows and notes still match a plain grep of a run log, since the old ID is the start of the new one. Check: entry in questions.md.
-		- The counter is 2 Crockford characters, 1024 IDs a minute, and `--new` takes the lowest free one, so 2 workers in one minute get different IDs unless they run it before either commits. `--check` still catches that repeat.
-		- Root host check IDs are checked for form too, so a 5-character one is refused rather than left out of the list.
-	- Test case: dfh7x00, df7b700
-	- Branch: nov19b-2026111911594103
-	- Commit: c7421ea
-	- Actual effort: Low
-	- Acceptance signoff: Self-closed: the clock rule and fixed length were the answer, and the test fails on the old tool and passes now.
-	- Closed: 20261119-135500
-	- Target version: v1.0.0-beta.1
-
 - Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
 	- ID: 2026111911125756
 	- Type: Enhancement
@@ -252,51 +317,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Swept: every write to /usr/local/bin/tt-minecraftd: repair check 15, setup's copy, install.bash, and cicd's dogfood step. Dogfood puts each dev build on the dev box and is left as it is. install-dev.bash doesn't install the tool. update --self is deferred, per Decisions.
 	- Closed reason: Done
 	- Closed: 20261119
-
-- Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
-	- ID: 2026111715275425
-	- Type: Enhancement
-	- Status: Closed
-		- The fix mixes the 2 ways the answer named, and adds a repair prompt and a start message. Only a person can judge those.
-	- Target version: v1.0.0-beta.1
-	- Priority: Avg
-	- Opened: 20261117-152754
-	- Opened by:
-	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
-	- Actual effort: Avg
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
-		- 2026-11-19: Reproduced on Paper 26.3 build 256: a jar written over a plugin library in `libraries/` was loaded at the next start, with no download and no check. 26.3 makes no `plugins/.paper-remapped/`, since 26.1 dropped the remapper. Paperclip put back a changed server library and `versions/` jar from the hashes in `paper.jar`.
-		- 2026-11-19: start removes `libraries/` and `plugins/.paper-remapped/` after the hand-off, as the service account, in both modes. Paper then downloaded the library again, matching Maven Central's SHA-1. design.md's start and Plugin pinning sections say so.
-		- Verified: df7bg and df7bh fail with the removal taken out, with `.paper-remapped` left off the list, and with the removal run through plain sudo, and pass with the fix. The quick gate's format, tests and CodeQL pass, and so do vet, staticcheck, gosec, shellcheck and the test ID check. Its markdownlint step fails on backlog lines from round commit f741e0d, not this item.
-		- 2026-11-19: Asserts updated for the new rm line: df5xp and df5y1 have it in their lists. Change counts went from 5 to 6 in df5xs, 7 to 8 in df5y3, and 7 to 8 and 8 to 9 in df5y4.
-		- 2026-11-19: Per the answer, start no longer clears the whole cache. Library jars go on the approved list. start removes only the ones that aren't listed or don't match, and says how many, so Paper downloads just those. `repair --approve-plugins` lists them and asks once for all. Paper's own libraries are left out by `paper.jar`'s `META-INF/libraries.list`. `update --plugins` and the agent skip approved libraries. design.md's start, repair and Plugin pinning say so.
-		- 2026-11-19: Asserts back to their values before 6ca2410, since a rig with no library cache runs no rm now: df5xp and df5y1 lose the rm line. Change counts went from 6 to 5 in df5xs, 8 to 7 in df5y3, and 8 to 7 and 9 to 8 in df5y4.
-		- Verified: df7bg fails with start's removal taken out, and with Paper's own libraries not left out. dfh8a02 fails with the update skip taken out. dfh8a00, dfh8a01, df7bg and df7bh pass, and so does the whole quick gate. On a real Paper 26.3 build 256 tree, after Paperclip set it up, all 104 of Paper's own libraries were left out and a planted jar was listed.
-	- Note: No. Paper's loader wasn't checked.
-	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
-	- Decisions:
-		- Superseded by the 20261119 answer below: Clear rather than pin or mount read-only. The running server writes plugin libraries, so pinning them would approve the server's own writes, and a read-only mount stops Paper adding a new plugin's libraries. Check: entry in questions.md, for the download at each start.
-		- Superseded by the 20261119 answer below: All of `libraries/` goes, not only the plugins' part. Paperclip checks its own part anyway and puts it back in about a second, so no list from `paper.jar` is needed.
-		- The rm runs as `runUser`, so a link in the tree reaches nothing that account couldn't change already. A link at `libraries` itself is removed, not followed (df7bg).
-		- A failed removal stops the start before the launch, and hands the trees back (df7bh).
-		- Left alone: code a plugin downloads into its own folder, which approving the plugin trusts it with. `cache/` and `versions/` are checked by Paperclip at every start.
-		- Swept: both launching start paths, `Boxed.Start` (shared by `--debug`, `--foreground` and the boot unit's `start --foreground`) and `Native.Start`. No other code launches Paper.
-		- 20261119 answer: do whatever makes the most sense without deleting and downloading again at every start. So the clearing at start goes, and one of the other ways replaces it, such as pinning the libraries' hashes and approving them through repair after the first download, or mounting libraries/ read-only.
-		- Pin, and clear only what isn't approved. A refusal at the second start, after Paper's own download at the first, would surprise. Removing unapproved jars keeps the server running and still drops anything the server wrote. Once approved, they stay. Check: entry in questions.md.
-		- Not read-only: Paperclip writes its own libraries there after each Paper update, and Paper adds a new plugin's.
-		- Paper's own libraries are left out by path, whatever their hash, since Paperclip puts back any that differ before Paper runs. That also keeps old Paper builds' libraries from needing approval; start removes them.
-		- repair asks once for all the libraries, since a plugin can need dozens, and they have no `plugin.yml` to tell them apart. `repair --check` doesn't report them, since start takes care of them.
-		- Approved libraries aren't locked read-only like plugins. One changed while the server runs fails its hash at the next start and is removed, and it was loaded before the change anyway.
-		- A link to a folder, or a link at `libraries` itself, is listed and can never be approved, so start removes it and doesn't follow it (df7bg, dfh8a00).
-		- Left open: entries for libraries no longer on disk stay on the list, as old Paper builds do.
-		- Swept: both start paths call `clearLibraries`. Readers of the approved list that act per jar, `pluginLookup` and `movePlugins` in update, skip libraries (dfh8a02). status, setup and `CheckJars` list only `plugins.Jars`, which has no libraries.
-	- Branch: nov19-2026111715275425, nov19b-2026111715275425
-	- Commit: 6ca2410, 1cbed80
-	- Test case: df7bg, df7bh, dfh8a00, dfh8a01, dfh8a02
-	- Stand-in: none (20261119). Only a person can judge the repair prompt, the start message, and the mix of the 2 ways.
-	- Closed reason: Done
-	- Acceptance signoff: 20261119, closed in round nov19b. Libraries are pinned through repair and not downloaded again once approved, per the 20261119 answer. The call has a Check: entry in questions.md.
 
 - cmd's stop and restart guard misses namespaced forms such as minecraft:stop
 	- ID: 2026111715275187
