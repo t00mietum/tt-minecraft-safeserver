@@ -201,17 +201,34 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - console counts any exit 1 as a detach
 	- ID: 2026111715275221
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
 	- Opened by:
 	- Incorrect behavior [Bug]: `attachDetached` treats any exit 1 as a detach. sudo exits 1 after failed password tries, and Docker exits 1 on its own errors. Either one prints that the server is still running and exits 0, though the operator never attached. cmd's own check also reads stderr.
 	- Expected behavior [Bug]: console counts a detach only from what Docker says on a detach.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 20261119, by df5z6: with any stderr, or none, an attach that exits 1 printed "Detached" and returned no error.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 26. Detail in detail_backlog.md.
-	- Origin: 5c5b023 console and cmd. Not seen before. Plausible.
+	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed.
+	- Actual cause [Bug]: console ran attach on the operator's terminal and never saw its stderr, so it had only the exit code to go on.
+	- Actual effort: Low
+	- Verified: df5z6 and df7b0 fail on the old code and pass with the fix. Under real Docker and rootless Podman, attach to a busybox container on a pty, with stderr through a pipe, detached on Ctrl-C with the container still up. Docker exited 1 and said "read escape sequence" on stderr; Podman exited 0.
+	- Decisions:
+		- `host.Cmd` has an `ErrCopy` writer that also gets a Tty command's stderr, which still goes to the terminal. `session` keeps the last 4 KB of it.
+		- console uses `detachedDocker`, the same test as `cmd`'s attach, so the 2 can't drift apart. `attachDetached` is gone.
+		- 20261119: df5z6's exit 1 case now writes "read escape sequence" on stderr. It was a bare exit 1, which counted as a detach.
+	- Against: 2026111111065750's "`docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach". It now follows 2026111116104058's newer rule, which also needs the message on stderr.
+	- Sweep: other places that read an exit code as a detach.
+	- Swept: `grep -rn 'ExitCode()' source` finds only `detachedDocker`, and main's mapping of a failed command to its exit code. Native console and `start --debug` pass no detach test. Container `start --debug` doesn't count a detach.
+	- Actual fix [Bug]: console counts docker's exit 1 as a detach only with "read escape sequence" on stderr. sudo's and docker's own exit 1 are errors.
+	- Branch: nov19-2026111715275221
+	- Commit: 8804491
+	- Test case: df5z6, df7b0
+	- Acceptance signoff: Self-closed: reproduced, and the tests fail before and pass after.
+	- Closed: 20261119-113306
 
 - Two jar links to the same file give the same mount twice, and start fails
 	- ID: 2026111715275253

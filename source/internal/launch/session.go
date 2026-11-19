@@ -48,15 +48,21 @@ func (k *Kit) mustRun(ctx context.Context, e engine) error {
 
 // session hands this terminal to the console. A detach leaves the server up,
 // and its trees with it. An exit, such as after stop, hands them back.
-// detached, when set, says whether an error from c is only how it detaches.
-func (k *Kit) session(ctx context.Context, e engine, c host.Cmd, detached func(error) bool) error {
+// detached, when set, says whether an error from c and the end of its stderr
+// are only how it detaches. The exit code alone can't say, since sudo and
+// docker exit 1 on their own failures too.
+func (k *Kit) session(ctx context.Context, e engine, c host.Cmd, detached func(err error, stderr string) bool) error {
+	var said errTail
+	if detached != nil {
+		c.ErrCopy = &said
+	}
 	_, err := k.Run.Run(ctx, c)
 	if k.DryRun {
 		return err
 	}
 	up, upErr := e.running(ctx)
 	if upErr == nil && up {
-		if err != nil && detached != nil && detached(err) {
+		if err != nil && detached != nil && detached(err, string(said.buf)) {
 			err = nil
 		}
 		if err == nil {
@@ -69,6 +75,23 @@ func (k *Kit) session(ctx context.Context, e engine, c host.Cmd, detached func(e
 	}
 	k.say("The server stopped.")
 	return errors.Join(err, k.handBack(ctx))
+}
+
+// errTailMax is how much of a console's stderr errTail keeps. docker attach
+// says it detached in its last line.
+const errTailMax = 4096
+
+// errTail keeps the end of what's written to it.
+type errTail struct {
+	buf []byte
+}
+
+func (t *errTail) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > errTailMax {
+		t.buf = append([]byte(nil), t.buf[len(t.buf)-errTailMax:]...)
+	}
+	return len(p), nil
 }
 
 // checkCmd keeps stop and restart off cmd, since stop also hands the trees

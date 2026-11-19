@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,21 +39,43 @@ func TestOpenConsole(t *testing.T) {
 		t.Errorf("docker, detached: ran %q, output %q", got, out)
 	}
 
-	// docker attach exits 1 after the detach keys. Any other failure is an error.
-	for code, wantErr := range map[int]bool{1: false, 2: true} {
+	// docker attach exits 1 after the detach keys, and says so on stderr.
+	// sudo after failed password tries, and docker on its own errors, exit 1
+	// too, and aren't a detach.
+	for _, tc := range []struct {
+		code    int
+		stderr  string
+		wantErr bool
+	}{
+		{1, "read escape sequence\n", false},
+		{1, "", true},
+		{1, "sudo: 3 incorrect password attempts\n", true},
+		{1, "Error response from daemon: No such container: tt-minecraftd\n", true},
+		{2, "read escape sequence\n", true},
+	} {
 		g = newRig(t)
 		g.states = []string{"running"}
-		exit := exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+		exit := exec.Command("sh", "-c", "exit "+strconv.Itoa(tc.code)).Run()
 		g.r.Reply = func(c host.Cmd) ([]byte, error) {
 			if c.Args[1] == "attach" {
+				if c.ErrCopy != nil {
+					_, _ = io.WriteString(c.ErrCopy, tc.stderr)
+				}
 				return nil, fmt.Errorf("docker attach: %w", exit)
 			}
 			return g.reply(c)
 		}
 		err := g.d.OpenConsole(context.Background())
-		if (err != nil) != wantErr || strings.Contains(g.out.String(), "Detached") == wantErr {
-			t.Errorf("docker attach exit %d: err %v, output %q", code, err, g.out.String())
+		if (err != nil) != tc.wantErr || strings.Contains(g.out.String(), "Detached") == tc.wantErr {
+			t.Errorf("docker attach exit %d, stderr %q: err %v, output %q", tc.code, tc.stderr, err, g.out.String())
 		}
+	}
+
+	// Only the end of a long stderr is kept, and the detach is in its last line.
+	var tail errTail
+	_, _ = io.WriteString(&tail, strings.Repeat("x", 3*errTailMax)+"read escape sequence\n")
+	if len(tail.buf) != errTailMax || !strings.HasSuffix(string(tail.buf), "read escape sequence\n") {
+		t.Errorf("errTail kept %d bytes, ending %q", len(tail.buf), tail.buf[max(0, len(tail.buf)-30):])
 	}
 
 	g = newRig(t)

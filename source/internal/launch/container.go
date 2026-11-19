@@ -392,14 +392,7 @@ func (d *Boxed) OpenConsole(ctx context.Context) error {
 	d.say(consoleHello)
 	c := d.box(false, "attach", "--sig-proxy=false", "--detach-keys=ctrl-c", Container)
 	c.Tty = true
-	return d.session(ctx, d, c, attachDetached)
-}
-
-// attachDetached is docker attach's exit after the detach keys, which is 1.
-// Podman's is 0.
-func attachDetached(err error) bool {
-	var exit *exec.ExitError
-	return errors.As(err, &exit) && exit.ExitCode() == 1
+	return d.session(ctx, d, c, detachedDocker)
 }
 
 // SendCmd is cmd: one console line, and what the server says back.
