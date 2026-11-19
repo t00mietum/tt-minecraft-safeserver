@@ -446,7 +446,7 @@ cicd/                        build, test, and release scripts
 
 - Plugin jars that the admin adds are trusted, with no approval step. The server can't write to them while it runs.
 	- Until 2026-11-19 they were pinned by hash, and a new or changed jar stopped the start until `repair --approve-plugins` approved it. Plugin libraries were pinned the same way for a while. That's reversed: an admin shouldn't have to look into a plugin or its hash, and a hash says nothing a person can judge.
-	- A jar the admin adds, or one another plugin needs, counts as OK. A check against a public list of known-bad plugins is planned, if one is easy to use.
+	- A jar the admin adds, or one another plugin needs, counts as OK. There's no check against a list of known-bad plugins, since no maintained one could be read without an account (2026-11-19).
 	- The trade is that a jar the server writes into `plugins/` while it runs loads at the next start. Malware such as Fractureiser spread by changing jars, and a changed jar no longer stops the start. The container, the read-only mounts while it runs, and the outbound firewall still limit what such code can reach.
 	- The update agent's finds still need a yes, since they're new code from a lookup, not something the admin added.
 

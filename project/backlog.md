@@ -248,7 +248,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Check plugins against a list of known-bad jars, if one is easy to use
 	- ID: 2026111914262600
 	- Type: Task
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261119-142626
@@ -260,6 +260,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- If none is easy, close it with what was found.
 	- Progress log:
 		- 2026-11-19: From t00mietum's answer on plugin libraries: checking for known-dangerous plugins and removing them is welcome, if easily possible.
+		- 2026-11-19: No maintained list of bad plugins can be read without an account, so the tool has no such check, and no code changed.
+		- Found: MCAntiMalware's list on GitHub is 349 SHA-1 sums in a SQLite file, last changed in July 2024, and the scanner no longer downloads it. MalwareBazaar's hash lists and API need an abuse.ch key. SentinelCore's list isn't documented. The Fractureiser and PaperMC malware notes cover single outbreaks. The other tools found are scanners that read the code, not lists.
+		- Verified: the MCAntiMalware file was downloaded and read, and the MalwareBazaar export page says it needs a key.
+	- Closed reason: Done
+	- Decisions:
+		- The MCAntiMalware list wasn't used. Its own scanner dropped it, it misses everything since 2024, and an exact hash match misses any rebuilt jar, so it would catch little.
+		- design.md's Direction decisions entry now says there is no bad-list check, in place of planned.
+		- plugins.Refuse and RefusedDir stay unused. Taking them out is a separate call.
+	- Test case: none, since no code changed
+	- Actual effort: Low
+	- Branch: nov19c-2026111914262600
+	- Commit: 92f1fb7
+	- Acceptance signoff: Self-closed: the item says to close with what was found when no list is easy to use.
+	- Closed: 20261119-145947
 
 - Make a logged-in CLI subscription the recommended update agent kind
 	- ID: 2026111913431995
