@@ -901,7 +901,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - The .deb and .rpm packages install to /usr/bin, but setup and the boot unit run /usr/local/bin
 	- ID: 2026111715275041
 	- Type: Bug
-	- Status: Closed
+	- Status: Queued
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152750
@@ -917,15 +917,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: boot.Bin, setup's copy, install.bash, the demo, and the root host checks all use /usr/local/bin. No /usr/bin path for the tool is left in cicd or source.
 		- 2026-11-19: t00mietum kept the packages putting the binary in /usr/local/bin as built.
 	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
-	- Closed reason: Done
 	- Actual cause [Bug]: The package step put the binary in /usr/bin, a different path from the one setup, install.bash, and the boot unit use.
 	- Actual fix [Bug]: The .deb and .rpm put it in /usr/local/bin. The package step fails when the build names another path for itself, or a package's file list doesn't have it there. design.md's Boot says so.
 	- Branch: fixes-2026111715275041
 	- Test case: the package step's checks that the build and each package name /usr/local/bin/tt-minecraftd, in every full run. No test ID, since the step isn't a Go test or a root host check.
 	- Actual effort: Low
-	- Closed: 20261117-194845
 	- Decisions:
 		- The packages go in /usr/local/bin, against the FHS and Debian policy, since setup, install.bash, and the boot unit's recorded path all use it, and an upgrade from alpha.1 then removes its own /usr/bin copy. Check entry in questions.md.
+		- 2026-11-19: Reopened. t00mietum's answer asked for industry practice, meaning the FHS and Debian policy: a package owns /usr/bin/tt-minecraftd, and /usr/local/bin is only for hand installs. The /usr/local/bin pick is replaced.
+		- 2026-11-19: Design: the .deb and .rpm install /usr/bin/tt-minecraftd. install.bash, setup's copy and dogfood keep /usr/local/bin. setup skips its copy when the package's binary is there, the boot unit runs the binary that's installed, and repair flags a /usr/local/bin copy that shadows the package's on PATH.
 	- Acceptance signoff: Self-closed: the package checks and the .deb upgrade passed, and the path call is a Check entry.
 	- Commit: 6404266
 
