@@ -195,7 +195,7 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if err != nil {
 		return err
 	}
-	if err := d.clearCaches(ctx); err != nil {
+	if err := d.clearLibraries(ctx); err != nil {
 		return d.failedStart(ctx, d, err)
 	}
 

@@ -256,7 +256,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
+		- The fix mixes the 2 ways the answer named, and adds a repair prompt and a start message. Only a person can judge those.
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152754
@@ -269,19 +270,33 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: start removes `libraries/` and `plugins/.paper-remapped/` after the hand-off, as the service account, in both modes. Paper then downloaded the library again, matching Maven Central's SHA-1. design.md's start and Plugin pinning sections say so.
 		- Verified: df7bg and df7bh fail with the removal taken out, with `.paper-remapped` left off the list, and with the removal run through plain sudo, and pass with the fix. The quick gate's format, tests and CodeQL pass, and so do vet, staticcheck, gosec, shellcheck and the test ID check. Its markdownlint step fails on backlog lines from round commit f741e0d, not this item.
 		- 2026-11-19: Asserts updated for the new rm line: df5xp and df5y1 have it in their lists. Change counts went from 5 to 6 in df5xs, 7 to 8 in df5y3, and 7 to 8 and 8 to 9 in df5y4.
+		- 2026-11-19: Per the answer, start no longer clears the whole cache. Library jars go on the approved list. start removes only the ones that aren't listed or don't match, and says how many, so Paper downloads just those. `repair --approve-plugins` lists them and asks once for all. Paper's own libraries are left out by `paper.jar`'s `META-INF/libraries.list`. `update --plugins` and the agent skip approved libraries. design.md's start, repair and Plugin pinning say so.
+		- 2026-11-19: Asserts back to their values before 6ca2410, since a rig with no library cache runs no rm now: df5xp and df5y1 lose the rm line. Change counts went from 6 to 5 in df5xs, 8 to 7 in df5y3, and 8 to 7 and 9 to 8 in df5y4.
+		- Verified: df7bg fails with start's removal taken out, and with Paper's own libraries not left out. dfh8a02 fails with the update skip taken out. dfh8a00, dfh8a01, df7bg and df7bh pass, and so does the whole quick gate. On a real Paper 26.3 build 256 tree, after Paperclip set it up, all 104 of Paper's own libraries were left out and a planted jar was listed.
 	- Note: No. Paper's loader wasn't checked.
 	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
 	- Decisions:
-		- Clear rather than pin or mount read-only. The running server writes plugin libraries, so pinning them would approve the server's own writes, and a read-only mount stops Paper adding a new plugin's libraries. Check: entry in questions.md, for the download at each start.
-		- All of `libraries/` goes, not only the plugins' part. Paperclip checks its own part anyway and puts it back in about a second, so no list from `paper.jar` is needed.
+		- Superseded by the 20261119 answer below: Clear rather than pin or mount read-only. The running server writes plugin libraries, so pinning them would approve the server's own writes, and a read-only mount stops Paper adding a new plugin's libraries. Check: entry in questions.md, for the download at each start.
+		- Superseded by the 20261119 answer below: All of `libraries/` goes, not only the plugins' part. Paperclip checks its own part anyway and puts it back in about a second, so no list from `paper.jar` is needed.
 		- The rm runs as `runUser`, so a link in the tree reaches nothing that account couldn't change already. A link at `libraries` itself is removed, not followed (df7bg).
 		- A failed removal stops the start before the launch, and hands the trees back (df7bh).
 		- Left alone: code a plugin downloads into its own folder, which approving the plugin trusts it with. `cache/` and `versions/` are checked by Paperclip at every start.
 		- Swept: both launching start paths, `Boxed.Start` (shared by `--debug`, `--foreground` and the boot unit's `start --foreground`) and `Native.Start`. No other code launches Paper.
 		- 20261119 answer: do whatever makes the most sense without deleting and downloading again at every start. So the clearing at start goes, and one of the other ways replaces it, such as pinning the libraries' hashes and approving them through repair after the first download, or mounting libraries/ read-only.
-	- Branch: nov19-2026111715275425
-	- Commit: 6ca2410
-	- Test case: df7bg, df7bh
+		- Pin, and clear only what isn't approved. A refusal at the second start, after Paper's own download at the first, would surprise. Removing unapproved jars keeps the server running and still drops anything the server wrote. Once approved, they stay. Check: entry in questions.md.
+		- Not read-only: Paperclip writes its own libraries there after each Paper update, and Paper adds a new plugin's.
+		- Paper's own libraries are left out by path, whatever their hash, since Paperclip puts back any that differ before Paper runs. That also keeps old Paper builds' libraries from needing approval; start removes them.
+		- repair asks once for all the libraries, since a plugin can need dozens, and they have no `plugin.yml` to tell them apart. `repair --check` doesn't report them, since start takes care of them.
+		- Approved libraries aren't locked read-only like plugins. One changed while the server runs fails its hash at the next start and is removed, and it was loaded before the change anyway.
+		- A link to a folder, or a link at `libraries` itself, is listed and can never be approved, so start removes it and doesn't follow it (df7bg, dfh8a00).
+		- Left open: entries for libraries no longer on disk stay on the list, as old Paper builds do.
+		- Swept: both start paths call `clearLibraries`. Readers of the approved list that act per jar, `pluginLookup` and `movePlugins` in update, skip libraries (dfh8a02). status, setup and `CheckJars` list only `plugins.Jars`, which has no libraries.
+	- Branch: nov19-2026111715275425, nov19b-2026111715275425
+	- Commit: 6ca2410, 1cbed80
+	- Test case: df7bg, df7bh, dfh8a00, dfh8a01, dfh8a02
+	- Stand-in: none (20261119). Only a person can judge the repair prompt, the start message, and the mix of the 2 ways.
+	- Closed reason: Done
+	- Acceptance signoff: 20261119, closed in round nov19b. Libraries are pinned through repair and not downloaded again once approved, per the 20261119 answer. The call has a Check: entry in questions.md.
 
 - cmd's stop and restart guard misses namespaced forms such as minecraft:stop
 	- ID: 2026111715275187

@@ -376,6 +376,65 @@ func TestRepairApprovePlugins(t *testing.T) {
 	}
 }
 
+// repair --approve-plugins asks once about the plugin libraries Paper
+// downloaded. repair --check leaves them out, since start removes them.
+func TestRepairApproveLibraries(t *testing.T) {
+	defer testid.Line(t, "dfh8a01")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	dir := t.TempDir()
+	for name, text := range map[string]string{"paper.jar": "p", "libraries/org/a/a/1/a-1.jar": "a", "libraries/org/b/b/2/b-2.jar": "b", "libraries/org/b/b/2/b-2.pom": "b"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set := "--set=serverDir=" + dir
+	repairWith := func(answers string) (string, error) {
+		t.Helper()
+		inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
+		if done {
+			t.Fatal("prepare stopped")
+		}
+		var b bytes.Buffer
+		err := repair(context.Background(), inv, strings.NewReader(answers), &b, true)
+		return b.String(), err
+	}
+	out, err := repairWith("y\nn\n")
+	for _, want := range []string{
+		"FIXED   paper.jar approved\n",
+		"Plugin libraries that Paper downloaded, not approved yet:\n  libraries/org/a/a/1/a-1.jar (new)\n    sha256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb, 1 bytes, ",
+		"  libraries/org/b/b/2/b-2.jar (new)\n",
+		"Approve all 2? [y/n] \n",
+		"OK      libraries: left unapproved; the next start removes them\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("first pass lacks %q:\n%s", want, out)
+		}
+	}
+	if err != nil || strings.Contains(out, ".pom") {
+		t.Errorf("first pass: %v\n%s", err, out)
+	}
+	if code, out, _ := runArgs("repair", "--check", set); code != exitOK || strings.Contains(out, "libraries") {
+		t.Errorf("--check: exit %d, stdout %q", code, out)
+	}
+	if out, err := repairWith("y\n"); err != nil || !strings.Contains(out, "FIXED   libraries: 2 approved") || strings.Contains(out, "paper.jar (new)") {
+		t.Errorf("second pass: %v\n%s", err, out)
+	}
+	if out, err := repairWith(""); err != nil || strings.Contains(out, "Plugin libraries") {
+		t.Errorf("third pass: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "libraries/org/b/b/2/b-2.jar"), []byte("b2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := repairWith(""); err == nil || !strings.Contains(out, "libraries/org/b/b/2/b-2.jar (changed)\n") || !strings.Contains(out, "Approve it? [y/n] ") ||
+		!strings.Contains(out, "FAILED  libraries: not approved; no answer") {
+		t.Errorf("changed, no answer: %v\n%s", err, out)
+	}
+}
+
 // A Geyser jar approved through repair gets GeyserMC's source, as setup's do.
 func TestRepairApproveGeyserSource(t *testing.T) {
 	defer testid.Line(t, "df76r00")

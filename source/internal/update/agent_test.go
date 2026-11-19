@@ -528,6 +528,49 @@ func TestAgentMoveReport(t *testing.T) {
 	}
 }
 
+// Approved plugin libraries are Paper's to fetch, so the agent isn't asked
+// about them, for an update or for a move.
+func TestAgentSkipsLibraries(t *testing.T) {
+	defer testid.Line(t, "dfh8a02")
+	ctx := context.Background()
+	addLib := func(a *agentRig) {
+		t.Helper()
+		lib := filepath.Join(a.u.Cfg.ServerDir, "libraries", "org", "a", "a", "1", "a-1.jar")
+		if err := os.MkdirAll(filepath.Dir(lib), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(lib, []byte("a"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.OpenFile(a.u.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
+		if err == nil {
+			_, err = f.WriteString("jar: libraries/org/a/a/1/a-1.jar\n\tsha256: " + sumOf("a") + "\n")
+		}
+		if err == nil {
+			err = f.Close()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	a := newAgentRig(t, "n\n")
+	addLib(a)
+	_ = a.u.Do(ctx)
+	if len(a.asked) != 1 || len(a.asked[0].Jars) != 1 || a.asked[0].Jars[0].Path != "plugins/Chunky.jar" {
+		t.Errorf("update asked %+v\n%s", a.asked, a.out)
+	}
+
+	a = newAgentRig(t, "n\n")
+	addLib(a)
+	a.u.Parts, a.u.MCVersion = Parts{Paper: true}, "26.4"
+	a.answer = agent.Answer{Move: []agent.MoveNote{{Jar: "plugins/Chunky.jar", Has: "yes"}}}
+	_ = a.u.Do(ctx)
+	if len(a.asked) != 1 || len(a.asked[0].Plugins) != 1 || a.asked[0].Plugins[0].Path != "plugins/Chunky.jar" {
+		t.Errorf("move asked %+v\n%s", a.asked, a.out)
+	}
+}
+
 // Paper and the move report go through the hand-off too, and the root run
 // uses them only for the same version, and the same plugin hashes.
 func TestAgentHandOffPaperAndMove(t *testing.T) {

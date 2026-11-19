@@ -134,29 +134,20 @@ func Jars(serverDir string) ([]Jar, error) {
 // CheckJars compares the jars from Jars with approved. Missing lists only the
 // approved jars in pinnedDirs, since old Paper builds stay on the list.
 func CheckJars(serverDir string, approved []Approved, sums *Sums) (Check, error) {
-	var c Check
 	jars, err := Jars(serverDir)
+	if err != nil {
+		return Check{}, err
+	}
+	c, err := compare(jars, approved, sums, false)
 	if err != nil {
 		return c, err
 	}
-	want := make(map[string]string, len(approved))
+	want := make(map[string]bool, len(approved))
 	for _, a := range approved {
-		want[a.Name] = a.SHA256
+		want[a.Name] = true
 	}
-	c.Jars = len(jars)
 	for _, j := range jars {
-		sum, err := sums.Sum(j.File)
-		if err != nil && !errors.Is(err, ErrNotRegular) {
-			return c, err
-		}
-		approvedSum, listed := want[j.Name]
 		delete(want, j.Name)
-		switch {
-		case !listed:
-			c.New = append(c.New, j.Name)
-		case approvedSum != sum:
-			c.Changed = append(c.Changed, j.Name)
-		}
 	}
 	for name := range want {
 		if slices.Contains(pinnedDirs, path.Dir(name)) && path.Ext(name) == ".jar" {
@@ -164,5 +155,31 @@ func CheckJars(serverDir string, approved []Approved, sums *Sums) (Check, error)
 		}
 	}
 	sort.Strings(c.Missing)
+	return c, nil
+}
+
+// compare sorts jars into new and changed against approved. With dangling
+// set, a link to nothing counts as changed, as anything but a regular file
+// does, rather than stopping the check.
+func compare(jars []Jar, approved []Approved, sums *Sums, dangling bool) (Check, error) {
+	var c Check
+	want := make(map[string]string, len(approved))
+	for _, a := range approved {
+		want[a.Name] = a.SHA256
+	}
+	c.Jars = len(jars)
+	for _, j := range jars {
+		sum, err := sums.Sum(j.File)
+		if err != nil && !errors.Is(err, ErrNotRegular) && (!dangling || !errors.Is(err, fs.ErrNotExist)) {
+			return c, err
+		}
+		approvedSum, listed := want[j.Name]
+		switch {
+		case !listed:
+			c.New = append(c.New, j.Name)
+		case approvedSum != sum:
+			c.Changed = append(c.Changed, j.Name)
+		}
+	}
 	return c, nil
 }

@@ -91,7 +91,6 @@ func TestNativeStart(t *testing.T) {
 		"sudo -v",
 		"sudo chown -R -- minecraftd:minecraftd " + q(g.dir),
 		"sudo chmod -R ug+rwX,o-rwx -- " + q(g.dir),
-		"sudo -u minecraftd -- rm -rf --one-file-system -- " + q(g.dir+"/libraries") + " " + q(g.dir+"/plugins/.paper-remapped"),
 		"sudo chown root:root -- " + q(paper) + " " + q(geyser),
 		"sudo chmod 0644 -- " + q(paper) + " " + q(geyser),
 		"sudo " + host.Quote(run),
@@ -190,7 +189,7 @@ func TestNativeStartRefuses(t *testing.T) {
 	if err := g.n.Start(context.Background(), StartMode{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.changes(); len(got) != 8 || got[1] != "sudo systemctl reset-failed tt-minecraftd-server.service" {
+	if got := g.changes(); len(got) != 7 || got[1] != "sudo systemctl reset-failed tt-minecraftd-server.service" {
 		t.Errorf("failed unit: ran %q", got)
 	}
 }
@@ -207,7 +206,7 @@ func TestNativeStartModes(t *testing.T) {
 	}
 	got := g.changes()
 	last := g.r.Ran[len(g.r.Ran)-2]
-	if len(got) != 8 || got[7] != "sudo -u minecraftd -- tmux -S /run/tt-minecraftd/tmux.sock attach-session -t tt-minecraftd" || !last.Tty ||
+	if len(got) != 7 || got[6] != "sudo -u minecraftd -- tmux -S /run/tt-minecraftd/tmux.sock attach-session -t tt-minecraftd" || !last.Tty ||
 		!strings.Contains(g.out.String(), "Detached") {
 		t.Errorf("debug, detached: ran %q, output %q", got, g.out.String())
 	}
@@ -217,7 +216,7 @@ func TestNativeStartModes(t *testing.T) {
 	if err := g.n.Start(context.Background(), StartMode{Debug: true}); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.changes(); len(got) != 9 || !strings.Contains(got[8], "chown -R -- alice:minecraftd") {
+	if got := g.changes(); len(got) != 8 || !strings.Contains(got[7], "chown -R -- alice:minecraftd") {
 		t.Errorf("debug, exited: ran %q", got)
 	}
 
