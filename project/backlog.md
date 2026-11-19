@@ -636,7 +636,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Add a README section on using the server after setup
 	- ID: 2026111715275532
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Waiting on UAT
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152755
@@ -644,7 +644,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
+		- Waiting on UAT: README wording is a matter of taste. Someone should read the new sections.
 	- Origin: Not seen before.
+	- Branch: nov19-2026111715275532
+	- Commit: 61984e5
+	- Test case: none, README text. Markdownlint and the quick gate pass.
+	- Actual effort: Low
 
 - Have install.bash always install the binary owned by root
 	- ID: 2026111715275548
