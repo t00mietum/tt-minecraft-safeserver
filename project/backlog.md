@@ -76,7 +76,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Trust the plugins an admin adds, with no approval step
 	- ID: 2026111914293176
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261119-142931
@@ -94,13 +94,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: t00mietum, after the plugin library answer: admins shouldn't have to investigate plugins or hashes. A plugin they add, or one another plugin needs, is OK unless it's on a public bad list.
 		- 2026-11-19: Split in 2: 2026111914334569 for start, status, repair, setup and the docs, and 2026111914334585 for update. The parent closes with the last child.
 		- 2026-11-19: Both children are worked and wait on the root host check: 2026111914334569 (bca9ac5) and 2026111914334585.
+		- 2026-11-19: No public bad list is readable without an account (2026111914262600), so no jar is checked against one.
 	- Decisions:
 		- This reverses the hash pinning chosen at the start of the project (9058841). The library pinning in 2026111715275425 goes with it.
+	- Test case: its children's: 2026111914334569: 1a4j16c, 1a4j19g, 1a4j1s4; 2026111914334585: 1a4j2j4, 1a4j2rc
+	- Closed: 20261119-151632
+	- Closed reason: Done
 
 - Stop checking jars against the approved list in start, status, repair and setup
 	- ID: 2026111914334569
 	- Type: Enhancement
-	- Status: Waiting for testing
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261119-143345
@@ -109,13 +113,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Related IDs: 2026111715275425
 	- Requirements [Feature]: start, status and repair stop checking jars and paper.jar against the list, and start no longer refuses a new or changed jar. repair --approve-plugins and setup's approve step go. The library pinning from 2026111715275425 goes: start's removal, repair's prompt, and plugins.Libraries. plugins.shcl's sha256 is no longer needed. setup and repair give Geyser and Floodgate GeyserMC's source without asking. Jars stay read-only in container modes. design.md's Summary, start, status, setup, repair, Plugin pinning, Security and Direction decisions, and README, say so.
 	- Estimated effort: Avg
-	- Needs local test suite run?: The root host check, for 1a3fh00, 1a3fjbr and 1a3jgsm, whose script changed with this item.
+	- Needs local test suite run?: No
 	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-19: start, status, repair and setup no longer read hashes. repair --approve-plugins, setup's approve step, start's library removal, repair's library prompt, and plugins.CheckJars and CheckLibraries are gone. A missing or bad sha256 in plugins.shcl is ignored. setup and repair give a Geyser or Floodgate jar with no source GeyserMC's, through the new plugins.SetSources and Unsourced. status lists the jars by name. design.md's Summary, start, status, setup, repair, Plugin jars (was Plugin pinning), Configuration model, Security and Direction decisions, and README, say so.
 		- Verified: 1a4j19g and 1a4j1s4 fail on 8bc0fd1 and pass with the change. The whole quick gate passes.
 		- Tests commented out, since approval went: 1a3ek3r, 1a4hxz8, 1a3jzy0, 1a3k014, 1a3en8g, 1a3jtj4, 1a3enbm, 1a4hxz9, 1a3jh30, 1a3jv4w, and root host check 1a3fhz8. The CheckJars asserts in 1a3emw0 and 1a3jsw8 are commented out too, and 1a3jt8r calls Jars in place of CheckJars.
 		- 2026-11-19 asserts updated for the change: 1a3ef0g keeps the jars with no or bad sha256, and drops the line 3 warning. 1a3jnw4 allows an empty hash. 1a3emw0's error text went from "can't be approved" to ", outside ". The plugin lines in 1a3ejdw, 1a3ejm4, 1a3ejq8, 1a3ekd4 and 1a3jtf0 list jar names, not approval. 1a3f8wm's list went from 3 entries to 2, 1a3f92w's from 4 to 2, 1a3jgzw lost paper.jar and the lookalike, and 1a3famw's hash went from cd x 32 to empty. 1a3fgww lists a Geyser jar, and 1a3jqe4 refuses on the whitelist, in place of an unapproved jar.
+		- Verified: root host check on nov19c passed 1a3fh00, 1a3fjbr and 1a3jgsm (run 20261119-151312_001, 16 PASS, 4 native SKIPs). Quick gate on nov19c passed too.
 	- Decisions:
 		- plugins.Approve stays, for update, until 2026111914334585. So do Libraries and IsLibrary, which that item needs, and Refuse, which the known-bad check (2026111914262600) needs.
 		- The names Approved and ReadApproved stay, to keep the churn down.
@@ -128,11 +133,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: nov19c-2026111914293176
 	- Test case: 1a4j16c, 1a4j19g, 1a4j1s4
 	- Commit: bca9ac5
+	- Closed reason: Done
+	- Closed: 20261119-151632
+	- Acceptance signoff: Self-closed: tests passed, per the standing close policy.
 
 - update: judge plugins by the file on disk, stop writing hashes, and clear plugin libraries
 	- ID: 2026111914334585
 	- Type: Enhancement
-	- Status: Waiting for testing
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261119-143345
@@ -142,13 +150,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: update --plugins works on the jars in the tree, with their optional source from plugins.shcl, and calls a jar up to date by the hash of the file on disk. update, setup and the agent stop writing hashes to plugins.shcl. The agent's finds still need a yes. update --plugins, and a plain update, remove the plugins' libraries in libraries/ as runUser, with Paper's own left out by paper.jar's libraries.list, so Paper downloads fresh ones at the next start (2026111715275425's second answer). design.md's update, Update agent and Plugin pinning say so.
 	- Estimated effort: Avg
 	- Prereq IDs: 2026111914334569
-	- Needs local test suite run?: The root host check, for 1a3jgsm, which now finds Thing.jar in the tree with no list entry.
+	- Needs local test suite run?: No
 	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-19: update --plugins works on the jars in plugins/ and its extensions folder, with their source from plugins.shcl, and calls one up to date by the hash of the file on disk. update and the agent no longer write to plugins.shcl, and plugins.Approve and IsLibrary are gone. update --plugins, and a plain update, remove the plugins' libraries from Paper's cache as runUser, after the plugins, with Paper's own left out. design.md's update, Update agent and Plugin jars say so.
 		- Verified: 1a4j2rc fails on bca9ac5 and passes with the change. 1a4j2j4 is new, for SetSources. The whole quick gate passes.
 		- Tests commented out: 1a3en28 (TestApprove), since Approve went. 1a4hxza now makes the list it appends to.
 		- 2026-11-19 asserts updated for the change: 1a3fdrw, 1a3jra8, 1a3fe28 and 1a3jgd4 lost their "approved" lines, and their list checks now want no list, or no hash. 1a3jgg8's order went from the list's to the folder's. 1a3jrdc's report says "the plugins", not "the approved plugins". 1a3fe28's gone jar no longer says "not in the server folder".
+		- Verified: root host check on nov19c passed 1a3fh00, 1a3fjbr and 1a3jgsm (run 20261119-151312_001, 16 PASS, 4 native SKIPs). Quick gate on nov19c passed too.
 	- Decisions:
 		- A jar plugins.shcl names that isn't in the tree is left out with no message, since it isn't a jar now.
 		- The removal is left out while the server may be running, through Update.Running, since a running Paper can still open a library it hasn't read yet. A failed look counts as running.
@@ -158,6 +167,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: nov19c-2026111914293176
 	- Test case: 1a4j2j4, 1a4j2rc
 	- Commit: 4eb03ec
+	- Closed reason: Done
+	- Closed: 20261119-151632
+	- Acceptance signoff: Self-closed: tests passed, per the standing close policy.
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
