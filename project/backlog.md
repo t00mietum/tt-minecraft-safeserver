@@ -121,12 +121,12 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: `update --self` is Deferred. It gets the same move when it comes back.
 		- 2026-11-19: Moved from `tt-minecraftd_old_<mtime>` beside the binary to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>` (t00mietum). Off PATH, on every distro, and a dot suffix is the usual form for a dated copy. `/var/backups` is Debian's only.
 		- 2026-11-19: install.bash has the build it's about to install do the move, with a hidden retire-build command, run through sudo from a staged copy beside the target. One Go version of the move and the rotation then serves all 3, and Bash 3.2 never needs one. The staged copy is renamed into place, so the swap is one step.
-		- 2026-11-19: Kept names stay tt-minecraftd.<mtime>, without the role suffix gfs-rotate.bash adds. The counts are its defaults: 10 newest, 4 hours, 5 days, 4 weeks, 4 months, 2 years, and the first. A build from the same second as a kept one gets .2, .3 and so on.
+		- 2026-11-19: Kept names stay tt-minecraftd.`<mtime>`, without the role suffix gfs-rotate.bash adds. The counts are its defaults: 10 newest, 4 hours, 5 days, 4 weeks, 4 months, 2 years, and the first. A build from the same second as a kept one gets .2, .3 and so on.
 		- 2026-11-19: A /usr/local/bin link to some file other than the package's has no build to keep, so check 15 still reports it with sudo rm. install.bash and setup write over a link as before.
 		- 2026-11-19: When the same build, by SHA-256, is in /usr/local/bin already, setup leaves out its copy, as install.bash already did.
 		- 2026-11-19: The folder is refused as root when it's a link, or someone other than root could write to it.
-		- 2026-11-19: df7av: the expected text was "...; remove it with: sudo rm /usr/local/bin/tt-minecraftd" with no fix, and is now "...; repair moves it to /var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime> [fix]". Its other checks are unchanged.
-		- 2026-11-19: df65d and df7at: setup's copy was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd", and is now "sudo install -m 0755 -o root -g root <exe> <LocalBin>", with LocalBin a stand-in path in the test.
+		- 2026-11-19: df7av: the expected text was "...; remove it with: sudo rm /usr/local/bin/tt-minecraftd" with no fix, and is now "...; repair moves it to /var/lib/tt-minecraftd/old-builds/tt-minecraftd.`<mtime>` [fix]". Its other checks are unchanged.
+		- 2026-11-19: df65d and df7at: setup's copy was "sudo install -m 0755 `<exe>` /usr/local/bin/tt-minecraftd", and is now "sudo install -m 0755 -o root -g root `<exe>` `<LocalBin>`", with LocalBin a stand-in path in the test.
 	- Needs local test suite run?: the root host check df7bf, one plain run of cicd/root-host/root-host.bash. It moves a build as root and checks the folder is root's 0755.
 	- Branch: nov19-2026111911125756
 	- Commit: 32e1415
