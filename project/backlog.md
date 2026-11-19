@@ -174,7 +174,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - watch --interval with a huge value panics
 	- ID: 2026111715275203
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
@@ -185,6 +186,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 25. Detail in detail_backlog.md.
 	- Origin: ba0f959 status and watch. Not seen before. Confirmed.
+	- Actual cause [Bug]: The option check only refused values under 1, so a count of seconds past what a duration holds overflowed in `time.Duration(n)*time.Second` and went negative, which `NewTicker` panics on.
+	- Actual fix [Bug]: `watch` refuses an `--interval` above 9223372036 seconds, the most a duration holds, with a usage message that gives the range and exit 2.
+	- Test case: df5xk TestUsageErrors, with the case `watch --interval 9300000000`.
+	- Verified: the case panicked on the old code with "non-positive interval for NewTicker" and passes now. `go run ... watch --interval 9300000000` prints the message and exits 2. `cicd/cicd.bash --backlog-run-quick cli` passes.
+	- Swept: `interval` is the only duration built from an option count in the command (grep of `time.Duration(` and `interval` in source/cmd). `stop --warn` isn't a duration.
+	- Decisions:
+		- The cap is the overflow limit rather than a smaller sensible one such as a day, so no value that worked before is refused.
+	- Branch: nov19-2026111715275203
+	- Commit: 9329cf1
+	- Acceptance signoff: Self-closed: the case fails on the old code and passes now.
+	- Closed: 20261119-193000
 
 - console counts any exit 1 as a detach
 	- ID: 2026111715275221

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -52,6 +53,9 @@ const (
 	exitOK    = 0
 	exitError = 1
 	exitUsage = 2
+
+	// Most whole seconds a time.Duration holds.
+	maxWatchInterval = math.MaxInt64 / int64(time.Second)
 )
 
 type options struct {
@@ -811,8 +815,9 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		return usageErr("stop: --warn takes 0 or more seconds")
 	case o.approve && o.check:
 		return usageErr("repair: --approve-plugins and --check don't go together")
-	case name == "watch" && o.interval < 1:
-		return usageErr("watch: --interval takes 1 or more seconds")
+	case name == "watch" && (o.interval < 1 || int64(o.interval) > maxWatchInterval):
+		// The upper bound keeps Duration(n)*Second from overflowing, which makes NewTicker panic.
+		return usageErr("watch: --interval takes %d to %d seconds", 1, maxWatchInterval)
 	}
 	inv.opts = o
 	inv.args = args

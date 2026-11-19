@@ -175,6 +175,7 @@ func TestUsageErrors(t *testing.T) {
 		{"stop", "--warn", "-1"},
 		{"stop", "--warn", "soon"},
 		{"watch", "--interval", "0"},
+		{"watch", "--interval", "9300000000"},
 		{"repair", "--approve-plugins", "--check"},
 		{"repair", "--approve-plugins", "--dry-run"},
 		{"status", "--set", "heapMax"},
