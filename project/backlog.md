@@ -97,7 +97,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
 	- ID: 2026111911125756
 	- Type: Enhancement
-	- Status: Waiting for testing
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261119-111257
@@ -115,6 +115,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: t00mietum's answer to the check 15 question: rename the copy and GFS rotate the old ones, rather than report it with `sudo rm`.
 		- Verified: df7ba to df7be, df7av and df798 pass, and the quick gate passes, CodeQL included. df798 passes under Bash 3.2 with busybox tools too. Each new check failed with its part taken out: the move in repair, setup and install.bash, setup's SHA-256 skip, and each rotation rule.
 		- Not verified: the move and the folder as root. Only the non-root path ran here, and root host check df7bf waits for the round's run.
+		- Verified: root host run 20261119-130556_002 on nov19 passed df7bf, 17 PASS, native checks skipped.
 	- Decisions:
 		- 2026-11-19: The move keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can copy it back.
 		- 2026-11-19: t00mietum widened it to install.bash and setup's copy, which wrote over the old build in place.
@@ -127,12 +128,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: The folder is refused as root when it's a link, or someone other than root could write to it.
 		- 2026-11-19: df7av: the expected text was "...; remove it with: sudo rm /usr/local/bin/tt-minecraftd" with no fix, and is now "...; repair moves it to /var/lib/tt-minecraftd/old-builds/tt-minecraftd.`<mtime>` [fix]". Its other checks are unchanged.
 		- 2026-11-19: df65d and df7at: setup's copy was "sudo install -m 0755 `<exe>` /usr/local/bin/tt-minecraftd", and is now "sudo install -m 0755 -o root -g root `<exe>` `<LocalBin>`", with LocalBin a stand-in path in the test.
-	- Needs local test suite run?: the root host check df7bf, one plain run of cicd/root-host/root-host.bash. It moves a build as root and checks the folder is root's 0755.
+	- Needs local test suite run?: No
 	- Branch: nov19-2026111911125756
 	- Commit: 32e1415
 	- Test case: df7ba, df7bb, df7bc (the move, the copy across filesystems, the rotation), df7av (repair check 15), df7bd (setup's copy), df7be (retire-build), df798 (install.bash), and root host check df7bf
 	- Actual effort: Avg
 	- Swept: every write to /usr/local/bin/tt-minecraftd: repair check 15, setup's copy, install.bash, and cicd's dogfood step. Dogfood puts each dev build on the dev box and is left as it is. install-dev.bash doesn't install the tool. update --self is deferred, per Decisions.
+	- Closed reason: Done
+	- Closed: 20261119
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
