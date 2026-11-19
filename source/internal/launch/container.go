@@ -313,6 +313,11 @@ func (d *Boxed) runArgs() ([]string, error) {
 			// tree.ToServer warns about a missing tree.
 			continue
 		}
+		// Two trees may be one folder by way of a link, and a mount
+		// destination can't be given twice.
+		if slices.Contains(trees, real) {
+			continue
+		}
 		if args, err = appendMount(args, real, false); err != nil {
 			return nil, err
 		}
@@ -359,12 +364,16 @@ func LockedJars(serverDir string) ([]string, error) {
 	}
 	jars := make([]string, 0, len(found))
 	jars = append(jars, paper)
+	// Several links may lead to one file, and Docker and Podman refuse a
+	// mount destination given twice.
+	seen := map[string]bool{paper: true}
 	for _, j := range found {
 		real, err := filepath.EvalSymlinks(j.File)
 		if err != nil {
 			return nil, err
 		}
-		if real != paper {
+		if !seen[real] {
+			seen[real] = true
 			jars = append(jars, real)
 		}
 	}

@@ -233,17 +233,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Two jar links to the same file give the same mount twice, and start fails
 	- ID: 2026111715275253
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
 	- Opened by:
 	- Incorrect behavior [Bug]: `LockedJars` drops duplicates only against paper.jar. With 2 plugin jars linking to one file, the same mount destination is passed twice, and Docker refuses it.
 	- Expected behavior [Bug]: Each file is mounted once.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: 2026-11-19, by df7b1 on the old code: 2 plugin links to one jar gave that jar 3 read-only mounts in the create command.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 28. Detail in detail_backlog.md.
-	- Origin: ba09f6c docker mode start and stop. Not seen before. Plausible.
+	- Origin: ba09f6c docker mode start and stop. Not seen before. Confirmed.
+	- Actual cause [Bug]: `LockedJars` compared each jar's real path only with paper.jar's, not with the jars before it.
+	- Actual fix [Bug]: `LockedJars` keeps each real path once. Container start also mounts each tree once when 2 `ownerTrees` entries lead to one folder, the same fault in the same function.
+	- Swept: `LockedJars` callers: container start's mounts, native start's `ReadOnlyPaths`, and repair's skip map, which a repeat never hurt. `Boxed.runArgs` is the one place mounts are built, and its tree loop had the twin. Left alone: native `ReadWritePaths` with a repeated tree, since systemd is expected to take a path given twice (unverified).
+	- Test case: df7b1
+	- Verified: df7b1 fails on the old code, with 3 mounts of the jar and 3 of the tree, and passes with the fix. The quick gate passes.
+	- Branch: nov19-2026111715275253
+	- Commit: a1ce8e4
+	- Acceptance signoff: Self-closed: reproduced, and the test fails before and passes after.
+	- Closed: 20261119-113637
 
 - From a root shell, ownerAfterStop becomes root
 	- ID: 2026111715275300
