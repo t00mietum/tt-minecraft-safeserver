@@ -548,7 +548,7 @@ cicd/                        build, test, and release scripts
 | `runMode`           | `podman`                          | `podman` or `docker`, and `native` once it's back. `setup` picks one
 | `runUser`           | `minecraftd`
 | `runGroup`          | same as `runUser`                 | Stays the group before and after a run
-| `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`, else the account it runs as, unless that's root
+| `ownerAfterStop`    | the operator                      | From `SUDO_USER`, else `USER`, else the account it runs as, skipping root at each step
 | `serverDir`         | `/srv/tt-minecraftd/server`
 | `ownerTrees`        | `[<serverDir>]`                   | Every tree that changes hands, such as a world on another dataset
 | `zfsDataset`        | none                              | No snapshots when unset

@@ -258,7 +258,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - From a root shell, ownerAfterStop becomes root
 	- ID: 2026111715275300
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -268,7 +269,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: a test with `USER=root` and with `SUDO_USER=root` got root.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 31. Detail in detail_backlog.md.
+		- Verified: df7b2 fails on the old code with root from `SUDO_USER` or `USER`, and passes after. It fails too with the uid 0 lookup taken out. The quick gate passed.
+		- Swept: `operator` is the one place the default is made. Account already skipped root by uid. setup refuses an empty operator, repair skips the group check when it's empty, and stop leaves the trees with runUser, as design.md says. The root host checks run setup as the operator, not root.
 	- Origin: 715f9b3 config defaults, c076344. Not seen before. Confirmed.
+	- Actual cause [Bug]: The default took the first valid name from `SUDO_USER`, `USER` and the running account, and only the last one left root out.
+	- Actual fix [Bug]: Each of the three is skipped when it's root or another name for uid 0. design.md's table says root is skipped at each step.
+	- Decisions:
+		- A name that looks up to uid 0, such as `toor`, counts as root, as Account already did by uid. A name that can't be looked up isn't root.
+		- An `ownerAfterStop: root` set by hand is kept, since it's the operator's own call.
+	- Test case: df7b2
+	- Branch: nov19-2026111715275300
+	- Commit: bd0d0c1
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: reproduced, its test failed before the fix and passes after.
+	- Closed: 20261119-114006
 
 - A checked download can be changed by the folder's owner before it's renamed into place
 	- ID: 2026111715275315

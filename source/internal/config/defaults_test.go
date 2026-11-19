@@ -5,6 +5,7 @@ package config
 
 import (
 	"os"
+	"os/user"
 	"reflect"
 	"regexp"
 	"strings"
@@ -144,6 +145,45 @@ func TestOperatorFromAccount(t *testing.T) {
 		if got := Account(); got == "" {
 			t.Error("Account gave nothing for a non-root uid")
 		}
+	}
+}
+
+// From a root shell, SUDO_USER or USER can be root. The default skips it, or
+// stop would hand the trees to root and repair would add root to the group.
+func TestOperatorSkipsRoot(t *testing.T) {
+	defer testid.Line(t, "df7b2")
+	cases := []struct{ sudoUser, user, account, want string }{
+		{"root", "root", "", ""},
+		{"root", "", "", ""},
+		{"", "root", "", ""},
+		{"root", "bob", "", "bob"},
+		{"", "root", "dave", "dave"},
+		{"alice", "root", "", "alice"},
+	}
+	for _, tc := range cases {
+		asOperator(t, tc.sudoUser, tc.user)
+		asAccount(t, tc.account)
+		if c, _ := mustLoad(t, ""); c.OwnerAfterStop != tc.want {
+			t.Errorf("SUDO_USER %q USER %q account %q: ownerAfterStop %q, want %q", tc.sudoUser, tc.user, tc.account, c.OwnerAfterStop, tc.want)
+		}
+	}
+	// Another name for uid 0 counts as root too.
+	old := lookupUser
+	lookupUser = func(name string) (*user.User, error) {
+		if name == "toor" {
+			return &user.User{Username: name, Uid: "0"}, nil
+		}
+		return old(name)
+	}
+	t.Cleanup(func() { lookupUser = old })
+	asOperator(t, "toor", "bob")
+	if c, _ := mustLoad(t, ""); c.OwnerAfterStop != "bob" {
+		t.Errorf("SUDO_USER toor: ownerAfterStop %q, want bob", c.OwnerAfterStop)
+	}
+	// An explicit setting is the operator's own call, root included.
+	asOperator(t, "", "")
+	if c, _ := mustLoad(t, writeConfig(t, "ownerAfterStop: root\n")); c.OwnerAfterStop != "root" {
+		t.Errorf("set ownerAfterStop: root gave %q", c.OwnerAfterStop)
 	}
 }
 
