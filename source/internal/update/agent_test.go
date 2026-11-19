@@ -57,6 +57,8 @@ type agentRig struct {
 	fetched []string
 	// extra are more files the host serves, by path.
 	extra map[string][]byte
+	// moved are paths the host redirects, to the address given.
+	moved map[string]string
 }
 
 func newAgentRig(t *testing.T, answers string) *agentRig {
@@ -82,6 +84,10 @@ func newAgentRig(t *testing.T, answers string) *agentRig {
 		case "/sums":
 			_, _ = w.Write([]byte(a.page))
 		default:
+			if to, ok := a.moved[r.URL.Path]; ok {
+				http.Redirect(w, r, to, http.StatusFound)
+				return
+			}
 			if b, ok := a.extra[r.URL.Path]; ok {
 				_, _ = w.Write(b)
 				return
@@ -232,6 +238,53 @@ func TestAgentJars(t *testing.T) {
 	a.u.Agent, a.u.AgentNote = nil, "not asked as root"
 	if err := a.u.Do(ctx); err != nil || !strings.Contains(a.out.String(), "NOTE    not asked as root") {
 		t.Errorf("as root: %v\n%s", err, a.out)
+	}
+}
+
+// A redirect is held to agentHosts like the agent's own addresses, for the
+// jar and its hash page. The certificate covers *.example.com, so only the
+// host check can refuse cdn.example.com.
+func TestAgentRedirectsHeldToHosts(t *testing.T) {
+	defer testid.Line(t, "df7bt")
+	ctx := context.Background()
+	moved := func(a *agentRig) {
+		a.moved = map[string]string{"/get/jar": "https://cdn.example.com/Chunky-1.1.jar", "/get/sums": "https://cdn.example.com/sums"}
+		a.answer.Jars[0].URL = "https://example.com/get/jar"
+	}
+
+	a := newAgentRig(t, "y\n")
+	moved(a)
+	old := a.jar(t)
+	if err := a.u.Do(ctx); err != nil || !bytes.Equal(a.jar(t), old) || slices.Contains(a.fetched, "/Chunky-1.1.jar") ||
+		!strings.Contains(a.out.String(), "FAILED  plugins/Chunky.jar: ") || !strings.Contains(a.out.String(), "redirected, but host cdn.example.com isn't in agentHosts") {
+		t.Errorf("jar: %v, fetched %q\n%s", err, a.fetched, a.out)
+	}
+	a.noTemps(t)
+
+	a = newAgentRig(t, "y\n")
+	moved(a)
+	a.answer.Jars[0].URL, a.answer.Jars[0].HashFrom = "https://example.com/Chunky-1.1.jar", "https://example.com/get/sums"
+	if err := a.u.Do(ctx); err != nil || !bytes.Equal(a.jar(t), old) || slices.Contains(a.fetched, "/sums") ||
+		!strings.Contains(a.out.String(), "can't read its hash page") || !strings.Contains(a.out.String(), "cdn.example.com isn't in agentHosts") {
+		t.Errorf("hash page: %v, fetched %q\n%s", err, a.fetched, a.out)
+	}
+
+	// Listed, the same redirects are followed.
+	a = newAgentRig(t, "y\ny\n")
+	moved(a)
+	a.answer.Jars[0].HashFrom = "https://example.com/get/sums"
+	a.u.Cfg.AgentHosts = append(a.u.Cfg.AgentHosts, "cdn.example.com")
+	if err := a.u.Do(ctx); err != nil || !bytes.Equal(a.jar(t), a.newJar) {
+		t.Errorf("listed: %v, fetched %q\n%s", err, a.fetched, a.out)
+	}
+
+	// A redirect to plain http stays refused with the default client's rule
+	// gone too.
+	a = newAgentRig(t, "y\n")
+	moved(a)
+	a.moved["/get/jar"] = "http://example.com/Chunky-1.1.jar"
+	if err := a.u.Do(ctx); err != nil || !bytes.Equal(a.jar(t), old) || !strings.Contains(a.out.String(), "isn't https") {
+		t.Errorf("http: %v\n%s", err, a.out)
 	}
 }
 

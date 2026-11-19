@@ -560,7 +560,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Hold the agent's download redirects to agentHosts
 	- ID: 2026111715275472
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -568,13 +568,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: Only the agent's first URL is checked against agentHosts. A redirect can take the download to any public https host, while the plan says the jar was found on the first one.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 42. Detail in detail_backlog.md.
+		- Verified: df7bt fails with the hold taken out, where the jar came through a redirect to a host not in agentHosts, and passes now. The quick gate passed.
 	- Note: No.
-	- Origin: 91a46c8. Not seen before. Plausible.
+	- Origin: 91a46c8. Not seen before. Confirmed by df7bt on the old code.
+	- Closed reason: Done
+	- Test case: df7bt
+	- Branch: nov19-2026111715275472
+	- Commit: 262b7f4
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261119-130030
+	- Decisions:
+		- update's `fetcher`, the one path for the agent's jars and hash pages, holds each redirect to the same check as the first address: https, the usual port, no user name, a host in agentHosts. It copies whatever client it's given, so tests run the hold too.
+		- `fetch` still follows redirects to any public host, since it only reads pages for the agent.
+		- The default agentHosts adds GitHub's `release-assets`, `objects` and `raw` githubusercontent hosts, where github.com sends downloads. A config with its own list needs them for GitHub, and the error names the host.
+	- Swept: the 3 `fetcher` uses (hash page, agent jar, agent Paper) share the hold. Known sources' downloads have fixed hosts and aren't the agent's, so they're left alone.
 
 - Refuse NAT64 and 6to4 forms of LAN addresses in the agent's fetch, and don't tell the model which address was refused
 	- ID: 2026111715275500
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152755
@@ -582,13 +594,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: fetch lets through NAT64 and 6to4 forms of LAN addresses and a few reserved ranges. A refused fetch tells the model the address a name resolved to, which design.md says the agent shouldn't learn.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 43. Detail in detail_backlog.md.
+		- Verified: df7bs fails on the old check, where all 24 addresses passed and a refusal named 127.0.0.1, and passes now. The quick gate passed.
+		- 2026-11-19: df767 `TestFetchOnlyReachesPublicAddresses` expects the refusal to say "doesn't lead to a public address", was "isn't a public address".
 	- Note: 2026-11-17: each address passed the check in a test.
 	- Origin: 91a46c8. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Test case: df7bs, df767
+	- Branch: nov19-2026111715275472
+	- Commit: 1d27f3b
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261119-130030
+	- Decisions:
+		- NAT64 (`64:ff9b::/96`) and 6to4 addresses are judged by the IPv4 address in them, so a public site over NAT64 still works. Teredo, the local-use NAT64 prefix, the old IPv4-compatible forms, and the reserved IPv4 and IPv6 ranges are refused outright.
+		- A failed fetch tells the agent only the kind of failure: refused, a failed lookup, or a connect error. Go's text with the resolved address, the resolver, or this host's own address is dropped. update's download errors go to the operator, and keep the address.
+	- Swept: `publicOnly` is the only outbound address check, by a grep for IsPrivate, IsGlobalUnicast and Dialer under source. update's agent downloads use the same dialer through `PublicClient`.
 
 - Send the vendor API key only to the vendor's own host
 	- ID: 2026111715275517
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Waiting on signoff
+		- It narrows a recorded call and changes README's wording. A person checks the README lines and OKs the narrower key rule, per the Check entry in questions.md.
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152755
@@ -596,8 +621,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
+		- Verified: df7bv fails on the old code, where the vendor key went to OpenRouter, a look-alike host, a local server, and the other vendor's host, and passes now. df761 still passes. The quick gate passed.
 	- Note: No.
 	- Origin: 91a46c8. Not seen before.
+	- Test case: df7bv, df761
+	- Branch: nov19-2026111715275472
+	- Commit: aab781b
+	- Decisions:
+		- With no `TT_MINECRAFTD_AGENT_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes only when agentURL is https on that kind's own API host. A gateway or local server gets `TT_MINECRAFTD_AGENT_KEY` or no key, and a 401 already names that variable.
+		- design.md's key line and README's key line and OpenRouter example say so.
+	- Against: 2026111210033649's "The key is TT_MINECRAFTD_AGENT_KEY, else OPENAI_API_KEY or ANTHROPIC_API_KEY". The fallback now holds only for the vendor's own API.
+	- Swept: the key is read only in `agent.New`, by a grep for _API_KEY under source.
 
 - Add a README section on using the server after setup
 	- ID: 2026111715275532

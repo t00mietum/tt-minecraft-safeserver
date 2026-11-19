@@ -242,11 +242,15 @@ func (s agentStep) plan(dryRun bool) string {
 // maxHashPage caps a hash page. It's searched as is, not handed to the agent.
 const maxHashPage = 4 << 20
 
+// fetcher gets the agent's jars and hash pages, with redirects held to
+// agentHosts like the addresses themselves.
 func (u *Update) fetcher() download.Client {
-	if u.Fetch.HTTP == nil {
-		return download.Client{HTTP: agent.PublicClient(10 * time.Minute), UserAgent: u.Fetch.UserAgent}
+	c := u.Fetch
+	if c.HTTP == nil {
+		c.HTTP = agent.PublicClient(10 * time.Minute)
 	}
-	return u.Fetch
+	c.HTTP = agent.HoldTo(c.HTTP, u.Cfg.AgentHosts)
+	return c
 }
 
 // hashOnPage checks the hash the agent gave is on the page it named.

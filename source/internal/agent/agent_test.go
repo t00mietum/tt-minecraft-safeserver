@@ -323,3 +323,37 @@ func TestPaperAndMoveReport(t *testing.T) {
 		t.Errorf("a report alone: %v", err)
 	}
 }
+
+// The vendor's own key goes only to the vendor's own API, not to a gateway or
+// local server agentURL names. TT_MINECRAFTD_AGENT_KEY goes to any.
+func TestVendorKeyStaysHome(t *testing.T) {
+	defer testid.Line(t, "df7bv")
+	env := map[string]string{"ANTHROPIC_API_KEY": "ak", "OPENAI_API_KEY": "ok"}
+	old := getenv
+	getenv = func(k string) string { return env[k] }
+	t.Cleanup(func() { getenv = old })
+	cfg := config.Defaults()
+	cfg.AgentModel = "m"
+	for _, c := range []struct{ kind, url, key string }{
+		{"openai", "", "ok"},
+		{"openai", "https://api.openai.com/v1", "ok"},
+		{"openai", "https://API.OpenAI.com./v1", "ok"},
+		{"anthropic", "https://api.anthropic.com/v1", "ak"},
+		{"openai", "https://openrouter.ai/api/v1", ""},
+		{"openai", "https://api.openai.com.evil.example/v1", ""},
+		{"openai", "http://127.0.0.1:11434/v1", ""},
+		{"openai", "https://api.anthropic.com/v1", ""},
+		{"anthropic", "https://gateway.example/v1", ""},
+	} {
+		cfg.Agent, cfg.AgentURL = c.kind, c.url
+		a, err := New(&cfg)
+		if api, ok := a.(API); err != nil || !ok || api.Key != c.key {
+			t.Errorf("%s at %q: %+v, %v", c.kind, c.url, a, err)
+		}
+	}
+	env["TT_MINECRAFTD_AGENT_KEY"] = "tk"
+	cfg.Agent, cfg.AgentURL = "openai", "https://openrouter.ai/api/v1"
+	if a, err := New(&cfg); err != nil || a.(API).Key != "tk" {
+		t.Errorf("tool key: %+v, %v", a, err)
+	}
+}

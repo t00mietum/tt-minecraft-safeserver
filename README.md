@@ -117,9 +117,9 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 - Run `tt-minecraftd update` as yourself, not with sudo. It asks the agent as you, then runs itself through sudo. Started as root, it skips the agent and says so.
 
-- An API key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none.
+- An API key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, which only go to OpenAI's or Anthropic's own API. A local server needs none.
 
-- Jars and hash pages may only come from the hosts in `agentHosts`. The default has Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from somewhere else is listed as skipped, with its host, so you can add it.
+- Jars and hash pages may only come from the hosts in `agentHosts`, redirects included. The default has Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from somewhere else is listed as skipped, with its host, so you can add it.
 
 - OpenAI, or any server with the same chat API:
 
@@ -128,7 +128,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 	agentModel: gpt-5-mini
 	~~~
 
-- OpenRouter:
+- OpenRouter, with its key in `TT_MINECRAFTD_AGENT_KEY`:
 
 	~~~text
 	agent: openai

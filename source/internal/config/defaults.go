@@ -68,6 +68,7 @@ func Defaults() Config {
 			"hangar.papermc.io", "hangarcdn.papermc.io",
 			"modrinth.com", "api.modrinth.com", "cdn.modrinth.com",
 			"github.com", "api.github.com",
+			"release-assets.githubusercontent.com", "objects.githubusercontent.com", "raw.githubusercontent.com", // where github.com sends downloads
 			"download.geysermc.org",
 			"fill.papermc.io", "fill-data.papermc.io",
 		},

@@ -787,12 +787,12 @@ cicd/                        build, test, and release scripts
 	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents.
 	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
 
-- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.
+- The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. The usual one goes only to its vendor's own API, so a gateway or other server in `agentURL` gets `TT_MINECRAFTD_AGENT_KEY` or nothing. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.
 
 - What it's told: the Minecraft version, the Paper build, and for each jar it's asked about, its path under `serverDir`, its name and version from `plugin.yml`, its SHA-256, and its source if it has one. Nothing else from the host, such as the config, addresses, or player names.
 
 - What it may do:
-	- Read web pages and APIs over HTTPS, through the one tool `update` gives the API kinds, `fetch`. It only sends GET, only follows `https`, refuses loopback, LAN, and link-local addresses, caps each page's size, and gives back text. A run has a cap on its fetches too.
+	- Read web pages and APIs over HTTPS, through the one tool `update` gives the API kinds, `fetch`. It only sends GET, only follows `https`, refuses loopback, LAN, and link-local addresses, caps each page's size, and gives back text. The NAT64 and 6to4 forms of those addresses and the reserved ranges are refused too, and a refusal doesn't say which address a name led to. A run has a cap on its fetches too.
 	- A `command` agent uses its own web tools instead. Its flags should allow web reads and nothing else, such as no shell and no file writes.
 
 - What it can't do:
@@ -803,7 +803,7 @@ cicd/                        build, test, and release scripts
 	- Get past `egress`. That limits the service account, and the agent runs as the operator, so neither one changes the other.
 
 - Each jar it finds is checked like any other download, and then a person approves it:
-	- The download address and the hash page are `https`, on a host in `agentHosts`. The default is the main plugin hosts: Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from another host is listed as skipped, with the host, so the operator can add it.
+	- The download address and the hash page are `https`, on a host in `agentHosts`, and so is every redirect from them. The default is the main plugin hosts: Hangar, Modrinth, GitHub and the hosts its downloads redirect to, GeyserMC, and PaperMC. A jar from another host is listed as skipped, with the host, so the operator can add it.
 	- The jar's size is capped, and its SHA-256 or SHA-512 has to match the hash the agent gave. The tool fetches the hash page itself, and that hash has to be in it. A source that publishes no hash is allowed, and the jar is shown with a warning.
 	- The new jar's `plugin.yml`, `paper-plugin.yml`, or `extension.yml` has to name the same plugin as the old one.
 	- The plan shows each jar's host, old and new versions, and hash, plus the agent's notes, such as config changes. The agent's text has its control characters dropped.
