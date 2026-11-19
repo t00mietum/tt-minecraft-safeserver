@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Make a logged-in CLI subscription the recommended update agent kind
 	- ID: 2026111913431995
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261119-134319
@@ -35,6 +35,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 20261119 answer on 2026111715275517: the most preferred option is a CLI run as the logged-in user, on that user's subscription, rather than an API at about 10 times the cost.
 		- Lead README, design.md and the config template with the command kind for that, and keep the API kinds as the fallback.
+		- Verified: dfh8400 and TestNewInstall pass. The quick gate passed, all areas. README's flags still unchecked against a live subscription.
+		- Swept: agent kinds listed in README's Update agent, design.md's kinds and settings row, and setup's configText, the only config setup writes. No other config template exists.
+		- Waiting on signoff for the README and design.md wording, and the comment block setup writes.
+	- Branch: nov19b-2026111913431995
+	- Test case: dfh8400 (setup's config leads with a commented command agent, which reads back once uncommented)
+	- Actual effort: Low
+	- Decisions:
+		- README leads with the subscription CLI and calls the API kinds the fallback. design.md lists command first, marked recommended.
+		- The config template is the file setup writes. It gets a commented-out Codex example only when agent isn't given, so nothing turns on unasked.
+	- Commit: 035c441
+	- Closed reason: Done
+	- Acceptance signoff: 20261119, closed in round nov19b. The order and fallback wording meet the answer on 2026111715275517, and dfh8400 checks the config hint.
 
 - repair counts a Paper started by hand as runUser as the tool's own
 	- ID: 2026111715275170

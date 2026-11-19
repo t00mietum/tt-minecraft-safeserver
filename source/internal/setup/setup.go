@@ -635,6 +635,15 @@ func (s *Setup) reporter(failed *bool) repair.Report {
 	}
 }
 
+// agentHint leads with a CLI on the operator's own subscription, which
+// costs far less than the API kinds. README's Update agent has the rest.
+const agentHint = `
+# Update agent, off until set. A subscription CLI run as you is cheapest.
+# The API kinds, openai and anthropic, are the fallback. See README's Update agent.
+# agent: command
+# agentCommand: [codex, --search, exec, --sandbox, read-only, --skip-git-repo-check, --ephemeral, -]
+`
+
 // configText is the file setup writes: only the keys that were given or
 // picked, so the rest keep following the defaults.
 func configText(opts []config.Option) string {
@@ -642,6 +651,9 @@ func configText(opts []config.Option) string {
 	b.WriteString("# tt-minecraftd config, written by setup. design.md's Configuration model lists every key.\n")
 	for _, o := range lastOfEach(opts) {
 		b.WriteString(o.Key + ": " + o.Value + "\n")
+	}
+	if !given(opts, "agent") {
+		b.WriteString(agentHint)
 	}
 	return b.String()
 }

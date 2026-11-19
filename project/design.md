@@ -578,7 +578,7 @@ cicd/                        build, test, and release scripts
 | `firewall`          | `true`                            | See [Firewall](#firewall)
 | `startAtBoot`       | `false`
 | `extraArgs`         | none                              | Added to the Paper command as given
-| `agent`             | `none`                            | `openai`, `anthropic`, `command`, or `none`. See [Update agent](#update-agent)
+| `agent`             | `none`                            | `command` (recommended), `openai`, `anthropic`, or `none`. See [Update agent](#update-agent)
 | `agentURL`          | the kind's own                    | Such as `http://127.0.0.1:11434/v1` for a local Ollama
 | `agentModel`        | none                              | Needed for `openai` and `anthropic`
 | `agentCommand`      | none                              | For `command`, the program and its arguments, as a list
@@ -782,9 +782,9 @@ cicd/                        build, test, and release scripts
 	- Everything for one run goes to the agent in one question, since each can take minutes.
 
 - Kinds of agent:
-	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio.
+	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents. It's the recommended kind: a CLI run as the logged-in operator, on that operator's own subscription, costs about a tenth of an API. The config `setup` writes has a commented-out example.
+	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio. It and `anthropic` are the fallback.
 	- `anthropic`: Anthropic's messages API.
-	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents.
 	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
 
 - The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. The usual one goes only to its vendor's own API, so a gateway or other server in `agentURL` gets `TT_MINECRAFTD_AGENT_KEY` or nothing. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.

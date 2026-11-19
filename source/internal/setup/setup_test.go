@@ -1092,3 +1092,29 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 		}
 	}
 }
+
+// The written config leads with the command kind, commented out, and the
+// lines read back as a working agent once uncommented.
+func TestConfigAgentHint(t *testing.T) {
+	defer testid.Line(t, "dfh8400")
+	text := configText([]config.Option{{Key: "runMode", Value: "podman"}})
+	if !strings.Contains(text, "# agent: command\n") || !strings.Contains(text, "# agentCommand: [codex") {
+		t.Fatalf("no agent hint:\n%s", text)
+	}
+	if strings.Contains(configText([]config.Option{{Key: "agent", Value: "openai"}}), "agentCommand") {
+		t.Fatal("hint written beside a given agent")
+	}
+	path := filepath.Join(t.TempDir(), "config.shcl")
+	live := strings.NewReplacer("# agent: ", "agent: ", "# agentCommand: ", "agentCommand: ").Replace(text)
+	if err := os.WriteFile(path, []byte(live), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var c config.Config
+	warns, err := config.Read(path, &c)
+	if err != nil || len(warns) > 0 {
+		t.Fatalf("read: %v %v", err, warns)
+	}
+	if c.Agent != "command" || len(c.AgentCommand) != 8 || c.AgentCommand[0] != "codex" || c.AgentCommand[7] != "-" {
+		t.Fatalf("got %q %q", c.Agent, c.AgentCommand)
+	}
+}
