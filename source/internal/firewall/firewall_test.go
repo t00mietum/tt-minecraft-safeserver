@@ -147,6 +147,26 @@ func TestRules(t *testing.T) {
 	}
 }
 
+// A mapped allowFrom address in the config file goes in the IPv4 set, where
+// an IPv4 client's packets are matched.
+func TestMappedAllowFromIsIPv4(t *testing.T) {
+	defer testid.Line(t, "df7b6")
+	path := filepath.Join(t.TempDir(), "config.shcl")
+	if err := os.WriteFile(path, []byte("allowFrom: [\"::ffff:10.0.0.1\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, warns, err := config.Load(path, nil)
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("Load: %v %v", err, warns)
+	}
+	rules := Rules(&c, Local{})
+	set4, _, _ := strings.Cut(rules[strings.Index(rules, "set allow4 {"):], "\t}")
+	set6, _, _ := strings.Cut(rules[strings.Index(rules, "set allow6 {"):], "\t}")
+	if !strings.Contains(set4, "10.0.0.1") || strings.Contains(set6, "10.0.0.1") {
+		t.Errorf("10.0.0.1 isn't in allow4 alone:\n%s\n%s", set4, set6)
+	}
+}
+
 // The server's own ports stay open to it on loopback, ahead of the drop,
 // and nothing else on loopback does.
 func TestOwnPortsOnLoopback(t *testing.T) {

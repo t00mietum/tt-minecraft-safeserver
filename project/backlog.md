@@ -316,7 +316,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - IPv4-mapped addresses in allowFrom and bindIP load without a warning and never match
 	- ID: 2026111715275330
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
@@ -327,6 +328,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 33. Detail in detail_backlog.md.
 	- Origin: e3a0636 shcl config reader. Not seen before. Confirmed for config.
+	- Actual cause [Bug]: `checkAddr` and `checkAllow` kept an address or range in its IPv4-mapped IPv6 form. nft and Paper see an IPv4 client as IPv4, so a mapped entry in the IPv6 set matched nothing.
+	- Actual fix [Bug]: Both unmap. A mapped address is read as the IPv4 address, and a mapped range of /96 or narrower as the IPv4 range, so `::ffff:10.1.2.3/104` is `10.0.0.0/8`. bindIP goes through `checkAddr` too. design.md's allowFrom row says so.
+	- Test case: df7b5 (config reads mapped forms as IPv4), df7b6 (a config file's mapped allowFrom lands in the firewall's allow4 set)
+	- Verified: df7b5 and df7b6 fail on the old reader and pass with the fix. The quick gate passed.
+	- Swept: `netip.Parse` across `source`. Config's `loopback` uses `IsLoopback`, which already unmaps. The agent's `publicOnly` and the firewall's resolver read already unmap. firewall's `is4` and route reads take only checked config values or kernel output. `start --set` goes through the same setters.
+	- Branch: nov19-2026111715275330
+	- Commit: ff4ef78
+	- Acceptance signoff: Self-closed: its tests fail before and pass after, per the standing close policy.
+	- Closed: 20261119-114901
+	- Decisions:
+		- Unmap rather than warn, since a mapped entry has only one meaning here. A range wider than /96 isn't all IPv4, so it stays IPv6.
 
 - test-id.bash misses root host checks run through native, so their IDs can be reused
 	- ID: 2026111715275346

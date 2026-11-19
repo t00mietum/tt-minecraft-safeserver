@@ -564,7 +564,7 @@ cicd/                        build, test, and release scripts
 | `gamePort`          | `25565`                           | TCP, for Java players
 | `bedrock`           | `true`                            | Geyser and Floodgate
 | `bedrockPort`       | `19132`                           | TCP and UDP, for Bedrock players. Can't be `gamePort`
-| `allowFrom`         | `[lan]`                           | Who may connect to the game ports. `lan`, `any`, or addresses and ranges
+| `allowFrom`         | `[lan]`                           | Who may connect to the game ports. `lan`, `any`, or addresses and ranges. An IPv4-mapped address, such as `::ffff:10.0.0.1`, is read as IPv4
 | `joinRateLimit`     | `20`                              | New connections per minute from one address
 | `egress`            | `web`                             | What the server may connect out to. `web` or `open`
 | `hideOnlinePlayers` | `true`
