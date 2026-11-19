@@ -22,26 +22,76 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- test-id.bash's header says to take an ID from the clock, against the next-after-highest rule
-	- ID: 2026111911594103
+- repair counts a Paper started by hand as runUser as the tool's own
+	- ID: 2026111715275170
 	- Type: Bug
-	- Status: Done
+	- Status: Waiting on signoff
+		- Against a recorded decision, so it waits on the Check: entry in questions.md.
+	- Target version: v1.0.0-beta.1
 	- Priority: Low
-	- Opened: 20261119-115941
+	- Opened: 20261117-152751
 	- Opened by:
-	- Estimated effort: Low
+	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
+	- Expected behavior [Bug]: repair tells them apart the way status does.
+	- Reproduced [Bug]: 2026-11-19: a Paper as runUser in a login session's cgroup passed the old check, with no finding.
 	- Progress log:
-		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to df7b7 and df7b8.
-		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
-		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
-		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
+		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
+		- Verified: df7ay fails on the old check, which found nothing for a hand-started Paper as runUser, and passes now. df5zk passes with its process table in the new form. The quick gate passes.
+	- Origin: b42345a repair checks. Not seen before. Confirmed.
+	- Actual cause [Bug]: The check took any Paper under runUser's uid as the tool's own. status decides by the process's cgroup and the container's wrapper.
+	- Actual fix [Bug]: The check reads the same process table as status and calls `status.Others`, which uses status's own cgroup and wrapper test. A Paper as runUser outside the native unit, or in a container not under the wrapper, is reported.
 	- Decisions:
-		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
-	- Test case: n/a: comment-only change in a header. The lint step's test ID check still passes.
+		- `status.Others` is the one place both use, so the 2 can't drift apart again. `repair.Host.ReadFile` reads `/proc`, nil meaning the real one.
+		- A second Paper that looks like ours is reported too, as status does, since start runs only one.
+		- design.md's check 14 now says how it tells them apart.
+	- Against: 2026111111065763's "Other Paper servers are told apart by uid". The uid can't tell a hand-started Paper as runUser from ours.
+	- Sweep: other places that pick out the tool's own Paper.
+	- Swept: status goes through the same `sight`. start's `refuseOthers` and setup's `refuseRunning` refuse any Paper, whoever runs it, so the uid never mattered there. `grep -rn 'PaperProcs\|IsPaper\|RunningPaper' source` finds no other caller.
+	- Branch: nov19-2026111715275170
+	- Commit: 1466e71
+	- Test case: df7ay, df5zk
+
+- Send the vendor API key only to the vendor's own host
+	- ID: 2026111715275517
+	- Type: Enhancement
+	- Status: Waiting on signoff
+		- It narrows a recorded call and changes README's wording. A person checks the README lines and OKs the narrower key rule, per the Check entry in questions.md.
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
+		- Verified: df7bv fails on the old code, where the vendor key went to OpenRouter, a look-alike host, a local server, and the other vendor's host, and passes now. df761 still passes. The quick gate passed.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before.
+	- Test case: df7bv, df761
+	- Branch: nov19-2026111715275472
+	- Commit: aab781b
+	- Decisions:
+		- With no `TT_MINECRAFTD_AGENT_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes only when agentURL is https on that kind's own API host. A gateway or local server gets `TT_MINECRAFTD_AGENT_KEY` or no key, and a 401 already names that variable.
+		- design.md's key line and README's key line and OpenRouter example say so.
+	- Against: 2026111210033649's "The key is TT_MINECRAFTD_AGENT_KEY, else OPENAI_API_KEY or ANTHROPIC_API_KEY". The fallback now holds only for the vendor's own API.
+	- Swept: the key is read only in `agent.New`, by a grep for _API_KEY under source.
+
+- Add a README section on using the server after setup
+	- ID: 2026111715275532
+	- Type: Enhancement
+	- Status: Waiting on UAT
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
+		- Waiting on UAT: README wording is a matter of taste. Someone should read the new sections.
+	- Origin: Not seen before.
+	- Branch: nov19-2026111715275532
+	- Commit: 61984e5
+	- Test case: none, README text. Markdownlint and the quick gate pass.
 	- Actual effort: Low
-	- Acceptance signoff: Self-closed: mechanical, a header comment.
-	- Closed reason: Done
-	- Closed: 20261119-120500
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
@@ -93,6 +143,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
+
+- test-id.bash's header says to take an ID from the clock, against the next-after-highest rule
+	- ID: 2026111911594103
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261119-115941
+	- Opened by:
+	- Estimated effort: Low
+	- Progress log:
+		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to df7b7 and df7b8.
+		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
+		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
+		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
+	- Decisions:
+		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
+	- Test case: n/a: comment-only change in a header. The lint step's test ID check still passes.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical, a header comment.
+	- Closed reason: Done
+	- Closed: 20261119-120500
 
 - Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
 	- ID: 2026111911125756
@@ -168,35 +239,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: df7bg, df7bh
 	- Acceptance signoff: Self-closed: reproduced on Paper 26.3, and its tests fail without the fix and pass with it. The download at each start is a Check: entry.
 	- Closed: 20261119-123825
-
-- repair counts a Paper started by hand as runUser as the tool's own
-	- ID: 2026111715275170
-	- Type: Bug
-	- Status: Waiting on signoff
-		- Against a recorded decision, so it waits on the Check: entry in questions.md.
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152751
-	- Opened by:
-	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
-	- Expected behavior [Bug]: repair tells them apart the way status does.
-	- Reproduced [Bug]: 2026-11-19: a Paper as runUser in a login session's cgroup passed the old check, with no finding.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
-		- Verified: df7ay fails on the old check, which found nothing for a hand-started Paper as runUser, and passes now. df5zk passes with its process table in the new form. The quick gate passes.
-	- Origin: b42345a repair checks. Not seen before. Confirmed.
-	- Actual cause [Bug]: The check took any Paper under runUser's uid as the tool's own. status decides by the process's cgroup and the container's wrapper.
-	- Actual fix [Bug]: The check reads the same process table as status and calls `status.Others`, which uses status's own cgroup and wrapper test. A Paper as runUser outside the native unit, or in a container not under the wrapper, is reported.
-	- Decisions:
-		- `status.Others` is the one place both use, so the 2 can't drift apart again. `repair.Host.ReadFile` reads `/proc`, nil meaning the real one.
-		- A second Paper that looks like ours is reported too, as status does, since start runs only one.
-		- design.md's check 14 now says how it tells them apart.
-	- Against: 2026111111065763's "Other Paper servers are told apart by uid". The uid can't tell a hand-started Paper as runUser from ours.
-	- Sweep: other places that pick out the tool's own Paper.
-	- Swept: status goes through the same `sight`. start's `refuseOthers` and setup's `refuseRunning` refuse any Paper, whoever runs it, so the uid never mattered there. `grep -rn 'PaperProcs\|IsPaper\|RunningPaper' source` finds no other caller.
-	- Branch: nov19-2026111715275170
-	- Commit: 1466e71
-	- Test case: df7ay, df5zk
 
 - cmd's stop and restart guard misses namespaced forms such as minecraft:stop
 	- ID: 2026111715275187
@@ -611,48 +653,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- NAT64 (`64:ff9b::/96`) and 6to4 addresses are judged by the IPv4 address in them, so a public site over NAT64 still works. Teredo, the local-use NAT64 prefix, the old IPv4-compatible forms, and the reserved IPv4 and IPv6 ranges are refused outright.
 		- A failed fetch tells the agent only the kind of failure: refused, a failed lookup, or a connect error. Go's text with the resolved address, the resolver, or this host's own address is dropped. update's download errors go to the operator, and keep the address.
 	- Swept: `publicOnly` is the only outbound address check, by a grep for IsPrivate, IsGlobalUnicast and Dialer under source. update's agent downloads use the same dialer through `PublicClient`.
-
-- Send the vendor API key only to the vendor's own host
-	- ID: 2026111715275517
-	- Type: Enhancement
-	- Status: Waiting on signoff
-		- It narrows a recorded call and changes README's wording. A person checks the README lines and OKs the narrower key rule, per the Check entry in questions.md.
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
-		- Verified: df7bv fails on the old code, where the vendor key went to OpenRouter, a look-alike host, a local server, and the other vendor's host, and passes now. df761 still passes. The quick gate passed.
-	- Note: No.
-	- Origin: 91a46c8. Not seen before.
-	- Test case: df7bv, df761
-	- Branch: nov19-2026111715275472
-	- Commit: aab781b
-	- Decisions:
-		- With no `TT_MINECRAFTD_AGENT_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes only when agentURL is https on that kind's own API host. A gateway or local server gets `TT_MINECRAFTD_AGENT_KEY` or no key, and a 401 already names that variable.
-		- design.md's key line and README's key line and OpenRouter example say so.
-	- Against: 2026111210033649's "The key is TT_MINECRAFTD_AGENT_KEY, else OPENAI_API_KEY or ANTHROPIC_API_KEY". The fallback now holds only for the vendor's own API.
-	- Swept: the key is read only in `agent.New`, by a grep for _API_KEY under source.
-
-- Add a README section on using the server after setup
-	- ID: 2026111715275532
-	- Type: Enhancement
-	- Status: Waiting on UAT
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152755
-	- Opened by:
-	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
-		- Waiting on UAT: README wording is a matter of taste. Someone should read the new sections.
-	- Origin: Not seen before.
-	- Branch: nov19-2026111715275532
-	- Commit: 61984e5
-	- Test case: none, README text. Markdownlint and the quick gate pass.
-	- Actual effort: Low
 
 - Have install.bash always install the binary owned by root
 	- ID: 2026111715275548
