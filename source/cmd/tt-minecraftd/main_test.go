@@ -849,3 +849,22 @@ func TestServerExitCode(t *testing.T) {
 		}
 	}
 }
+
+// Dry runs and repair --check never ask for a sudo password, so their
+// runners put -n on every sudo (2026111715275268).
+func TestDryRunsNoPrompt(t *testing.T) {
+	defer testid.Line(t, "df7ax")
+	noPrompt := func(r host.Runner) bool {
+		e, ok := r.(*host.Exec)
+		return ok && e.NoPrompt
+	}
+	if !noPrompt(hostRunner(true)) || noPrompt(hostRunner(false)) {
+		t.Error("setup's and update's runner: NoPrompt doesn't follow --dry-run")
+	}
+	for _, check := range []bool{true, false} {
+		h, _, _ := repairSteps(invocation{opts: options{check: check}})
+		if noPrompt(h.Run) != check {
+			t.Errorf("repair --check %v: NoPrompt is %v", check, !check)
+		}
+	}
+}

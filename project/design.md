@@ -143,7 +143,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - `--set KEY=VALUE` overrides one config key for this run, such as `--set heapMax=6G`. It can be given more than once. See [Configuration model](#configuration-model).
 
-- `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `podman ps`, still run, so the plan matches what a real run would do.
+- `--dry-run` prints every command that would change something, with the sudo ones marked, and doesn't run them. Commands that only look, such as `podman ps`, still run, so the plan matches what a real run would do. A dry run never asks for a sudo password, and neither does `repair --check`: their looks go through `sudo -n`, and one that sudo refuses says what it couldn't check. `sudo -v` first lets them check it.
 
 - When the boot unit is enabled, `start` and `stop` run `systemctl start` and `systemctl stop` on it instead. That way systemd and the tool don't disagree about what's running.
 	- That's only for the config the unit runs, so a second config given with `--config` starts and stops by itself.
@@ -155,7 +155,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 1. Load and check the config. Refuse when a Paper server is already running, under any account. That includes one the old scripts started.
 
-2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules. `--dry-run` runs both, since neither changes anything, so it asks for the password at the same point.
+2. Get sudo once, up front. `sudo -n true` goes first, and `sudo -v` asks for a password only when that fails. `sudo -v` asks unless every matching sudoers rule is NOPASSWD, so it would prompt where a NOPASSWD rule sits beside password rules. `--dry-run` runs `sudo -n true`, and prints `sudo -v` when that fails rather than asking. Its later sudo looks use `sudo -n`, so with no password cached it stops at the first one and says what it couldn't check.
 
 3. Check the safe settings in `server.properties` and the other server files. Refuse when one is wrong, and name the setting and `repair` as the fix. See [Safe server settings](#safe-server-settings).
 

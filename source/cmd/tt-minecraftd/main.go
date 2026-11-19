@@ -506,6 +506,7 @@ func (e exitCode) Error() string { return "exit status " + strconv.Itoa(int(e)) 
 var repairSteps = func(inv invocation) (h *repairpkg.Host, before, after []repairpkg.Check) {
 	runner := host.NewExec(false)
 	runner.QuietErr = true
+	runner.NoPrompt = inv.opts.check
 	return repairpkg.NewHost(runner, &inv.cfg, inv.configPath), repairpkg.Before, repairpkg.After
 }
 
