@@ -22,43 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- start --dry-run says it would run sudo -v, then sudo asks for a password anyway
-	- ID: 2026111715275268
-	- Type: Bug
-	- Status: Closed
-	- Closed reason: Done
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261117-152752
-	- Opened by:
-	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
-	- Expected behavior [Bug]: start --dry-run never asks for a sudo password. It prints sudo -v as a step, and its looks that need sudo use sudo -n, saying what it couldn't check when that fails.
-	- Reproduced [Bug]: 20261117: the built binary's start --dry-run, with a stand-in sudo whose sudo -n fails, printed would run: sudo -v and never ran it. 20261119: at 3923e56 the same run asked twice, at sudo -v and at sudo podman ps.
-	- Progress log:
-		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
-		- 20261117: Verified: df79e fails on the unfixed code (sudo -v isn't a look) and passes with the fix. The built binary's start --dry-run ran sudo -v through the stand-in, and the unfixed build printed it. The quick gate passed, and race tests of launch and cli.
-		- 2026-11-19: t00mietum answered the signoff question: dry run never asks for a sudo password.
-		- 20261119: Verified: df7aw fails with the -n taken out, and with the password check taken out, and passes with both. df7ax fails with repair's NoPrompt line taken out. df79e fails on 3923e56's sudo -v and passes now. The quick gate passed.
-		- 20261119: Verified: the built binary, with a stand-in sudo whose sudo -n fails, never asked in start, stop, setup or update --dry-run, nor in repair --check. start and stop printed would run: sudo -v, then stopped at sudo -n podman ps, saying they couldn't check it. setup and repair --check gave that line as FAILED for the image and tree checks.
-	- Origin: 3a04d86. Related to 2026111410134553. Confirmed.
-	- Actual cause [Bug]: dry run ran its sudo looks through plain sudo, which asks when no password is cached. 3923e56 also made sudo -v a look, so dry run asked there first.
-	- Actual effort: Low
-	- Actual fix [Bug]: under --dry-run and repair --check the runner puts -n on the sudo it adds, and a look sudo refuses says what it couldn't check and that sudo -v first lets it. sudo -v is a change again, so dry run prints it. design.md's dry run line and start step 2 say so.
-	- Branch: pkgpath
-	- Commit: 9cbfe94
-	- Test case: df7aw, df7ax, df79e
-	- Acceptance signoff: Self-closed: t00mietum's answer settles the behavior, and the tests fail on the old code and pass now.
-	- Closed: 20261119-105905
-	- Decisions:
-		- 20261117: the launch rig's changes() keeps sudo -v in its list, though it's now a look, so each test's list still shows sudo asked up front. No assert changed. df79e checks it's a look and on the terminal.
-		- Swept: kit.go's sudoUp is the only sudo -v. setup, update, and repair run themselves through sudo, and skip it under dry run.
-		- 2026-11-19: t00mietum's answer: no sudo prompt. Commit 3923e56 made sudo -v a look, which prompts in dry run, so that part is reversed. The decision on 2026111410134553 stands.
-		- 20261119: df79e's assert on sudo -v changed from a look to not a look, undoing 3923e56. The rest of the test is as it was. The rig's changes() is back to changes only, and sudo -v is in it as one.
-		- 20261119: the -n goes in the runner (`host.Exec.NoPrompt`), not at each call, so a new sudo look gets it too. repair --check sets it, since --dry-run is its alias and it doesn't need root.
-		- 20261119: a sudo look refused under start or stop --dry-run ends the dry run with that error, rather than going on with a plan that rests on a guess (design.md's dry run line, 2026111715275137). setup and repair --check report it as a FAILED line and go on, as they do for any check.
-		- 20261119: sudo's refusal is told from the command's own failure by a first stderr line that starts with "sudo:" and names a password. Under another language it comes through as the plain error with sudo's line.
-		- Swept: every sudo look in non-test code goes through `host.Exec`: `firewall.Loaded`, `launch.ContainerState`, repair's image inspect, ufw and firewall-cmd reads, and update's image inspect and java run, which only run past the dry run. attach already used sudo -n. status, the run-mode follow, and the boot unit check run no sudo.
-
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -109,6 +72,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
+
+- repair renames a /usr/local/bin copy that hides the package's binary, and rotates the old ones
+	- ID: 2026111911125756
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261119-111257
+	- Opened by:
+	- Related IDs: 2026111715275041
+	- Requirements [Feature]:
+		- When repair check 15 finds a different `/usr/local/bin/tt-minecraftd` ahead of the package's `/usr/bin/tt-minecraftd`, plain `repair` renames it to `tt-minecraftd_old_<mtime YYYYmmDD-HHMMSS>` in the same folder, so it stops hiding the package's binary.
+		- The `tt-minecraftd_old_*` files there are GFS-rotated after each rename, like the cicd demo renders.
+		- `repair --check` and `--dry-run` still only report it, and say it would be renamed.
+		- A symlink to the package's binary still passes, and isn't renamed.
+		- design.md's repair check 15 and Boot say so.
+	- Progress log:
+		- 2026-11-19: t00mietum's answer to the check 15 question: rename the copy and GFS rotate the old ones, rather than report it with `sudo rm`.
+	- Decisions:
+		- 2026-11-19: The rename keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can rename it back.
+		- 2026-11-19: install.bash and setup's copy still write over `/usr/local/bin/tt-minecraftd` in place. The answer was about check 15.
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
@@ -399,6 +383,43 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: Code review 20261117 item 46. Detail in detail_backlog.md.
 	- Note: No.
 	- Origin: 9d7cb3e install script. Not seen before. Plausible.
+
+- start --dry-run says it would run sudo -v, then sudo asks for a password anyway
+	- ID: 2026111715275268
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
+	- Expected behavior [Bug]: start --dry-run never asks for a sudo password. It prints sudo -v as a step, and its looks that need sudo use sudo -n, saying what it couldn't check when that fails.
+	- Reproduced [Bug]: 20261117: the built binary's start --dry-run, with a stand-in sudo whose sudo -n fails, printed would run: sudo -v and never ran it. 20261119: at 3923e56 the same run asked twice, at sudo -v and at sudo podman ps.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
+		- 20261117: Verified: df79e fails on the unfixed code (sudo -v isn't a look) and passes with the fix. The built binary's start --dry-run ran sudo -v through the stand-in, and the unfixed build printed it. The quick gate passed, and race tests of launch and cli.
+		- 2026-11-19: t00mietum answered the signoff question: dry run never asks for a sudo password.
+		- 20261119: Verified: df7aw fails with the -n taken out, and with the password check taken out, and passes with both. df7ax fails with repair's NoPrompt line taken out. df79e fails on 3923e56's sudo -v and passes now. The quick gate passed.
+		- 20261119: Verified: the built binary, with a stand-in sudo whose sudo -n fails, never asked in start, stop, setup or update --dry-run, nor in repair --check. start and stop printed would run: sudo -v, then stopped at sudo -n podman ps, saying they couldn't check it. setup and repair --check gave that line as FAILED for the image and tree checks.
+	- Origin: 3a04d86. Related to 2026111410134553. Confirmed.
+	- Actual cause [Bug]: dry run ran its sudo looks through plain sudo, which asks when no password is cached. 3923e56 also made sudo -v a look, so dry run asked there first.
+	- Actual effort: Low
+	- Actual fix [Bug]: under --dry-run and repair --check the runner puts -n on the sudo it adds, and a look sudo refuses says what it couldn't check and that sudo -v first lets it. sudo -v is a change again, so dry run prints it. design.md's dry run line and start step 2 say so.
+	- Branch: pkgpath
+	- Commit: 9cbfe94
+	- Test case: df7aw, df7ax, df79e
+	- Acceptance signoff: Self-closed: t00mietum's answer settles the behavior, and the tests fail on the old code and pass now.
+	- Closed: 20261119-105905
+	- Decisions:
+		- 20261117: the launch rig's changes() keeps sudo -v in its list, though it's now a look, so each test's list still shows sudo asked up front. No assert changed. df79e checks it's a look and on the terminal.
+		- Swept: kit.go's sudoUp is the only sudo -v. setup, update, and repair run themselves through sudo, and skip it under dry run.
+		- 2026-11-19: t00mietum's answer: no sudo prompt. Commit 3923e56 made sudo -v a look, which prompts in dry run, so that part is reversed. The decision on 2026111410134553 stands.
+		- 20261119: df79e's assert on sudo -v changed from a look to not a look, undoing 3923e56. The rest of the test is as it was. The rig's changes() is back to changes only, and sudo -v is in it as one.
+		- 20261119: the -n goes in the runner (`host.Exec.NoPrompt`), not at each call, so a new sudo look gets it too. repair --check sets it, since --dry-run is its alias and it doesn't need root.
+		- 20261119: a sudo look refused under start or stop --dry-run ends the dry run with that error, rather than going on with a plan that rests on a guess (design.md's dry run line, 2026111715275137). setup and repair --check report it as a FAILED line and go on, as they do for any check.
+		- 20261119: sudo's refusal is told from the command's own failure by a first stderr line that starts with "sudo:" and names a password. Under another language it comes through as the plain error with sudo's line.
+		- Swept: every sudo look in non-test code goes through `host.Exec`: `firewall.Loaded`, `launch.ContainerState`, repair's image inspect, ufw and firewall-cmd reads, and update's image inspect and java run, which only run past the dry run. attach already used sudo -n. status, the run-mode follow, and the boot unit check run no sudo.
 
 - repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
 	- ID: 2026111715275121
@@ -945,6 +966,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: With both there, the unit runs the package's, since the package manager keeps it current and repair reports the other.
 		- 2026-11-19: repair's PATH check is its own check 15, FAILED with the command that removes the copy, and it never removes it, since someone may have put that build there on purpose. A symlink to the package's binary passes. Check entry in questions.md.
 		- 2026-11-19: `start` and `stop` take a unit on either path as this config's, so a unit from before the package came still goes through systemctl until repair rewrites it.
+		- 2026-11-19: t00mietum answered the check 15 entry: rename the copy to `_old_<mtime>` and GFS rotate the old ones. Filed as 2026111911125756.
 	- Acceptance signoff: Self-closed: its tests pass, the design is t00mietum's, and the repair check's picks are a Check entry.
 	- Commit: 6404266, a1dae52
 	- Closed: 20261119-104932
