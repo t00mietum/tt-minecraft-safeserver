@@ -901,7 +901,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - The .deb and .rpm packages install to /usr/bin, but setup and the boot unit run /usr/local/bin
 	- ID: 2026111715275041
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152750
@@ -916,18 +917,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Not verified: the .rpm upgrade.
 		- Swept: boot.Bin, setup's copy, install.bash, the demo, and the root host checks all use /usr/local/bin. No /usr/bin path for the tool is left in cicd or source.
 		- 2026-11-19: t00mietum kept the packages putting the binary in /usr/local/bin as built.
+		- 2026-11-19: Reworked to the FHS design in Decisions. The lines above are about the replaced /usr/local/bin packages.
+		- Verified: df7as, df7at and df7av pass, and each fails with its part taken out: the package check in `boot.Bin`, setup's skip, and the PATH check in repair. df78q and df7a6 fail when a unit that runs `/usr/bin` isn't taken as this config's.
+		- Verified: the build and package steps passed in a throwaway clone, and the .deb and .rpm list /usr/bin/tt-minecraftd. The package step failed with its path put back to /usr/local/bin, with `boot.PkgBin` moved, and with install.bash's path set to /usr/bin.
+		- Not verified: setup and repair against a really installed package, which the root host checks don't do.
+		- Swept: every /usr/local/bin and `boot.Bin` use. `boot.Command`, `ExecStart`, `Unit`, `Owner` and `Serves` take either path. install.bash, dogfood, the demo, the root host checks and `update --self` are hand installs and keep /usr/local/bin.
 	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
-	- Actual cause [Bug]: The package step put the binary in /usr/bin, a different path from the one setup, install.bash, and the boot unit use.
-	- Actual fix [Bug]: The .deb and .rpm put it in /usr/local/bin. The package step fails when the build names another path for itself, or a package's file list doesn't have it there. design.md's Boot says so.
-	- Branch: fixes-2026111715275041
-	- Test case: the package step's checks that the build and each package name /usr/local/bin/tt-minecraftd, in every full run. No test ID, since the step isn't a Go test or a root host check.
+	- Actual cause [Bug]: setup copied itself to /usr/local/bin even when the package's binary was in /usr/bin, and the boot unit ran only /usr/local/bin. That copy comes first on PATH, so a package upgrade never reached the operator or the unit.
+	- Actual fix [Bug]: The .deb and .rpm put it in /usr/bin. setup leaves its /usr/local/bin copy out when the package's binary is there. The boot unit runs the package's binary when it's there, and setup's copy otherwise. repair check 15 reports a /usr/local/bin copy that comes before the package's on PATH. The package step fails unless the build names the package's path and install.bash's, and nothing else. design.md's setup, repair and Boot say so.
+	- Branch: pkgpath
+	- Test case: df7as (which binary the unit runs), df7at (setup with and without the package), df7av (the unit moves to the package's binary, and repair reports the copy), df78q and df7a6 (a unit on either path is this config's), and the package step's path checks in every full run.
 	- Actual effort: Low
 	- Decisions:
 		- The packages go in /usr/local/bin, against the FHS and Debian policy, since setup, install.bash, and the boot unit's recorded path all use it, and an upgrade from alpha.1 then removes its own /usr/bin copy. Check entry in questions.md.
 		- 2026-11-19: Reopened. t00mietum's answer asked for industry practice, meaning the FHS and Debian policy: a package owns /usr/bin/tt-minecraftd, and /usr/local/bin is only for hand installs. The /usr/local/bin pick is replaced.
 		- 2026-11-19: Design: the .deb and .rpm install /usr/bin/tt-minecraftd. install.bash, setup's copy and dogfood keep /usr/local/bin. setup skips its copy when the package's binary is there, the boot unit runs the binary that's installed, and repair flags a /usr/local/bin copy that shadows the package's on PATH.
-	- Acceptance signoff: Self-closed: the package checks and the .deb upgrade passed, and the path call is a Check entry.
-	- Commit: 6404266
+		- 2026-11-19: With both there, the unit runs the package's, since the package manager keeps it current and repair reports the other.
+		- 2026-11-19: repair's PATH check is its own check 15, FAILED with the command that removes the copy, and it never removes it, since someone may have put that build there on purpose. A symlink to the package's binary passes. Check entry in questions.md.
+		- 2026-11-19: `start` and `stop` take a unit on either path as this config's, so a unit from before the package came still goes through systemctl until repair rewrites it.
+	- Acceptance signoff: Self-closed: its tests pass, the design is t00mietum's, and the repair check's picks are a Check entry.
+	- Commit: 6404266, a1dae52
+	- Closed: 20261119-104932
 
 - The root host ZFS checks force-destroy any pool ZFS_POOL names, even one the name check refused
 	- ID: 2026111715275056
