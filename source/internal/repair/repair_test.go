@@ -35,6 +35,7 @@ func testHost(t *testing.T, passwd, group string, reply func(c host.Cmd) ([]byte
 	h.RulesFile, h.UnitFile, h.ResolvConf, h.Routes = filepath.Join(dir, "firewall.nft"), filepath.Join(dir, "fw.service"), filepath.Join(dir, "resolv.conf"), filepath.Join(dir, "ipv6_route")
 	h.BootFile = filepath.Join(dir, "boot.service")
 	h.PkgBin, h.LocalBin = filepath.Join(dir, "usr-bin-tt-minecraftd"), filepath.Join(dir, "usr-local-bin-tt-minecraftd")
+	h.OldBuilds = filepath.Join(dir, "old-builds")
 	for file, text := range map[string]string{h.Passwd: passwd, h.Group: group} {
 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
 			t.Fatal(err)

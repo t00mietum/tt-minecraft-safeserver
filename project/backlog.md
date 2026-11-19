@@ -97,7 +97,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
 	- ID: 2026111911125756
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Waiting for testing
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261119-111257
@@ -113,11 +113,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- design.md's setup, repair check 15, Boot and file paths, and README's Installing section, say so.
 	- Progress log:
 		- 2026-11-19: t00mietum's answer to the check 15 question: rename the copy and GFS rotate the old ones, rather than report it with `sudo rm`.
+		- Verified: df7ba to df7be, df7av and df798 pass, and the quick gate passes, CodeQL included. df798 passes under Bash 3.2 with busybox tools too. Each new check failed with its part taken out: the move in repair, setup and install.bash, setup's SHA-256 skip, and each rotation rule.
+		- Not verified: the move and the folder as root. Only the non-root path ran here, and root host check df7bf waits for the round's run.
 	- Decisions:
 		- 2026-11-19: The move keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can copy it back.
 		- 2026-11-19: t00mietum widened it to install.bash and setup's copy, which wrote over the old build in place.
 		- 2026-11-19: `update --self` is Deferred. It gets the same move when it comes back.
 		- 2026-11-19: Moved from `tt-minecraftd_old_<mtime>` beside the binary to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>` (t00mietum). Off PATH, on every distro, and a dot suffix is the usual form for a dated copy. `/var/backups` is Debian's only.
+		- 2026-11-19: install.bash has the build it's about to install do the move, with a hidden retire-build command, run through sudo from a staged copy beside the target. One Go version of the move and the rotation then serves all 3, and Bash 3.2 never needs one. The staged copy is renamed into place, so the swap is one step.
+		- 2026-11-19: Kept names stay tt-minecraftd.<mtime>, without the role suffix gfs-rotate.bash adds. The counts are its defaults: 10 newest, 4 hours, 5 days, 4 weeks, 4 months, 2 years, and the first. A build from the same second as a kept one gets .2, .3 and so on.
+		- 2026-11-19: A /usr/local/bin link to some file other than the package's has no build to keep, so check 15 still reports it with sudo rm. install.bash and setup write over a link as before.
+		- 2026-11-19: When the same build, by SHA-256, is in /usr/local/bin already, setup leaves out its copy, as install.bash already did.
+		- 2026-11-19: The folder is refused as root when it's a link, or someone other than root could write to it.
+		- 2026-11-19: df7av: the expected text was "...; remove it with: sudo rm /usr/local/bin/tt-minecraftd" with no fix, and is now "...; repair moves it to /var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime> [fix]". Its other checks are unchanged.
+		- 2026-11-19: df65d and df7at: setup's copy was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd", and is now "sudo install -m 0755 -o root -g root <exe> <LocalBin>", with LocalBin a stand-in path in the test.
+	- Needs local test suite run?: the root host check df7bf, one plain run of cicd/root-host/root-host.bash. It moves a build as root and checks the folder is root's 0755.
+	- Branch: nov19-2026111911125756
+	- Commit: 32e1415
+	- Test case: df7ba, df7bb, df7bc (the move, the copy across filesystems, the rotation), df7av (repair check 15), df7bd (setup's copy), df7be (retire-build), df798 (install.bash), and root host check df7bf
+	- Actual effort: Avg
+	- Swept: every write to /usr/local/bin/tt-minecraftd: repair check 15, setup's copy, install.bash, and cicd's dogfood step. Dogfood puts each dev build on the dev box and is left as it is. install-dev.bash doesn't install the tool. update --self is deferred, per Decisions.
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
@@ -557,7 +572,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Have install.bash always install the binary owned by root
 	- ID: 2026111715275548
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152755
@@ -565,8 +580,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: When `/usr/local/bin` or the old binary is writable by the user, it installs without sudo, and the file stays user-owned. setup's sudo run and the boot unit then run a file the operator account can change. repair doesn't check it.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 46. Detail in detail_backlog.md.
+		- Verified: df798's first case fails on the old script, 14 cases fail with the old sudo rule put back, and 2 with the owner left out. All pass now, under Bash 3.2 with busybox tools too, and the quick gate passes. The test has no root, so the owner itself isn't checked; install -o root is.
+		- Done: install.bash always installs through sudo unless it runs as root, with install -o root -g root, even where the folder or the old binary lets the operator write. setup's copy names the owner too.
 	- Note: No.
-	- Origin: 9d7cb3e install script. Not seen before. Plausible.
+	- Origin: 9d7cb3e install script. Not seen before. Confirmed by df798.
+	- Closed reason: Done
+	- Branch: nov19-2026111911125756
+	- Commit: 32e1415
+	- Test case: df798
+	- Actual effort: Low
+	- Swept: setup's copy now installs with -o root -g root too. cicd's dogfood step copies without sudo into a writable folder, but it's a dev-box step, not a user install.
+	- Acceptance signoff: Self-closed: df798 fails on the old script and passes now.
+	- Closed: 20261119-122525
+	- Decisions: 2026-11-19: A binary that's already current is left alone, even when the operator owns it. The next release replaces it with a root-owned one. Done with 2026111911125756, since both change how install.bash puts the binary in place.
 
 - start --dry-run says it would run sudo -v, then sudo asks for a password anyway
 	- ID: 2026111715275268

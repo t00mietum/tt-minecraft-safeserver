@@ -8,8 +8,11 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 )
 
 // BootCheck is design.md's repair check 13, and setup's step 11. It never
@@ -91,17 +94,21 @@ func (h *Host) bootOff(path string) ([]Finding, error) {
 
 // shadowCheck is design.md's repair check 15. A hand-installed copy in
 // /usr/local/bin comes before the package's /usr/bin one on PATH, so the
-// operator keeps running it after a package upgrade. It's reported and never
-// removed, since someone may have put that build there on purpose.
+// operator keeps running it after a package upgrade. It's moved to the
+// old-builds folder rather than removed, since someone may have put that
+// build there on purpose.
 var shadowCheck = Check{
 	Name: "tool on PATH",
 	Look: func(_ context.Context, h *Host) ([]Finding, error) {
-		pkg, local := h.PkgBin, h.LocalBin
+		pkg, local, kept := h.PkgBin, h.LocalBin, h.OldBuilds
 		if pkg == "" {
 			pkg = boot.PkgBin
 		}
 		if local == "" {
 			local = boot.LocalBin
+		}
+		if kept == "" {
+			kept = oldbuild.Dir
 		}
 		if boot.Bin(pkg) != boot.PkgBin {
 			return nil, nil
@@ -116,6 +123,22 @@ var shadowCheck = Check{
 		if pfi, err := os.Stat(pkg); err == nil && os.SameFile(pfi, lfi) {
 			return nil, nil
 		}
-		return []Finding{{Problem: boot.LocalBin + " comes before the package's " + boot.PkgBin + " on PATH, so a package upgrade doesn't change what runs; remove it with: sudo rm " + boot.LocalBin}}, nil
+		problem := boot.LocalBin + " comes before the package's " + boot.PkgBin + " on PATH, so a package upgrade doesn't change what runs"
+		to, err := oldbuild.Where(local, kept)
+		if err != nil {
+			return nil, err
+		}
+		// A link to some other file has no build of its own to keep.
+		if lst, err := os.Lstat(local); err != nil || !lst.Mode().IsRegular() {
+			return []Finding{{Problem: problem + "; it's a link, so remove it with: sudo rm " + boot.LocalBin}}, nil
+		}
+		return []Finding{{
+			Problem: problem + "; repair moves it to " + filepath.Join(oldbuild.Dir, filepath.Base(to)),
+			Fixed:   boot.LocalBin + " moved to " + oldbuild.Dir + ", so the package's runs",
+			Fix: func(context.Context) error {
+				_, err := oldbuild.Retire(local, kept, time.Now())
+				return err
+			},
+		}}, nil
 	},
 }

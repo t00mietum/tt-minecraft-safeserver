@@ -266,6 +266,23 @@ fFirewallOff() {
 	! sudo nft list table inet tt_minecraftd > /dev/null 2>&1 && ! systemctl is-enabled tt-minecraftd-firewall.service
 }
 
+# What install.bash runs through sudo before it swaps a build in: the old one
+# goes to a root-owned old-builds folder. A second one from the same second
+# gets a suffix, and the folder is taken as it is.
+fOldBuild() {
+	local bin=/usr/local/bin/tt-minecraftd kept=/var/lib/tt-minecraftd/old-builds
+	sudo cp -p "${bin}" "${HOME}/keep.bin" || return 1
+	sudo "${bin}" retire-build "${bin}" | tee retire.out || return 1
+	[[ ! -e "${bin}" ]] && has "${kept}/tt-minecraftd\.2" retire.out || return 1
+	[[ "$(stat -c '%U:%G %a' "${kept}" "${kept}/..")" == $'root:root 755\nroot:root 755' ]] || { stat -c '%n %U:%G %a' "${kept}" "${kept}/.."; return 1; }
+	sudo install -m 0755 -o root -g root "${HOME}/keep.bin" "${bin}" || return 1
+	sudo touch -r "${HOME}/keep.bin" "${bin}" || return 1
+	sudo "${bin}" retire-build "${bin}" | tee retire.out || return 1
+	sudo install -m 0755 -o root -g root "${HOME}/keep.bin" "${bin}" || return 1
+	ls -l "${kept}"
+	[[ "$(find "${kept}" -name 'tt-minecraftd.*' | wc -l)" -eq 2 ]] && has '\.2\.$' retire.out
+}
+
 fAgentHandOff() {
 	# A jar with no source, and an agent that has nothing for it.
 	printf 'thing' > /srv/mc/adopted/plugins/Thing.jar || return 1
@@ -432,6 +449,7 @@ check df78x "startAtBoot: repair enables the unit, and start and stop go through
 check df68e "setup --adopt a copy of the tree" fAdopt
 check df68f "firewall off removes the unit and table" fFirewallOff
 check df76n "update asks the agent as the operator, and hands its answer through sudo" fAgentHandOff
+check df7bf "a replaced build is kept in a root-owned old-builds folder" fOldBuild
 exit "${failed}"
 
 
@@ -442,3 +460,4 @@ exit "${failed}"
 ##		- 2026-11-17: Ctrl-C in the stop countdown. The boot check loads past startTimeout, and checks the unit didn't fail.
 ##		- 2026-11-18: Refuses a ZFS_POOL that isn't a ttmcss-test-* name, before anything runs and again before the destroy.
 ##		- 2026-11-18: Waits for Paper to log the stop-off line. Long output goes to a file before its grep. A failed boot check stops the server and turns the unit off.
+##		- 2026-11-19: A replaced build is kept in /var/lib/tt-minecraftd/old-builds.

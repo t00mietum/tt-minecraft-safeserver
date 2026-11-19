@@ -262,6 +262,7 @@ Common:  --config PATH, --set KEY=VALUE
 	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else, unless the `.deb` or `.rpm` package has put it in `/usr/bin`. See [Boot](#boot).
+		- The copy is owned by root. A different build already there is moved to the old-builds folder first, the same as `repair` does in check 15. The same build, by SHA-256, is left alone, and no copy is made.
 	13. Ends with `repair --check`.
 
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
@@ -351,7 +352,9 @@ Common:  --config PATH, --set KEY=VALUE
 		- A unit that runs another config is left alone, whatever this config's `startAtBoot` is. See [Boot](#boot).
 	14. Any Paper server that this tool didn't start is reported, and never killed.
 		- It's told apart the way `status` tells it, by its cgroup and the container's wrapper, since one started by hand as `runUser` has the same uid.
-	15. When the package's `/usr/bin/tt-minecraftd` is there, no other copy in `/usr/local/bin` comes before it on PATH. One is reported with the command that removes it, and never removed. See [Boot](#boot).
+	15. When the package's `/usr/bin/tt-minecraftd` is there, no other copy in `/usr/local/bin` comes before it on PATH. One is moved to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, rather than removed, since someone may have put that build there on purpose. See [Boot](#boot).
+		- `--check` and `--dry-run` only report it, and say where it would go.
+		- A link to the package's binary passes. A link to some other file is reported with the command that removes it, since there's no build to keep.
 
 ## Project structure
 
@@ -373,6 +376,7 @@ source/internal/fetch/       downloads and hash checks
 source/internal/update/
 source/internal/repair/
 source/internal/boot/        systemd unit
+source/internal/oldbuild/    replaced builds kept and rotated
 nix/                         NixOS module and flake, deferred
 project/                     design, backlog, and notes
 cicd/                        build, test, and release scripts
@@ -581,7 +585,7 @@ cicd/                        build, test, and release scripts
 
 ### Saves and persistence
 
-- The tool doesn't store any state of its own, apart from the approved plugin list. Whether the server runs comes from the container runtime or systemd. Ownership comes from the the files.
+- The tool doesn't store any state of its own, apart from the approved plugin list and the builds it kept in `/var/lib/tt-minecraftd/old-builds/`. See [Boot](#boot). Whether the server runs comes from the container runtime or systemd. Ownership comes from the the files.
 
 - Server tree layout, as Paper makes it:
 
@@ -900,7 +904,13 @@ cicd/                        build, test, and release scripts
 	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
 	- The unit runs the tool from `/usr/bin` when the `.deb` or `.rpm` package put it there, and otherwise from `/usr/local/bin`, where `setup` and the install script put it. It adds `--config` when the config isn't the default one.
 		- The packages follow the FHS and Debian policy, which give a package `/usr/bin` and leave `/usr/local/bin` to hand installs. A package upgrade then changes what the unit runs. `start` and `stop` take a unit that runs either path as this config's.
-		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` reports one it finds, without removing it.
+		- `setup` and the install script always install it owned by root, even where the folder lets the operator write, since `setup`'s sudo run and the boot unit run it.
+		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` moves one it finds to the old-builds folder.
+	- A hand-installed build that's replaced or in the way is kept, not deleted. `repair`, `setup`'s copy and the install script move it to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, with the mtime as `YYYYmmDD-HHMMSS`. Someone who put it there on purpose can copy it back.
+		- The folder is off PATH, and it's the same on every distro. It's made root-owned, mode 0755, when it's missing. `/var` can be on another filesystem, so the move falls back to a copy and then a remove.
+		- After each move the folder is GFS-rotated, as cicd keeps its demo renders: the newest build in each of the last few finished hours, days, weeks, months, and years, plus the newest 10 and the very first.
+		- The install script has the build it's about to install do the move, through a command left out of the help, so the rules live in one place.
+		- `update --self` is deferred. When it comes back, it gets the same move.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
 		- Only `ExecStop`'s `stop` hands the trees back. systemd runs it after every start, even when the server ended by itself, and sends SIGTERM to what's left once it's done, which would cut a second hand-back short and fail the unit. A SIGTERM that finds the server down is a clean stop.
 	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.

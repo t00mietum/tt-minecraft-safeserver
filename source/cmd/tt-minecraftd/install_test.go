@@ -21,6 +21,8 @@ import (
 type installRig struct {
 	t                         *testing.T
 	bin, rel, dest, log, tty  string
+	old                       string
+	noRetire                  bool
 	osRelease, arch, bashPath string
 	systemd, sys              string
 	releases                  []rigRelease
@@ -49,15 +51,25 @@ const rigUname = `#!@BASH@
 case "$1" in -s) echo Linux ;; -m) echo "${RIG_ARCH}" ;; esac
 `
 
+// The rig has no root, so the owner is logged and left out.
 const rigSudo = `#!@BASH@
 echo "sudo $*" >> "${RIG_LOG}"
-exec "$@"
+args=()
+while (($#)); do
+	if [[ "$1" == -o || "$1" == -g ]] && [[ "${2:-}" == root ]]; then shift 2; continue; fi
+	args+=("$1"); shift
+done
+exec "${args[@]}"
 `
 
 const rigExe = `#!@BASH@
 case "$1" in
 	--version) printf 'tt-minecraftd @TAG@ build test (2026-11-14)\nCopyright\n' ;;
 	setup) shift; echo "setup $*" >> "${RIG_LOG}" ;;
+	retire-build)
+		echo "retire-build $2" >> "${RIG_LOG}"
+		[[ -z "${RIG_NO_RETIRE:-}" ]] || exit 1
+		install -d "${RIG_OLD}" && mv "$2" "${RIG_OLD}/tt-minecraftd.old" ;;
 esac
 `
 
@@ -65,7 +77,7 @@ func newInstallRig(t *testing.T, fetcher string) *installRig {
 	t.Helper()
 	dir := t.TempDir()
 	r := &installRig{t: t, bin: filepath.Join(dir, "bin"), rel: filepath.Join(dir, "rel"), dest: filepath.Join(dir, "usr-local-bin"),
-		log: filepath.Join(dir, "log"), tty: filepath.Join(dir, "tty"), osRelease: filepath.Join(dir, "os-release"), arch: "x86_64",
+		log: filepath.Join(dir, "log"), old: filepath.Join(dir, "old-builds"), tty: filepath.Join(dir, "tty"), osRelease: filepath.Join(dir, "os-release"), arch: "x86_64",
 		systemd: filepath.Join(dir, "run-systemd-system"), sys: filepath.Join(dir, "sys")}
 	var err error
 	if r.bashPath, err = exec.LookPath("bash"); err != nil {
@@ -76,7 +88,7 @@ func newInstallRig(t *testing.T, fetcher string) *installRig {
 			t.Fatal(err)
 		}
 	}
-	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat"} {
+	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat", "mv"} {
 		p, err := exec.LookPath(tool)
 		if err != nil {
 			t.Fatalf("%s: %v", tool, err)
@@ -158,7 +170,10 @@ func (r *installRig) run(args ...string) (string, int) {
 	// #nosec G204 -- test runs the repo's own script
 	cmd := exec.Command(r.bashPath, all...)
 	tmp := r.t.TempDir()
-	cmd.Env = []string{"PATH=" + r.bin, "HOME=" + r.t.TempDir(), "TMPDIR=" + tmp, "RIG_LOG=" + r.log, "RIG_REL=" + r.rel, "RIG_ARCH=" + r.arch}
+	cmd.Env = []string{"PATH=" + r.bin, "HOME=" + r.t.TempDir(), "TMPDIR=" + tmp, "RIG_LOG=" + r.log, "RIG_REL=" + r.rel, "RIG_ARCH=" + r.arch, "RIG_OLD=" + r.old}
+	if r.noRetire {
+		cmd.Env = append(cmd.Env, "RIG_NO_RETIRE=1")
+	}
 	out, err := cmd.CombinedOutput()
 	if left, _ := os.ReadDir(tmp); len(left) != 0 {
 		r.t.Errorf("left %s in the temp folder", left[0].Name())
@@ -225,8 +240,12 @@ func TestInstallScript(t *testing.T) {
 		if !strings.Contains(r.logText(), "setup --yes --accept-eula\n") {
 			t.Errorf("setup didn't get its options:\n%s", r.logText())
 		}
-		if strings.Contains(r.logText(), "sudo") {
-			t.Errorf("used sudo on a writable folder:\n%s", r.logText())
+		// 2026-11-19: a writable folder skipped sudo, and the binary stayed the operator's (2026111715275548).
+		if os.Geteuid() != 0 && !strings.Contains(r.logText(), "sudo install -m 0755 -o root -g root ") {
+			t.Errorf("didn't install as root on a writable folder:\n%s", r.logText())
+		}
+		if strings.Contains(r.logText(), "retire-build") {
+			t.Errorf("moved a build that wasn't there:\n%s", r.logText())
 		}
 	})
 
@@ -265,7 +284,7 @@ func TestInstallScript(t *testing.T) {
 			t.Fatal("first run failed")
 		}
 		out, code := r.run("--yes")
-		if code != 0 || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || !strings.Contains(r.logText(), "setup") {
+		if code != 0 || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || !strings.Contains(r.logText(), "setup") || strings.Contains(r.logText(), "retire-build") {
 			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
 		}
 		if !strings.Contains(out, "already v1.0.0") {
@@ -309,6 +328,44 @@ func TestInstallScript(t *testing.T) {
 		}
 		if !strings.Contains(r.logText(), "setup") {
 			t.Errorf("setup didn't run:\n%s", r.logText())
+		}
+	})
+
+	t.Run("a different build is moved out of the way by the new one, and kept", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		local := strings.ReplaceAll(strings.ReplaceAll(rigExe, "@BASH@", r.bashPath), "@TAG@", "v0.9.0") + "# hand build\n"
+		r.write(dest, local)
+		if err := os.Chmod(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out, code := r.run("--yes")
+		kept, _ := os.ReadFile(filepath.Join(r.old, "tt-minecraftd.old"))
+		if code != 0 || r.installed() != "v1.0.0" || string(kept) != local || !strings.Contains(out, "Old build ..: moves to /var/lib/tt-minecraftd/old-builds") {
+			t.Fatalf("code %d, installed %q, kept %t\n%s\n%s", code, r.installed(), string(kept) == local, out, r.logText())
+		}
+		if !strings.Contains(r.logText(), "retire-build "+dest+"\n") {
+			t.Errorf("the staged build didn't move the old one:\n%s", r.logText())
+		}
+		if left, _ := os.ReadDir(r.dest); len(left) != 1 {
+			t.Errorf("left %v", left)
+		}
+	})
+
+	t.Run("a failed move installs nothing and keeps the old build", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		r.write(dest, "#!/bin/sh\n# hand build\n")
+		r.noRetire = true
+		out, code := r.run("--yes")
+		got, _ := os.ReadFile(dest)
+		if code == 0 || string(got) != "#!/bin/sh\n# hand build\n" || strings.Contains(r.logText(), "setup") || !strings.Contains(out, "nothing was installed") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+		if left, _ := os.ReadDir(r.dest); len(left) != 1 {
+			t.Errorf("left %v", left)
 		}
 	})
 

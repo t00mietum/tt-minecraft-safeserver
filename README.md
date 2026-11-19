@@ -164,7 +164,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 ### Direct stable and dev install script
 
-For Debian and its derivatives, on amd64 or arm64. It finds the newest release, checks the binary against the release's `SHA256SUMS`, puts it in `/usr/local/bin/tt-minecraftd`, and runs `tt-minecraftd setup`, which does the rest.
+For Debian and its derivatives, on amd64 or arm64. It finds the newest release, checks the binary against the release's `SHA256SUMS`, puts it in `/usr/local/bin/tt-minecraftd` owned by root, and runs `tt-minecraftd setup`, which does the rest.
 
 ~~~bash
 bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
@@ -176,7 +176,7 @@ Or with wget:
 bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
 ~~~
 
-It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`.
+It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`. The build it replaces goes to `/var/lib/tt-minecraftd/old-builds/`, named for its date, in case you want it back. Only a few of those are kept, spread out over time.
 
 On another distro with systemd, add `--any-distro` to the end of the line. Then nothing gets installed through a package manager, so Podman and catatonit, or Docker, and nftables have to be installed already. NixOS isn't supported yet.
 
