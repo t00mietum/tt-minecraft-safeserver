@@ -260,7 +260,7 @@ Common:  --config PATH, --set KEY=VALUE
 		- That's `repair`'s firewall check, with its fixes. When it fails, such as with no apt to get nftables from, setup stops before it writes the config.
 	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
-	12. Copies itself to `/usr/local/bin` when it runs from somewhere else.
+	12. Copies itself to `/usr/local/bin` when it runs from somewhere else, unless the `.deb` or `.rpm` package has put it in `/usr/bin`. See [Boot](#boot).
 	13. Ends with `repair --check`.
 
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
@@ -349,6 +349,7 @@ Common:  --config PATH, --set KEY=VALUE
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
 		- A unit that runs another config is left alone, whatever this config's `startAtBoot` is. See [Boot](#boot).
 	14. Any Paper server that this tool didn't start is reported, and never killed.
+	15. When the package's `/usr/bin/tt-minecraftd` is there, no other copy in `/usr/local/bin` comes before it on PATH. One is reported with the command that removes it, and never removed. See [Boot](#boot).
 
 ## Project structure
 
@@ -895,8 +896,9 @@ cicd/                        build, test, and release scripts
 	- With `firewall` on, it requires `tt-minecraftd-firewall.service`, so the server never starts at boot without the rules.
 
 	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
-	- The unit runs the tool from `/usr/local/bin`, where `setup` puts it, with `--config` when the config isn't the default one.
-		- The `.deb` and `.rpm` packages and the install script put it there too, so an upgrade changes what the operator and the unit run. A package in `/usr/bin` would sit behind a copy in `/usr/local/bin`, which comes first on PATH.
+	- The unit runs the tool from `/usr/bin` when the `.deb` or `.rpm` package put it there, and otherwise from `/usr/local/bin`, where `setup` and the install script put it. It adds `--config` when the config isn't the default one.
+		- The packages follow the FHS and Debian policy, which give a package `/usr/bin` and leave `/usr/local/bin` to hand installs. A package upgrade then changes what the unit runs. `start` and `stop` take a unit that runs either path as this config's.
+		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` reports one it finds, without removing it.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
 		- Only `ExecStop`'s `stop` hands the trees back. systemd runs it after every start, even when the server ended by itself, and sends SIGTERM to what's left once it's done, which would cut a second hand-back short and fail the unit. A SIGTERM that finds the server down is a clean stop.
 	- `setup` and `repair` enable the unit and never start it, so the server starts at the next boot or the next `start`.

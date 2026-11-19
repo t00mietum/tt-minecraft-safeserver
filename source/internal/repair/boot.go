@@ -50,7 +50,7 @@ func (h *Host) bootOwner(path string) string {
 }
 
 func (h *Host) bootOn(ctx context.Context, path string) ([]Finding, error) {
-	unit := boot.Unit(h.Cfg, h.ConfigPath)
+	unit := boot.Unit(h.Cfg, h.ConfigPath, boot.Bin(h.PkgBin))
 	var found []Finding
 	ok, err := sameFile(path, unit)
 	if err != nil {
@@ -87,4 +87,35 @@ func (h *Host) bootOff(path string) ([]Finding, error) {
 			[]string{"systemctl", "daemon-reload"},
 		),
 	}}, nil
+}
+
+// shadowCheck is design.md's repair check 15. A hand-installed copy in
+// /usr/local/bin comes before the package's /usr/bin one on PATH, so the
+// operator keeps running it after a package upgrade. It's reported and never
+// removed, since someone may have put that build there on purpose.
+var shadowCheck = Check{
+	Name: "tool on PATH",
+	Look: func(_ context.Context, h *Host) ([]Finding, error) {
+		pkg, local := h.PkgBin, h.LocalBin
+		if pkg == "" {
+			pkg = boot.PkgBin
+		}
+		if local == "" {
+			local = boot.LocalBin
+		}
+		if boot.Bin(pkg) != boot.PkgBin {
+			return nil, nil
+		}
+		lfi, err := os.Stat(local)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		} else if err != nil {
+			return nil, err
+		}
+		// A link to the package's runs the package's.
+		if pfi, err := os.Stat(pkg); err == nil && os.SameFile(pfi, lfi) {
+			return nil, nil
+		}
+		return []Finding{{Problem: boot.LocalBin + " comes before the package's " + boot.PkgBin + " on PATH, so a package upgrade doesn't change what runs; remove it with: sudo rm " + boot.LocalBin}}, nil
+	},
 }

@@ -135,9 +135,11 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 		In:          bufio.NewScanner(strings.NewReader(answers)),
 		Out:         r.out,
 		Exe:         filepath.Join(dir, "tt-minecraftd"),
+		PkgBin:      filepath.Join(dir, "usr-bin-tt-minecraftd"),
 		Accounts: func(c *config.Config) *repair.Host {
 			return &repair.Host{Run: r.f, Cfg: c, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, Routes: filepath.Join(dir, "ipv6_route"), BootFile: filepath.Join(dir, "boot.service")}
+				RulesFile: filepath.Join(dir, "firewall.nft"), UnitFile: filepath.Join(dir, "fw.service"), ResolvConf: resolv, Routes: filepath.Join(dir, "ipv6_route"), BootFile: filepath.Join(dir, "boot.service"),
+				PkgBin: r.s.PkgBin, LocalBin: filepath.Join(dir, "usr-local-bin-tt-minecraftd")}
 		},
 		Paper:  &r.paper,
 		Geyser: &r.geyser,
@@ -996,5 +998,37 @@ func TestBootUnit(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(r.ran(), "\n"), "tt-minecraftd.service") || strings.Contains(r.out.String(), "tt-minecraftd.service") {
 		t.Errorf("startAtBoot off:\n%s\n%s", strings.Join(r.ran(), "\n"), r.out)
+	}
+}
+
+// With the package's binary there, setup leaves its copy out and the boot
+// unit runs the package's, so a package upgrade reaches both the operator and
+// the unit. Without it, the unit runs setup's copy. See design.md, Boot.
+func TestPackageInstall(t *testing.T) {
+	defer testid.Line(t, "df7at")
+	for _, pkg := range []bool{false, true} {
+		r := newRig(t, []string{"podman", "catatonit"}, "", "startAtBoot=true")
+		r.s.Yes, r.s.AcceptEULA = true, true
+		if pkg {
+			if err := os.WriteFile(r.s.PkgBin, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("package %v: %v\n%s", pkg, err, r.out)
+		}
+		unitFile := filepath.Join(r.dir, "boot.service")
+		unit := ""
+		for _, c := range r.f.Ran {
+			if strings.HasSuffix(strings.Join(c.Args, " "), " "+unitFile) {
+				unit = string(c.Stdin)
+			}
+		}
+		copied := slices.Contains(r.ran(), "sudo install -m 0755 "+r.s.Exe+" "+BinPath)
+		said := strings.Contains(r.out.String(), "Copy "+r.s.Exe+" to "+BinPath)
+		bin := map[bool]string{false: "/usr/local/bin/tt-minecraftd", true: "/usr/bin/tt-minecraftd"}[pkg]
+		if copied == pkg || said == pkg || !strings.Contains(unit, "\nExecStart="+bin+" start --foreground\n") {
+			t.Errorf("package %v: copied %v, in the plan %v, unit:\n%s\n%s", pkg, copied, said, unit, strings.Join(r.ran(), "\n"))
+		}
 	}
 }

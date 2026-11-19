@@ -71,6 +71,7 @@ func noHostRunner(t *testing.T) (*host.Fake, *int) {
 		return fake, func(c *config.Config) *repairpkg.Host {
 			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
 				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), Routes: filepath.Join(etc, "ipv6_route"), BootFile: filepath.Join(etc, "boot.service"),
+				PkgBin: filepath.Join(etc, "usr-bin-tt-minecraftd"), LocalBin: filepath.Join(etc, "usr-local-bin-tt-minecraftd"),
 				NftThere: func() bool { return false }}
 		}
 	}
