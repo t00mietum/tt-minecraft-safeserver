@@ -73,7 +73,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
-- repair renames a /usr/local/bin copy that hides the package's binary, and rotates the old ones
+- Rename a replaced /usr/local/bin build to _old_<mtime>, and rotate the old ones
 	- ID: 2026111911125756
 	- Type: Enhancement
 	- Status: Queued
@@ -87,12 +87,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The `tt-minecraftd_old_*` files there are GFS-rotated after each rename, like the cicd demo renders.
 		- `repair --check` and `--dry-run` still only report it, and say it would be renamed.
 		- A symlink to the package's binary still passes, and isn't renamed.
-		- design.md's repair check 15 and Boot say so.
+		- install.bash and setup's copy do the same when they replace a different build in `/usr/local/bin`. The same build, by SHA-256, is left alone.
+		- design.md's setup, repair check 15 and Boot, and README's Installing section, say so.
 	- Progress log:
 		- 2026-11-19: t00mietum's answer to the check 15 question: rename the copy and GFS rotate the old ones, rather than report it with `sudo rm`.
 	- Decisions:
 		- 2026-11-19: The rename keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can rename it back.
-		- 2026-11-19: install.bash and setup's copy still write over `/usr/local/bin/tt-minecraftd` in place. The answer was about check 15.
+		- 2026-11-19: t00mietum widened it to install.bash and setup's copy, which wrote over the old build in place.
+		- 2026-11-19: `update --self` is Deferred. It gets the same rename when it comes back.
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
