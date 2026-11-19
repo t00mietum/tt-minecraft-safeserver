@@ -82,7 +82,7 @@ func attachStandIn() int {
 // The line reaches a raw terminal with a carriage return, and Ctrl-C comes
 // by itself, so it detaches rather than reaching the server.
 func TestAttachConsole(t *testing.T) {
-	defer testid.Line(t, "df5xw")
+	defer testid.Line(t, "df5xw00")
 	got := filepath.Join(t.TempDir(), "got")
 	t.Setenv("TT_ATTACH_GOT", got)
 	c := AttachConsole{argv: []string{os.Args[0]}}

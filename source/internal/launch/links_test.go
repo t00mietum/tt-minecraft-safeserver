@@ -18,7 +18,7 @@ import (
 // doesn't have stops start before anything changes hands. One between the
 // mounted trees is fine, and so is a serverDir given as a link.
 func TestStartBoxLinks(t *testing.T) {
-	defer testid.Line(t, "df79c")
+	defer testid.Line(t, "df79c00")
 	g := newRig(t)
 	srv := filepath.Dir(g.dir)
 	v2 := filepath.Join(srv, "worlds", "v2")
@@ -75,7 +75,7 @@ func TestStartBoxLinks(t *testing.T) {
 // fix. A folder start can't read is a warning, and doesn't stop the start
 // (backlog 2026111715275408).
 func TestBoxLinksOutsideAndUnread(t *testing.T) {
-	defer testid.Line(t, "df7b9")
+	defer testid.Line(t, "df7b900")
 	if os.Geteuid() == 0 {
 		t.Skip("root reads every folder")
 	}

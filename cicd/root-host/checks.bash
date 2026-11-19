@@ -411,45 +411,45 @@ fZfsNone() {
 
 cd "${HOME}" || exit 1
 if [[ "${1:-}" != after-login ]]; then
-	check df680 "setup installs from scratch" fNewInstall
-	native df68j "native start in setup's login says to log in again" fSameLogin
+	check df68000 "setup installs from scratch" fNewInstall
+	native df68j00 "native start in setup's login says to log in again" fSameLogin
 	# The group setup added counts from the next login, as setup says.
 	exec sudo -u op TERM="${TERM:-xterm}" ZFS_POOL="${pool}" ZFS_FILE="${ZFS_FILE:-}" bash "${0}" after-login "${failed}"
 fi
 failed="${2:-0}"
 if [[ -n "${pool}" ]]; then
 	trap fZfsGone EXIT
-	check df780 "a throwaway pool holds the server's tree" fZfsPool
+	check df78000 "a throwaway pool holds the server's tree" fZfsPool
 	if ((failed == 0)); then
-		check df78y "start and stop take no snapshot" fZfsNone
+		check df78y00 "start and stop take no snapshot" fZfsNone
 		# Start and stop snapshots, the prune, and zfs allow went (backlog 2026111318002875).
-		# check df781 "start snapshots the dataset" fZfsStart
-		# check df782 "stop snapshots after the save, before the hand-back" fZfsStop
-		# check df783 "a prune destroys only the tool's own, in one destroy" fZfsPrune
-		# check df784 "with zfs allow the operator snapshots and prunes without sudo" fZfsAllow
+		# check df78100 "start snapshots the dataset" fZfsStart
+		# check df78200 "stop snapshots after the save, before the hand-back" fZfsStop
+		# check df78300 "a prune destroys only the tool's own, in one destroy" fZfsPrune
+		# check df78400 "with zfs allow the operator snapshots and prunes without sudo" fZfsAllow
 	fi
 	fZfsGone
 	exit "${failed}"
 fi
-check df681 "firewall table survives an nftables restart" fNftRestart
-check df682 "rootful Podman start without the docker group" fPodmanStart
-check df683 "jars read-only in the container" fJarsInContainer
-check df684 "status without sudo names podman mode" fStatusPodman
-check df685 "cmd list in podman mode" fCmd
-check df686 "console line and Ctrl-C detach in podman mode" fConsole
-check df687 "Geyser STUN answers behind the firewall" fStun
-check df688 "firewall drops and counts the account's local, LAN, and non-web connections" fFirewallOut
-check df7ag "Ctrl-C in stop --warn's countdown calls the stop off" fStopCancel
-check df689 "stop --warn 10 saves and hands the trees back" fStopWarn
-check df68a "start refuses a changed jar" fRefuseChanged
-native df68b "native start, sandbox, and locked jars" fNativeStart
-native df68c "status, cmd, and console follow a native server" fNativeFollow
-native df68d "stop follows a native server" fNativeStop
-check df78x "startAtBoot: repair enables the unit, and start and stop go through it" fBoot
-check df68e "setup --adopt a copy of the tree" fAdopt
-check df68f "firewall off removes the unit and table" fFirewallOff
-check df76n "update asks the agent as the operator, and hands its answer through sudo" fAgentHandOff
-check df7bf "a replaced build is kept in a root-owned old-builds folder" fOldBuild
+check df68100 "firewall table survives an nftables restart" fNftRestart
+check df68200 "rootful Podman start without the docker group" fPodmanStart
+check df68300 "jars read-only in the container" fJarsInContainer
+check df68400 "status without sudo names podman mode" fStatusPodman
+check df68500 "cmd list in podman mode" fCmd
+check df68600 "console line and Ctrl-C detach in podman mode" fConsole
+check df68700 "Geyser STUN answers behind the firewall" fStun
+check df68800 "firewall drops and counts the account's local, LAN, and non-web connections" fFirewallOut
+check df7ag00 "Ctrl-C in stop --warn's countdown calls the stop off" fStopCancel
+check df68900 "stop --warn 10 saves and hands the trees back" fStopWarn
+check df68a00 "start refuses a changed jar" fRefuseChanged
+native df68b00 "native start, sandbox, and locked jars" fNativeStart
+native df68c00 "status, cmd, and console follow a native server" fNativeFollow
+native df68d00 "stop follows a native server" fNativeStop
+check df78x00 "startAtBoot: repair enables the unit, and start and stop go through it" fBoot
+check df68e00 "setup --adopt a copy of the tree" fAdopt
+check df68f00 "firewall off removes the unit and table" fFirewallOff
+check df76n00 "update asks the agent as the operator, and hands its answer through sudo" fAgentHandOff
+check df7bf00 "a replaced build is kept in a root-owned old-builds folder" fOldBuild
 exit "${failed}"
 
 

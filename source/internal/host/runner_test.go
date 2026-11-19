@@ -16,7 +16,7 @@ import (
 )
 
 func TestQuote(t *testing.T) {
-	defer testid.Line(t, "df5xc")
+	defer testid.Line(t, "df5xc00")
 	got := Quote([]string{"chown", "-R", "--", "minecraftd:minecraftd", "/srv/a b", "it's", ""})
 	want := `chown -R -- minecraftd:minecraftd '/srv/a b' 'it'\''s' ''`
 	if got != want {
@@ -27,7 +27,7 @@ func TestQuote(t *testing.T) {
 // Under dry run a change prints and doesn't run, with sudo marked, while a
 // command that only looks still runs.
 func TestExecDryRun(t *testing.T) {
-	defer testid.Line(t, "df5xd")
+	defer testid.Line(t, "df5xd00")
 	var out bytes.Buffer
 	e := &Exec{DryRun: true, Out: &out, Err: &out}
 	ctx := context.Background()
@@ -49,7 +49,7 @@ func TestExecDryRun(t *testing.T) {
 }
 
 func TestExecError(t *testing.T) {
-	defer testid.Line(t, "df5xe")
+	defer testid.Line(t, "df5xe00")
 	var errOut bytes.Buffer
 	e := &Exec{Out: &errOut, Err: &errOut}
 	_, err := e.Run(context.Background(), Cmd{Args: []string{"sh", "-c", "echo oops >&2; exit 3"}})
@@ -67,7 +67,7 @@ func TestExecError(t *testing.T) {
 // A Tty command's stderr still goes to the terminal, and to ErrCopy too, for
 // console to tell docker attach's detach from sudo's or docker's own exit 1.
 func TestExecTtyErrCopy(t *testing.T) {
-	defer testid.Line(t, "df7b0")
+	defer testid.Line(t, "df7b000")
 	term, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestExecTtyErrCopy(t *testing.T) {
 // A command run as the service account goes through sudo -u, or runuser
 // when the tool is already root, since root may have no sudo.
 func TestExecAs(t *testing.T) {
-	defer testid.Line(t, "df5y0")
+	defer testid.Line(t, "df5y000")
 	var out bytes.Buffer
 	e := &Exec{DryRun: true, Out: &out}
 	ctx := context.Background()
@@ -114,7 +114,7 @@ func TestExecAs(t *testing.T) {
 
 // QuietErr keeps stderr off the terminal and puts it in the error.
 func TestExecQuietErr(t *testing.T) {
-	defer testid.Line(t, "df5yf")
+	defer testid.Line(t, "df5yf00")
 	var errOut bytes.Buffer
 	e := &Exec{Err: &errOut, QuietErr: true}
 	_, err := e.Run(context.Background(), Cmd{Look: true, Args: []string{"sh", "-c", "echo oops >&2; echo more >&2; exit 3"}})
@@ -129,7 +129,7 @@ func TestExecQuietErr(t *testing.T) {
 
 // Quiet does the same for one command, such as a try with a fallback.
 func TestExecQuietCmd(t *testing.T) {
-	defer testid.Line(t, "df77r")
+	defer testid.Line(t, "df77r00")
 	var errOut bytes.Buffer
 	e := &Exec{Err: &errOut}
 	_, err := e.Run(context.Background(), Cmd{Quiet: true, Look: true, Args: []string{"sh", "-c", "echo denied >&2; exit 1"}})
@@ -139,7 +139,7 @@ func TestExecQuietCmd(t *testing.T) {
 }
 
 func TestExecStdin(t *testing.T) {
-	defer testid.Line(t, "df66j")
+	defer testid.Line(t, "df66j00")
 	e := &Exec{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}
 	out, err := e.Run(context.Background(), Cmd{Args: []string{"cat"}, Stdin: []byte("table inet x\n")})
 	if err != nil || string(out) != "table inet x\n" {
@@ -155,7 +155,7 @@ func TestExecStdin(t *testing.T) {
 // NoPrompt puts -n on the sudo the runner adds, so a dry run's look never
 // asks for a password, and one sudo refuses says what it couldn't check.
 func TestExecNoPrompt(t *testing.T) {
-	defer testid.Line(t, "df7aw")
+	defer testid.Line(t, "df7aw00")
 	dir := t.TempDir()
 	log := filepath.Join(dir, "sudo.log")
 	// Without SUDO_CACHED, -n refuses as a run-out timestamp does, and

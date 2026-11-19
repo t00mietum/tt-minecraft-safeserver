@@ -21,7 +21,7 @@ import (
 // A staged jar that the server swaps for a pipe is refused when opened to
 // read its claims, rather than hanging the open.
 func TestStagedOpenPipe(t *testing.T) {
-	defer testid.Line(t, "df79n")
+	defer testid.Line(t, "df79n00")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "PK not really a jar")
 	}))
@@ -82,7 +82,7 @@ func rawStatus(w http.ResponseWriter, _ *http.Request) {
 // A download server's reason phrase is its own text, so the error names the
 // status by its code.
 func TestStatusByCode(t *testing.T) {
-	defer testid.Line(t, "df79x")
+	defer testid.Line(t, "df79x00")
 	ts := httptest.NewServer(http.HandlerFunc(rawStatus))
 	t.Cleanup(ts.Close)
 	_, err := Client{}.Get(context.Background(), ts.URL+"/x.jar")
@@ -118,7 +118,7 @@ func stageJar(t *testing.T, body string) (string, *Staged) {
 // The checked download stays 0600 while it waits for the operator, so the
 // server account can't rewrite it, and gets 0660 only as it's kept.
 func TestStagedPrivateUntilKept(t *testing.T) {
-	defer testid.Line(t, "df7b3")
+	defer testid.Line(t, "df7b300")
 	dir, s := stageJar(t, "PK good jar")
 	fi, err := os.Lstat(filepath.Join(dir, s.Temp))
 	if err != nil {
@@ -142,7 +142,7 @@ func TestStagedPrivateUntilKept(t *testing.T) {
 // A file the server puts in place of the staged one isn't renamed over the
 // good jar.
 func TestStagedSwapRefused(t *testing.T) {
-	defer testid.Line(t, "df7b4")
+	defer testid.Line(t, "df7b400")
 	dir, s := stageJar(t, "PK good jar")
 	good := filepath.Join(dir, "x.jar")
 	if err := os.WriteFile(good, []byte("PK old jar"), 0o660); err != nil {

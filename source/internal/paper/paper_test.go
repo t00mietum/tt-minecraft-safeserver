@@ -64,7 +64,7 @@ func build(id int, channel, name string, jar []byte) string {
 }
 
 func TestNewestVersion(t *testing.T) {
-	defer testid.Line(t, "df65p")
+	defer testid.Line(t, "df65p00")
 	jar := []byte("jar")
 	_, api := newFill(t, `{"project":{"id":"paper"},"versions":{"1.9":["1.9.4"],"26.3":["26.3-rc-3","26.3"],"26.4":["26.4-rc-1"],"1.21":["1.21.11","1.21.10"],"27.1":["27.1"]}}`,
 		map[string]string{
@@ -84,7 +84,7 @@ func TestNewestVersion(t *testing.T) {
 }
 
 func TestJava(t *testing.T) {
-	defer testid.Line(t, "df67p")
+	defer testid.Line(t, "df67p00")
 	f := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/paper/versions/26.3":
@@ -108,7 +108,7 @@ func TestJava(t *testing.T) {
 }
 
 func TestNewestStable(t *testing.T) {
-	defer testid.Line(t, "df65q")
+	defer testid.Line(t, "df65q00")
 	jar := []byte("jar")
 	_, api := newFill(t, `{}`, map[string]string{
 		"26.3":   "[" + build(250, "BETA", "paper-26.3-250.jar", jar) + "," + build(249, "STABLE", "paper-26.3-249.jar", jar) + "," + build(248, "STABLE", "paper-26.3-248.jar", jar) + "]",
@@ -129,7 +129,7 @@ func TestNewestStable(t *testing.T) {
 }
 
 func TestInstall(t *testing.T) {
-	defer testid.Line(t, "df65r")
+	defer testid.Line(t, "df65r00")
 	jar := []byte("PK not really a jar")
 	f, api := newFill(t, `{}`, map[string]string{"26.3": "[" + build(249, "STABLE", "paper-26.3-249.jar", jar) + "]"}, jar)
 	dir := t.TempDir()
@@ -183,7 +183,7 @@ func TestInstall(t *testing.T) {
 
 // Current reads the version and build from the name paper.jar links to.
 func TestCurrent(t *testing.T) {
-	defer testid.Line(t, "df66x")
+	defer testid.Line(t, "df66x00")
 	dir := t.TempDir()
 	if l, err := Current(dir); l != nil || err != nil {
 		t.Errorf("no paper.jar: %+v, %v", l, err)
@@ -228,7 +228,7 @@ func TestCurrent(t *testing.T) {
 
 // Prune leaves the builds it's told to keep, and anything that isn't a build.
 func TestPrune(t *testing.T) {
-	defer testid.Line(t, "df66y")
+	defer testid.Line(t, "df66y00")
 	dir := t.TempDir()
 	for _, name := range []string{"paper-26.3-240.jar", "paper-26.3-244.jar", "paper-26.3-249.jar", "paper-1.21.11-7.jar", "paper-stuff.jar", "paper.jar.bak"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("jar"), 0o600); err != nil {
@@ -251,7 +251,7 @@ func TestPrune(t *testing.T) {
 // Older orders versions by their numbers, with a pre-release before its
 // release, so update --mc-version can refuse a move back.
 func TestOlder(t *testing.T) {
-	defer testid.Line(t, "df78k")
+	defer testid.Line(t, "df78k00")
 	for _, c := range []struct {
 		a, b  string
 		older bool
@@ -299,7 +299,7 @@ func paperJar(t *testing.T, main, version string) []byte {
 
 // Claims reads the version from a Paper jar only, and Point links paper.jar.
 func TestClaimsAndPoint(t *testing.T) {
-	defer testid.Line(t, "df791")
+	defer testid.Line(t, "df79100")
 	dir := t.TempDir()
 	for _, c := range []struct {
 		jar  []byte
@@ -334,7 +334,7 @@ func TestClaimsAndPoint(t *testing.T) {
 // paper.jar's link text is shown in update's plan and errors, and the server
 // account can set it, so one with control characters anywhere is refused.
 func TestCurrentRefusesControlCharacters(t *testing.T) {
-	defer testid.Line(t, "df79v")
+	defer testid.Line(t, "df79v00")
 	for _, target := range []string{"/x\x1b]0;owned\x07\x1b[2J/paper-26.3-249.jar", "paper-26.3-249.jar\u202e", "\x1b[2Jevil"} {
 		dir := t.TempDir()
 		if err := os.Symlink(target, filepath.Join(dir, "paper.jar")); err != nil {

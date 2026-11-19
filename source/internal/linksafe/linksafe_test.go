@@ -95,7 +95,7 @@ func tempLeft(t *testing.T, dir string) []string {
 // A link, or a file, at any step of the path is refused, and no handle is
 // left open on the way out.
 func TestWalkRefusesLinks(t *testing.T) {
-	defer testid.Line(t, "df7bj")
+	defer testid.Line(t, "df7bj00")
 	parts := []string{"a", "b", "c"}
 	for step := range parts {
 		for _, kind := range []string{"link", "file"} {
@@ -159,7 +159,7 @@ func TestWalkRefusesLinks(t *testing.T) {
 // Read takes only a regular file that isn't a link, doesn't hang on a pipe,
 // and caps the size.
 func TestRead(t *testing.T) {
-	defer testid.Line(t, "df7bk")
+	defer testid.Line(t, "df7bk00")
 	top, elsewhere := t.TempDir(), t.TempDir()
 	put(t, filepath.Join(elsewhere, "secret"), "root's")
 	link(t, filepath.Join(elsewhere, "secret"), filepath.Join(top, "linked"))
@@ -208,7 +208,7 @@ func TestRead(t *testing.T) {
 // Write replaces a link rather than writing through it, sets the mode it's
 // given whatever the umask, and leaves no temp file when the rename fails.
 func TestWrite(t *testing.T) {
-	defer testid.Line(t, "df7bm")
+	defer testid.Line(t, "df7bm00")
 	umask(t, 0o077)
 	top, elsewhere := t.TempDir(), t.TempDir()
 	target := filepath.Join(elsewhere, "secret")
@@ -257,7 +257,7 @@ func TestWrite(t *testing.T) {
 // Move never replaces, moves a link as the link, and keeps both promises on
 // a filesystem without RENAME_NOREPLACE.
 func TestMove(t *testing.T) {
-	defer testid.Line(t, "df7bn")
+	defer testid.Line(t, "df7bn00")
 	check := func(t *testing.T) {
 		t.Helper()
 		top, elsewhere := t.TempDir(), t.TempDir()
@@ -320,7 +320,7 @@ func TestMove(t *testing.T) {
 // Mkdir makes the folder ug+rwx whatever the umask, refuses one that's there,
 // and refuses one swapped for a link before it's opened.
 func TestMkdir(t *testing.T) {
-	defer testid.Line(t, "df7bp")
+	defer testid.Line(t, "df7bp00")
 	umask(t, 0o077)
 	top, elsewhere := t.TempDir(), t.TempDir()
 	d := open(t, top)
@@ -367,7 +367,7 @@ const asRoot = "TT_LINKSAFE_AS_ROOT"
 // itself again as root in a user namespace, with more ids mapped when
 // newuidmap allows, so the owner it sets is one the test didn't have.
 func TestRootChown(t *testing.T) {
-	defer testid.Line(t, "df7bq")
+	defer testid.Line(t, "df7bq00")
 	if os.Getenv(asRoot) != "" {
 		rootSide(t)
 		return
@@ -389,7 +389,7 @@ func TestRootChown(t *testing.T) {
 	cmd := exec.Command("unshare", args...) // #nosec G204 -- the test binary itself
 	cmd.Env = append(os.Environ(), asRoot+"=1")
 	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "PASS df7bq") {
+	if err != nil || !strings.Contains(string(out), "PASS df7bq00") {
 		t.Errorf("as root, unshare %v: %v\n%s", args[:len(args)-3], err, out)
 	}
 	t.Logf("unshare %v", args[:len(args)-3])

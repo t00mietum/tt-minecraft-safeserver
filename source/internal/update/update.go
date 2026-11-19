@@ -329,7 +329,7 @@ func (u *Update) movePlugins() []plugins.Approved {
 	}
 	var in []plugins.Approved
 	for _, a := range approved {
-		if paper.IsBuild(a.Name) {
+		if paper.IsBuild(a.Name) || plugins.IsLibrary(a.Name) {
 			continue
 		}
 		if _, err := os.Lstat(filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(a.Name))); err == nil {
@@ -550,6 +550,9 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 		switch {
 		case paper.IsBuild(a.Name):
 			// --paper's, from PaperMC.
+			continue
+		case plugins.IsLibrary(a.Name):
+			// Paper downloads its own.
 			continue
 		case a.Source == "" && !agentOn:
 			continue

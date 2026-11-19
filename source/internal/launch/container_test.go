@@ -161,7 +161,7 @@ func (g *rig) changes() []string {
 // create then start, since Podman's run --detach warns when started from a
 // script.
 func TestDockerStart(t *testing.T) {
-	defer testid.Line(t, "df5xp")
+	defer testid.Line(t, "df5xp00")
 	g := newRig(t)
 	g.states = []string{"exited", "running"}
 	g.log = "[12:00:09 INFO]: Done (8.1s)! For help, type \"help\"\n"
@@ -186,7 +186,6 @@ func TestDockerStart(t *testing.T) {
 		"sudo docker rm tt-minecraftd",
 		"sudo chown -R -- minecraftd:minecraftd " + q(g.dir),
 		"sudo chmod -R ug+rwX,o-rwx -- " + q(g.dir),
-		"sudo -u minecraftd -- rm -rf --one-file-system -- " + q(g.dir+"/libraries") + " " + q(g.dir+"/plugins/.paper-remapped"),
 		"sudo " + host.Quote(run),
 		"sudo docker start tt-minecraftd",
 	}
@@ -202,7 +201,7 @@ func TestDockerStart(t *testing.T) {
 // sudo -v only when that fails. A NOPASSWD rule beside password rules passes
 // sudo -n but not sudo -v.
 func TestStartSudoNoPassword(t *testing.T) {
-	defer testid.Line(t, "df79e")
+	defer testid.Line(t, "df79e00")
 	for _, free := range []bool{true, false} {
 		g := newRig(t)
 		g.sudoFree = free
@@ -235,7 +234,7 @@ func TestStartSudoNoPassword(t *testing.T) {
 // Another Paper server, such as one the old scripts started, stops start
 // before it changes anything.
 func TestDockerStartRefuses(t *testing.T) {
-	defer testid.Line(t, "df5xq")
+	defer testid.Line(t, "df5xq00")
 	g := newRig(t)
 	g.ps = "safeserver 4242 java -Xmx6G -jar paper-26.3-244.jar nogui\n"
 	err := g.d.Start(context.Background(), StartMode{})
@@ -261,7 +260,7 @@ func TestDockerStartRefuses(t *testing.T) {
 // A server that dies while loading gets its log tail shown, and one that's
 // slow is left running with an error.
 func TestDockerStartFails(t *testing.T) {
-	defer testid.Line(t, "df5xr")
+	defer testid.Line(t, "df5xr00")
 	g := newRig(t)
 	g.states = []string{"", "exited"}
 	g.log = "Error: Unable to access jarfile paper.jar\n"
@@ -282,7 +281,7 @@ func TestDockerStartFails(t *testing.T) {
 // trees back. One that leaves the server up, or can't tell, says how to get
 // them back. Inside the boot unit, ExecStop's stop does it.
 func TestFailedStartHandsBack(t *testing.T) {
-	defer testid.Line(t, "df7an")
+	defer testid.Line(t, "df7an00")
 	back := "sudo chown -R -- alice:minecraftd "
 	failing := func(g *rig, step string, cancel func()) {
 		g.r.Reply = func(c host.Cmd) ([]byte, error) {
@@ -357,13 +356,13 @@ func TestFailedStartHandsBack(t *testing.T) {
 // --debug runs attached and hands the trees back after. --foreground skips
 // sudo and waits for the container, for the boot unit. Dry run waits for nothing.
 func TestDockerStartModes(t *testing.T) {
-	defer testid.Line(t, "df5xs")
+	defer testid.Line(t, "df5xs00")
 	g := newRig(t)
 	if err := g.d.Start(context.Background(), StartMode{Debug: true}); err != nil {
 		t.Fatal(err)
 	}
 	got := g.changes()
-	if len(got) != 6 || !strings.HasPrefix(got[4], "sudo docker run --name") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[5], "chown -R -- alice:minecraftd") {
+	if len(got) != 5 || !strings.HasPrefix(got[3], "sudo docker run --name") || !g.r.Ran[len(g.r.Ran)-2].Tty || !strings.Contains(got[4], "chown -R -- alice:minecraftd") {
 		t.Errorf("debug ran %q", got)
 	}
 
@@ -391,7 +390,7 @@ func TestDockerStartModes(t *testing.T) {
 }
 
 func TestDockerStop(t *testing.T) {
-	defer testid.Line(t, "df5xt")
+	defer testid.Line(t, "df5xt00")
 	g := newRig(t)
 	g.states = []string{"running", "running", "running", "exited"}
 	if err := g.d.Stop(context.Background(), 12); err != nil {
@@ -417,7 +416,7 @@ func TestDockerStop(t *testing.T) {
 // Ctrl-C in the countdown ends it at once, tells the players the stop is
 // off, and fails, with the server and its trees left as they were.
 func TestStopCountdownInterrupt(t *testing.T) {
-	defer testid.Line(t, "df7ab")
+	defer testid.Line(t, "df7ab00")
 	g := newRig(t)
 	g.states = []string{"running"}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -473,7 +472,7 @@ func (c cancelConsole) Send(ctx context.Context, line string) error {
 
 // The real clock's wait ends at Ctrl-C.
 func TestPauseInterrupt(t *testing.T) {
-	defer testid.Line(t, "df7ac")
+	defer testid.Line(t, "df7ac00")
 	k := &Kit{}
 	if err := k.pause(context.Background(), time.Millisecond); err != nil {
 		t.Errorf("short wait: %v", err)
@@ -493,7 +492,7 @@ func TestPauseInterrupt(t *testing.T) {
 // goes on, since an exit there makes systemd stop the server. The
 // container's exit code is passed on.
 func TestForegroundSlowLoad(t *testing.T) {
-	defer testid.Line(t, "df7ad")
+	defer testid.Line(t, "df7ad00")
 	g := newRig(t)
 	g.d.Root = true
 	g.states = []string{"", "running"}
@@ -533,7 +532,7 @@ func TestForegroundSlowLoad(t *testing.T) {
 // Only update --mc-version snapshots now, so start and stop with zfsDataset
 // set run no zfs.
 func TestNoStartStopSnapshot(t *testing.T) {
-	defer testid.Line(t, "df78z")
+	defer testid.Line(t, "df78z00")
 	g := newRig(t)
 	g.d.Cfg.ZfsDataset = "tank/mc"
 	g.states = []string{"exited", "running", "running", "running", "exited"}
@@ -555,7 +554,7 @@ func TestNoStartStopSnapshot(t *testing.T) {
 // Not running: the trees still go back, as after a crash. Stuck: SIGTERM,
 // then SIGKILL after docker's grace time.
 func TestDockerStopEdges(t *testing.T) {
-	defer testid.Line(t, "df5xv")
+	defer testid.Line(t, "df5xv00")
 	g := newRig(t)
 	g.states = []string{"exited"}
 	if err := g.d.Stop(context.Background(), 30); err != nil {
@@ -600,7 +599,7 @@ func (failConsole) Send(context.Context, string) error { return errors.New("no s
 // An unsafe setting stops a start in either mode, after sudo and before
 // anything changes. A likely mistake only warns.
 func TestStartChecksSettings(t *testing.T) {
-	defer testid.Line(t, "df5yj")
+	defer testid.Line(t, "df5yj00")
 	for _, native := range []bool{false, true} {
 		g := newNativeRig(t)
 		start := g.d.Start
@@ -641,7 +640,7 @@ func TestStartChecksSettings(t *testing.T) {
 // With firewall on, a start without the table stops after sudo, in either
 // mode, before anything changes. With it off, nft isn't asked.
 func TestStartChecksFirewall(t *testing.T) {
-	defer testid.Line(t, "df66f")
+	defer testid.Line(t, "df66f00")
 	for _, native := range []bool{false, true} {
 		g := newNativeRig(t)
 		start := g.d.Start
@@ -680,7 +679,7 @@ func TestStartChecksFirewall(t *testing.T) {
 // Rules written for another config, or that miss a new IPv6 subnet, stop a
 // start in either mode before anything changes, even with the table loaded.
 func TestStartChecksFirewallRules(t *testing.T) {
-	defer testid.Line(t, "df7a5")
+	defer testid.Line(t, "df7a500")
 	for _, native := range []bool{false, true} {
 		for what, change := range map[string]func(g *nativeRig){
 			"allowFrom": func(g *nativeRig) { g.d.Cfg.AllowFrom = []string{"any"} },
@@ -715,7 +714,7 @@ func TestStartChecksFirewallRules(t *testing.T) {
 // A new or changed jar stops a start in either mode, after sudo and before
 // anything changes. Geyser extensions count, and get read-only mounts too.
 func TestStartChecksPlugins(t *testing.T) {
-	defer testid.Line(t, "df5z4")
+	defer testid.Line(t, "df5z400")
 	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	ext := filepath.Join("plugins", "Geyser-Spigot", "extensions", "thing.jar")
 	for _, native := range []bool{false, true} {
@@ -782,7 +781,7 @@ func TestStartChecksPlugins(t *testing.T) {
 
 // Podman gets the same run command as Docker, through sudo.
 func TestPodmanStart(t *testing.T) {
-	defer testid.Line(t, "df64f")
+	defer testid.Line(t, "df64f00")
 	docker := newRig(t)
 	docker.states = []string{"", "running"}
 	docker.log = "Done (1.0s)! For help, type \"help\""
@@ -821,7 +820,7 @@ func TestPodmanStart(t *testing.T) {
 // A container from before a runMode change is found under the other runtime,
 // and stop goes there. Only runMode's runtime has to answer.
 func TestFindContainer(t *testing.T) {
-	defer testid.Line(t, "df64g")
+	defer testid.Line(t, "df64g00")
 	states := map[string]string{}
 	fails := map[string]bool{}
 	installed := map[string]bool{}
@@ -905,7 +904,7 @@ func TestFindContainer(t *testing.T) {
 // A jar's name comes from the server account, so start's refusal shows it
 // without its escape codes.
 func TestStartCleansJarName(t *testing.T) {
-	defer testid.Line(t, "df79s")
+	defer testid.Line(t, "df79s00")
 	g := newRig(t)
 	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "\x1b]0;owned\x07\x1b[2K\rGeyser-Spigot.jar"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -920,7 +919,7 @@ func TestStartCleansJarName(t *testing.T) {
 // The log tail of a server that died while loading is the server's text, so
 // it's shown without escape codes, a line per line.
 func TestStartCleansLogTail(t *testing.T) {
-	defer testid.Line(t, "df79t")
+	defer testid.Line(t, "df79t00")
 	g := newRig(t)
 	g.states = []string{"", "exited"}
 	g.log = "first \x1b]52;c;ZWNobyBoaQ==\x07line\r\nsecond\x1b[2J line\n"
@@ -934,7 +933,7 @@ func TestStartCleansLogTail(t *testing.T) {
 // Two plugin jars that link to one file give one mount, since Docker and
 // Podman refuse a destination given twice.
 func TestStartJarLinksOneMount(t *testing.T) {
-	defer testid.Line(t, "df7b1")
+	defer testid.Line(t, "df7b100")
 	g := newRig(t)
 	g.d.DryRun = true
 	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

@@ -35,7 +35,7 @@ func testConfig(trees ...string) *config.Config {
 }
 
 func TestToServer(t *testing.T) {
-	defer testid.Line(t, "df5xf")
+	defer testid.Line(t, "df5xf00")
 	server, world := deepDir(t, "server"), deepDir(t, "world")
 	missing := filepath.Join(filepath.Dir(server), "gone")
 	var r host.Fake
@@ -60,7 +60,7 @@ func TestToServer(t *testing.T) {
 // Back to the operator with the group kept. With no operator, as from the
 // boot unit, nothing changes hands.
 func TestToOperator(t *testing.T) {
-	defer testid.Line(t, "df5xg")
+	defer testid.Line(t, "df5xg00")
 	server := deepDir(t, "server")
 	var r host.Fake
 	c := testConfig(server)
@@ -85,7 +85,7 @@ func TestToOperator(t *testing.T) {
 
 // A shallow tree is refused, and so is a link to one, before anything runs.
 func TestShallowTrees(t *testing.T) {
-	defer testid.Line(t, "df5xh")
+	defer testid.Line(t, "df5xh00")
 	base := deepDir(t, "links")
 	toShallow := filepath.Join(base, "to-usr")
 	if err := os.Symlink("/usr", toShallow); err != nil {

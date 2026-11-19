@@ -20,7 +20,7 @@ import (
 )
 
 func TestCheckJars(t *testing.T) {
-	defer testid.Line(t, "df5ye")
+	defer testid.Line(t, "df5ye00")
 	dir := t.TempDir()
 	put := func(name, text string) {
 		t.Helper()
@@ -81,7 +81,7 @@ func TestCheckJars(t *testing.T) {
 // links to one. A pipe stands in for the device, since inotify shows whether
 // it was opened.
 func TestJarLinksNotOpened(t *testing.T) {
-	defer testid.Line(t, "df79j")
+	defer testid.Line(t, "df79j00")
 	dir, outside := t.TempDir(), t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "plugins"), 0o700); err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestJarLinksNotOpened(t *testing.T) {
 // Glob characters in serverDir are part of its name, not a pattern. Read as a
 // pattern, mc[1] matches only mc1, so no jar was found and the check passed.
 func TestJarsGlobInServerDir(t *testing.T) {
-	defer testid.Line(t, "df79p")
+	defer testid.Line(t, "df79p00")
 	for _, name := range []string{"mc[1]", "mc*", "mc?", `mc\x`, "[mc"} {
 		dir := filepath.Join(t.TempDir(), name)
 		ext := filepath.Join(dir, "plugins", "Geyser-Spigot", "extensions")
@@ -184,7 +184,7 @@ func TestJarsGlobInServerDir(t *testing.T) {
 // The folder paper.jar points to is the server account's to name, so the
 // refusal of one outside the server folder shows it cleaned.
 func TestJarsOutsideCleaned(t *testing.T) {
-	defer testid.Line(t, "df79w")
+	defer testid.Line(t, "df79w00")
 	dir, outside := t.TempDir(), filepath.Join(t.TempDir(), "x\x1b]0;owned\x07")
 	if err := os.MkdirAll(outside, 0o700); err != nil {
 		t.Fatal(err)

@@ -95,7 +95,7 @@ func hasAll(t *testing.T, what string, have []string, want ...string) {
 }
 
 func TestRun(t *testing.T) {
-	defer testid.Line(t, "df5za")
+	defer testid.Line(t, "df5za00")
 	fixed := 0
 	checks := []Check{
 		{Name: "fine", Look: func(context.Context, *Host) ([]Finding, error) { return nil, nil }},
@@ -130,7 +130,7 @@ func TestRun(t *testing.T) {
 }
 
 func TestConfigCheck(t *testing.T) {
-	defer testid.Line(t, "df5zb")
+	defer testid.Line(t, "df5zb00")
 	h, f := testHost(t, "", "", nil)
 	hasAll(t, "missing", look(t, h, configCheck), "no config at "+h.ConfigPath+"; sudo tt-minecraftd setup writes one")
 
@@ -158,7 +158,7 @@ const (
 )
 
 func TestAccountCheck(t *testing.T) {
-	defer testid.Line(t, "df5zc")
+	defer testid.Line(t, "df5zc00")
 	h, _ := testHost(t, goodPasswd, goodGroup, nil)
 	if got := look(t, h, accountCheck); len(got) != 0 {
 		t.Errorf("good account: %q", got)
@@ -205,7 +205,7 @@ func TestAccountCheck(t *testing.T) {
 }
 
 func TestOperatorCheck(t *testing.T) {
-	defer testid.Line(t, "df5zd")
+	defer testid.Line(t, "df5zd00")
 	h, _ := testHost(t, goodPasswd, goodGroup, nil)
 	if got := look(t, h, operatorCheck); len(got) != 0 {
 		t.Errorf("listed member: %q", got)
@@ -230,7 +230,7 @@ func TestOperatorCheck(t *testing.T) {
 }
 
 func TestServerTreeCheck(t *testing.T) {
-	defer testid.Line(t, "df5ze")
+	defer testid.Line(t, "df5ze00")
 	h, _ := testHost(t, "", "", nil)
 	dir := h.Cfg.ServerDir
 	hasAll(t, "no folder", look(t, h, serverTreeCheck), "server folder "+dir+" is missing", "sudo tt-minecraftd setup makes one")
@@ -303,7 +303,7 @@ func ownHost(t *testing.T, serverIsMe bool, state string) (*Host, *host.Fake) {
 }
 
 func TestOwnershipCheck(t *testing.T) {
-	defer testid.Line(t, "df5zf")
+	defer testid.Line(t, "df5zf00")
 	if os.Getuid() == 990 {
 		t.Skip("the test's uid is the fake service account's")
 	}
@@ -385,7 +385,7 @@ func TestOwnershipCheck(t *testing.T) {
 }
 
 func TestBedrockCheck(t *testing.T) {
-	defer testid.Line(t, "df5zg")
+	defer testid.Line(t, "df5zg00")
 	h, f := testHost(t, "", "", nil)
 	if bedrockCheck.Applies(h.Cfg) {
 		t.Error("applies with bedrock off")
@@ -429,7 +429,7 @@ func TestBedrockCheck(t *testing.T) {
 // The key's mode is changed as root, so a link on the way to it isn't
 // followed.
 func TestBedrockKeyLinks(t *testing.T) {
-	defer testid.Line(t, "df79b")
+	defer testid.Line(t, "df79b00")
 	h, f := testHost(t, "", "", nil)
 	h.Cfg.Bedrock = true
 	plugins := filepath.Join(h.Cfg.ServerDir, "plugins")
@@ -479,7 +479,7 @@ func TestBedrockKeyLinks(t *testing.T) {
 }
 
 func TestDockerCheck(t *testing.T) {
-	defer testid.Line(t, "df5zh")
+	defer testid.Line(t, "df5zh00")
 	var noImage bool
 	var state string
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
@@ -518,7 +518,7 @@ func TestDockerCheck(t *testing.T) {
 // Podman mode also finds an old container left under Docker, and needs
 // catatonit.
 func TestPodmanChecks(t *testing.T) {
-	defer testid.Line(t, "df64h")
+	defer testid.Line(t, "df64h00")
 	states := map[string]string{"podman": "running", "docker": "exited"}
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
 		if c.Args[1] == "ps" {
@@ -563,7 +563,7 @@ func TestPodmanChecks(t *testing.T) {
 }
 
 func TestDatasetCheck(t *testing.T) {
-	defer testid.Line(t, "df5zj")
+	defer testid.Line(t, "df5zj00")
 	var mounted string
 	var err error
 	h, f := testHost(t, "", "", func(host.Cmd) ([]byte, error) { return []byte(mounted + "\n"), err })
@@ -602,7 +602,7 @@ func procCgroups(paths map[string]string) func(string) ([]byte, error) {
 }
 
 func TestOthersCheck(t *testing.T) {
-	defer testid.Line(t, "df5zk")
+	defer testid.Line(t, "df5zk00")
 	ps := "  990    99     1  60 catatonit -- sh -c " + launch.Wrapper + " sh java -Xmx4G -jar paper.jar --nogui\n" +
 		"  990   100    99  60 java -Xmx4G -jar /srv/mc/paper.jar nogui\n 1000   200     1  60 /usr/bin/java -jar paper-26.3-244.jar\n 1000   300     1  60 bash\n 1234   400     1  60 java -jar paper.jar\n"
 	h, f := testHost(t, goodPasswd, goodGroup, func(host.Cmd) ([]byte, error) { return []byte(ps), nil })
@@ -623,7 +623,7 @@ func TestOthersCheck(t *testing.T) {
 // A Paper under runUser's uid is the tool's only when status would call it
 // so: in the native unit, or in a container under the wrapper.
 func TestOthersCheckSameUID(t *testing.T) {
-	defer testid.Line(t, "df7ay")
+	defer testid.Line(t, "df7ay00")
 	cases := []struct {
 		name, cgroup, parent string
 		ours                 bool
@@ -656,7 +656,7 @@ func TestOthersCheckSameUID(t *testing.T) {
 }
 
 func TestHostFirewallCheck(t *testing.T) {
-	defer testid.Line(t, "df5zm")
+	defer testid.Line(t, "df5zm00")
 	units := map[string]bool{}
 	var ufw, firewalld string
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {

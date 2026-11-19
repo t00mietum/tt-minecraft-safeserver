@@ -166,7 +166,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- An IPv6 subnet the file has and the host doesn't is fine, since it only blocks more. At boot, the router's announcement can come after the server starts.
 
 6. Hand the trees to the service account. See [Tree ownership](#tree-ownership).
-	- Then, as the service account, remove Paper's plugin library cache and its remapped plugin jars. See [Plugin pinning](#plugin-pinning).
+	- Then, as the service account, remove the jars in Paper's plugin library cache that aren't approved. See [Plugin pinning](#plugin-pinning).
 
 7. Launch in the configured mode. Then wait until the log says the server is done loading, or `startTimeout` runs out. When the process died, print the end of its log and exit 1.
 	- When `startTimeout` runs out, the server keeps running, and `start` exits 1. With `--foreground` that's only a warning, and it goes on to wait for the server's end. An exit there would end the boot unit, and systemd would run its `ExecStop`, so a big world or a slow host would never come up at boot.
@@ -322,7 +322,7 @@ Common:  --config PATH, --set KEY=VALUE
 
 - Needs root unless `--check` is given, so it runs itself again through sudo when needed, the same as `setup` and `update`. `--check` reports only, and `--dry-run` is the same as `--check`.
 
-- It takes no `--yes`, since its only questions come from `--approve-plugins`, one per jar.
+- It takes no `--yes`, since its only questions come from `--approve-plugins`, one per plugin jar, plus one for all the plugin libraries.
 
 - Each check prints OK, FIXED, or FAILED. The exit code is 1 when anything failed.
 
@@ -578,7 +578,7 @@ cicd/                        build, test, and release scripts
 | `firewall`          | `true`                            | See [Firewall](#firewall)
 | `startAtBoot`       | `false`
 | `extraArgs`         | none                              | Added to the Paper command as given
-| `agent`             | `none`                            | `openai`, `anthropic`, `command`, or `none`. See [Update agent](#update-agent)
+| `agent`             | `none`                            | `command` (recommended), `openai`, `anthropic`, or `none`. See [Update agent](#update-agent)
 | `agentURL`          | the kind's own                    | Such as `http://127.0.0.1:11434/v1` for a local Ollama
 | `agentModel`        | none                              | Needed for `openai` and `anthropic`
 | `agentCommand`      | none                              | For `command`, the program and its arguments, as a list
@@ -753,10 +753,13 @@ cicd/                        build, test, and release scripts
 	- A jar that's a pipe, a socket, a device, or a link to one counts as changed. Its kind is checked before it's opened, since opening a device runs its driver, as root in `repair`, setup, `update` and a boot start.
 	- `status` and `repair` run the same check.
 
-- Paper also loads code that it writes into the tree while it runs, which can't be pinned. `start` removes it after the hand-off, as the service account, and Paper writes it again:
-	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256). So each start downloads them again, and a plugin whose libraries can't be downloaded, such as with no internet, doesn't load.
-	- Paper's own libraries in `libraries/`, and the server in `versions/`, are checked against hashes inside the pinned `paper.jar` at every start, and put back when they differ. Removing them costs about a second.
+- Paper also loads code that it writes into the tree itself, and it doesn't check it again:
+	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256).
 	- `plugins/.paper-remapped/` held the copies of plugins that Paper remapped before 26.1, reused by the original jar's hash alone.
+	- Their jars are pinned on the same list. After the hand-off, `start` removes the ones that aren't listed or don't match, as the service account, and says how many. Paper downloads them again, so a new plugin's libraries work at first start. Once approved, they stay, and aren't downloaded again.
+	- A link to a folder there, or a link at `libraries` itself, is removed and not followed.
+	- Paper's own libraries in `libraries/` are left out, since `paper.jar` lists them in its `META-INF/libraries.list`, with hashes. Paperclip checks them at every start, and puts back any that differ. So does the server jar in `versions/`.
+	- `update --plugins` and the update agent skip approved libraries, since Paper fetches its own.
 	- Code that a plugin keeps in its own folder, such as libraries it downloads itself, isn't covered. Approving such a plugin trusts it with that.
 
 - `repair --approve-plugins` shows each new or changed jar with its hash, its size, its date, and the name and version inside its `plugin.yml` or `paper-plugin.yml`, or a Geyser extension's `extension.yml`. It asks about each one. A refused jar gets moved out of `plugins/` to `plugins-refused/`.
@@ -765,6 +768,7 @@ cicd/                        build, test, and release scripts
 	- It doesn't go with `--check`, since approving writes the list.
 	- The new hashes go into the list in place. Its comments, sources, and other entries stay as they were.
 	- A new jar in `plugins/` whose file name and `plugin.yml` name both start with `geyser` or `floodgate`, ignoring case, is shown and approved with GeyserMC's source, so `update --plugins` keeps it current. A changed jar keeps the source it has.
+	- Then it lists the plugin libraries that aren't approved, each with its hash, size, and date, and asks once about them all. A plugin can need dozens, and they have no `plugin.yml` to tell them apart. When they aren't approved, they stay where they are, and the next start removes them. `repair --check` doesn't report them, since start takes care of them.
 
 - Plugins should come from known sources, such as Hangar, Modrinth, GeyserMC, or the author's own site. The tool can't judge a jar, but it does make sure a jar doesn't change without a person looking at it.
 
@@ -782,9 +786,9 @@ cicd/                        build, test, and release scripts
 	- Everything for one run goes to the agent in one question, since each can take minutes.
 
 - Kinds of agent:
-	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio.
+	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents. It's the recommended kind: a CLI run as the logged-in operator, on that operator's own subscription, costs about a tenth of an API. The config `setup` writes has a commented-out example.
+	- `openai`: any server with OpenAI's chat completions API. That covers OpenAI and hosts such as OpenRouter, plus local servers such as Ollama, llama.cpp, vLLM, and LM Studio. It and `anthropic` are the fallback.
 	- `anthropic`: Anthropic's messages API.
-	- `command`: a program that reads the question on stdin and prints its answer on stdout. That covers subscription CLIs such as Codex and Gemini CLI, and other command-line agents.
 	- `agentURL` points the first two at a server other than the kind's own. Plain `http` is allowed only to a loopback address.
 
 - The API key never goes in the config, since that's readable by everyone. It comes from `TT_MINECRAFTD_AGENT_KEY` in the operator's environment, or else the kind's usual one, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. The usual one goes only to its vendor's own API, so a gateway or other server in `agentURL` gets `TT_MINECRAFTD_AGENT_KEY` or nothing. A local server needs none. The API client doesn't follow redirects, so the key goes only to `agentURL`'s host.

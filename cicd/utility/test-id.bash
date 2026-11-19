@@ -4,18 +4,20 @@
 
 ##	Purpose:
 ##		- Checks that every Go test has its own ID, and lists them.
-##		- An ID is a number of minutes since 2000-01-01 UTC in lowercase Crockford base 32 (0-9, a-z
-##		  less i, l, o, u). A new test takes the next free one after the highest in use, not the
-##		  clock: find the highest from the `testid.Line` calls under source and the `check` calls in
-##		  cicd/root-host/checks.bash, and add 1.
+##		- An ID is 7 characters of lowercase Crockford base 32 (0-9, a-z less i, l, o, u): 5 for the
+##		  minutes since 2000-01-01 UTC when it was made, then a 2-character counter, 00 unless that
+##		  minute already has one. `--new` prints the next free one. IDs made before the counter came
+##		  in took 00.
 ##		- A Go test has it as the first line of its body, `defer testid.Line(t, "<id>")`, or `f` in a
 ##		  fuzz target. A root host check has it as the first argument of a `check` call in
 ##		  cicd/root-host/checks.bash, or of a function there that hands its arguments to `check`.
 ##	Syntax:
 ##		test-id.bash --check [-q] [--root DIR]
 ##		test-id.bash --list [--root DIR]
-##		  --check     fail on a Go test with no ID, a malformed ID, or an ID used twice by any test
+##		test-id.bash --new [--root DIR]
+##		  --check     fail on a Go test with no ID, a malformed ID on any test, or an ID used twice
 ##		  --list      print "<id> <label>" for each test, once each
+##		  --new       print a free ID for a new test, from the clock
 ##		  -q          print findings only
 ##	Exit: 0 clean, 1 findings, 2 bad usage.
 ##	History: At bottom of script.
@@ -34,11 +36,12 @@ mode=""; quiet=0
 while (($#)); do case "$1" in
 	--check) mode=check; shift ;;
 	--list)  mode=list; shift ;;
+	--new)   mode=new; shift ;;
 	-q)      quiet=1; shift ;;
 	--root)  root="${2:?--root needs a folder}"; shift 2 ;;
 	*) printf 'test-id: unknown option: %s\n' "$1" >&2; exit 2 ;;
 esac; done
-[[ -n "${mode}" ]] || { printf 'test-id: give --check or --list\n' >&2; exit 2; }
+[[ -n "${mode}" ]] || { printf 'test-id: give --check, --list or --new\n' >&2; exit 2; }
 
 ## "<id>\t<file>\t<name>" per Go test with an ID, and "-\t<file>\t<name>" per test without one.
 # shellcheck disable=SC2016  ## the awk program is single-quoted on purpose
@@ -67,7 +70,7 @@ fRootChecks(){
 		fn != "" && /(^|[^A-Za-z0-9_])check "\$(\{@\}|@)"/ { print fn }
 		/^}/ { fn = "" }' "${f}" | sort -u | paste -sd'|' -)"
 	names="check${names:+|${names}}"
-	sed -nE "s/^[[:space:]]*(${names})[[:space:]]+([0-9a-z]{5})[[:space:]]+\"?([^\"]*)\"?[[:space:]].*\$/\2\t\3/p" "${f}"
+	sed -nE "s/^[[:space:]]*(${names})[[:space:]]+([0-9a-z]+)[[:space:]]+\"?([^\"]*)\"?[[:space:]].*\$/\2\t\3/p" "${f}"
 }
 
 if [[ "${mode}" == list ]]; then
@@ -75,13 +78,29 @@ if [[ "${mode}" == list ]]; then
 	exit 0
 fi
 
+digits=0123456789abcdefghjkmnpqrstvwxyz
+
+if [[ "${mode}" == new ]]; then
+	min=$(( ($(date -u +%s) - 946684800) / 60 )); stem=""
+	for _ in 1 2 3 4 5; do stem="${digits:min%32:1}${stem}"; min=$((min / 32)); done
+	used="$({ fGoTests | cut -f1; fRootChecks | cut -f1; } | grep "^${stem}" || true)"
+	for ((n = 0; n < 1024; n++)); do
+		id="${stem}${digits:n/32:1}${digits:n%32:1}"
+		grep -qx "${id}" <<<"${used}" || { printf '%s\n' "${id}"; exit 0; }
+	done
+	printf 'test-id: no free ID this minute\n' >&2; exit 1
+fi
+
 bad=0
-re='^[0-9a-hjkmnp-tv-z]{5}$'
+re='^[0-9a-hjkmnp-tv-z]{7}$'
 while IFS=$'\t' read -r id file name; do
 	rel="${file#"${root}"/}"
 	if [[ "${id}" == - ]]; then printf 'no ID: %s %s\n' "${rel}" "${name}"; bad=1
 	elif [[ ! "${id}" =~ ${re} ]]; then printf 'bad ID "%s": %s %s\n' "${id}" "${rel}" "${name}"; bad=1; fi
 done < <(fGoTests)
+while IFS=$'\t' read -r id name; do
+	[[ "${id}" =~ ${re} ]] || { printf 'bad ID "%s": cicd/root-host/checks.bash %s\n' "${id}" "${name}"; bad=1; }
+done < <(fRootChecks)
 dups="$({ fGoTests | awk -F'\t' '$1 != "-" { print $1 }'; fRootChecks | cut -f1; } | sort | uniq -d)"
 if [[ -n "${dups}" ]]; then printf 'ID used twice: %s\n' "${dups//$'\n'/ }"; bad=1; fi
 ((bad)) || { ((quiet)) || printf 'test IDs: every test has its own\n'; }
@@ -93,3 +112,5 @@ exit "${bad}"
 ##		- 2026-11-13: Fuzz targets take their ID the same way, from `f`.
 ##		- 2026-11-19: Root host checks run through `native`, or any function that hands its
 ##		  arguments to `check`, count too, and a check ID used twice in checks.bash is a repeat.
+##		- 2026-11-19: IDs are the clock's minute plus a 2-character counter, 7 characters in all, and
+##		  `--new` prints one. A root host check's ID is checked for form too.

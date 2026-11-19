@@ -17,7 +17,7 @@ import (
 // server.properties is kept line for line, and a value set here reads back
 // the same through the parser, whatever was in the file.
 func FuzzProperties(f *testing.F) {
-	defer testid.Line(f, "df78b")
+	defer testid.Line(f, "df78b00")
 	f.Add([]byte("#Minecraft server properties\nwhite-list=false\r\nserver-ip=\n"), "::1")
 	f.Add([]byte("motd=A \\\n    long one\\\\\nkey\\ with\\:colon = v\\u00e9\n! bang\n"), " lead\tand\\trail\\")
 	f.Add([]byte("server-ip\\\n"), "\f\u00e9\n=")
@@ -46,7 +46,7 @@ func FuzzProperties(f *testing.F) {
 // When it passes, Check finds nothing. It fails only on a YAML file it can't
 // read or fix in place, and leaves that file as it was.
 func FuzzFix(f *testing.F) {
-	defer testid.Line(f, "df78c")
+	defer testid.Line(f, "df78c00")
 	f.Add("white-list=false\n", "bedrock:\n  port: 19132\n", "settings:\n  bungeecord: true\n")
 	f.Add("enforce-secure-profile\\\n", "bedrock: [\n", "\t- x\n  :\n")
 	f.Add("", "java:\n  auth-type: online\n# c\n", "")

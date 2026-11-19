@@ -72,7 +72,7 @@ func runZfsChecks(t *testing.T, pool string) (string, string, int) {
 }
 
 func TestRootHostZfsPoolName(t *testing.T) {
-	defer testid.Line(t, "df7ak")
+	defer testid.Line(t, "df7ak00")
 
 	t.Run("a pool root-host.bash didn't name is never touched", func(t *testing.T) {
 		out, sudoLog, code := runZfsChecks(t, "tank")

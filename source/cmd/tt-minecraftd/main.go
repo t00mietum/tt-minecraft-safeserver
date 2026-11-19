@@ -590,6 +590,14 @@ func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 // asks about each one. A refused jar moves to plugins-refused/. Running out of
 // answers leaves the rest as they are.
 func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state, text string)) {
+	answers := bufio.NewScanner(in)
+	repairPluginJars(inv, answers, w, report)
+	if inv.opts.approve {
+		repairLibraries(inv, answers, w, report)
+	}
+}
+
+func repairPluginJars(inv invocation, answers *bufio.Scanner, w io.Writer, report func(state, text string)) {
 	file := inv.pluginsFile()
 	approved, warns, err := plugins.ReadApproved(file)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -631,7 +639,6 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 	for _, name := range c.Changed {
 		asked[name] = false
 	}
-	answers := bufio.NewScanner(in)
 	var yes []plugins.Info
 	var left []string
 	for _, j := range jars {
@@ -691,6 +698,75 @@ func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state,
 	}
 	for _, name := range left {
 		report("FAILED", name+" isn't approved; no answer")
+	}
+}
+
+// repairLibraries shows the plugin libraries Paper downloaded that aren't
+// approved, and asks once about them all, since a plugin can need dozens and
+// they have no plugin.yml to tell them apart. Ones not approved stay where
+// they are, and the next start removes them.
+func repairLibraries(inv invocation, answers *bufio.Scanner, w io.Writer, report func(state, text string)) {
+	file := inv.pluginsFile()
+	approved, _, err := plugins.ReadApproved(file)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		report("FAILED", "libraries: "+err.Error())
+		return
+	}
+	c, err := plugins.CheckLibraries(inv.cfg.ServerDir, approved, &plugins.Sums{})
+	if err != nil {
+		report("FAILED", "libraries: "+err.Error())
+		return
+	}
+	if c.OK() {
+		return
+	}
+	jars, err := plugins.Libraries(inv.cfg.ServerDir)
+	if err != nil {
+		report("FAILED", "libraries: "+err.Error())
+		return
+	}
+	asked := make(map[string]string, len(c.New)+len(c.Changed))
+	for _, name := range c.New {
+		asked[name] = "new"
+	}
+	for _, name := range c.Changed {
+		asked[name] = "changed"
+	}
+	var yes []plugins.Info
+	fmt.Fprintf(w, "\nPlugin libraries that Paper downloaded, not approved yet:\n")
+	for _, j := range jars {
+		state, ok := asked[j.Name]
+		if !ok {
+			continue
+		}
+		info, err := plugins.Describe(j)
+		if err != nil {
+			report("FAILED", j.Name+": "+err.Error())
+			continue
+		}
+		fmt.Fprintf(w, "  %s (%s)\n    sha256: %s, %d bytes, %s\n", server.Clean(j.Name), state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"))
+		yes = append(yes, info)
+	}
+	if len(yes) == 0 {
+		return
+	}
+	prompt := "Approve it? [y/n] "
+	if len(yes) > 1 {
+		prompt = fmt.Sprintf("Approve all %d? [y/n] ", len(yes))
+	}
+	answer, ok := ask(answers, w, prompt)
+	fmt.Fprintln(w)
+	switch {
+	case !ok:
+		report("FAILED", "libraries: not approved; no answer")
+	case !answer:
+		report("OK", "libraries: left unapproved; the next start removes them")
+	default:
+		if err := plugins.Approve(file, yes); err != nil {
+			report("FAILED", "libraries: can't write the approved list: "+err.Error())
+			return
+		}
+		report("FIXED", fmt.Sprintf("libraries: %d approved", len(yes)))
 	}
 }
 

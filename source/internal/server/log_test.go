@@ -18,7 +18,7 @@ import (
 // A name or chat line can't send escape codes or flip the text direction of
 // what the operator reads.
 func TestClean(t *testing.T) {
-	defer testid.Line(t, "df78h")
+	defer testid.Line(t, "df78h00")
 	for _, c := range []struct{ in, want string }{
 		{"Alex", "Alex"},
 		{"Mal\x1b[2Jory\x7f\u0085", "Mal[2Jory"},
@@ -62,7 +62,7 @@ func watchOpens(t *testing.T, file string) func() bool {
 // link to a device never runs the driver. A pipe stands in for the device,
 // since inotify shows whether it was opened.
 func TestOpenRegularChecksFirst(t *testing.T) {
-	defer testid.Line(t, "df79h")
+	defer testid.Line(t, "df79h00")
 	dir := t.TempDir()
 	fifo, plain := filepath.Join(dir, "fifo"), filepath.Join(dir, "plain")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {

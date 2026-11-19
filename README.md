@@ -119,9 +119,23 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 - Run `tt-minecraftd update` as yourself, not with sudo. It asks the agent as you, then runs itself through sudo. Started as root, it skips the agent and says so.
 
-- An API key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, which only go to OpenAI's or Anthropic's own API. A local server needs none.
+- For the API kinds, a key comes from your environment, never the config, since everyone can read the config. It's `TT_MINECRAFTD_AGENT_KEY`, or else the usual `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, which only go to OpenAI's or Anthropic's own API. A local server needs none.
 
 - Jars and hash pages may only come from the hosts in `agentHosts`, redirects included. The default has Hangar, Modrinth, GitHub, GeyserMC, and PaperMC. A jar from somewhere else is listed as skipped, with its host, so you can add it.
+
+- The best choice is a CLI you're already logged in to, run as you on your own subscription. It costs far less than an API, often about a tenth. It reads the question on stdin and prints its answer. `setup` writes the Codex line below into the config, commented out. Give it web reads and nothing else, such as no shell and no file writes. These flags change between versions, so check them against your CLI's own docs.
+
+	~~~text
+	agent: command
+	agentCommand: [codex, --search, exec, --sandbox, read-only, --skip-git-repo-check, --ephemeral, -]
+	~~~
+
+	~~~text
+	agent: command
+	agentCommand: [gemini, --approval-mode, plan, --output-format, text]
+	~~~
+
+- The API kinds are the fallback, for when you have no CLI subscription.
 
 - OpenAI, or any server with the same chat API:
 
@@ -147,18 +161,6 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 	~~~
 
 - Anthropic's API: `agent: anthropic`, with `agentModel` set to one of its model names.
-
-- A subscription CLI, which reads the question on stdin and prints its answer. Give it web reads and nothing else, such as no shell and no file writes. These flags change between versions, so check them against your CLI's own docs.
-
-	~~~text
-	agent: command
-	agentCommand: [codex, --search, exec, --sandbox, read-only, --skip-git-repo-check, --ephemeral, -]
-	~~~
-
-	~~~text
-	agent: command
-	agentCommand: [gemini, --approval-mode, plan, --output-format, text]
-	~~~
 
 - `--set agent=none` skips the agent for one run, and `update --plugins --dry-run` shows what it suggests without downloading anything.
 

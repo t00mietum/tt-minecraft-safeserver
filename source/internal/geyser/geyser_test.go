@@ -55,7 +55,7 @@ func sum(b []byte) string {
 }
 
 func TestLatest(t *testing.T) {
-	defer testid.Line(t, "df65x")
+	defer testid.Line(t, "df65x00")
 	jar := []byte("PK not really a jar")
 	f := &fakeAPI{name: "Geyser-Spigot.jar", sum: strings.ToUpper(sum(jar)), jar: jar}
 	api := newAPI(t, f)
@@ -90,7 +90,7 @@ func TestLatest(t *testing.T) {
 }
 
 func TestInstall(t *testing.T) {
-	defer testid.Line(t, "df65y")
+	defer testid.Line(t, "df65y00")
 	jar := []byte("PK not really a jar")
 	f := &fakeAPI{name: "Geyser-Spigot.jar", sum: sum(jar), jar: jar}
 	api := newAPI(t, f)
@@ -142,7 +142,7 @@ func TestInstall(t *testing.T) {
 // A new plugins/ that the server swaps for a link before its mode is set
 // leaves the link's target alone. A file outside stands in for /etc/passwd.
 func TestInstallSwappedFolder(t *testing.T) {
-	defer testid.Line(t, "df79m")
+	defer testid.Line(t, "df79m00")
 	jar := []byte("PK not really a jar")
 	api := newAPI(t, &fakeAPI{name: "Geyser-Spigot.jar", sum: sum(jar), jar: jar})
 	b, err := api.Latest(context.Background(), "geyser")
@@ -178,7 +178,7 @@ func TestInstallSwappedFolder(t *testing.T) {
 // A jar is GeyserMC's only when it sits in plugins/ and both its file name
 // and the plugin name it claims say so.
 func TestProject(t *testing.T) {
-	defer testid.Line(t, "df76p")
+	defer testid.Line(t, "df76p00")
 	for _, c := range []struct{ name, claim, want string }{
 		{"plugins/Geyser-Spigot.jar", "Geyser-Spigot", "geyser"},
 		{"plugins/floodgate-spigot.jar", "floodgate", "floodgate"},

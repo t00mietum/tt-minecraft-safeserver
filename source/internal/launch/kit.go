@@ -353,24 +353,41 @@ func (k *Kit) preflight(ctx context.Context) error {
 	return k.checkFirewall(ctx)
 }
 
-// caches are the folders under serverDir that Paper loads code from but
-// start can't pin: plugin libraries it downloads from Maven, and remapped
-// plugin jars before 26.1. Paper reuses what's there without checking it, so
-// start clears them and Paper fills them again. Its own jars in libraries/
-// come back from paper.jar in about a second.
-var caches = []string{"libraries", "plugins/.paper-remapped"}
-
-// clearCaches runs after the hand-off, as the service account, so a link in
-// the tree only leads where that account could write anyway.
-func (k *Kit) clearCaches(ctx context.Context) error {
-	args := []string{"rm", "-rf", "--one-file-system", "--"}
-	for _, c := range caches {
-		args = append(args, filepath.Join(k.Cfg.ServerDir, c))
+// clearLibraries removes the jars Paper would load from its library cache
+// that aren't approved, or changed since, so code the server wrote there
+// doesn't outlast a restart. Paper downloads them again. It runs after the
+// hand-off, as the service account, so a link only leads where that account
+// could write anyway. See design.md, Plugin pinning.
+func (k *Kit) clearLibraries(ctx context.Context) error {
+	approved, _, err := plugins.ReadApproved(k.PluginsFile)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("can't read the approved plugin list: %w", err)
+	}
+	c, err := plugins.CheckLibraries(k.Cfg.ServerDir, approved, &plugins.Sums{})
+	if err != nil {
+		return k.denied(fmt.Errorf("can't check Paper's library cache: %w", err))
+	}
+	doomed := append(c.New, c.Changed...)
+	if len(doomed) == 0 {
+		return nil
+	}
+	args := []string{"rm", "-f", "--"}
+	for _, name := range doomed {
+		args = append(args, filepath.Join(k.Cfg.ServerDir, filepath.FromSlash(name)))
 	}
 	if _, err := k.Run.Run(ctx, host.Cmd{Args: args, As: k.Cfg.RunUser}); err != nil {
 		return fmt.Errorf("clearing Paper's library cache: %w", err)
 	}
+	k.say("Removed %d plugin %s that %s approved, so Paper downloads %s again. sudo tt-minecraftd repair --approve-plugins approves them.",
+		len(doomed), plural(len(doomed), "library", "libraries"), plural(len(doomed), "isn't", "aren't"), plural(len(doomed), "it", "them"))
 	return nil
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // startUnit is start when the boot unit is enabled. The checks that can

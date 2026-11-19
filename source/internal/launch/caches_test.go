@@ -4,7 +4,11 @@
 package launch
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -18,17 +22,44 @@ import (
 )
 
 // plantCaches puts code where Paper would load it from without a check, and
-// files start must leave alone. libraries is a link to a folder of the world
-// when linked is set, since container start refuses one out of the trees. It gives the paths that must be gone, and those that must
-// stay.
-func plantCaches(t *testing.T, dir string, linked bool) (gone, kept []string) {
+// files start must leave alone, with an approved list to match. libraries is
+// a link to a folder of the world when linked is set. It gives the paths that
+// must be gone, and those that must stay.
+func plantCaches(t *testing.T, dir, list string, linked bool) (gone, kept []string) {
 	t.Helper()
+	sum := func(text string) string {
+		s := sha256.Sum256([]byte(text))
+		return hex.EncodeToString(s[:])
+	}
+	own := "libraries/com/google/guava/guava/33.3.1-jre/guava-33.3.1-jre.jar"
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	w, err := z.Create("META-INF/libraries.list")
+	if err == nil {
+		_, err = w.Write([]byte(sum("planted") + "\tcom.google.guava:guava:33.3.1-jre\t" + strings.TrimPrefix(own, "libraries/") + "\n"))
+	}
+	if err == nil {
+		err = z.Close()
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "paper-26.3-244.jar"), b.Bytes(), 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvedLib := "libraries/org/a/a/1/a-1.jar"
+	changedLib := "libraries/org/b/b/1/b-1.jar"
+	text := "jar: paper-26.3-244.jar\n\tsha256: " + sum(b.String()) + "\njar: plugins/Geyser-Spigot.jar\n\tsha256: " + sum("") +
+		"\njar: " + approvedLib + "\n\tsha256: " + sum("planted") + "\njar: " + changedLib + "\n\tsha256: " + sum("before") + "\n"
+	if err := os.WriteFile(list, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	gone = []string{
-		"plugins/.paper-remapped/index.json",
 		"plugins/.paper-remapped/Geyser-Spigot.jar",
 		"plugins/.paper-remapped/unknown-origin/x.jar",
 	}
-	kept = []string{"plugins/Geyser-Spigot.jar", "plugins/Geyser-Spigot/config.yml", "world/level.dat", "paper-26.3-244.jar"}
+	kept = []string{"plugins/.paper-remapped/index.json", "plugins/Geyser-Spigot/config.yml", "world/level.dat"}
 	if linked {
 		outside := filepath.Join(dir, "world", "datapacks")
 		if err := os.MkdirAll(outside, 0o700); err != nil {
@@ -43,7 +74,8 @@ func plantCaches(t *testing.T, dir string, linked bool) (gone, kept []string) {
 		gone = append(gone, "libraries")
 		kept = append(kept, "world/datapacks/keep.jar")
 	} else {
-		gone = append(gone, "libraries/org/apache/commons/commons-text/1.12.0/commons-text-1.12.0.jar")
+		gone = append(gone, "libraries/org/apache/commons/commons-text/1.12.0/commons-text-1.12.0.jar", changedLib)
+		kept = append(kept, own, approvedLib, "libraries/org/apache/commons/commons-text/1.12.0/commons-text-1.12.0.pom")
 	}
 	for _, f := range append(slices.Clone(gone), kept...) {
 		path := filepath.Join(dir, f)
@@ -82,7 +114,7 @@ func runClear(t *testing.T, g *rig, launch string) {
 		t.Fatalf("no rm in %q", changes)
 	}
 	handOff := slices.IndexFunc(changes, func(s string) bool { return strings.HasPrefix(s, "sudo chmod -R ug+rwX") })
-	clear := slices.IndexFunc(changes, func(s string) bool { return strings.Contains(s, " rm -rf ") })
+	clear := slices.IndexFunc(changes, func(s string) bool { return strings.Contains(s, " rm -f ") })
 	start := slices.IndexFunc(changes, func(s string) bool { return strings.HasPrefix(s, launch) })
 	if handOff < 0 || clear != handOff+1 || start <= clear {
 		t.Errorf("order: hand-off %d, rm %d, launch %d in %q", handOff, clear, start, changes)
@@ -90,10 +122,10 @@ func runClear(t *testing.T, g *rig, launch string) {
 }
 
 // Code the server account leaves in Paper's library cache or remapped plugin
-// folder doesn't outlast a restart, in either mode. A link there is removed,
-// not followed.
+// folder doesn't outlast a restart, in either mode, unless it's approved or
+// paper.jar's own. A link there is removed, not followed.
 func TestStartClearsCaches(t *testing.T) {
-	defer testid.Line(t, "df7bg")
+	defer testid.Line(t, "df7bg00")
 	for _, linked := range []bool{false, true} {
 		for _, mode := range []string{"docker", "native"} {
 			var g *rig
@@ -111,11 +143,14 @@ func TestStartClearsCaches(t *testing.T) {
 				g, launch = n.rig, "sudo systemd-run "
 				start = func() error { return n.n.Start(context.Background(), StartMode{}) }
 			}
-			gone, kept := plantCaches(t, g.dir, linked)
+			gone, kept := plantCaches(t, g.dir, g.d.PluginsFile, linked)
 			if err := start(); err != nil {
 				t.Fatalf("%s, linked %v: %v", mode, linked, err)
 			}
 			runClear(t, g, launch)
+			if !strings.Contains(g.out.String(), "isn't approved, so Paper downloads") && !strings.Contains(g.out.String(), "aren't approved, so Paper downloads") {
+				t.Errorf("%s, linked %v: no word of it in %q", mode, linked, g.out.String())
+			}
 			for _, f := range gone {
 				if _, err := os.Lstat(filepath.Join(g.dir, f)); !errors.Is(err, os.ErrNotExist) {
 					t.Errorf("%s, linked %v: %s is still there (%v)", mode, linked, f, err)
@@ -131,10 +166,21 @@ func TestStartClearsCaches(t *testing.T) {
 }
 
 // A cache start can't clear stops the start before the launch, and the trees
-// go back.
+// go back. With nothing to clear, there's no rm.
 func TestStartClearFails(t *testing.T) {
-	defer testid.Line(t, "df7bh")
+	defer testid.Line(t, "df7bh00")
 	g := newRig(t)
+	g.states = []string{"", "running"}
+	g.log = doneLine
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.changes(); slices.ContainsFunc(got, func(s string) bool { return strings.Contains(s, " rm ") }) {
+		t.Errorf("nothing to clear, but ran %q", got)
+	}
+
+	g = newRig(t)
+	plantCaches(t, g.dir, g.d.PluginsFile, false)
 	g.r.Reply = func(c host.Cmd) ([]byte, error) {
 		if c.Args[0] == "rm" {
 			return nil, errors.New("rm: cannot remove: Permission denied")
