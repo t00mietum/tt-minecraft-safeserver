@@ -27,8 +27,9 @@ import (
 // <addr:port>" (send one and say whether anything came back), "send <port>
 // <addr:port>" (send one from that port), "listen <port>" (say whether
 // anything arrives), "try <addr:port>" (send one and say whether the output
-// drop refused it) or "rules <path>" (write the rules for this namespace's
-// routes).
+// drop refused it), "rules <path>" (write the rules for this namespace's
+// routes), "hear <port>" (say who each datagram came from) or "from <ip>
+// <addr:port>" (send one from that address).
 func udpStandIn(args []string) int {
 	if len(args) < 2 {
 		return 2
@@ -126,6 +127,40 @@ func udpStandIn(args []string) int {
 			fmt.Println("none")
 		} else {
 			fmt.Println("heard")
+		}
+	case "hear":
+		c, err := net.ListenPacket("udp", "[::]:"+args[1])
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		fmt.Println("ready")
+		_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
+		buf := make([]byte, 512)
+		for {
+			_, from, err := c.ReadFrom(buf)
+			if err != nil {
+				return 0
+			}
+			fmt.Println("from", from.(*net.UDPAddr).IP)
+		}
+	case "from":
+		if len(args) < 3 {
+			return 2
+		}
+		c, err := net.ListenPacket("udp", net.JoinHostPort(args[1], "0"))
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		to, err := net.ResolveUDPAddr("udp", args[2])
+		if err != nil {
+			fmt.Println(err)
+			return 3
+		}
+		if _, err := c.WriteTo([]byte("join"), to); err != nil {
+			fmt.Println(err)
+			return 3
 		}
 	case "probe":
 		lc := net.ListenConfig{Control: func(_, _ string, rc syscall.RawConn) error {
@@ -327,5 +362,89 @@ done
 		if load && !strings.Contains(got, "elements = { fc00::/7, fe80::/10, 2001:db8:77::/64 }") {
 			t.Errorf("the subnet isn't in lan6:\n%s", got)
 		}
+	}
+}
+
+// Spoofed sources can fill a rate limit set, and then the update that limits
+// an address can't add one. With each set cut to 2, .2 and .3 get their own
+// limit of 2, the addresses after them share one, and a tracked address keeps
+// its own while the shared one is spent. The same goes for IPv6.
+func TestFloodSetFull(t *testing.T) {
+	defer testid.Line(t, "df7br")
+	if !nftCheck(t, "") {
+		t.Skip("no unprivileged network namespace with nft")
+	}
+	for _, tool := range []string{"ip", "nsenter"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip("no " + tool)
+		}
+	}
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	was := floodSize
+	floodSize = 2
+	t.Cleanup(func() { floodSize = was })
+	cfg := config.Defaults()
+	cfg.RunUser = "root"
+	cfg.AllowFrom = []string{"lan"}
+	cfg.Bedrock = true
+	cfg.BedrockPort = 19132
+	cfg.JoinRateLimit = 2
+	dir := t.TempDir()
+	rules := filepath.Join(dir, "firewall.nft")
+	if err := os.WriteFile(rules, []byte(Rules(&cfg, Local{})), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	order := "2 3 4 5 6 3 2 2"
+	script := `set -e
+for f in all default; do echo 0 > /proc/sys/net/ipv6/conf/$f/disable_ipv6; done
+ip link set lo up
+ip link add vs0 type veth peer name vc0
+unshare -n sleep 30 & C=$!
+trap 'kill $C ${S:-} 2>/dev/null' EXIT
+while [ "$(readlink /proc/$C/ns/net)" = "$(readlink /proc/$$/ns/net)" ]; do sleep 0.01; done
+ip link set vc0 netns $C
+ip addr add 192.168.77.1/24 dev vs0
+ip -6 addr add fd77::1/64 dev vs0 nodad
+ip link set vs0 up
+nsenter -t $C -n sh -c 'ip link set lo up && ip link set vc0 up && for i in 2 3 4 5 6; do ip addr add 192.168.77.$i/24 dev vc0 && ip -6 addr add fd77::$i/64 dev vc0 nodad; done'
+/usr/sbin/nft -f "$RULES"
+TT_UDP_STANDIN="hear 19132" "$BIN" > "$LOG" & S=$!
+while ! grep -q ready "$LOG"; do sleep 0.01; done
+for i in ` + order + `; do TT_UDP_STANDIN="from 192.168.77.$i 192.168.77.1:19132" nsenter -t $C -n "$BIN"; done
+for i in ` + order + `; do TT_UDP_STANDIN="from fd77::$i [fd77::1]:19132" nsenter -t $C -n "$BIN"; done
+# Loopback skips the limits, and this one comes last.
+TT_UDP_STANDIN="from 127.0.0.1 127.0.0.1:19132" "$BIN"
+n=0; while ! grep -q 'from 127.0.0.1' "$LOG" && [ $n -lt 500 ]; do sleep 0.01; n=$((n+1)); done
+kill $S; wait $S 2>/dev/null || true; S=
+grep from "$LOG"
+/usr/sbin/nft -j list counters inet
+`
+	cmd := exec.Command("unshare", "-rn", "sh", "-c", script)
+	cmd.Env = append(os.Environ(), "BIN="+bin, "LOG="+filepath.Join(dir, "hear.log"), "RULES="+rules)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	got := string(out)
+	var want []string
+	for _, pre := range []string{"192.168.77.", "fd77::"} {
+		for _, i := range []string{"2", "3", "4", "5", "3", "2"} {
+			want = append(want, "from "+pre+i)
+		}
+	}
+	want = append(want, "from 127.0.0.1")
+	if heard := got[:strings.Index(got+"{", "{")]; strings.TrimSpace(heard) != strings.Join(want, "\n") {
+		t.Errorf("heard\n%s\nwant\n%s", heard, strings.Join(want, "\n"))
+	}
+	i := strings.Index(got, "{")
+	if i < 0 {
+		t.Fatalf("no counters in\n%s", got)
+	}
+	counts, err := Counters(context.Background(), &host.Fake{Reply: func(host.Cmd) ([]byte, error) { return []byte(got[i:]), nil }})
+	if err != nil || counts["in_flood"] != 4 {
+		t.Errorf("counters %v, %v, want in_flood 4", counts, err)
 	}
 }

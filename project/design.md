@@ -876,6 +876,7 @@ cicd/                        build, test, and release scripts
 	- Ones from an address that's not in `allowFrom` get dropped.
 	- Past `joinRateLimit` a minute from one address, the rest get dropped. That slows down bot join floods.
 		- A burst of `joinRateLimit` is allowed too, so a minute's worth can come at once.
+		- Each address is kept on the list for a minute after its last new connection, up to 65536 IPv4 and 65536 IPv6 addresses. Spoofed addresses can fill it, so the ones left out when it's full share a single `joinRateLimit` a minute.
 
 - Inbound, new connections from anywhere but loopback get dropped on the RCON, query, and management ports, even though the server should never open them.
 	- Those are RCON's default port 25575 over TCP, and `gamePort` over UDP for query. The management server has no fixed default port, so it's left to the safe settings.

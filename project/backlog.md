@@ -532,7 +532,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Keep the join rate limit working when its address set fills
 	- ID: 2026111715275456
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -542,6 +542,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: Code review 20261117 item 41. Detail in detail_backlog.md.
 	- Note: 2026-11-17: a size-2 set in a namespace limited only the first 2 addresses.
 	- Origin: 88f3d3f. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual effort: Low
+	- Test case: df7br (TestFloodSetFull), df66c (TestRules)
+	- Verified: df7br fails with the new rules taken out, where the address past the full set got through over IPv4 and IPv6, and passes with them in. With only the IPv6 rule taken out it fails too. df66c, df797 and df7a4 pass, and the quick gate passed. In the gate's container df7br skips like df797, since it has no nft, so the namespace run is from the host.
+	- Swept: both sets, flood4 and flood6, get the shared limit. They're the only dynamic sets with a limit. seek4 has no limit, and a full seek4 only drops a LAN answer.
+	- Branch: nov19-2026111715275456
+	- Commit: 3ba1fdb
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261119-125034
+	- Decisions:
+		- Addresses past the full set share a single bucket at joinRateLimit a minute, one for IPv4 and one for IPv6, counted in in_flood. A global limit over every new connection would hit addresses that already have their own bucket too, and dropping all of them would shut out every new player.
+		- The sets now keep an address for 1 minute, down from 2. Its bucket is full again by then, so nothing changes for that address, and a flood frees room twice as fast.
+		- A rules file written by an older build no longer matches, so start refuses until repair writes it again, as with any rules change.
+		- design.md's Firewall says so.
 
 - Hold the agent's download redirects to agentHosts
 	- ID: 2026111715275472
