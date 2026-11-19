@@ -98,7 +98,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Add a README section on using the server after setup
 	- ID: 2026111715275532
 	- Type: Enhancement
-	- Status: Waiting on UAT
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152755
@@ -112,6 +112,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Commit: 61984e5
 	- Test case: none, README text. Markdownlint and the quick gate pass.
 	- Actual effort: Low
+	- Closed reason: Done
+	- Closed: 20261119
+	- Acceptance signoff: 20261119, t00mietum: it's good
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
