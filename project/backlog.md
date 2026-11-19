@@ -434,7 +434,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-17: Code review 20261117 item 36. Detail in detail_backlog.md.
 	- Origin: d701e7a dev install. Not seen before. Confirmed.
 	- Actual cause [Bug]: `fMain` took the `--dir` value as given, and a `~` that Bash didn't expand became a relative path under the working folder.
-	- Actual fix [Bug]: `~` and `~/path` are read as `$HOME` and `$HOME/path`, in both the `--dir=` and `--dir ` forms. Any other leading `~`, such as `~bob/x`, is refused with exit 2, as is a `~` with no full-path `$HOME`.
+	- Actual fix [Bug]: `~` and `~/path` are read as `$HOME` and `$HOME/path`, in both the `--dir=~/path` and `--dir ~/path` forms. Any other leading `~`, such as `~bob/x`, is refused with exit 2, as is a `~` with no full-path `$HOME`.
 	- Decisions:
 		- `~user` is refused rather than looked up, since the script has no portable lookup that works in the Bash 3.2 and busybox rig.
 	- Test case: df799 TestInstallDevScript, subtest "a leading ~ in --dir is the home folder, and ~user is refused"
