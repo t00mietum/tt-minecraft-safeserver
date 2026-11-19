@@ -22,10 +22,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Make a logged-in CLI subscription the recommended update agent kind
+	- ID: 2026111913431995
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261119-134319
+	- Opened by:
+	- Related IDs: 2026111715275517, 2026111210033649
+	- Estimated effort: Low
+	- Progress log:
+		- 20261119 answer on 2026111715275517: the most preferred option is a CLI run as the logged-in user, on that user's subscription, rather than an API at about 10 times the cost.
+		- Lead README, design.md and the config template with the command kind for that, and keep the API kinds as the fallback.
+
 - repair counts a Paper started by hand as runUser as the tool's own
 	- ID: 2026111715275170
 	- Type: Bug
-	- Status: Waiting on signoff
+	- Status: Closed
 		- Against a recorded decision, so it waits on the Check: entry in questions.md.
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
@@ -50,11 +64,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Branch: nov19-2026111715275170
 	- Commit: 1466e71
 	- Test case: df7ay, df5zk
+	- Closed reason: Done
+	- Closed: 20261119
+	- Acceptance signoff: 20261119, t00mietum: acceptable
 
 - Send the vendor API key only to the vendor's own host
 	- ID: 2026111715275517
 	- Type: Enhancement
-	- Status: Waiting on signoff
+	- Status: Closed
 		- It narrows a recorded call and changes README's wording. A person checks the README lines and OKs the narrower key rule, per the Check entry in questions.md.
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
@@ -74,6 +91,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- design.md's key line and README's key line and OpenRouter example say so.
 	- Against: 2026111210033649's "The key is TT_MINECRAFTD_AGENT_KEY, else OPENAI_API_KEY or ANTHROPIC_API_KEY". The fallback now holds only for the vendor's own API.
 	- Swept: the key is read only in `agent.New`, by a grep for _API_KEY under source.
+	- Closed reason: Done
+	- Closed: 20261119
+	- Acceptance signoff: 20261119, t00mietum prefers a logged-in CLI subscription over any API kind, filed as 2026111913431995. The key change stays, since it's the safer default for the API kinds.
 
 - Add a README section on using the server after setup
 	- ID: 2026111715275532
@@ -147,7 +167,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - test-id.bash's header says to take an ID from the clock, against the next-after-highest rule
 	- ID: 2026111911594103
 	- Type: Bug
-	- Status: Done
+	- Status: Queued
 	- Priority: Low
 	- Opened: 20261119-115941
 	- Opened by:
@@ -159,11 +179,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
 	- Decisions:
 		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
+		- 20261119 answer: follow the clock rule, minutes since 2000-01-01 UTC in Crockford. Add a counter after it for more granularity, and keep the length the same for every ID, such as a 00 counter where none is needed. This reverses the next-after-highest call, so test-id.bash's header, its form check, and the project notes change to match.
 	- Test case: n/a: comment-only change in a header. The lint step's test ID check still passes.
 	- Actual effort: Low
-	- Acceptance signoff: Self-closed: mechanical, a header comment.
-	- Closed reason: Done
-	- Closed: 20261119-120500
+	- Target version: v1.0.0-beta.1
 
 - Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
 	- ID: 2026111911125756
@@ -211,8 +230,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
 	- Type: Enhancement
-	- Status: Closed
-	- Closed reason: Done
+	- Status: Queued
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261117-152754
@@ -234,11 +252,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- A failed removal stops the start before the launch, and hands the trees back (df7bh).
 		- Left alone: code a plugin downloads into its own folder, which approving the plugin trusts it with. `cache/` and `versions/` are checked by Paperclip at every start.
 		- Swept: both launching start paths, `Boxed.Start` (shared by `--debug`, `--foreground` and the boot unit's `start --foreground`) and `Native.Start`. No other code launches Paper.
+		- 20261119 answer: do whatever makes the most sense without deleting and downloading again at every start. So the clearing at start goes, and one of the other ways replaces it, such as pinning the libraries' hashes and approving them through repair after the first download, or mounting libraries/ read-only.
 	- Branch: nov19-2026111715275425
 	- Commit: 6ca2410
 	- Test case: df7bg, df7bh
-	- Acceptance signoff: Self-closed: reproduced on Paper 26.3, and its tests fail without the fix and pass with it. The download at each start is a Check: entry.
-	- Closed: 20261119-123825
 
 - cmd's stop and restart guard misses namespaced forms such as minecraft:stop
 	- ID: 2026111715275187
