@@ -73,7 +73,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
-- Rename a replaced /usr/local/bin build to _old_<mtime>, and rotate the old ones
+- Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
 	- ID: 2026111911125756
 	- Type: Enhancement
 	- Status: Queued
@@ -83,18 +83,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Opened by:
 	- Related IDs: 2026111715275041
 	- Requirements [Feature]:
-		- When repair check 15 finds a different `/usr/local/bin/tt-minecraftd` ahead of the package's `/usr/bin/tt-minecraftd`, plain `repair` renames it to `tt-minecraftd_old_<mtime YYYYmmDD-HHMMSS>` in the same folder, so it stops hiding the package's binary.
-		- The `tt-minecraftd_old_*` files there are GFS-rotated after each rename, like the cicd demo renders.
-		- `repair --check` and `--dry-run` still only report it, and say it would be renamed.
-		- A symlink to the package's binary still passes, and isn't renamed.
+		- When repair check 15 finds a different `/usr/local/bin/tt-minecraftd` ahead of the package's `/usr/bin/tt-minecraftd`, plain `repair` moves it to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime YYYYmmDD-HHMMSS>`, so it stops hiding the package's binary.
+		- The folder is made root-owned 0755 when missing. `/var` can be on another filesystem, so a failed rename falls back to copy, then remove.
+		- The files in `old-builds/` are GFS-rotated after each move, like the cicd demo renders.
+		- `repair --check` and `--dry-run` still only report it, and say where it would go.
+		- A symlink to the package's binary still passes, and isn't moved.
 		- install.bash and setup's copy do the same when they replace a different build in `/usr/local/bin`. The same build, by SHA-256, is left alone.
-		- design.md's setup, repair check 15 and Boot, and README's Installing section, say so.
+		- design.md's setup, repair check 15, Boot and file paths, and README's Installing section, say so.
 	- Progress log:
 		- 2026-11-19: t00mietum's answer to the check 15 question: rename the copy and GFS rotate the old ones, rather than report it with `sudo rm`.
 	- Decisions:
-		- 2026-11-19: The rename keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can rename it back.
+		- 2026-11-19: The move keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can copy it back.
 		- 2026-11-19: t00mietum widened it to install.bash and setup's copy, which wrote over the old build in place.
-		- 2026-11-19: `update --self` is Deferred. It gets the same rename when it comes back.
+		- 2026-11-19: `update --self` is Deferred. It gets the same move when it comes back.
+		- 2026-11-19: Moved from `tt-minecraftd_old_<mtime>` beside the binary to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>` (t00mietum). Off PATH, on every distro, and a dot suffix is the usual form for a dated copy. `/var/backups` is Debian's only.
 
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
@@ -968,7 +970,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-19: With both there, the unit runs the package's, since the package manager keeps it current and repair reports the other.
 		- 2026-11-19: repair's PATH check is its own check 15, FAILED with the command that removes the copy, and it never removes it, since someone may have put that build there on purpose. A symlink to the package's binary passes. Check entry in questions.md.
 		- 2026-11-19: `start` and `stop` take a unit on either path as this config's, so a unit from before the package came still goes through systemctl until repair rewrites it.
-		- 2026-11-19: t00mietum answered the check 15 entry: rename the copy to `_old_<mtime>` and GFS rotate the old ones. Filed as 2026111911125756.
+		- 2026-11-19: t00mietum answered the check 15 entry: keep the copy and GFS rotate the old ones, in `/var/lib/tt-minecraftd/old-builds/`. Filed as 2026111911125756.
 	- Acceptance signoff: Self-closed: its tests pass, the design is t00mietum's, and the repair check's picks are a Check entry.
 	- Commit: 6404266, a1dae52
 	- Closed: 20261119-104932
