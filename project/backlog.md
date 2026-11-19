@@ -25,13 +25,13 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - start --dry-run says it would run sudo -v, then sudo asks for a password anyway
 	- ID: 2026111715275268
 	- Type: Bug
-	- Status: Waiting on signoff
+	- Status: Queued
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152752
 	- Opened by:
 	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
-	- Expected behavior [Bug]: sudo -v runs in dry run too, since it changes nothing.
+	- Expected behavior [Bug]: start --dry-run never asks for a sudo password. It prints sudo -v as a step, and its looks that need sudo use sudo -n, saying what it couldn't check when that fails.
 	- Reproduced [Bug]: 20261117: the built binary's start --dry-run, with a stand-in sudo whose sudo -n fails, printed would run: sudo -v and never ran it.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
@@ -48,6 +48,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions:
 		- 20261117: the launch rig's changes() keeps sudo -v in its list, though it's now a look, so each test's list still shows sudo asked up front. No assert changed. df79e checks it's a look and on the terminal.
 		- Swept: kit.go's sudoUp is the only sudo -v. setup, update, and repair run themselves through sudo, and skip it under dry run.
+		- 2026-11-19: t00mietum's answer: no sudo prompt. Commit 3923e56 made sudo -v a look, which prompts in dry run, so that part is reversed. The decision on 2026111410134553 stands.
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
