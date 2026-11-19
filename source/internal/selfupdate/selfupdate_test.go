@@ -63,7 +63,7 @@ func release(tag string, draft, pre bool, assets ...string) string {
 // Newest skips drafts, takes pre-releases only from a pre-release, and
 // reads the SHA-256 for this arch from SHA256SUMS.
 func TestNewest(t *testing.T) {
-	defer testid.Line(t, "df77g")
+	defer testid.Line(t, "df77g00")
 	ctx := context.Background()
 	bin := AssetName("arm64")
 	both := []string{AssetName("amd64"), bin, SumsName}
@@ -120,7 +120,7 @@ func TestNewest(t *testing.T) {
 }
 
 func TestCompare(t *testing.T) {
-	defer testid.Line(t, "df77h")
+	defer testid.Line(t, "df77h00")
 	// Each is older than the next, per semver.org's own example plus ours.
 	order := []string{"v0.9.9", "v1.0.0-alpha", "v1.0.0-alpha.1", "v1.0.0-alpha.2", "v1.0.0-alpha.10", "v1.0.0-alpha.beta", "v1.0.0-beta", "v1.0.0-beta.2", "v1.0.0-beta.11", "v1.0.0-rc.1", "v1.0.0", "v1.0.1", "v1.2.0", "v1.10.0", "v2.0.0"}
 	for i := range order {
@@ -160,7 +160,7 @@ func script(tag string) string {
 // Install swaps the new build in only once its size, SHA-256, and version
 // match, keeps the old one's mode, and leaves no temp file either way.
 func TestInstall(t *testing.T) {
-	defer testid.Line(t, "df77j")
+	defer testid.Line(t, "df77j00")
 	ctx := context.Background()
 	newBin := script("v1.0.0-alpha.2")
 	files := map[string]string{"new": newBin, "arm": "\x7fELF not for here", "liar": script("v1.0.0-alpha.9")}
@@ -222,7 +222,7 @@ func TestInstall(t *testing.T) {
 }
 
 func TestFromNix(t *testing.T) {
-	defer testid.Line(t, "df77k")
+	defer testid.Line(t, "df77k00")
 	if !FromNix("/nix/store/abc-tt-minecraftd/bin/tt-minecraftd") {
 		t.Error("a Nix store path isn't from Nix")
 	}

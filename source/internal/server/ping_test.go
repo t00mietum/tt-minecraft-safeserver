@@ -58,7 +58,7 @@ func packet(body []byte) []byte {
 }
 
 func TestPing(t *testing.T) {
-	defer testid.Line(t, "df5yc")
+	defer testid.Line(t, "df5yc00")
 	text := `{"version":{"name":"Paper 26.3","protocol":775},"players":{"max":20,"online":1,"sample":[{"name":"Steve","id":"x"}]},"description":{"text":"hi"},"favicon":"data:` + strings.Repeat("A", 40000) + `"}`
 	body := append([]byte{0}, binary.AppendUvarint(nil, uint64(len(text)))...)
 	body = append(body, text...)
@@ -83,7 +83,7 @@ func TestPing(t *testing.T) {
 
 // A server that never answers costs the timeout, not a hang.
 func TestPingTimeout(t *testing.T) {
-	defer testid.Line(t, "df5yd")
+	defer testid.Line(t, "df5yd00")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

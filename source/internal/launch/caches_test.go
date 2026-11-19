@@ -93,7 +93,7 @@ func runClear(t *testing.T, g *rig, launch string) {
 // folder doesn't outlast a restart, in either mode. A link there is removed,
 // not followed.
 func TestStartClearsCaches(t *testing.T) {
-	defer testid.Line(t, "df7bg")
+	defer testid.Line(t, "df7bg00")
 	for _, linked := range []bool{false, true} {
 		for _, mode := range []string{"docker", "native"} {
 			var g *rig
@@ -133,7 +133,7 @@ func TestStartClearsCaches(t *testing.T) {
 // A cache start can't clear stops the start before the launch, and the trees
 // go back.
 func TestStartClearFails(t *testing.T) {
-	defer testid.Line(t, "df7bh")
+	defer testid.Line(t, "df7bh00")
 	g := newRig(t)
 	g.r.Reply = func(c host.Cmd) ([]byte, error) {
 		if c.Args[0] == "rm" {

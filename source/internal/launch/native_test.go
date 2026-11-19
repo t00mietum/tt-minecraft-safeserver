@@ -61,7 +61,7 @@ func (g *nativeRig) writeLog(t *testing.T, text string) {
 }
 
 func TestNativeStart(t *testing.T) {
-	defer testid.Line(t, "df5y1")
+	defer testid.Line(t, "df5y100")
 	g := newNativeRig(t)
 	g.n.Cfg.ExtraArgs = []string{"--world-dir=$HOME"}
 	g.n.Cfg.Nice = 5
@@ -107,7 +107,7 @@ func TestNativeStart(t *testing.T) {
 // The last run's latest.log, Done line and all, isn't taken for this run's.
 // A server that dies shows this run's log tail, or says there's none.
 func TestNativeStartLog(t *testing.T) {
-	defer testid.Line(t, "df5y2")
+	defer testid.Line(t, "df5y200")
 	g := newNativeRig(t)
 	g.states = []string{"inactive", "active"}
 	g.writeLog(t, doneLine)
@@ -137,7 +137,7 @@ func TestNativeStartLog(t *testing.T) {
 // A latest.log the server swaps for a pipe stops the wait for the Done line
 // with an error, rather than hanging the read.
 func TestNativeStartLogPipe(t *testing.T) {
-	defer testid.Line(t, "df79k")
+	defer testid.Line(t, "df79k00")
 	g := newNativeRig(t)
 	g.states = []string{"inactive", "active"}
 	g.launch = func() {
@@ -161,7 +161,7 @@ func TestNativeStartLogPipe(t *testing.T) {
 // Another Paper server, a live unit, or a path the unit can't take stop start
 // before it changes anything. A failed unit is cleared.
 func TestNativeStartRefuses(t *testing.T) {
-	defer testid.Line(t, "df5y3")
+	defer testid.Line(t, "df5y300")
 	g := newNativeRig(t)
 	g.ps = "safeserver 4242 /usr/bin/java -jar /srv/old/paper.jar nogui\n"
 	if err := g.n.Start(context.Background(), StartMode{}); err == nil || len(g.r.Ran) != 1 {
@@ -199,7 +199,7 @@ func TestNativeStartRefuses(t *testing.T) {
 // with the server, and an exit hands them back. --foreground waits for the
 // unit to end, then hands back. Dry run waits for nothing.
 func TestNativeStartModes(t *testing.T) {
-	defer testid.Line(t, "df5y4")
+	defer testid.Line(t, "df5y400")
 	g := newNativeRig(t)
 	g.states = []string{"inactive", "active"}
 	if err := g.n.Start(context.Background(), StartMode{Debug: true}); err != nil {
@@ -257,7 +257,7 @@ func TestNativeStartModes(t *testing.T) {
 // stop sends stop to the console and hands back. A server that hangs gets
 // systemctl stop, which sends SIGTERM, then SIGKILL after TimeoutStopSec.
 func TestNativeStop(t *testing.T) {
-	defer testid.Line(t, "df5y5")
+	defer testid.Line(t, "df5y500")
 	g := newNativeRig(t)
 	g.states = []string{"active", "active", "inactive"}
 	if err := g.n.Stop(context.Background(), 3); err != nil {

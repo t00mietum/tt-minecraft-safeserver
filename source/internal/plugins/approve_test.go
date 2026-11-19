@@ -30,7 +30,7 @@ func put(t *testing.T, file, text string) {
 
 // Jars covers plugins, Geyser extensions, and the build paper.jar points to.
 func TestJars(t *testing.T) {
-	defer testid.Line(t, "df5z0")
+	defer testid.Line(t, "df5z000")
 	dir := t.TempDir()
 	put(t, filepath.Join(dir, "plugins", "a.jar"), "a")
 	put(t, filepath.Join(dir, "plugins", "Geyser-Spigot", "extensions", "x.jar"), "x")
@@ -95,7 +95,7 @@ func makeJar(t *testing.T, file string, inside map[string]string) {
 // Describe shows what a jar says it is, without its escape codes, and a jar
 // that isn't a zip still gets its hash.
 func TestDescribe(t *testing.T) {
-	defer testid.Line(t, "df5z1")
+	defer testid.Line(t, "df5z100")
 	dir := t.TempDir()
 	geyser := filepath.Join(dir, "plugins", "Geyser-Spigot.jar")
 	makeJar(t, geyser, map[string]string{
@@ -125,7 +125,7 @@ func TestDescribe(t *testing.T) {
 
 // Approve adds and updates hashes, and leaves the rest of the file alone.
 func TestApprove(t *testing.T) {
-	defer testid.Line(t, "df5z2")
+	defer testid.Line(t, "df5z200")
 	list := filepath.Join(t.TempDir(), "plugins.shcl")
 	odd := "plugins/floodgate (1).jar"
 	if err := Approve(list, []Info{{Jar: Jar{Name: "plugins/a.jar"}, SHA256: sumA}, {Jar: Jar{Name: odd}, SHA256: sumB}}); err != nil {
@@ -169,7 +169,7 @@ func TestApprove(t *testing.T) {
 
 // Refuse moves a plugin out of the way, and never paper.
 func TestRefuse(t *testing.T) {
-	defer testid.Line(t, "df5z3")
+	defer testid.Line(t, "df5z300")
 	dir := t.TempDir()
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.Local)
 	for i := range 2 {
@@ -198,7 +198,7 @@ func TestRefuse(t *testing.T) {
 // Refuse runs as root, so a link the server planted in the way is refused,
 // and the jar and the link's target stay as they were.
 func TestRefuseLinks(t *testing.T) {
-	defer testid.Line(t, "df79a")
+	defer testid.Line(t, "df79a00")
 	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.Local)
 	empty := func(t *testing.T, dir string) {
 		t.Helper()

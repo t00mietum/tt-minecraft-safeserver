@@ -30,7 +30,7 @@ func writeList(t *testing.T, text string) string {
 }
 
 func TestReadApprovedList(t *testing.T) {
-	defer testid.Line(t, "df5x3")
+	defer testid.Line(t, "df5x300")
 	text := "## approved jars\n" +
 		"jar: plugins/Geyser-Spigot.jar\n" +
 		"\tsha256: " + strings.ToUpper(sumA) + "\n" +
@@ -51,7 +51,7 @@ func TestReadApprovedList(t *testing.T) {
 }
 
 func TestBadEntriesAreLeftOut(t *testing.T) {
-	defer testid.Line(t, "df5x4")
+	defer testid.Line(t, "df5x400")
 	text := "jar: plugins/good.jar\n\tsha256: " + sumA + "\n" + // 1
 		"jar: plugins/nosum.jar\n" + // 3
 		"jar: plugins/short.jar\n\tsha256: abc123\n" + // 4
@@ -97,7 +97,7 @@ func TestBadEntriesAreLeftOut(t *testing.T) {
 }
 
 func TestUnreadableListIsAnError(t *testing.T) {
-	defer testid.Line(t, "df5x5")
+	defer testid.Line(t, "df5x500")
 	_, _, err := ReadApproved(filepath.Join(t.TempDir(), "plugins.shcl"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("got %v", err)

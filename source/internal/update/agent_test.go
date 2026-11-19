@@ -143,7 +143,7 @@ func (a *agentRig) noTemps(t *testing.T) {
 // The agent's jar is checked, needs its own yes even with --yes, and goes on
 // the list with no source. Each failed check leaves the old jar.
 func TestAgentJars(t *testing.T) {
-	defer testid.Line(t, "df76h")
+	defer testid.Line(t, "df76h00")
 	ctx := context.Background()
 
 	a := newAgentRig(t, "y\n")
@@ -245,7 +245,7 @@ func TestAgentJars(t *testing.T) {
 // jar and its hash page. The certificate covers *.example.com, so only the
 // host check can refuse cdn.example.com.
 func TestAgentRedirectsHeldToHosts(t *testing.T) {
-	defer testid.Line(t, "df7bt")
+	defer testid.Line(t, "df7bt00")
 	ctx := context.Background()
 	moved := func(a *agentRig) {
 		a.moved = map[string]string{"/get/jar": "https://cdn.example.com/Chunky-1.1.jar", "/get/sums": "https://cdn.example.com/sums"}
@@ -291,7 +291,7 @@ func TestAgentRedirectsHeldToHosts(t *testing.T) {
 // A failed known source goes to the agent rather than stopping update, and
 // with no agent it still stops it.
 func TestAgentAfterFailedLookup(t *testing.T) {
-	defer testid.Line(t, "df76j")
+	defer testid.Line(t, "df76j00")
 	ctx := context.Background()
 	r, g := pluginRig(t, "")
 	g.err = errors.New("no network")
@@ -318,7 +318,7 @@ func TestAgentAfterFailedLookup(t *testing.T) {
 // The operator's run hands its answer to the root run, which uses only what
 // both asked about with the same hash.
 func TestAgentHandOff(t *testing.T) {
-	defer testid.Line(t, "df76k")
+	defer testid.Line(t, "df76k00")
 	ctx := context.Background()
 	a := newAgentRig(t, "")
 	ans, err := a.u.AskAgent(ctx)
@@ -403,7 +403,7 @@ func (a *agentRig) linked(t *testing.T) string {
 // plugin's, and needs its own yes even with --yes. Each failed check stops
 // the update with paper.jar as it was.
 func TestAgentPaper(t *testing.T) {
-	defer testid.Line(t, "df792")
+	defer testid.Line(t, "df79200")
 	ctx := context.Background()
 	kept := []string{"paper-26.3-240.jar", "paper-26.3-244.jar", "paper.jar", "plugins"}
 
@@ -485,7 +485,7 @@ func TestAgentPaper(t *testing.T) {
 // Before --mc-version the agent says which approved plugins have a build for
 // the new version. It's shown before the question, and changes nothing.
 func TestAgentMoveReport(t *testing.T) {
-	defer testid.Line(t, "df793")
+	defer testid.Line(t, "df79300")
 	ctx := context.Background()
 	report := "The update agent's report on the approved plugins for Minecraft 26.4. It changes nothing.\n  - plugins/Chunky.jar: has no build yet. waiting on 26.4\n"
 
@@ -531,7 +531,7 @@ func TestAgentMoveReport(t *testing.T) {
 // Paper and the move report go through the hand-off too, and the root run
 // uses them only for the same version, and the same plugin hashes.
 func TestAgentHandOffPaperAndMove(t *testing.T) {
-	defer testid.Line(t, "df794")
+	defer testid.Line(t, "df79400")
 	ctx := context.Background()
 	a := newPaperAgentRig(t, "")
 	a.u.MCVersion = "26.4"
@@ -582,7 +582,7 @@ func TestAgentHandOffPaperAndMove(t *testing.T) {
 // With agent set and PaperMC down, the image's Java lookup fails too. That
 // skips --image rather than stopping the rest, unless it's the only part.
 func TestAgentPaperDownImage(t *testing.T) {
-	defer testid.Line(t, "df796")
+	defer testid.Line(t, "df79600")
 	ctx := context.Background()
 	setup := func(t *testing.T, parts Parts) (*agentRig, *host.Fake) {
 		a := newPaperAgentRig(t, "y\n")

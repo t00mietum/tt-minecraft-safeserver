@@ -133,7 +133,7 @@ func runArgs(args ...string) (code int, stdout, stderr string) {
 }
 
 func TestHelpAboutVersion(t *testing.T) {
-	defer testid.Line(t, "df5xj")
+	defer testid.Line(t, "df5xj00")
 	noDefaultConfig(t)
 	for _, c := range []struct {
 		args []string
@@ -163,7 +163,7 @@ func TestHelpAboutVersion(t *testing.T) {
 }
 
 func TestUsageErrors(t *testing.T) {
-	defer testid.Line(t, "df5xk")
+	defer testid.Line(t, "df5xk00")
 	noDefaultConfig(t)
 	bad := [][]string{
 		{},
@@ -198,7 +198,7 @@ func TestUsageErrors(t *testing.T) {
 // Options reach the config in the order given, so the last one wins, and the
 // common ones work before the command too.
 func TestOptionsReachConfig(t *testing.T) {
-	defer testid.Line(t, "df5xm")
+	defer testid.Line(t, "df5xm00")
 	t.Setenv("SUDO_USER", "")
 	t.Setenv("USER", "alice")
 	noDefaultConfig(t)
@@ -241,7 +241,7 @@ func TestOptionsReachConfig(t *testing.T) {
 // A missing default file means the defaults, with a warning. A missing file
 // named by --config is an error.
 func TestMissingConfig(t *testing.T) {
-	defer testid.Line(t, "df5xn")
+	defer testid.Line(t, "df5xn00")
 	noDefaultConfig(t)
 	var errOut bytes.Buffer
 	inv, _, done := prepare([]string{"status"}, &bytes.Buffer{}, &errOut)
@@ -259,7 +259,7 @@ func TestMissingConfig(t *testing.T) {
 
 // watch redraws until Ctrl-C, and sends no screen codes to a file or pipe.
 func TestWatch(t *testing.T) {
-	defer testid.Line(t, "df5yg")
+	defer testid.Line(t, "df5yg00")
 	cfg := config.Defaults()
 	cfg.ServerDir, cfg.OwnerTrees = t.TempDir(), nil
 	probe := status.NewProbe(&host.Fake{}, &cfg, filepath.Join(t.TempDir(), "plugins.shcl"))
@@ -281,7 +281,7 @@ func TestWatch(t *testing.T) {
 // it isn't, and --check or --dry-run only reports, without root. Either one
 // exits 1 while something is wrong.
 func TestRepair(t *testing.T) {
-	defer testid.Line(t, "df5ys")
+	defer testid.Line(t, "df5ys00")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	var again []string
@@ -323,7 +323,7 @@ func TestRepair(t *testing.T) {
 // repair reports jars that aren't approved, and --approve-plugins asks about
 // each one: yes approves it, no moves it out, and no answer leaves it.
 func TestRepairApprovePlugins(t *testing.T) {
-	defer testid.Line(t, "df5z5")
+	defer testid.Line(t, "df5z500")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	dir := t.TempDir()
@@ -378,7 +378,7 @@ func TestRepairApprovePlugins(t *testing.T) {
 
 // A Geyser jar approved through repair gets GeyserMC's source, as setup's do.
 func TestRepairApproveGeyserSource(t *testing.T) {
-	defer testid.Line(t, "df76r")
+	defer testid.Line(t, "df76r00")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	dir := t.TempDir()
@@ -418,7 +418,7 @@ func TestRepairApproveGeyserSource(t *testing.T) {
 
 // cmd takes the rest of the line as the console command; console takes none.
 func TestConsoleCmdArgs(t *testing.T) {
-	defer testid.Line(t, "df5z8")
+	defer testid.Line(t, "df5z800")
 	noDefaultConfig(t)
 	var out, errOut bytes.Buffer
 	inv, _, done := prepare([]string{"cmd", "--set", "heapMax=2G", "whitelist", "add", "Steve"}, &out, &errOut)
@@ -441,7 +441,7 @@ func TestConsoleCmdArgs(t *testing.T) {
 // stop, console, and cmd follow a server that runs natively while runMode
 // names a container, and the other way round. Podman to Docker is Boxed's.
 func TestFollowMode(t *testing.T) {
-	defer testid.Line(t, "df67x")
+	defer testid.Line(t, "df67x00")
 	old := serverMode
 	t.Cleanup(func() { serverMode = old })
 	for _, c := range []struct{ runMode, running, want, say string }{
@@ -465,7 +465,7 @@ func TestFollowMode(t *testing.T) {
 // repair runs the host checks before the safe settings and after the plugins,
 // and a failed one makes the exit 1.
 func TestRepairOrder(t *testing.T) {
-	defer testid.Line(t, "df5zn")
+	defer testid.Line(t, "df5zn00")
 	noDefaultConfig(t)
 	old := repairSteps
 	t.Cleanup(func() { repairSteps = old })
@@ -486,7 +486,7 @@ func TestRepairOrder(t *testing.T) {
 // setup runs itself through sudo unless it's root or a dry run, and on an
 // existing install it runs repair.
 func TestSetup(t *testing.T) {
-	defer testid.Line(t, "df65m")
+	defer testid.Line(t, "df65m00")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	fakePaperMC(t)
@@ -533,7 +533,7 @@ func TestSetup(t *testing.T) {
 // update runs itself through sudo unless it's root or a dry run, and a dry
 // run shows the plan without downloading.
 func TestUpdate(t *testing.T) {
-	defer testid.Line(t, "df671")
+	defer testid.Line(t, "df67100")
 	noDefaultConfig(t)
 	fakePaperMC(t)
 	// hits := fakeReleases(t)
@@ -595,7 +595,7 @@ func TestUpdate(t *testing.T) {
 // --mc-version is in the help, and one that can't work is refused before
 // sudo asks for a password.
 func TestUpdateMCVersion(t *testing.T) {
-	defer testid.Line(t, "df78n")
+	defer testid.Line(t, "df78n00")
 	noDefaultConfig(t)
 	var again []string
 	old := asRoot
@@ -622,7 +622,7 @@ func TestUpdateMCVersion(t *testing.T) {
 // run through sudo in a file only the operator can read, and removes it
 // after. The flag that names the file isn't in the help.
 func TestUpdateAgent(t *testing.T) {
-	defer testid.Line(t, "df76m")
+	defer testid.Line(t, "df76m00")
 	if os.Geteuid() == 0 {
 		t.Skip("the agent doesn't run as root")
 	}
@@ -694,7 +694,7 @@ func TestUpdateAgent(t *testing.T) {
 
 // update --paper asks the agent too, when PaperMC's lookup fails.
 func TestUpdateAgentPaper(t *testing.T) {
-	defer testid.Line(t, "df795")
+	defer testid.Line(t, "df79500")
 	if os.Geteuid() == 0 {
 		t.Skip("the agent doesn't run as root")
 	}
@@ -728,7 +728,7 @@ func TestUpdateAgentPaper(t *testing.T) {
 }
 
 func TestBuildNumber(t *testing.T) {
-	defer testid.Line(t, "df785")
+	defer testid.Line(t, "df78500")
 	for _, c := range []struct {
 		at   time.Time
 		want string
@@ -746,7 +746,7 @@ func TestBuildNumber(t *testing.T) {
 }
 
 func TestVersionLine(t *testing.T) {
-	defer testid.Line(t, "df786")
+	defer testid.Line(t, "df78600")
 	at := time.Date(2026, 10, 24, 22, 0, 0, 0, time.UTC)
 	date := at.Local().Format("2006-01-02")
 	if got, want := versionLine(at, true, false), "tt-minecraftd "+version+" build decp8 ("+date+")"; got != want {
@@ -764,7 +764,7 @@ func TestVersionLine(t *testing.T) {
 // --foreground, since systemctl runs it, and the unit is asked about that
 // config.
 func TestBootUnitRefuses(t *testing.T) {
-	defer testid.Line(t, "df78w")
+	defer testid.Line(t, "df78w00")
 	noDefaultConfig(t)
 	old := bootServes
 	t.Cleanup(func() { bootServes = old })
@@ -787,7 +787,7 @@ func TestBootUnitRefuses(t *testing.T) {
 // A jar's name is the server account's, so repair shows it without its
 // escape codes, in the report and in the question.
 func TestRepairCleansJarName(t *testing.T) {
-	defer testid.Line(t, "df79z")
+	defer testid.Line(t, "df79z00")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	dir := t.TempDir()
@@ -817,7 +817,7 @@ func TestRepairCleansJarName(t *testing.T) {
 // An error can name a file the server account named, so the one run prints
 // is cleaned, line by line.
 func TestRunCleansError(t *testing.T) {
-	defer testid.Line(t, "df7a0")
+	defer testid.Line(t, "df7a000")
 	noDefaultConfig(t)
 	dir := t.TempDir()
 	if err := os.Symlink("paper\x1b[2J\x07.jar", filepath.Join(dir, "paper.jar")); err != nil {
@@ -832,7 +832,7 @@ func TestRunCleansError(t *testing.T) {
 // start --foreground's error for a server that exited with a code of its own
 // exits with that code, so systemd sees a crash at boot as a failure.
 func TestServerExitCode(t *testing.T) {
-	defer testid.Line(t, "df7af")
+	defer testid.Line(t, "df7af00")
 	for _, c := range []struct {
 		err  error
 		code int
@@ -854,7 +854,7 @@ func TestServerExitCode(t *testing.T) {
 // Dry runs and repair --check never ask for a sudo password, so their
 // runners put -n on every sudo (2026111715275268).
 func TestDryRunsNoPrompt(t *testing.T) {
-	defer testid.Line(t, "df7ax")
+	defer testid.Line(t, "df7ax00")
 	noPrompt := func(r host.Runner) bool {
 		e, ok := r.(*host.Exec)
 		return ok && e.NoPrompt
@@ -874,7 +874,7 @@ func TestDryRunsNoPrompt(t *testing.T) {
 // old-builds folder, and takes only a full path to a tt-minecraftd. It isn't
 // in the help.
 func TestRetireBuild(t *testing.T) {
-	defer testid.Line(t, "df7be")
+	defer testid.Line(t, "df7be00")
 	old := oldBuilds
 	oldBuilds = filepath.Join(t.TempDir(), "old-builds")
 	t.Cleanup(func() { oldBuilds = old })

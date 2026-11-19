@@ -52,7 +52,7 @@ func before() Config {
 }
 
 func TestReadEveryKey(t *testing.T) {
-	defer testid.Line(t, "df5wt")
+	defer testid.Line(t, "df5wt00")
 	text := `runMode: docker
 runUser: mcd
 runGroup: games
@@ -132,7 +132,7 @@ agentHosts: [CDN.Modrinth.com, ci.example.org]
 }
 
 func TestMissingKeysLeaveDefaults(t *testing.T) {
-	defer testid.Line(t, "df5wv")
+	defer testid.Line(t, "df5wv00")
 	c := before()
 	if warns := mustRead(t, "## nothing set\n\nheapMax: 8G\n", &c); len(warns) != 0 {
 		t.Fatalf("warnings: %v", warns)
@@ -145,7 +145,7 @@ func TestMissingKeysLeaveDefaults(t *testing.T) {
 }
 
 func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
-	defer testid.Line(t, "df5ww")
+	defer testid.Line(t, "df5ww00")
 	cases := []struct{ line, says string }{
 		{"runMode: lxc", `"lxc" isn't one of: podman, docker`},
 		{"runMode: [docker, native]", "takes one value"},
@@ -215,7 +215,7 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 }
 
 func TestUnknownNestedAndRepeatedKeysWarn(t *testing.T) {
-	defer testid.Line(t, "df5wx")
+	defer testid.Line(t, "df5wx00")
 	c := before()
 	warns := mustRead(t, "gamePort: 25570\nwhiteList: true\nheapMax: 8G\n\tmin: 1G\ngamePort: 25571\negress: open\n", &c)
 	got := make([]string, len(warns))
@@ -236,7 +236,7 @@ func TestUnknownNestedAndRepeatedKeysWarn(t *testing.T) {
 }
 
 func TestSizesTakeJavaAndShclForms(t *testing.T) {
-	defer testid.Line(t, "df5wy")
+	defer testid.Line(t, "df5wy00")
 	cases := map[string]int64{
 		"512m":    512 << 20,
 		"512M":    512 << 20,
@@ -260,7 +260,7 @@ func TestSizesTakeJavaAndShclForms(t *testing.T) {
 }
 
 func TestKeysAndChoicesIgnoreCase(t *testing.T) {
-	defer testid.Line(t, "df5wz")
+	defer testid.Line(t, "df5wz00")
 	var c Config
 	if warns := mustRead(t, "RunMode: Docker\nALLOWFROM: [LAN, Any]\nEgress: WEB\n", &c); len(warns) != 0 {
 		t.Fatalf("warnings: %v", warns)
@@ -271,7 +271,7 @@ func TestKeysAndChoicesIgnoreCase(t *testing.T) {
 }
 
 func TestBrokenLineWarnsAndRestLoads(t *testing.T) {
-	defer testid.Line(t, "df5x0")
+	defer testid.Line(t, "df5x000")
 	c := before()
 	warns := mustRead(t, "gamePort: 25570\nthis line has no colon\negress: open\n", &c)
 	if len(warns) == 0 || warns[0].Line != 2 {
@@ -283,7 +283,7 @@ func TestBrokenLineWarnsAndRestLoads(t *testing.T) {
 }
 
 func TestUnreadableFileIsAnError(t *testing.T) {
-	defer testid.Line(t, "df5x1")
+	defer testid.Line(t, "df5x100")
 	c := before()
 	_, err := Read(filepath.Join(t.TempDir(), "nope.shcl"), &c)
 	if !errors.Is(err, fs.ErrNotExist) {
@@ -299,7 +299,7 @@ func TestUnreadableFileIsAnError(t *testing.T) {
 
 // Every key in design.md's settings table is read, and nothing else.
 func TestKeysMatchDesign(t *testing.T) {
-	defer testid.Line(t, "df5x2")
+	defer testid.Line(t, "df5x200")
 	text, err := os.ReadFile("../../../project/design.md")
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +327,7 @@ func TestKeysMatchDesign(t *testing.T) {
 // An IPv4-mapped address or range is read as IPv4, since that's how nft and
 // Paper see an IPv4 client.
 func TestMappedAddressesReadAsIPv4(t *testing.T) {
-	defer testid.Line(t, "df7b5")
+	defer testid.Line(t, "df7b500")
 	c := before()
 	text := "bindIP: \"::ffff:192.168.1.123\"\n" +
 		"allowFrom: [\"::ffff:10.0.0.1\", \"::ffff:10.1.2.3/104\", \"::FFFF:0:0/96\", \"::ffff:10.0.0.0/80\", \"2001:db8::1\"]\n"

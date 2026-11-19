@@ -21,7 +21,7 @@ import (
 // timeout past stopTimeout, the network first, docker.service in Docker
 // mode, and the firewall unit required when the firewall is on.
 func TestUnit(t *testing.T) {
-	defer testid.Line(t, "df78p")
+	defer testid.Line(t, "df78p00")
 	c := config.Defaults()
 	c.RunMode, c.Firewall, c.StopTimeout = "docker", true, 120*time.Second
 	u := Unit(&c, config.DefaultPath, LocalBin)
@@ -71,7 +71,7 @@ func TestUnit(t *testing.T) {
 // Inside goes by the unit's cgroup. Serves needs the unit enabled, and its
 // ExecStart for this config.
 func TestInsideAndServes(t *testing.T) {
-	defer testid.Line(t, "df78q")
+	defer testid.Line(t, "df78q00")
 	for cg, want := range map[string]bool{
 		"0::/system.slice/tt-minecraftd.service\n":         true,
 		"0::/system.slice/tt-minecraftd-server.service\n":  false,
@@ -122,7 +122,7 @@ func TestInsideAndServes(t *testing.T) {
 // Owner reads back the config any unit Unit writes runs, however odd its
 // path, and nothing from a unit it didn't write. See design.md, Boot.
 func TestOwner(t *testing.T) {
-	defer testid.Line(t, "df7a6")
+	defer testid.Line(t, "df7a600")
 	c := config.Defaults()
 	rel, err := filepath.Abs("rel/c.shcl")
 	if err != nil {
@@ -170,7 +170,7 @@ func TestOwner(t *testing.T) {
 // The unit runs the package's binary when it's there, so a package upgrade
 // reaches it, and setup's copy otherwise. See design.md, Boot.
 func TestBin(t *testing.T) {
-	defer testid.Line(t, "df7as")
+	defer testid.Line(t, "df7as00")
 	dir := t.TempDir()
 	pkg := filepath.Join(dir, "tt-minecraftd")
 	if got := Bin(pkg); got != LocalBin {

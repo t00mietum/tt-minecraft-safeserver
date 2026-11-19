@@ -59,7 +59,7 @@ func (r *rig) config(t *testing.T) string {
 // --image pulls the tag, checks its Java against Paper's, and pins the build
 // the tag points at, for every arch.
 func TestImage(t *testing.T) {
-	defer testid.Line(t, "df67q")
+	defer testid.Line(t, "df67q00")
 	ctx := context.Background()
 	temurin := `openjdk version "25.0.1" 2025-10-21 LTS` + "\nOpenJDK Runtime Environment Temurin-25.0.1+8\n"
 	newPin := "docker.io/library/eclipse-temurin:25-jre@" + index
@@ -142,7 +142,7 @@ func TestImage(t *testing.T) {
 }
 
 func TestPickDigest(t *testing.T) {
-	defer testid.Line(t, "df67r")
+	defer testid.Line(t, "df67r00")
 	for _, c := range []struct {
 		repo, inspect, want string
 	}{
@@ -165,7 +165,7 @@ func TestPickDigest(t *testing.T) {
 }
 
 func TestSplitImageJavaMajor(t *testing.T) {
-	defer testid.Line(t, "df67s")
+	defer testid.Line(t, "df67s00")
 	for in, want := range map[string][3]string{
 		"docker.io/library/eclipse-temurin:25-jre@sha256:ab": {"docker.io/library/eclipse-temurin", "25-jre", "sha256:ab"},
 		"localhost:5000/jre:21":                              {"localhost:5000/jre", "21", ""},

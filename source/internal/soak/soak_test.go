@@ -15,7 +15,7 @@ func TestMain(m *testing.M) { testid.Main(m) }
 // A round that keeps a goroutine or some heap fails, and one that keeps
 // nothing past round N passes, even when it warms a cache first.
 func TestLeak(t *testing.T) {
-	defer testid.Line(t, "df78d")
+	defer testid.Line(t, "df78d00")
 	const n = 50
 	var kept [][]byte
 	cache := map[int][]byte{}

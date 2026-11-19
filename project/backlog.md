@@ -167,10 +167,11 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
-- test-id.bash's header says to take an ID from the clock, against the next-after-highest rule
+- Test IDs follow the clock plus a fixed-length counter, not the next-after-highest rule
 	- ID: 2026111911594103
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261119-115941
 	- Opened by:
@@ -180,11 +181,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
 		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
 		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
+		- 20261119: Per the answer, an ID is now 7 characters: the clock's minute in 5, then a 2-character counter. Every existing ID took 00, in the Go tests and checks.bash. `test-id.bash --new` prints the next free ID, and `--check` refuses any other length, root host checks included. style_guide.md says the same, and cicd.bash's log greps match 7 characters.
+		- Verified: dfh7x00 fails all 3 of its cases on the old test-id.bash and passes on the new one. df7b700, with its IDs in the new form, fails all 4 on the old tool and passes on the new one. The quick gate passed, with the same 281 test lines as before the rename.
+		- Swept: the old rule was also in style_guide.md, missed by the first sweep, which skipped the repo root. Every `{5}` ID pattern in cicd, source and utility, and every test that names another test's ID (df7b700, linksafe's df7bq00), were moved. design.md and README.md name no IDs.
 	- Decisions:
 		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
 		- 20261119 answer: follow the clock rule, minutes since 2000-01-01 UTC in Crockford. Add a counter after it for more granularity, and keep the length the same for every ID, such as a 00 counter where none is needed. This reverses the next-after-highest call, so test-id.bash's header, its form check, and the project notes change to match.
-	- Test case: n/a: comment-only change in a header. The lint step's test ID check still passes.
+		- The existing IDs took 00 rather than staying at 5 characters, so every ID has one length. Old IDs in backlog rows and notes still match a plain grep of a run log, since the old ID is the start of the new one. Check: entry in questions.md.
+		- The counter is 2 Crockford characters, 1024 IDs a minute, and `--new` takes the lowest free one, so 2 workers in one minute get different IDs unless they run it before either commits. `--check` still catches that repeat.
+		- Root host check IDs are checked for form too, so a 5-character one is refused rather than left out of the list.
+	- Test case: dfh7x00, df7b700
+	- Branch: nov19b-2026111911594103
+	- Commit: c7421ea
 	- Actual effort: Low
+	- Acceptance signoff: Self-closed: the clock rule and fixed length were the answer, and the test fails on the old tool and passes now.
+	- Closed: 20261119-135500
 	- Target version: v1.0.0-beta.1
 
 - Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones

@@ -501,12 +501,12 @@ fGoTestRun(){ ## LABEL [VAR=value...]: go test over the chosen packages, to a lo
 	log="${runTmp}/gotest_${label}.log"
 	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
 	fGo test "${extra[@]}" "$@" -- go test -count=1 -p "${testJobs}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
 	if ((rc)); then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true
+		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{7} |SKIP [0-9a-z]{7} )' "${log}" | tail -n 80 || true
 		fDie "go test failed (${label})"
 	fi
-	fEcho_Clean "go test (${label}): $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+	fEcho_Clean "go test (${label}): $(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true) test line(s) passed"
 }
 fStepTest(){
 	local fresh="${runTmp}/gotmp"
@@ -522,8 +522,8 @@ fStepRace(){
 	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
 	## -race needs cgo, and the container has gcc.
 	fGo race "${extra[@]}" HEAVY=1 CGO_ENABLED=1 "TMPDIR=${fresh}" -- go test -race -count=1 -p "${HEAVY_JOBS}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
-	if ((rc)); then grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true; fDie "race test failed"; fi
-	fEcho_Clean "go test -race: $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+	if ((rc)); then grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{7} |SKIP [0-9a-z]{7} )' "${log}" | tail -n 80 || true; fDie "race test failed"; fi
+	fEcho_Clean "go test -race: $(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true) test line(s) passed"
 }
 fStepVuln(){
 	local out rc=0
@@ -555,9 +555,9 @@ fStepFuzz(){
 		while IFS= read -r name; do
 			n=$((n + 1)); rc=0
 			fGo fuzz HEAVY=1 -- go -C "${copy}" test -count=1 -run '^$' -fuzz "^${name}\$" -fuzztime "${budget}" -parallel "${HEAVY_JOBS}" "${dir}" > "${log}" 2>&1 || rc=$?
-			grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+			grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
 			if ((rc)); then
-				grep -vE '^(fuzz: elapsed|(PASS|FAIL|SKIP) [0-9a-z]{5} )' "${log}" | tail -n 40 || true
+				grep -vE '^(fuzz: elapsed|(PASS|FAIL|SKIP) [0-9a-z]{7} )' "${log}" | tail -n 40 || true
 				found="$(find "${copy}/${dir#./}/testdata/fuzz/${name}" -type f -newer "${copy}/go.mod" 2>/dev/null | head -n 1)"
 				[[ -z "${found}" ]] || { fEcho_Clean "failing input: ${found}"; sed 's/^/  /' "${found}"; }
 				fDie "fuzzing found a failure in ${name} (${dir})"
@@ -577,14 +577,14 @@ fStepSoak(){
 	fEcho_Clean "rounds ${rounds} and $((rounds * 2)), ${HEAVY_JOBS} worker(s)"
 	fGo soak HEAVY=1 "${SOAK_ENV}=${rounds}" -- go test -count=1 -p "${HEAVY_JOBS}" -v -run '^TestSoak$' "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
 	## A test's numbers, then its PASS or FAIL line: go test prints each package's output in one piece.
-	grep -E '^((PASS|FAIL|SKIP) [0-9a-z]{5} |[[:space:]]+soak_test\.go:[0-9]+: )' "${log}" | sed -E 's/^[[:space:]]*/  /' || true
+	grep -E '^((PASS|FAIL|SKIP) [0-9a-z]{7} |[[:space:]]+soak_test\.go:[0-9]+: )' "${log}" | sed -E 's/^[[:space:]]*/  /' || true
 	if ((rc)); then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|(PASS|FAIL|SKIP) [0-9a-z]{5} |[[:space:]]+soak_test\.go:)' "${log}" | tail -n 40 || true
+		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|(PASS|FAIL|SKIP) [0-9a-z]{7} |[[:space:]]+soak_test\.go:)' "${log}" | tail -n 40 || true
 		fDie "soak test failed"
 	fi
 	## A skip here means the rounds never reached the test, so it checked nothing.
-	! grep -qE '^SKIP [0-9a-z]{5} ' "${log}" || fDie "a soak test skipped: ${SOAK_ENV} didn't reach it"
-	n="$(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true)"
+	! grep -qE '^SKIP [0-9a-z]{7} ' "${log}" || fDie "a soak test skipped: ${SOAK_ENV} didn't reach it"
+	n="$(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true)"
 	((n)) || { fSkip "no soak tests in ${pkgs[*]}"; return 0; }
 	fEcho_Clean "soak: ${n} test(s), nothing grew"
 }
@@ -779,20 +779,20 @@ fStepArm64(){
 		fSkip "${ARM64_HOST} isn't there, or stayed busy past ${lockWait}s; exit ${rc}"; return 0
 	fi
 	grep -E '^(box: |work folder: |removed |arm64-tests: )' "${log}" || true
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
 	if [[ -f "${state}/rc" ]]; then read -r testRc < "${state}/rc" || true; fi
 	if [[ "${testRc}" != 0 ]]; then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true
+		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{7} |SKIP [0-9a-z]{7} )' "${log}" | tail -n 80 || true
 		fDie "arm64 tests failed on ${ARM64_HOST}"
 	fi
 	((rc == 0)) || fEcho "WARNING: ${VM_STATE_TOOL} exited ${rc} after the tests passed; check ${ARM64_HOST} went back as found"
-	fEcho_Clean "arm64 on ${ARM64_HOST}: $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+	fEcho_Clean "arm64 on ${ARM64_HOST}: $(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true) test line(s) passed"
 }
 fRootHost(){ ## [--zfs]
 	local log="${runTmp}/roothost${1:-}.log" rc=0
 	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fSkip "no docker here"; return 0; fi
 	nice -n 19 bash "${here}/root-host/root-host.bash" "${@}" > "${log}" 2>&1 || rc=$?
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
 	if ((rc)); then tail -n 60 "${log}"; fDie "root host checks failed"; fi
 	fEcho_Clean "root host: $(grep -cE '^PASS ' "${log}" || true) check(s) passed"
 }
