@@ -254,7 +254,10 @@ func (d Dir) Move(name string, to Dir, newName string) error {
 	return nil
 }
 
-func renameat2(olddirfd int, oldpath string, newdirfd int, newpath string, flags uint) error {
+// renameat2 is a var so a test can stand in for a filesystem without the flag.
+var renameat2 = sysRenameat2Call
+
+func sysRenameat2Call(olddirfd int, oldpath string, newdirfd int, newpath string, flags uint) error {
 	from, err := syscall.BytePtrFromString(oldpath)
 	if err != nil {
 		return err

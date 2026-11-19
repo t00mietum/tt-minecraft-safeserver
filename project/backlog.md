@@ -508,7 +508,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Give linksafe tests of its own
 	- ID: 2026111715275441
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152754
@@ -517,6 +517,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
 	- Origin: Not seen before.
+	- Closed reason: Done
+	- Actual fix: linksafe has its own tests. They cover a link or a file at each step of Walk and Sub, Read refusing a link, a pipe, a folder and an oversized file, Write replacing a link rather than writing through it and leaving no temp file when the rename fails, Move never replacing on both the RENAME_NOREPLACE path and the EINVAL fallback, and Mkdir's mode and its refusal of a folder swapped for a link. df7bq runs Mkdir's and Write's chown as root in a user namespace, including the chown failure path. Each error path also checks that no handle is left open.
+	- Test case: df7bj, df7bk, df7bm, df7bn, df7bp, df7bq
+	- Verified: all 6 pass, and the quick gate passes. Each was watched to fail: dropping Walk's close of a step, O_NOFOLLOW in Sub, Write's unlink of its temp file, the fallback's EEXIST, Mkdir's chown or its close on a failed chown, Mkdir's mode, and Read's O_NONBLOCK (hangs) each turn a test red. df7bq ran on the host with --map-auto, so it set an owner the test didn't have. In the gate's container it skips, since that has no user namespaces.
+	- Branch: nov19-2026111715275441
+	- Commit: 7ab8b2a
+	- Acceptance signoff: Self-closed: tests only, each watched to fail.
+	- Closed: 20261119-124430
+	- Decisions:
+		- renameat2 is now a package var, so df7bn can stand in for a filesystem that refuses RENAME_NOREPLACE. No filesystem here refuses it.
+		- Left alone: Move's fallback checks the new name with a path lstat, not through the folder handle, since package syscall has no Fstatat. A swap there only replaces a file in a folder the server can already write, per 2026111709090977's decision.
 
 - Keep the join rate limit working when its address set fills
 	- ID: 2026111715275456
