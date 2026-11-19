@@ -47,7 +47,7 @@ func nftCheck(t *testing.T, rules string) bool {
 }
 
 func TestRules(t *testing.T) {
-	defer testid.Line(t, "df66c00")
+	defer testid.Line(t, "1a3fbxg")
 	me, err := user.Current()
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestRules(t *testing.T) {
 // A mapped allowFrom address in the config file goes in the IPv4 set, where
 // an IPv4 client's packets are matched.
 func TestMappedAllowFromIsIPv4(t *testing.T) {
-	defer testid.Line(t, "df7b600")
+	defer testid.Line(t, "1a3jyyr")
 	path := filepath.Join(t.TempDir(), "config.shcl")
 	if err := os.WriteFile(path, []byte("allowFrom: [\"::ffff:10.0.0.1\"]\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestMappedAllowFromIsIPv4(t *testing.T) {
 // The server's own ports stay open to it on loopback, ahead of the drop,
 // and nothing else on loopback does.
 func TestOwnPortsOnLoopback(t *testing.T) {
-	defer testid.Line(t, "df67w00")
+	defer testid.Line(t, "1a3fgkg")
 	c := config.Defaults()
 	c.GamePort, c.BedrockPort = 25570, 19140
 	rules := Rules(&c, Local{})
@@ -193,7 +193,7 @@ func TestOwnPortsOnLoopback(t *testing.T) {
 }
 
 func TestResolvers(t *testing.T) {
-	defer testid.Line(t, "df66d00")
+	defer testid.Line(t, "1a3fc0m")
 	conf := "# by NetworkManager\nsearch lan\nnameserver 127.0.0.53\nnameserver  fe80::1%eth0\nnameserver bogus\nnameserver ::ffff:192.168.1.1\nnameserver 127.0.0.53\noptions edns0\n"
 	got, err := Resolvers(strings.NewReader(conf))
 	if err != nil {
@@ -206,7 +206,7 @@ func TestResolvers(t *testing.T) {
 }
 
 func TestLoaded(t *testing.T) {
-	defer testid.Line(t, "df66e00")
+	defer testid.Line(t, "1a3fc3r")
 	var reply string
 	var fail error
 	r := &host.Fake{Reply: func(host.Cmd) ([]byte, error) { return []byte(reply), fail }}
@@ -241,7 +241,7 @@ func TestLoaded(t *testing.T) {
 }
 
 func TestCounters(t *testing.T) {
-	defer testid.Line(t, "df67h00")
+	defer testid.Line(t, "1a3ffh4")
 	reply := `{"nftables": [{"metainfo": {"version": "1.1.6"}}, {"counter": {"family": "inet", "name": "out_lan", "table": "tt_minecraftd", "handle": 3, "packets": 12, "bytes": 720}}, {"counter": {"family": "inet", "name": "out_lan", "table": "other", "handle": 3, "packets": 5, "bytes": 0}}]}`
 	var fail error
 	r := &host.Fake{Reply: func(host.Cmd) ([]byte, error) { return []byte(reply), fail }}
@@ -306,7 +306,7 @@ func route(dest string, bits int, gateway string, flags uint32, dev string) stri
 // The host's own subnets are the on-link routes, and nothing a VPN or the
 // kernel's local table adds.
 func TestOnLink(t *testing.T) {
-	defer testid.Line(t, "df7a100")
+	defer testid.Line(t, "1a3jvb4")
 	list := route("2001:db8:1:2::", 64, "::", 0x1, "eth0") + // RA's on-link prefix
 		route("::", 0, "fe80::1", 0x450003, "eth0") + // default through the router
 		route("2001:db8:5::", 48, "fe80::1", 0x3, "eth0") + // routed elsewhere
@@ -341,7 +341,7 @@ func TestOnLink(t *testing.T) {
 // The server can't reach the host's IPv6 subnets, multicast, or broadcast,
 // whatever egress allows, and the LAN discovery answer still goes ahead.
 func TestLANDropCoversSubnetsAndMulticast(t *testing.T) {
-	defer testid.Line(t, "df7a200")
+	defer testid.Line(t, "1a3jve8")
 	me, err := user.Current()
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +377,7 @@ func TestLANDropCoversSubnetsAndMulticast(t *testing.T) {
 // start's view of the rules file: the config and the host's resolvers and
 // subnets have to give it, apart from a subnet the host has lost.
 func TestMatches(t *testing.T) {
-	defer testid.Line(t, "df7a300")
+	defer testid.Line(t, "1a3jvhc")
 	dir := t.TempDir()
 	f := Files{Rules: filepath.Join(dir, "firewall.nft"), ResolvConf: filepath.Join(dir, "resolv.conf"), Routes: filepath.Join(dir, "ipv6_route")}
 	write := func(path, text string) {
@@ -440,7 +440,7 @@ func TestMatches(t *testing.T) {
 // repair can leave it alone, and start's check skips that line, since 2
 // configs can give the same rules.
 func TestOwnerLine(t *testing.T) {
-	defer testid.Line(t, "df7a700")
+	defer testid.Line(t, "1a3jvxw")
 	dir := t.TempDir()
 	f := Files{Rules: filepath.Join(dir, "firewall.nft"), ResolvConf: filepath.Join(dir, "resolv.conf"), Routes: filepath.Join(dir, "ipv6_route")}
 	if err := os.WriteFile(f.ResolvConf, []byte("nameserver 192.168.1.1\n"), 0o600); err != nil {

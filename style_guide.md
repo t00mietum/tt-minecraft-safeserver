@@ -26,7 +26,7 @@ Code here takes the boring, obvious way over the clever one. Where a formatter o
 
 ## Tests
 
-- Every test starts with `defer testid.Line(t, "<id>")`. A new ID is the minutes since 2000-01-01 UTC in Crockford base 32, plus a 2-character counter, from `cicd/utility/test-id.bash --new`. `--check` refuses one that's missing, malformed, or used twice.
+- Every test starts with `defer testid.Line(t, "<id>")`. A new ID is the minutes since 2000-01-01 UTC times 100, plus a counter from 00 to 99, in 7 characters of Crockford base 32, from `cicd/utility/test-id.bash --new`. `--check` refuses one that's missing, malformed, or used twice.
 
 - Unit tests stay off the real host. They use `host.Fake` for commands and stand-in files for anything under `/etc`.
 

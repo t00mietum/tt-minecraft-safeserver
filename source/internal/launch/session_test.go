@@ -26,7 +26,7 @@ import (
 // over with Ctrl-C as the way out. An exit hands the trees back; a detach
 // doesn't.
 func TestOpenConsole(t *testing.T) {
-	defer testid.Line(t, "df5z600")
+	defer testid.Line(t, "1a3ener")
 	g := newRig(t)
 	g.states = []string{"running"}
 	if err := g.d.OpenConsole(context.Background()); err != nil {
@@ -154,7 +154,7 @@ func (g *cmdRig) add(t *testing.T, text string) {
 // cmd prints only the lines after the command, whole, joins a line written
 // in two parts, drops escape codes, and stops once the answer goes quiet.
 func TestSendCmd(t *testing.T) {
-	defer testid.Line(t, "df5z700")
+	defer testid.Line(t, "1a3enhw")
 	g := newCmdRig(t, "[12:00:01 INFO]: from before\n[12:00:02 INFO]: half wri")
 	g.feed = []string{"", "tten\n[12:00:03 INFO]: Added Steve to the whitelist\n[12:00:03 INFO]: \x1b[31mred\r\n[12:00:03 INFO]: par", "t two\n"}
 	if err := g.n.SendCmd(context.Background(), "whitelist add Steve"); err != nil {
@@ -221,7 +221,7 @@ func TestSendCmd(t *testing.T) {
 // Ctrl-C while cmd waits for the answer fails, rather than exit 0 as if the
 // answer was all shown.
 func TestSendCmdInterrupt(t *testing.T) {
-	defer testid.Line(t, "df7ae00")
+	defer testid.Line(t, "1a3jwkr")
 	g := newCmdRig(t, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -235,7 +235,7 @@ func TestSendCmdInterrupt(t *testing.T) {
 // Lines from other threads, such as Geyser's just after a start, are shown
 // but don't end the wait while the server thread is slow to answer.
 func TestSendCmdOtherThreads(t *testing.T) {
-	defer testid.Line(t, "df75300")
+	defer testid.Line(t, "1a3jbxc")
 	stun := "[12:00:03] [NetherNet Built-in Signaling-4-1/INFO]: [StunObserver] STUN discovery maps this host\n"
 	answer := "[12:00:04] [Server thread/INFO]: There are 0 of a max of 20 players online: \n"
 	g := newCmdRig(t, "")
@@ -264,7 +264,7 @@ func TestSendCmdOtherThreads(t *testing.T) {
 // A log removed and made again, as at a rollover, is read from its start,
 // even where the new file gets the old one's inode, as on ext4.
 func TestLogFollowNewFile(t *testing.T) {
-	defer testid.Line(t, "df5zp00")
+	defer testid.Line(t, "1a3eq0r")
 	path := filepath.Join(t.TempDir(), "latest.log")
 	if err := os.WriteFile(path, []byte("old line\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestLogFollowNewFile(t *testing.T) {
 // checkCmd refuses stop and restart under any name the console takes for
 // them, and nothing that only mentions them.
 func TestCheckCmd(t *testing.T) {
-	defer testid.Line(t, "df7az00")
+	defer testid.Line(t, "1a3jy8w")
 	for _, line := range []string{
 		"stop", "/stop", "STOP", "minecraft:stop", "/Minecraft:Stop", "bukkit:restart", "spigot:restart",
 		"execute run stop", "minecraft:execute as @a run minecraft:stop", "execute if entity @p run execute run restart",

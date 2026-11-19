@@ -30,7 +30,7 @@ func put(t *testing.T, file, text string) {
 
 // Jars covers plugins, Geyser extensions, and the build paper.jar points to.
 func TestJars(t *testing.T) {
-	defer testid.Line(t, "df5z000")
+	defer testid.Line(t, "1a3emw0")
 	dir := t.TempDir()
 	put(t, filepath.Join(dir, "plugins", "a.jar"), "a")
 	put(t, filepath.Join(dir, "plugins", "Geyser-Spigot", "extensions", "x.jar"), "x")
@@ -96,7 +96,7 @@ func makeJar(t *testing.T, file string, inside map[string]string) {
 // Describe shows what a jar says it is, without its escape codes, and a jar
 // that isn't a zip still gets its hash.
 func TestDescribe(t *testing.T) {
-	defer testid.Line(t, "df5z100")
+	defer testid.Line(t, "1a3emz4")
 	dir := t.TempDir()
 	geyser := filepath.Join(dir, "plugins", "Geyser-Spigot.jar")
 	makeJar(t, geyser, map[string]string{
@@ -127,7 +127,7 @@ func TestDescribe(t *testing.T) {
 // Approve adds and updates hashes, and leaves the rest of the file alone.
 // Commented out by 2026111914334585: Approve went, since nothing writes hashes now. TestSetSources covers the list writes.
 // func TestApprove(t *testing.T) {
-// 	defer testid.Line(t, "df5z200")
+// 	defer testid.Line(t, "1a3en28")
 // 	list := filepath.Join(t.TempDir(), "plugins.shcl")
 // 	odd := "plugins/floodgate (1).jar"
 // 	if err := Approve(list, []Info{{Jar: Jar{Name: "plugins/a.jar"}, SHA256: sumA}, {Jar: Jar{Name: odd}, SHA256: sumB}}); err != nil {
@@ -172,7 +172,7 @@ func TestDescribe(t *testing.T) {
 // SetSources adds and updates sources, writes no hash, and leaves the rest
 // of the file alone, an old hash included.
 func TestSetSources(t *testing.T) {
-	defer testid.Line(t, "dfh9s00")
+	defer testid.Line(t, "1a4j2j4")
 	list := filepath.Join(t.TempDir(), "plugins.shcl")
 	odd := "plugins/floodgate (1).jar"
 	if err := SetSources(list, []Info{{Jar: Jar{Name: "plugins/a.jar"}, Source: "https://example.com/a"}, {Jar: Jar{Name: odd}, Source: "https://example.com/f"}, {Jar: Jar{Name: "plugins/none.jar"}}}); err != nil {
@@ -212,7 +212,7 @@ func TestSetSources(t *testing.T) {
 
 // Refuse moves a plugin out of the way, and never paper.
 func TestRefuse(t *testing.T) {
-	defer testid.Line(t, "df5z300")
+	defer testid.Line(t, "1a3en5c")
 	dir := t.TempDir()
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.Local)
 	for i := range 2 {
@@ -241,7 +241,7 @@ func TestRefuse(t *testing.T) {
 // Refuse runs as root, so a link the server planted in the way is refused,
 // and the jar and the link's target stay as they were.
 func TestRefuseLinks(t *testing.T) {
-	defer testid.Line(t, "df79a00")
+	defer testid.Line(t, "1a3js38")
 	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.Local)
 	empty := func(t *testing.T, dir string) {
 		t.Helper()

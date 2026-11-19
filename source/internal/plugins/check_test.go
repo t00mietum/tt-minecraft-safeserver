@@ -21,7 +21,7 @@ import (
 
 // Commented out by 2026111914334569: CheckJars went with plugin approval. Sums is still covered by TestSumsRehash.
 // func TestCheckJars(t *testing.T) {
-// 	defer testid.Line(t, "df5ye00")
+// 	defer testid.Line(t, "1a3ek3r")
 // 	dir := t.TempDir()
 // 	put := func(name, text string) {
 // 		t.Helper()
@@ -82,7 +82,7 @@ import (
 // links to one. A pipe stands in for the device, since inotify shows whether
 // it was opened.
 func TestJarLinksNotOpened(t *testing.T) {
-	defer testid.Line(t, "df79j00")
+	defer testid.Line(t, "1a3jsw8")
 	dir, outside := t.TempDir(), t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "plugins"), 0o700); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestJarLinksNotOpened(t *testing.T) {
 // pattern, mc[1] matches only mc1, so no jar was found, and none was mounted
 // read-only.
 func TestJarsGlobInServerDir(t *testing.T) {
-	defer testid.Line(t, "df79p00")
+	defer testid.Line(t, "1a3jt8r")
 	for _, name := range []string{"mc[1]", "mc*", "mc?", `mc\x`, "[mc"} {
 		dir := filepath.Join(t.TempDir(), name)
 		ext := filepath.Join(dir, "plugins", "Geyser-Spigot", "extensions")
@@ -197,7 +197,7 @@ func TestJarsGlobInServerDir(t *testing.T) {
 // The folder paper.jar points to is the server account's to name, so the
 // refusal of one outside the server folder shows it cleaned.
 func TestJarsOutsideCleaned(t *testing.T) {
-	defer testid.Line(t, "df79w00")
+	defer testid.Line(t, "1a3jtvg")
 	dir, outside := t.TempDir(), filepath.Join(t.TempDir(), "x\x1b]0;owned\x07")
 	if err := os.MkdirAll(outside, 0o700); err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestJarsOutsideCleaned(t *testing.T) {
 // A jar swapped for another is hashed again, whether its size or only its
 // time changed.
 func TestSumsRehash(t *testing.T) {
-	defer testid.Line(t, "dfh9b00")
+	defer testid.Line(t, "1a4j16c")
 	file := filepath.Join(t.TempDir(), "a.jar")
 	hash := func(text string) string {
 		s := sha256.Sum256([]byte(text))

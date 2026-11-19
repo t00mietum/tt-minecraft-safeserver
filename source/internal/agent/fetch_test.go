@@ -47,7 +47,7 @@ func pages(t *testing.T) *httptest.Server {
 }
 
 func TestFetchReadsText(t *testing.T) {
-	defer testid.Line(t, "df76600")
+	defer testid.Line(t, "1a3jfar")
 	ts := pages(t)
 	// 9 fetches below, refused ones included, then one past the cap.
 	f := &Fetcher{Client: ts.Client(), MaxFetches: 9}
@@ -91,7 +91,7 @@ func TestFetchReadsText(t *testing.T) {
 }
 
 func TestFetchOnlyReachesPublicAddresses(t *testing.T) {
-	defer testid.Line(t, "df76700")
+	defer testid.Line(t, "1a3jfdw")
 	refused := []string{"127.0.0.1", "::1", "10.1.2.3", "172.16.0.1", "192.168.1.123", "169.254.169.254",
 		"fe80::1", "fd00::1", "100.100.100.100", "0.0.0.0", "::ffff:127.0.0.1", "::ffff:192.168.1.1", "224.0.0.1"}
 	for _, addr := range refused {
@@ -131,7 +131,7 @@ func TestFetchOnlyReachesPublicAddresses(t *testing.T) {
 // The forms that carry an IPv4 address are judged by it, the reserved ranges
 // are refused, and the agent isn't told which address a name led to.
 func TestFetchRefusesLANForms(t *testing.T) {
-	defer testid.Line(t, "df7bs00")
+	defer testid.Line(t, "1a3k0t4")
 	refused := []string{
 		"64:ff9b::a00:1", "64:ff9b::7f00:1", "64:ff9b::c0a8:17b", "64:ff9b::a9fe:a9fe", "64:ff9b:1::a00:1",
 		"2002:c0a8:101::1", "2002:7f00:1::1", "2002:a00:1::", "2001::1", "::7f00:1", "::a00:1", "::ffff:0:a00:1",

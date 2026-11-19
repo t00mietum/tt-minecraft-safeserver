@@ -205,7 +205,7 @@ func udpStandIn(args []string) int {
 // the server can't send from 7551 to a LAN host that didn't ask. The run
 // without the rules is the control.
 func TestBroadcastAnswer(t *testing.T) {
-	defer testid.Line(t, "df79700")
+	defer testid.Line(t, "1a3jrsw")
 	if !nftCheck(t, "") {
 		t.Skip("no unprivileged network namespace with nft")
 	}
@@ -299,7 +299,7 @@ grep got "$LOG" | sort | uniq -c
 // 2000::/3 and a default route with no gateway, which stay reachable. The
 // run without the rules is the control.
 func TestLANv6AndMulticastBlocked(t *testing.T) {
-	defer testid.Line(t, "df7a400")
+	defer testid.Line(t, "1a3jvmg")
 	if !nftCheck(t, "") {
 		t.Skip("no unprivileged network namespace with nft")
 	}
@@ -370,7 +370,7 @@ done
 // limit of 2, the addresses after them share one, and a tracked address keeps
 // its own while the shared one is spent. The same goes for IPv6.
 func TestFloodSetFull(t *testing.T) {
-	defer testid.Line(t, "df7br00")
+	defer testid.Line(t, "1a3k0q0")
 	if !nftCheck(t, "") {
 		t.Skip("no unprivileged network namespace with nft")
 	}

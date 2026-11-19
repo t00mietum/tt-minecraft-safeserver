@@ -47,7 +47,7 @@ func keys(problems []Problem) []string {
 // A missing server.properties counts as unsafe, since Minecraft's own
 // defaults have the whitelist off. Fix writes one.
 func TestPropertiesMissing(t *testing.T) {
-	defer testid.Line(t, "df5yk00")
+	defer testid.Line(t, "1a3ekkc")
 	cfg, dir := newServer(t)
 	cfg.Bedrock = false // Geyser's file has its own tests
 	problems, err := Check(cfg)
@@ -75,7 +75,7 @@ func TestPropertiesMissing(t *testing.T) {
 // Fix changes only the wrong settings, and keeps comments, order, line ends,
 // and the file's mode.
 func TestPropertiesFix(t *testing.T) {
-	defer testid.Line(t, "df5ym00")
+	defer testid.Line(t, "1a3ekpg")
 	cfg, dir := newServer(t)
 	cfg.Bedrock = false
 	cfg.BindIP, cfg.GamePort, cfg.HideOnlinePlayers = "::1", 25570, false
@@ -140,7 +140,7 @@ func TestPropertiesFix(t *testing.T) {
 }
 
 func TestParseProperties(t *testing.T) {
-	defer testid.Line(t, "df5yn00")
+	defer testid.Line(t, "1a3eksm")
 	p := parseProperties([]byte("! bang comment\n  # hash comment\na = 1\nb:2\nc 3\nd=x\\\n    y\ne=\\u0041\\t\nf\ng=one\ng=two\n"))
 	for key, want := range map[string]string{"a": "1", "b": "2", "c": "3", "d": "xy", "e": "A\t", "f": "", "g": "two"} {
 		if got, ok := p.get(key); !ok || got != want {
@@ -158,7 +158,7 @@ func TestParseProperties(t *testing.T) {
 // The proxy settings in Paper's YAML files are found by their full path,
 // and a fix keeps the comment and the rest of the file.
 func TestYAMLSettings(t *testing.T) {
-	defer testid.Line(t, "df5yp00")
+	defer testid.Line(t, "1a3ekwr")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestYAMLSettings(t *testing.T) {
 // The server account can write the tree, so links and pipes there are
 // refused, and a fix never writes through one.
 func TestSettingsLinks(t *testing.T) {
-	defer testid.Line(t, "df5yq00")
+	defer testid.Line(t, "1a3ekzw")
 	cfg, dir := newServer(t)
 	outside := t.TempDir()
 	put(t, outside, propertiesFile, "white-list=false\n", 0o640)
@@ -235,7 +235,7 @@ func TestSettingsLinks(t *testing.T) {
 }
 
 func TestWarnings(t *testing.T) {
-	defer testid.Line(t, "df5yr00")
+	defer testid.Line(t, "1a3em30")
 	_, dir := newServer(t)
 	if w := Warnings(dir); len(w) != 1 || !strings.Contains(w[0], "whitelist is empty") {
 		t.Errorf("no files: %q", w)
@@ -265,7 +265,7 @@ func TestWarnings(t *testing.T) {
 
 // A name the server account wrote can't flip the text direction of a warning.
 func TestWarningsDirection(t *testing.T) {
-	defer testid.Line(t, "df78g00")
+	defer testid.Line(t, "1a3jpj0")
 	_, dir := newServer(t)
 	put(t, dir, "whitelist.json", `[{"name": "Alex"}]`, 0o640)
 	put(t, dir, "ops.json", `[{"name": "Mal\u202eyrot\u2066 x\u2069"}]`, 0o640)
@@ -300,7 +300,7 @@ var geyserNow = strings.Join([]string{
 // With bedrock on, Geyser's listener follows bindIP and bedrockPort, and
 // Bedrock logins go through Floodgate. A fix keeps the comments.
 func TestGeyserConfig(t *testing.T) {
-	defer testid.Line(t, "df5yv00")
+	defer testid.Line(t, "1a3emcc")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestGeyserConfig(t *testing.T) {
 // auth-type is looked for where the file's own layout keeps it, and a missing
 // key is added under its section.
 func TestGeyserLayouts(t *testing.T) {
-	defer testid.Line(t, "df5yw00")
+	defer testid.Line(t, "1a3emfg")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -397,7 +397,7 @@ func TestGeyserLayouts(t *testing.T) {
 // Geyser's first start would run on its defaults. A linked Geyser folder isn't
 // followed.
 func TestGeyserSkipped(t *testing.T) {
-	defer testid.Line(t, "df5yx00")
+	defer testid.Line(t, "1a3emjm")
 	cfg, dir := newServer(t)
 	cfg.Bedrock = false
 	if _, err := Fix(cfg); err != nil {
@@ -440,7 +440,7 @@ func TestGeyserSkipped(t *testing.T) {
 // NetherNet stays on bedrockPort alone. A key left out is Geyser's default,
 // which is already right, so it isn't added.
 func TestGeyserNetherNetPort(t *testing.T) {
-	defer testid.Line(t, "df5yy00")
+	defer testid.Line(t, "1a3emnr")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -476,7 +476,7 @@ func TestGeyserNetherNetPort(t *testing.T) {
 }
 
 func TestEULAFile(t *testing.T) {
-	defer testid.Line(t, "df65n00")
+	defer testid.Line(t, "1a3f9nm")
 	dir := t.TempDir()
 	if ok, err := EULAAccepted(dir); ok || err != nil {
 		t.Errorf("no eula.txt: %v %v", ok, err)
@@ -527,7 +527,7 @@ func TestEULAFile(t *testing.T) {
 // Fix writes Geyser's keys before its first start, folders and all. Geyser
 // keeps them and fills in the rest of its layout.
 func TestGeyserFirstStart(t *testing.T) {
-	defer testid.Line(t, "df67a00")
+	defer testid.Line(t, "1a3fev8")
 	cfg, dir := newServer(t)
 	cfg.BindIP, cfg.BedrockPort = "192.168.1.123", 19555
 	want := []string{geyserConfig + " bedrock.address", geyserConfig + " bedrock.port", geyserConfig + " java.auth-type"}
@@ -578,7 +578,7 @@ func TestGeyserFirstStart(t *testing.T) {
 // key is checked, and a fix that can't edit every bad copy in place leaves the
 // file alone and says so.
 func TestYAMLEveryCopy(t *testing.T) {
-	defer testid.Line(t, "df79q00")
+	defer testid.Line(t, "1a3jtbw")
 	const spigot, paper = "spigot.yml", "config/paper-global.yml"
 	for _, c := range []struct {
 		name, file, text, fixed string

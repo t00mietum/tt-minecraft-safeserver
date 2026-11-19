@@ -21,7 +21,7 @@ import (
 // and is never started. Off, it's disabled and removed, and a server it runs
 // is left alone.
 func TestBootCheck(t *testing.T) {
-	defer testid.Line(t, "df78r00")
+	defer testid.Line(t, "1a3jqb0")
 	enabled := "disabled\n"
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte(enabled), nil })
 	h.Cfg.StartAtBoot = true
@@ -81,7 +81,7 @@ func slicesHas(checks []Check, name string) bool {
 // There's one boot unit. A second config's repair leaves the one that runs
 // the first alone, whichever way its startAtBoot is, and says whose it is.
 func TestBootOtherConfig(t *testing.T) {
-	defer testid.Line(t, "df7a800")
+	defer testid.Line(t, "1a3jw10")
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte("enabled\n"), nil })
 	first := h.ConfigPath
 	h.Cfg.StartAtBoot = true
@@ -126,7 +126,7 @@ func TestBootOtherConfig(t *testing.T) {
 // binary, and the copy, which comes first on PATH, is moved to the
 // old-builds folder. Check 15. See design.md, Boot.
 func TestPackageOverCopy(t *testing.T) {
-	defer testid.Line(t, "df7av00")
+	defer testid.Line(t, "1a3jxwc")
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return []byte("enabled\n"), nil })
 	h.Cfg.StartAtBoot = true
 	if err := os.WriteFile(h.BootFile, []byte(boot.Unit(h.Cfg, h.ConfigPath, boot.LocalBin)), 0o600); err != nil {

@@ -127,7 +127,7 @@ package launch
 // // folder doesn't outlast a restart, in either mode, unless it's approved or
 // // paper.jar's own. A link there is removed, not followed.
 // func TestStartClearsCaches(t *testing.T) {
-// 	defer testid.Line(t, "df7bg00")
+// 	defer testid.Line(t, "1a3jzy0")
 // 	for _, linked := range []bool{false, true} {
 // 		for _, mode := range []string{"docker", "native"} {
 // 			var g *rig
@@ -170,7 +170,7 @@ package launch
 // // A cache start can't clear stops the start before the launch, and the trees
 // // go back. With nothing to clear, there's no rm.
 // func TestStartClearFails(t *testing.T) {
-// 	defer testid.Line(t, "df7bh00")
+// 	defer testid.Line(t, "1a3k014")
 // 	g := newRig(t)
 // 	g.states = []string{"", "running"}
 // 	g.log = doneLine

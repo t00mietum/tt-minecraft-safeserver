@@ -193,7 +193,7 @@ func readFile(t *testing.T, path string) string {
 }
 
 func TestNewInstall(t *testing.T) {
-	defer testid.Line(t, "df65d00")
+	defer testid.Line(t, "1a3f8wm")
 	r := newRig(t, []string{"podman", "catatonit"}, "y\ny\n")
 	if err := r.s.Do(context.Background()); err != nil {
 		t.Fatalf("%v\n%s", err, r.out)
@@ -246,7 +246,7 @@ func TestNewInstall(t *testing.T) {
 }
 
 func TestRuntimePick(t *testing.T) {
-	defer testid.Line(t, "df65e00")
+	defer testid.Line(t, "1a3f8zr")
 	// A no to Podman falls back to native mode only while it's on.
 	noWant, noErr := "native", ""
 	if !config.NativeMode {
@@ -301,7 +301,7 @@ func TestRuntimePick(t *testing.T) {
 // Without apt, a missing catatonit, or Podman given with --set, stops setup
 // before it changes anything, as the runtime pick does.
 func TestNoAptPackages(t *testing.T) {
-	defer testid.Line(t, "df79g00")
+	defer testid.Line(t, "1a3jsp0")
 	for _, c := range []struct {
 		name  string
 		tools []string
@@ -339,7 +339,7 @@ func TestNoAptPackages(t *testing.T) {
 
 // A fresh image has no package lists, and install alone finds nothing.
 func TestAptUpdateFirst(t *testing.T) {
-	defer testid.Line(t, "df67t00")
+	defer testid.Line(t, "1a3fgd8")
 	r := newRig(t, []string{"apt-get"}, "")
 	r.s.Yes, r.s.AcceptEULA = true, true
 	if err := r.s.Do(context.Background()); err != nil {
@@ -363,7 +363,7 @@ func TestAptUpdateFirst(t *testing.T) {
 }
 
 func TestAdopt(t *testing.T) {
-	defer testid.Line(t, "df65f00")
+	defer testid.Line(t, "1a3f92w")
 	r := newRig(t, []string{"docker"}, "")
 	r.s.Yes = true
 	r.s.AcceptEULA = true
@@ -420,7 +420,7 @@ func TestAdopt(t *testing.T) {
 // source, so update --plugins keeps them current. A jar only named like one
 // doesn't, and one with a source keeps it.
 func TestAdoptGeyserSource(t *testing.T) {
-	defer testid.Line(t, "df76q00")
+	defer testid.Line(t, "1a3jgzw")
 	r := newRig(t, []string{"docker"}, "")
 	r.s.Yes = true
 	old := filepath.Join(r.dir, "old", "paper")
@@ -474,7 +474,7 @@ func TestAdoptGeyserSource(t *testing.T) {
 // An adopted tree's Floodgate key loses other accounts' access before the
 // final check, as repair gives it. A dry run leaves it as it is.
 func TestAdoptFloodgateKey(t *testing.T) {
-	defer testid.Line(t, "df79d00")
+	defer testid.Line(t, "1a3jscm")
 	for _, dry := range []bool{true, false} {
 		r := newRig(t, []string{"docker"}, "", "bedrock=true")
 		r.s.Yes, r.s.DryRun = true, dry
@@ -540,7 +540,7 @@ func writeJar(t *testing.T, file, pluginYML string) {
 // seen. A no approves none. Since 2026111914334569 that's the Geyser jar that
 // gets a source, not every jar.
 func TestJarsListedBeforeAsking(t *testing.T) {
-	defer testid.Line(t, "df67z00")
+	defer testid.Line(t, "1a3fgww")
 	r := newRig(t, []string{"docker"}, "n\n")
 	old := filepath.Join(r.dir, "old", "paper")
 	if err := os.MkdirAll(filepath.Join(old, "plugins"), 0o750); err != nil {
@@ -567,7 +567,7 @@ func TestJarsListedBeforeAsking(t *testing.T) {
 }
 
 func TestEULA(t *testing.T) {
-	defer testid.Line(t, "df65g00")
+	defer testid.Line(t, "1a3f960")
 	for _, c := range []struct {
 		name    string
 		answers string
@@ -598,7 +598,7 @@ func TestEULA(t *testing.T) {
 }
 
 func TestExistingInstall(t *testing.T) {
-	defer testid.Line(t, "df65h00")
+	defer testid.Line(t, "1a3f994")
 	for _, c := range []struct {
 		name    string
 		answers string
@@ -640,7 +640,7 @@ func TestExistingInstall(t *testing.T) {
 }
 
 func TestRefusals(t *testing.T) {
-	defer testid.Line(t, "df65j00")
+	defer testid.Line(t, "1a3f9c8")
 	r := newRig(t, []string{"podman", "catatonit"}, "")
 	r.ps = "safeserver 4242 java -Xmx4G -jar paper-26.3-244.jar --nogui\n"
 	if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "pid 4242") {
@@ -681,7 +681,7 @@ func TestRefusals(t *testing.T) {
 }
 
 func TestDryRun(t *testing.T) {
-	defer testid.Line(t, "df65k00")
+	defer testid.Line(t, "1a3f9fc")
 	r := newRig(t, []string{"podman", "catatonit"}, "")
 	r.s.DryRun = true
 	// The real runner prints and skips these under dry run; the fake would
@@ -702,7 +702,7 @@ func TestDryRun(t *testing.T) {
 }
 
 func TestBedrock(t *testing.T) {
-	defer testid.Line(t, "df65z00")
+	defer testid.Line(t, "1a3famw")
 	approved := func(r *rig) map[string]plugins.Approved {
 		list, _, err := plugins.ReadApproved(r.s.PluginsFile)
 		if err != nil {
@@ -773,7 +773,7 @@ func TestBedrock(t *testing.T) {
 
 // repair only reports a missing Geyser or Floodgate, and says setup gets it.
 func TestExistingBedrock(t *testing.T) {
-	defer testid.Line(t, "df66b00")
+	defer testid.Line(t, "1a3fbtc")
 	existing := func(answers string, jars ...string) *rig {
 		r := newRig(t, nil, answers)
 		if err := os.MkdirAll(filepath.Dir(r.s.ConfigPath), 0o750); err != nil {
@@ -835,7 +835,7 @@ func TestExistingBedrock(t *testing.T) {
 // On an existing install, a running server stops setup before it downloads,
 // asks, repairs, or updates anything, dry run included.
 func TestExistingRefusesRunning(t *testing.T) {
-	defer testid.Line(t, "df7ar00")
+	defer testid.Line(t, "1a3jxk0")
 	for _, dry := range []bool{false, true} {
 		r := newRig(t, nil, "y\n")
 		if err := os.MkdirAll(filepath.Join(r.server, "plugins"), 0o750); err != nil {
@@ -865,7 +865,7 @@ func TestExistingRefusesRunning(t *testing.T) {
 // On an existing install, update runs after repair, even when a repair check
 // failed, since update can be what fixes it.
 func TestExistingUpdate(t *testing.T) {
-	defer testid.Line(t, "df67000")
+	defer testid.Line(t, "1a3fdw0")
 	r := newRig(t, nil, "y\n")
 	if err := os.MkdirAll(filepath.Dir(r.s.ConfigPath), 0o750); err != nil {
 		t.Fatal(err)
@@ -901,7 +901,7 @@ func TestExistingUpdate(t *testing.T) {
 // Step 9 installs nftables when it's missing, writes the rules and the unit,
 // and starts it, before the image pull. Without nft, setup stops there.
 func TestFirewall(t *testing.T) {
-	defer testid.Line(t, "df66h00")
+	defer testid.Line(t, "1a3fcd4")
 	r := newRig(t, []string{"podman", "catatonit", "apt-get"}, "")
 	r.nft = false
 	r.s.Yes, r.s.AcceptEULA = true, true
@@ -956,7 +956,7 @@ func TestFirewall(t *testing.T) {
 // With no nft and no apt to get it, the dry run stops at the firewall step
 // with the real run's FAILED line, rather than planning rules it can't load.
 func TestFirewallDryRunNoApt(t *testing.T) {
-	defer testid.Line(t, "df7aq00")
+	defer testid.Line(t, "1a3jxfw")
 	failed := func(dry bool) (string, error) {
 		r := newRig(t, []string{"podman", "catatonit"}, "")
 		r.nft = false
@@ -986,7 +986,7 @@ func TestFirewallDryRunNoApt(t *testing.T) {
 // Step 11 installs and enables the boot unit with startAtBoot on, after the
 // image pull, and doesn't start it. Off, there's no unit.
 func TestBootUnit(t *testing.T) {
-	defer testid.Line(t, "df78v00")
+	defer testid.Line(t, "1a3jqmc")
 	r := newRig(t, []string{"podman", "catatonit"}, "", "startAtBoot=true")
 	r.s.Yes, r.s.AcceptEULA = true, true
 	if err := r.s.Do(context.Background()); err != nil {
@@ -1016,7 +1016,7 @@ func TestBootUnit(t *testing.T) {
 // unit runs the package's, so a package upgrade reaches both the operator and
 // the unit. Without it, the unit runs setup's copy. See design.md, Boot.
 func TestPackageInstall(t *testing.T) {
-	defer testid.Line(t, "df7at00")
+	defer testid.Line(t, "1a3jxs8")
 	for _, pkg := range []bool{false, true} {
 		r := newRig(t, []string{"podman", "catatonit"}, "", "startAtBoot=true")
 		r.s.Yes, r.s.AcceptEULA = true, true
@@ -1049,7 +1049,7 @@ func TestPackageInstall(t *testing.T) {
 // the copy, rather than written over. The same build, by SHA-256, is left
 // alone, and a dry run only says what it would do.
 func TestCopyKeepsOldBuild(t *testing.T) {
-	defer testid.Line(t, "df7bd00")
+	defer testid.Line(t, "1a3jzmm")
 	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
 	kept := "tt-minecraftd.20261119-111257"
 	for _, c := range []struct {
@@ -1103,7 +1103,7 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 // The written config leads with the command kind, commented out, and the
 // lines read back as a working agent once uncommented.
 func TestConfigAgentHint(t *testing.T) {
-	defer testid.Line(t, "dfh8400")
+	defer testid.Line(t, "1a4hxcg")
 	text := configText([]config.Option{{Key: "runMode", Value: "podman"}})
 	if !strings.Contains(text, "# agent: command\n") || !strings.Contains(text, "# agentCommand: [codex") {
 		t.Fatalf("no agent hint:\n%s", text)

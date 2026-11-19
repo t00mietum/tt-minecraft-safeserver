@@ -19,7 +19,7 @@ import (
 // folder first. The sums left after it have to match the new binaries and list nothing else, and
 // the package step's own sums then cover every file.
 func TestReleaseSums(t *testing.T) {
-	defer testid.Line(t, "df7b800")
+	defer testid.Line(t, "1a3jz50")
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash")

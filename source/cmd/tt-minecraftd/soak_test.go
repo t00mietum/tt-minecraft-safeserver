@@ -24,7 +24,7 @@ import (
 // goroutines past the first rounds. start, stop, console and cmd soak in
 // launch. TT_MINECRAFTD_SOAK sets the rounds, and the test skips without it.
 func TestSoak(t *testing.T) {
-	defer testid.Line(t, "df78f00")
+	defer testid.Line(t, "1a3jpew")
 	soak.Rounds(t) // skip before the setup
 	noDefaultConfig(t)
 	noHostChecks(t)

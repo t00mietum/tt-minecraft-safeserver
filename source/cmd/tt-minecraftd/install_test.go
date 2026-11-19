@@ -228,7 +228,7 @@ func (r *installRig) installed() string {
 }
 
 func TestInstallScript(t *testing.T) {
-	defer testid.Line(t, "df79800")
+	defer testid.Line(t, "1a3jrx0")
 
 	t.Run("stable over a newer pre-release, then setup with its options", func(t *testing.T) {
 		r := newInstallRig(t, "curl")

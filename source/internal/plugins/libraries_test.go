@@ -20,7 +20,7 @@ package plugins
 // // files paper.jar puts back itself. Links to folders, and a link at the
 // // cache folder, can never pass.
 // func TestCheckLibraries(t *testing.T) {
-// 	defer testid.Line(t, "dfh8a00")
+// 	defer testid.Line(t, "1a4hxz8")
 // 	dir := t.TempDir()
 // 	put := func(name, text string) {
 // 		t.Helper()

@@ -45,7 +45,7 @@ func names(t *testing.T, dir string) []string {
 // A replaced build goes to a new 0755 folder, named for its mtime; a second
 // one from the same second gets a suffix, and a link is left where it is.
 func TestRetire(t *testing.T) {
-	defer testid.Line(t, "df7ba00")
+	defer testid.Line(t, "1a3jzb8")
 	bin := t.TempDir()
 	dir := filepath.Join(t.TempDir(), "var-lib", "old-builds")
 	mtime := time.Date(2026, 11, 19, 11, 12, 13, 0, time.Local)
@@ -101,7 +101,7 @@ func TestRetire(t *testing.T) {
 // The copy for a move across filesystems keeps the bytes, the mode and the
 // mtime, and leaves no temp file.
 func TestCopyOver(t *testing.T) {
-	defer testid.Line(t, "df7bb00")
+	defer testid.Line(t, "1a3jzec")
 	src := filepath.Join(t.TempDir(), "tt-minecraftd")
 	mtime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.Local)
 	put(t, src, "build bytes", 0o751, mtime)
@@ -151,7 +151,7 @@ func TestCopyOver(t *testing.T) {
 // 10, and the first, and leaves other names alone. Each kept build here is
 // kept by one rule only, so each rule is pinned.
 func TestRotate(t *testing.T) {
-	defer testid.Line(t, "df7bc00")
+	defer testid.Line(t, "1a3jzhg")
 	dir := t.TempDir()
 	at := func(y int, mo time.Month, d, h, m int) time.Time { return time.Date(y, mo, d, h, m, 0, 0, time.UTC) }
 	builds := []time.Time{

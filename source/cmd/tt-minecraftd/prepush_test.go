@@ -120,7 +120,7 @@ func (r *hookRig) push(ref, sha, gateRC string) (string, int) {
 // A docs-only push to main still runs the quick gate, since markdownlint and the config tests
 // read the docs, design.md included. Code goes through the merge gate, unless it already passed.
 func TestPrePushGates(t *testing.T) {
-	defer testid.Line(t, "df7ah00")
+	defer testid.Line(t, "1a3jwx4")
 	r := newHookRig(t)
 	cases := []struct {
 		name, file, ref, rc, wantRan string
@@ -156,7 +156,7 @@ func TestPrePushGates(t *testing.T) {
 // fGateWhole, copied out of cicd.bash, over every merge step: any SKIP but arm64's, a step
 // turned off, a dirty tree, or HEAD moving keeps the marker from being written.
 func TestGateMarker(t *testing.T) {
-	defer testid.Line(t, "df7aj00")
+	defer testid.Line(t, "1a3jx08")
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash")

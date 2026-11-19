@@ -107,7 +107,7 @@ func (r *rig) files() []string {
 // --paper stays on the Minecraft version, asks, points paper.jar at the new
 // build, and keeps the last 2.
 func TestPaper(t *testing.T) {
-	defer testid.Line(t, "df66z00")
+	defer testid.Line(t, "1a3fdrw")
 	ctx := context.Background()
 
 	r := newRig(t, "y\n", 249)
@@ -183,7 +183,7 @@ func TestPaper(t *testing.T) {
 // --paper keeps the build paper.jar led to, however the link is written, and
 // only that one: a same-named build elsewhere doesn't save the local file.
 func TestPaperKeepsLinkedBuild(t *testing.T) {
-	defer testid.Line(t, "df7ap00")
+	defer testid.Line(t, "1a3jxcr")
 	ctx := context.Background()
 	both := []string{"paper-26.3-244.jar", "paper-26.3-249.jar", "paper.jar"}
 	for _, c := range []struct {
@@ -289,7 +289,7 @@ func pluginRig(t *testing.T, answers string) (*rig, *fakeGeyser) {
 // --plugins updates what has a known source and a newer build, keeps the
 // source, and leaves the rest.
 func TestPlugins(t *testing.T) {
-	defer testid.Line(t, "df67200")
+	defer testid.Line(t, "1a3fe28")
 	ctx := context.Background()
 
 	r, g := pluginRig(t, "y\n")
@@ -361,7 +361,7 @@ func TestPlugins(t *testing.T) {
 // --mc-version asks even with --yes, snapshots before anything changes, and
 // won't go back to an older version.
 func TestMCVersion(t *testing.T) {
-	defer testid.Line(t, "df78m00")
+	defer testid.Line(t, "1a3jpyg")
 	ctx := context.Background()
 	snap := "zfs snapshot -- tank/mc@20261112-110000_pre_tt-minecraftd-mc-version"
 	move := func(answers, dataset string) (*rig, *host.Fake) {
@@ -455,7 +455,7 @@ func TestMCVersion(t *testing.T) {
 // named in paper.jar's libraries.list, stay, and so does the cache while the
 // server runs, or when --plugins isn't a part (2026111914334585).
 func TestUpdateClearsLibraries(t *testing.T) {
-	defer testid.Line(t, "dfh9v00")
+	defer testid.Line(t, "1a4j2rc")
 	ctx := context.Background()
 	setUp := func(answers string) (*rig, *fakeGeyser, *host.Fake, []string) {
 		t.Helper()

@@ -229,6 +229,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Verified: dfh7x00 fails all 3 of its cases on the old test-id.bash and passes on the new one. df7b700, with its IDs in the new form, fails all 4 on the old tool and passes on the new one. The quick gate passed, with the same 281 test lines as before the rename.
 		- Swept: the old rule was also in style_guide.md, missed by the first sweep, which skipped the repo root. Every `{5}` ID pattern in cicd, source and utility, and every test that names another test's ID (df7b700, linksafe's df7bq00), were moved. design.md and README.md name no IDs.
 		- 20261119: Second answer: the counter goes in before the Crockford step, at the base-10 minute. Set back to Queued.
+		- 20261119: An ID is now Crockford of minutes x 100 + counter, padded to 7. `test-id.bash --new` adds the counter at base 10 and tries 00 to 99. All 326 IDs in the tree and its git history, commented-out tests and root host checks included, were re-encoded the same way by a saved script, and the old-to-new list is in details.md. style_guide.md and the tool's header say the same.
+		- Verified: the new `new` case in 1a4hwpm (was dfh7x00) fails on the old test-id.bash, which gives a 5+2 ID, and passes on the new one. `test-id.bash --check` is clean, and the quick gate passed with 279 test lines.
+		- Swept: every `testid.Line` call, live and commented out, every `check` and `native` line in checks.bash, live and commented out, and the tests that name another test's ID (1a3jz1w, was df7b700). The script's `check` finds no old ID in any tracked file but the backlog. cicd.bash's log greps already match 7 characters.
+		- Old IDs in other items' rows and detail_backlog.md are left to child 2026111915090857.
 	- Decisions:
 		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
 		- 20261119 answer: follow the clock rule, minutes since 2000-01-01 UTC in Crockford. Add a counter after it for more granularity, and keep the length the same for every ID, such as a 00 counter where none is needed. This reverses the next-after-highest call, so test-id.bash's header, its form check, and the project notes change to match.
@@ -239,11 +243,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261119 second answer (t00mietum): the counter comes before the Crockford step, at the last base-10 integer stage.
 		- So an ID is Crockford of minutes x 100 + counter, padded to 7 characters, which lasts until about 2650. The counter runs 00 to 99, 100 IDs a minute.
 		- Every existing ID is re-encoded the same way with its counter, so all IDs follow one rule. Backlog rows, style_guide.md and the project notes that name an ID get the new form, and the old-to-new map goes in details.md.
-	- Test case: dfh7x00, df7b700
-	- Branch: nov19b-2026111911594103
-	- Commit: c7421ea
+		- The re-encode left the length at 7, so the form check stays as it was. A run of 100 IDs in one minute is the cap, against 1024 with the old counter.
+		- The re-encode ends the plain-grep match above: an old ID in a row no longer starts the new one, so those rows move to the new form (child 2026111915090857). The item stays open until that child closes.
+	- Test case: 1a4hwpm (was dfh7x00), 1a3jz1w (was df7b700)
+	- Branch: nov19c-2026111911594103
+	- Commit: 39fdb56
 	- Actual effort: Low
 	- Target version: v1.0.0-beta.1
+
+- Old 5- and 7-character test IDs in backlog rows don't match run logs
+	- ID: 2026111915090857
+	- Type: Task
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261119-150908
+	- Opened by:
+	- Parent ID: 2026111911594103
+	- Estimated effort: Low
+	- Progress log:
+		- Every test ID was re-encoded on 2026-11-19, so a row that names an old ID, such as a Test case row on an open item, no longer matches a run log.
+		- Run `private/claude_simple/tools/testid-reencode.py apply <map> repo/project/backlog.md .claude/detail_backlog.md`, with the map `private/claude_simple/tools/testid-map-20261119.tsv`, the same list as under "Test ID re-encode" in details.md. It rewrites only known IDs, as whole words, 5-character ones as their 00 form. Then `check` the same files shows none left.
+		- Edits most items, so it needs a --note that every backlog edit is the round's, and `git add` of the backlog.
 
 - Check plugins against a list of known-bad jars, if one is easy to use
 	- ID: 2026111914262600
