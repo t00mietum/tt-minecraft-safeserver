@@ -224,6 +224,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- The lines come from `logs/latest.log`, in both modes. It waits up to 3 seconds for the first one, then until half a second goes by with nothing new, and 10 seconds at most.
 		- Only lines from the server thread count for those waits, since console commands run there. Lines from other threads are shown but don't count, since Geyser's STUN lookup logs from its own thread just after a start, and could end the wait before the answer came.
 	- `cmd stop` and `cmd restart` are refused, since `stop` also hands the trees back, and Paper's `restart` only stops without a restart script.
+		- So are their namespaced names, such as `minecraft:stop` and `bukkit:restart`, and either one after a `run` in `execute` or `return`, such as `execute run stop`.
 
 - RCON is never used. See [Safe server settings](#safe-server-settings).
 

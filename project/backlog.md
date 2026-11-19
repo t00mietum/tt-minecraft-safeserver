@@ -144,7 +144,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - cmd's stop and restart guard misses namespaced forms such as minecraft:stop
 	- ID: 2026111715275187
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152751
@@ -154,7 +155,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-17: `checkCmd` passed each form in a test. Paper running them is Plausible.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 24. Detail in detail_backlog.md.
+		- 20261119: Verified: df7az and df5z7 fail on the unfixed code (every namespaced and execute form was sent) and pass with the fix. The quick gate passed.
 	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed for the check.
+	- Sweep: other places that test a console command's name.
+	- Swept: `checkCmd` is the only guard on a console line. `cmd` in both modes goes through `Kit.command`, which calls it first. `console` is typed by hand, and `stop` there hands the trees back (design.md). The only other "stop" sent to the console is `stop`'s own.
+	- Actual cause [Bug]: `checkCmd` matched only the first word, as `stop` or `restart` with an optional slash.
+	- Actual effort: Low
+	- Actual fix [Bug]: `checkCmd` drops a `namespace:` prefix from the command name, and for `execute` and `return` also tries every word after a `run`. It splits on any whitespace. design.md's console and cmd section says so.
+	- Decisions:
+		- 20261119: every word after any `run` is tried, rather than parsing execute's grammar. It covers nested forms in one linear pass, and a player, score or chat text with `run stop` in it is refused rather than sent, which is the safe side.
+		- 20261119: aliases from Bukkit's `commands.yml` and plugins that run commands for the console aren't covered. Their names can't be known here.
+	- Branch: nov19-2026111715275187
+	- Commit: a7115f6
+	- Test case: df7az, df5z7
+	- Acceptance signoff: Self-closed: the tests fail on the old code and pass now, and the change only refuses more.
+	- Closed: 20261119-112650
 
 - watch --interval with a huge value panics
 	- ID: 2026111715275203

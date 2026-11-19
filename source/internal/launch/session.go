@@ -72,16 +72,46 @@ func (k *Kit) session(ctx context.Context, e engine, c host.Cmd, detached func(e
 }
 
 // checkCmd keeps stop and restart off cmd, since stop also hands the trees
-// back, and Paper's restart only stops without a restart script.
+// back, and Paper's restart only stops without a restart script. A namespace
+// such as minecraft: or bukkit: names the same command, and execute and
+// return run one after their run keyword, nested or not.
 func checkCmd(line string) error {
-	word, _, _ := strings.Cut(strings.TrimSpace(line), " ")
-	switch strings.ToLower(strings.TrimPrefix(word, "/")) {
-	case "":
+	words := strings.Fields(line)
+	if len(words) == 0 {
 		return errors.New("no console command given")
-	case "stop", "restart":
-		return fmt.Errorf("%s isn't sent through cmd; tt-minecraftd stop stops the server and hands the trees back", word)
+	}
+	first := cmdName(words[0])
+	if first == "stop" || first == "restart" {
+		return stopRefused(words[0])
+	}
+	// Every word after a run is tried as the command, which covers a nested
+	// execute too, and is linear. A player or score named run can only refuse
+	// more.
+	if first == "execute" || first == "return" {
+		for i := 1; i < len(words)-1; i++ {
+			if strings.ToLower(words[i]) != "run" {
+				continue
+			}
+			if name := cmdName(words[i+1]); name == "stop" || name == "restart" {
+				return stopRefused(words[i+1])
+			}
+		}
 	}
 	return nil
+}
+
+func stopRefused(word string) error {
+	return fmt.Errorf("%s isn't sent through cmd; tt-minecraftd stop stops the server and hands the trees back", word)
+}
+
+// cmdName gives a console command's name without its slash or namespace,
+// lower-cased, since Bukkit's names ignore case.
+func cmdName(word string) string {
+	name := strings.ToLower(strings.TrimPrefix(word, "/"))
+	if i := strings.LastIndexByte(name, ':'); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
 }
 
 // command sends one console line and prints the log lines that follow it,

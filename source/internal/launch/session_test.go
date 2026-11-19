@@ -164,7 +164,7 @@ func TestSendCmd(t *testing.T) {
 	}
 
 	// A server that's down, or a command that's stop by another road, sends nothing.
-	for _, line := range []string{"stop", " /Stop now", "restart", " "} {
+	for _, line := range []string{"stop", " /Stop now", "restart", " ", "minecraft:stop", "bukkit:restart", "execute run stop"} {
 		g = newCmdRig(t, "")
 		if err := g.n.SendCmd(context.Background(), line); err == nil || len(g.console.sent) != 0 || len(g.r.Ran) != 0 {
 			t.Errorf("%q: err %v, sent %q", line, err, g.console.sent)
@@ -260,5 +260,28 @@ func TestLogFollowNewFile(t *testing.T) {
 	lines, err := f.next()
 	if want := []string{"new day", "answer"}; err != nil || !reflect.DeepEqual(lines, want) {
 		t.Errorf("got %q, %v, want %q", lines, err, want)
+	}
+}
+
+// checkCmd refuses stop and restart under any name the console takes for
+// them, and nothing that only mentions them.
+func TestCheckCmd(t *testing.T) {
+	defer testid.Line(t, "df7az")
+	for _, line := range []string{
+		"stop", "/stop", "STOP", "minecraft:stop", "/Minecraft:Stop", "bukkit:restart", "spigot:restart",
+		"execute run stop", "minecraft:execute as @a run minecraft:stop", "execute if entity @p run execute run restart",
+		"execute run return run stop", "return run stop", "execute\trun\tstop",
+	} {
+		if err := checkCmd(line); err == nil || !strings.Contains(err.Error(), "tt-minecraftd stop") {
+			t.Errorf("%q: err %v, want refused", line, err)
+		}
+	}
+	for _, line := range []string{
+		"list", "say stop", "whitelist add stop", "tell restart hi", "execute run say hi", "execute as stop run say hi",
+		"execute run", "minecraft:list", "stopwatch", "execute run stopwatch", ":", "minecraft:",
+	} {
+		if err := checkCmd(line); err != nil {
+			t.Errorf("%q: err %v, want sent", line, err)
+		}
 	}
 }
