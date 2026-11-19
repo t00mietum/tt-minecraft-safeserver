@@ -15,7 +15,7 @@ import (
 // Each line goes as literal keys and then Enter, as the service account. A
 // ; at the end goes as hex, since tmux would take it as a separator.
 func TestTmuxConsole(t *testing.T) {
-	defer testid.Line(t, "df5y600")
+	defer testid.Line(t, "1a3ejar")
 	r := &host.Fake{}
 	c := TmuxConsole{Run: r, User: "minecraftd"}
 	for _, line := range []string{"stop", "say a\\;;", ";"} {

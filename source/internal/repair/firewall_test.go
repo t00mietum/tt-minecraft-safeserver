@@ -32,7 +32,7 @@ func fakeNft(t *testing.T, there bool) {
 }
 
 func TestFirewallCheck(t *testing.T) {
-	defer testid.Line(t, "df66g00")
+	defer testid.Line(t, "1a3fca0")
 	fakeNft(t, true)
 	var enabled, tables string
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
@@ -154,7 +154,7 @@ func TestFirewallCheck(t *testing.T) {
 // first one's alone while its unit is there, and says whose they are. Rules
 // that come out the same for both do for both.
 func TestFirewallOtherConfig(t *testing.T) {
-	defer testid.Line(t, "df7a900")
+	defer testid.Line(t, "1a3jw44")
 	fakeNft(t, true)
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
 		switch c.Args[0] {

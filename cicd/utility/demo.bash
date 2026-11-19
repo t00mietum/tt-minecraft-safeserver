@@ -51,12 +51,6 @@ EOF
 printf 'demo jar\n' > /srv/tt-minecraftd/server/plugins/LuckyChest.jar
 printf 'demo jar\n' > /srv/tt-minecraftd/server/paper-26.3-50.jar
 ln -s paper-26.3-50.jar /srv/tt-minecraftd/server/paper.jar
-cat > /etc/tt-minecraftd/plugins.shcl <<EOF
-jar: plugins/LuckyChest.jar
-	sha256: $(sha256sum < /srv/tt-minecraftd/server/plugins/LuckyChest.jar | cut -d' ' -f1)
-jar: paper-26.3-50.jar
-	sha256: $(sha256sum < /srv/tt-minecraftd/server/paper-26.3-50.jar | cut -d' ' -f1)
-EOF
 cat > /srv/tt-minecraftd/server/whitelist.json <<'EOF'
 [
   {"uuid": "6a1e3f0c-2b4d-4c8e-9f1a-0d3b5c7e9a11", "name": "PebbleFox"},

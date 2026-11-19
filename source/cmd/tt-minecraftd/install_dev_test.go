@@ -137,7 +137,7 @@ func (r *devRig) cloned(dir string) bool {
 }
 
 func TestInstallDevScript(t *testing.T) {
-	defer testid.Line(t, "df79900")
+	defer testid.Line(t, "1a3js04")
 
 	t.Run("a bare box gets every package with --install-docker, then the clone", func(t *testing.T) {
 		r := newDevRig(t)

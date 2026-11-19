@@ -20,7 +20,7 @@ import (
 // With the boot unit enabled, start runs the checks and then systemctl start,
 // in both modes, and a refused check never reaches systemctl.
 func TestStartThroughUnit(t *testing.T) {
-	defer testid.Line(t, "df78s00")
+	defer testid.Line(t, "1a3jqe4")
 	g := newRig(t)
 	g.d.Boot = true
 	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
@@ -43,11 +43,17 @@ func TestStartThroughUnit(t *testing.T) {
 
 	g = newRig(t)
 	g.d.Boot = true
-	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "new.jar"), []byte("x"), 0o600); err != nil {
+	// Was an unapproved jar until 2026111914334569 took approval out.
+	props := filepath.Join(g.dir, "server.properties")
+	text, err := os.ReadFile(props)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(props, []byte(strings.Replace(string(text), "white-list=true", "white-list=false", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.d.Start(context.Background(), StartMode{}); err == nil || strings.Contains(strings.Join(g.changes(), "\n"), "systemctl") {
-		t.Errorf("unapproved jar: %v, ran %q", err, g.changes())
+		t.Errorf("whitelist off: %v, ran %q", err, g.changes())
 	}
 }
 
@@ -55,7 +61,7 @@ func TestStartThroughUnit(t *testing.T) {
 // ExecStop saves the worlds, and hands the trees back. A server the unit
 // didn't start still gets the stop command.
 func TestStopThroughUnit(t *testing.T) {
-	defer testid.Line(t, "df78t00")
+	defer testid.Line(t, "1a3jqh8")
 	for _, unitStops := range []bool{true, false} {
 		g := newRig(t)
 		g.d.Boot = true
@@ -99,7 +105,7 @@ func TestStopThroughUnit(t *testing.T) {
 // SIGTERM cuts short once the server is down is a clean stop. Outside it,
 // both are as before.
 func TestInsideUnitOneHandBack(t *testing.T) {
-	defer testid.Line(t, "df7am00")
+	defer testid.Line(t, "1a3jx6g")
 	chowned := func(g *rig) bool {
 		return strings.Contains(strings.Join(g.changes(), "\n"), "chown -R -- alice:minecraftd")
 	}

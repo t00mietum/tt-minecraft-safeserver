@@ -30,7 +30,7 @@ func writeList(t *testing.T, text string) string {
 }
 
 func TestReadApprovedList(t *testing.T) {
-	defer testid.Line(t, "df5x300")
+	defer testid.Line(t, "1a3eexc")
 	text := "## approved jars\n" +
 		"jar: plugins/Geyser-Spigot.jar\n" +
 		"\tsha256: " + strings.ToUpper(sumA) + "\n" +
@@ -51,7 +51,7 @@ func TestReadApprovedList(t *testing.T) {
 }
 
 func TestBadEntriesAreLeftOut(t *testing.T) {
-	defer testid.Line(t, "df5x400")
+	defer testid.Line(t, "1a3ef0g")
 	text := "jar: plugins/good.jar\n\tsha256: " + sumA + "\n" + // 1
 		"jar: plugins/nosum.jar\n" + // 3
 		"jar: plugins/short.jar\n\tsha256: abc123\n" + // 4
@@ -72,12 +72,12 @@ func TestBadEntriesAreLeftOut(t *testing.T) {
 	for _, j := range jars {
 		names = append(names, j.Name+"@"+j.Source)
 	}
-	if got := strings.Join(names, " "); got != "plugins/http.jar@ plugins/extra.jar@ plugins/same.jar@" {
+	// Since 2026111914293176 a missing or bad sha256 no longer drops the jar.
+	if got := strings.Join(names, " "); got != "plugins/good.jar@ plugins/nosum.jar@ plugins/short.jar@ plugins/http.jar@ plugins/twice.jar@ plugins/extra.jar@ plugins/same.jar@" {
 		t.Errorf("kept %s", got)
 	}
 	wantLines := map[int]string{
 		1:  "more than one sha256",
-		3:  "has no sha256",
 		5:  "isn't 64 hex digits",
 		6:  "isn't a path under the server folder",
 		8:  "isn't a path under the server folder",
@@ -97,7 +97,7 @@ func TestBadEntriesAreLeftOut(t *testing.T) {
 }
 
 func TestUnreadableListIsAnError(t *testing.T) {
-	defer testid.Line(t, "df5x500")
+	defer testid.Line(t, "1a3ef3m")
 	_, _, err := ReadApproved(filepath.Join(t.TempDir(), "plugins.shcl"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("got %v", err)

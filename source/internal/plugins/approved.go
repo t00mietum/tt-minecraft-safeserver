@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package plugins reads and writes the approved jar list, and checks jars against it. See Plugin pinning in design.md.
+// Package plugins lists the jars the server loads, and reads and writes plugins.shcl, which keeps where update gets each one. See Plugin jars in design.md.
 package plugins
 
 import (
@@ -15,17 +15,17 @@ import (
 	"github.com/yottacore/shcl/source/go/v3"
 )
 
-// Approved is one jar from plugins.shcl.
+// Approved is one jar from plugins.shcl. Since approval went (2026111914293176)
+// it only says where update gets the jar.
 type Approved struct {
 	Name   string // path under serverDir, such as plugins/Geyser-Spigot.jar
-	SHA256 string // lower-case hex
+	SHA256 string // lower-case hex, or empty: an old pinned list's, or the file's own from update
 	Source string // where update --plugins gets it, or empty
 	Line   int
 }
 
 // ReadApproved reads plugins.shcl. A bad entry gets a warning and is left
-// out, so its jar counts as not approved. Only a file that can't be read is
-// an error.
+// out. Only a file that can't be read is an error.
 func ReadApproved(file string) ([]Approved, []config.Warning, error) {
 	doc, warns, err := config.LoadFile(file)
 	if err != nil {
@@ -72,21 +72,20 @@ func readJar(doc *shcl.Document, base string, warn func(int, string, ...any)) (A
 		}
 	}
 
+	// An old pinned list has a sha256 per jar. Nothing checks it now, so a
+	// bad one only loses the hash.
 	sum := doc.ReadString(base + ".sha256")
 	switch {
 	case sum.Status == shcl.NotFound:
-		warn(jar.Line, "%s has no sha256; left out", jar.Name)
-		return jar, false
 	case sum.Status == shcl.Multiple:
-		warn(jar.Line, "%s has more than one sha256; left out", jar.Name)
-		return jar, false
+		warn(jar.Line, "%s has more than one sha256; ignored", jar.Name)
 	case sum.Status != shcl.Good || !isSHA256(sum.Value):
-		warn(sum.Line, "%s: sha256 isn't 64 hex digits; left out", jar.Name)
-		return jar, false
+		warn(sum.Line, "%s: sha256 isn't 64 hex digits; ignored", jar.Name)
+	default:
+		jar.SHA256 = strings.ToLower(sum.Value)
 	}
-	jar.SHA256 = strings.ToLower(sum.Value)
 
-	// A bad source only costs update --plugins; the hash still approves the jar.
+	// A bad source only costs update --plugins.
 	src := doc.ReadString(base + ".source")
 	switch src.Status {
 	case shcl.NotFound:

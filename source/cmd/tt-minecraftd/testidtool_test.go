@@ -48,7 +48,7 @@ func runTestID(t *testing.T, checks, goID, mode string) (string, int) {
 }
 
 func TestTestIDRootChecks(t *testing.T) {
-	defer testid.Line(t, "df7b700")
+	defer testid.Line(t, "1a3jz1w")
 	checks, err := os.ReadFile(cicdFile(t, filepath.Join("root-host", "checks.bash")))
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestTestIDRootChecks(t *testing.T) {
 	// The checks that run through native are the ones the old sed missed.
 	t.Run("native checks are listed", func(t *testing.T) {
 		out, code := runTestID(t, string(checks), "zzzzz00", "--list")
-		for _, id := range []string{"df68000", "df68j00", "df68b00", "df68c00", "df68d00"} {
+		for _, id := range []string{"1a3fh00", "1a3fjr8", "1a3fj2c", "1a3fj5g", "1a3fj8m"} {
 			if code != 0 || !strings.Contains("\n"+out, "\n"+id+" ") {
 				t.Errorf("code %d, %s not listed\n%s", code, id, out)
 			}
@@ -65,9 +65,9 @@ func TestTestIDRootChecks(t *testing.T) {
 	})
 
 	t.Run("a Go test reusing a native check's ID fails", func(t *testing.T) {
-		out, code := runTestID(t, string(checks), "df68b00", "--check")
-		if code != 1 || !strings.Contains(out, "ID used twice: df68b00") {
-			t.Errorf("code %d, want df68b00 as a repeat\n%s", code, out)
+		out, code := runTestID(t, string(checks), "1a3fj2c", "--check")
+		if code != 1 || !strings.Contains(out, "ID used twice: 1a3fj2c") {
+			t.Errorf("code %d, want 1a3fj2c as a repeat\n%s", code, out)
 		}
 	})
 
@@ -91,25 +91,26 @@ func TestTestIDRootChecks(t *testing.T) {
 	})
 }
 
-// The clock's minute in 5 Crockford characters, as test-id.bash --new makes it.
-func clockStem(at time.Time) string {
+// The clock's minute times 100 plus the counter, in 7 Crockford characters, as test-id.bash
+// --new makes it.
+func clockID(at time.Time, counter int64) string {
 	const digits = "0123456789abcdefghjkmnpqrstvwxyz"
-	m := (at.Unix() - 946684800) / 60
-	b := make([]byte, 5)
-	for i := 4; i >= 0; i-- {
-		b[i] = digits[m%32]
-		m /= 32
+	v := (at.Unix()-946684800)/60*100 + counter
+	b := make([]byte, 7)
+	for i := 6; i >= 0; i-- {
+		b[i] = digits[v%32]
+		v /= 32
 	}
 	return string(b)
 }
 
 func TestTestIDForm(t *testing.T) {
-	defer testid.Line(t, "dfh7x00")
+	defer testid.Line(t, "1a4hwpm")
 
 	t.Run("form", func(t *testing.T) {
 		for id, want := range map[string]int{
-			"dfh7x00": 0, "dfh7x0z": 0, "df68000": 0,
-			"df680": 1, "dfh7x0": 1, "dfh7x000": 1, "dfh7xi0": 1,
+			"1a4hwpm": 0, "dfh7x0z": 0, "1a3fh00": 0,
+			"df680": 1, "1a4hwp": 1, "1a4hwpm0": 1, "1a4hwim": 1,
 		} {
 			out, code := runTestID(t, "", id, "--check")
 			if code != want || (want == 1 && !strings.Contains(out, "bad ID \""+id+"\"")) {
@@ -129,19 +130,29 @@ func TestTestIDForm(t *testing.T) {
 		}
 	})
 
-	// The stem is the clock's minute, and a counter already taken that minute is skipped.
+	// The minute times 100 is the base, the counter adds to it at base 10, and a counter already
+	// taken that minute is skipped.
 	t.Run("new", func(t *testing.T) {
 		for range 3 {
-			stem := clockStem(time.Now())
-			out, code := runTestID(t, "check "+stem+"01 \"taken\" true\n", stem+"00", "--new")
-			if stem != clockStem(time.Now()) {
+			now := time.Now()
+			out, code := runTestID(t, "check "+clockID(now, 1)+" \"taken\" true\n", clockID(now, 0), "--new")
+			if clockID(now, 0) != clockID(time.Now(), 0) {
 				continue // the minute turned over mid-run
 			}
-			if got := strings.TrimSpace(out); code != 0 || got != stem+"02" {
-				t.Errorf("code %d, got %q, want %s02", code, got, stem)
+			if got, want := strings.TrimSpace(out), clockID(now, 2); code != 0 || got != want {
+				t.Errorf("code %d, got %q, want %s", code, got, want)
 			}
 			return
 		}
 		t.Skip("the minute kept turning over")
+	})
+
+	// A known minute, so the encoding itself is pinned: 2026-11-19 12:00 UTC is minute 14140080,
+	// and 1414008003 in Crockford is 1a4g363.
+	t.Run("encoding", func(t *testing.T) {
+		at := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+		if got := clockID(at, 3); got != "1a4g363" {
+			t.Errorf("got %s, want 1a4g363", got)
+		}
 	})
 }

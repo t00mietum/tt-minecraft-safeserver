@@ -50,7 +50,7 @@ func last(body map[string]any) map[string]any {
 }
 
 func TestOpenAIRunsFetches(t *testing.T) {
-	defer testid.Line(t, "df76900")
+	defer testid.Line(t, "1a3jfm4")
 	page := pages(t)
 	call := fmt.Sprintf(`{"choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [
 		{"id": "c1", "type": "function", "function": {"name": "fetch", "arguments": "{\"url\": \"%s/json\"}"}}]}}]}`, page.URL)
@@ -81,7 +81,7 @@ func TestOpenAIRunsFetches(t *testing.T) {
 }
 
 func TestAnthropicRunsFetches(t *testing.T) {
-	defer testid.Line(t, "df76a00")
+	defer testid.Line(t, "1a3jfq8")
 	page := pages(t)
 	call := fmt.Sprintf(`{"stop_reason": "tool_use", "content": [{"type": "text", "text": "Looking."},
 		{"type": "tool_use", "id": "tu1", "name": "fetch", "input": {"url": "%s/json"}}]}`, page.URL)
@@ -105,7 +105,7 @@ func TestAnthropicRunsFetches(t *testing.T) {
 }
 
 func TestAPIFailures(t *testing.T) {
-	defer testid.Line(t, "df76b00")
+	defer testid.Line(t, "1a3jftc")
 	ctx := context.Background()
 	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error": "bad key"}`, http.StatusUnauthorized)
@@ -160,7 +160,7 @@ func rawStatus(w http.ResponseWriter, _ *http.Request) {
 // The agent's server and a fetched page give their own reason phrase, so
 // errors name the status by its code.
 func TestStatusByCode(t *testing.T) {
-	defer testid.Line(t, "df79y00")
+	defer testid.Line(t, "1a3jv1r")
 	ts := httptest.NewServer(http.HandlerFunc(rawStatus))
 	t.Cleanup(ts.Close)
 	_, err := API{Kind: "openai", URL: ts.URL, Model: "m"}.Ask(context.Background(), "q")
@@ -178,7 +178,7 @@ func TestStatusByCode(t *testing.T) {
 // A redirect could send the key and the prompt to another host, or down to
 // plain http, so the API client doesn't follow one.
 func TestAPIKeepsTheKeyOnRedirect(t *testing.T) {
-	defer testid.Line(t, "df7aa00")
+	defer testid.Line(t, "1a3jw78")
 	var elsewhere []string
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		elsewhere = append(elsewhere, r.Method+" "+r.URL.Path+" x-api-key="+r.Header.Get("x-api-key")+" auth="+r.Header.Get("Authorization"))

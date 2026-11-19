@@ -12,7 +12,7 @@ import (
 )
 
 func TestJavaArgs(t *testing.T) {
-	defer testid.Line(t, "df5xy00")
+	defer testid.Line(t, "1a3ehhr")
 	c := &config.Config{
 		HeapMin: 1536 << 20, HeapMax: 4 << 30,
 		JvmArgs: []string{"-XX:+UseG1GC"}, ExtraJvmArgs: []string{"-Dfoo=bar"}, ExtraArgs: []string{"--port", "25566"},
@@ -28,7 +28,7 @@ func TestJavaArgs(t *testing.T) {
 
 // Old scripts' servers count, under any account and any jar name Paper uses.
 func TestRunningPaper(t *testing.T) {
-	defer testid.Line(t, "df5xz00")
+	defer testid.Line(t, "1a3ehmw")
 	ps := "root 1 /sbin/init\n" +
 		"safeserver 4242 /usr/lib/jvm/java-25/bin/java -Xmx6G -jar paper-26.3-244.jar nogui\n" +
 		"  minecraftd 77 java -Xms1G -jar paper.jar --nogui\r\n" +
@@ -43,7 +43,7 @@ func TestRunningPaper(t *testing.T) {
 
 // The thread comes from latest.log's own line form, and nothing else.
 func TestLogThread(t *testing.T) {
-	defer testid.Line(t, "df75400")
+	defer testid.Line(t, "1a3jc0g")
 	for line, want := range map[string]string{
 		"[12:00:03] [Server thread/INFO]: There are 0 of a max of 20 players online: ": MainThread,
 		"[09:37:50] [NetherNet Built-in Signaling-4-1/INFO]: [StunObserver] STUN":      "NetherNet Built-in Signaling-4-1",

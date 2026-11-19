@@ -11,30 +11,14 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
-	"slices"
-	"sort"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
-// Check is how the jars in plugins/ compare with the approved list.
-type Check struct {
-	Jars    int
-	New     []string // in plugins/, not on the list
-	Changed []string // on the list, with another hash
-	Missing []string // on the list, not in plugins/
-}
-
-// OK says every jar there is approved.
-func (c Check) OK() bool {
-	return len(c.New) == 0 && len(c.Changed) == 0
-}
-
 // Sums hashes jars, and keeps each sum until the file's size or time changes,
-// so watch doesn't read every jar on every redraw.
+// so a second look doesn't read every jar again.
 type Sums struct {
 	seen map[string]seenSum
 }
@@ -84,20 +68,19 @@ func hashOf(r io.Reader) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// Folders whose jars start checks, besides paper.jar. Geyser extensions run
+// Folders whose jars run as plugins, besides paper.jar. Geyser extensions run
 // with the same access as plugins.
 var pinnedDirs = []string{"plugins", "plugins/Geyser-Spigot/extensions"}
 
-// Jar is one jar that start checks: its name on the approved list, and its
-// file.
+// Jar is one jar the server loads: its path under serverDir, and its file.
 type Jar struct {
 	Name string
 	File string
 }
 
-// Jars lists what start checks: the jars in pinnedDirs, and the build
-// paper.jar points to, named by its path under serverDir. A missing paper.jar
-// is left to start's own check.
+// Jars lists what the server loads: the jars in pinnedDirs, and the build
+// paper.jar points to, named by its path under serverDir. Container start
+// mounts each one read-only. A missing paper.jar is left to start's own check.
 func Jars(serverDir string) ([]Jar, error) {
 	var jars []Jar
 	for _, dir := range pinnedDirs {
@@ -126,60 +109,7 @@ func Jars(serverDir string) ([]Jar, error) {
 	}
 	rel, err := filepath.Rel(base, paper)
 	if err != nil || !insideServer(filepath.ToSlash(rel)) {
-		return nil, fmt.Errorf("paper.jar points to %s, outside %s, so it can't be approved", server.Clean(paper), serverDir)
+		return nil, fmt.Errorf("paper.jar points to %s, outside %s", server.Clean(paper), serverDir)
 	}
 	return append(jars, Jar{filepath.ToSlash(rel), paper}), nil
-}
-
-// CheckJars compares the jars from Jars with approved. Missing lists only the
-// approved jars in pinnedDirs, since old Paper builds stay on the list.
-func CheckJars(serverDir string, approved []Approved, sums *Sums) (Check, error) {
-	jars, err := Jars(serverDir)
-	if err != nil {
-		return Check{}, err
-	}
-	c, err := compare(jars, approved, sums, false)
-	if err != nil {
-		return c, err
-	}
-	want := make(map[string]bool, len(approved))
-	for _, a := range approved {
-		want[a.Name] = true
-	}
-	for _, j := range jars {
-		delete(want, j.Name)
-	}
-	for name := range want {
-		if slices.Contains(pinnedDirs, path.Dir(name)) && path.Ext(name) == ".jar" {
-			c.Missing = append(c.Missing, name)
-		}
-	}
-	sort.Strings(c.Missing)
-	return c, nil
-}
-
-// compare sorts jars into new and changed against approved. With dangling
-// set, a link to nothing counts as changed, as anything but a regular file
-// does, rather than stopping the check.
-func compare(jars []Jar, approved []Approved, sums *Sums, dangling bool) (Check, error) {
-	var c Check
-	want := make(map[string]string, len(approved))
-	for _, a := range approved {
-		want[a.Name] = a.SHA256
-	}
-	c.Jars = len(jars)
-	for _, j := range jars {
-		sum, err := sums.Sum(j.File)
-		if err != nil && !errors.Is(err, ErrNotRegular) && (!dangling || !errors.Is(err, fs.ErrNotExist)) {
-			return c, err
-		}
-		approvedSum, listed := want[j.Name]
-		switch {
-		case !listed:
-			c.New = append(c.New, j.Name)
-		case approvedSum != sum:
-			c.Changed = append(c.Changed, j.Name)
-		}
-	}
-	return c, nil
 }

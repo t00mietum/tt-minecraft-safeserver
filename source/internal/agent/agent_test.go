@@ -26,7 +26,7 @@ var (
 )
 
 func TestPromptHoldsOnlyTheQuestion(t *testing.T) {
-	defer testid.Line(t, "df75x00")
+	defer testid.Line(t, "1a3jeem")
 	q := Question{Minecraft: "26.3", Paper: "26.3-249", Jars: asked}
 	p := Prompt(q)
 	if !strings.HasPrefix(p, instructions) {
@@ -42,7 +42,7 @@ func TestPromptHoldsOnlyTheQuestion(t *testing.T) {
 }
 
 func TestParseFindsTheAnswer(t *testing.T) {
-	defer testid.Line(t, "df75y00")
+	defer testid.Line(t, "1a3jehr")
 	one := `{"jars": [{"jar": "plugins/Chunky.jar", "version": "1.4.40", "url": "https://cdn.modrinth.com/c.jar"}]}`
 	want := Answer{Jars: []Suggestion{{Jar: "plugins/Chunky.jar", Version: "1.4.40", URL: "https://cdn.modrinth.com/c.jar"}}}
 	good := map[string]string{
@@ -112,7 +112,7 @@ func TestParseFindsTheAnswer(t *testing.T) {
 }
 
 func TestCheckHoldsSuggestionsToTheRules(t *testing.T) {
-	defer testid.Line(t, "df75z00")
+	defer testid.Line(t, "1a3jemw")
 	ok := Suggestion{
 		Jar:      "plugins/LuckPerms-Bukkit.jar",
 		Version:  "5.5.17",
@@ -171,7 +171,7 @@ func TestCheckHoldsSuggestionsToTheRules(t *testing.T) {
 }
 
 func TestCheckCleansText(t *testing.T) {
-	defer testid.Line(t, "df76000")
+	defer testid.Line(t, "1a3jer0")
 	s := Suggestion{
 		Jar:     "plugins/Chunky.jar",
 		Version: "1.4\x1b[2J.40\u202e",
@@ -193,7 +193,7 @@ func TestCheckCleansText(t *testing.T) {
 }
 
 func TestNewPicksTheKind(t *testing.T) {
-	defer testid.Line(t, "df76100")
+	defer testid.Line(t, "1a3jev4")
 	cfg := config.Defaults()
 	for kind, says := range map[string]string{
 		"none":      "no agent is set",
@@ -232,7 +232,7 @@ type askFunc func(ctx context.Context, prompt string) (string, error)
 func (f askFunc) Ask(ctx context.Context, prompt string) (string, error) { return f(ctx, prompt) }
 
 func TestSuggestAsksAndChecks(t *testing.T) {
-	defer testid.Line(t, "df76500")
+	defer testid.Line(t, "1a3jf7m")
 	q := Question{Minecraft: "26.3", Jars: asked}
 	var sent string
 	reply := `{"jars": [{"jar": "plugins/Chunky.jar", "version": "1.4.40", "url": "https://evil.example/c.jar"}]}`
@@ -260,7 +260,7 @@ func TestSuggestAsksAndChecks(t *testing.T) {
 // The move report keeps only the jars asked about. Both parts of the prompt
 // show only when asked.
 func TestPaperAndMoveReport(t *testing.T) {
-	defer testid.Line(t, "df79000")
+	defer testid.Line(t, "1a3jr40")
 	q := Question{Minecraft: "26.3", Paper: "249", FindPaper: "26.4", MoveTo: "26.4", Plugins: asked}
 	p := Prompt(q)
 	if !strings.Contains(p, `"paper": {"version"`) || !strings.Contains(p, `"moveReport": [{"jar"`) || !strings.Contains(p, `"findPaperFor": "26.4"`) {
@@ -327,7 +327,7 @@ func TestPaperAndMoveReport(t *testing.T) {
 // The vendor's own key goes only to the vendor's own API, not to a gateway or
 // local server agentURL names. TT_MINECRAFTD_AGENT_KEY goes to any.
 func TestVendorKeyStaysHome(t *testing.T) {
-	defer testid.Line(t, "df7bv00")
+	defer testid.Line(t, "1a3k10c")
 	env := map[string]string{"ANTHROPIC_API_KEY": "ak", "OPENAI_API_KEY": "ok"}
 	old := getenv
 	getenv = func(k string) string { return env[k] }

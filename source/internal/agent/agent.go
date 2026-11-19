@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package agent asks an AI agent where newer builds of approved jars are. The
+// Package agent asks an AI agent where newer builds of the server's jars are. The
 // agent only suggests; see design.md's Update agent for what's checked after.
 package agent
 
@@ -20,7 +20,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
-// Jar is what the agent is told about one approved jar.
+// Jar is what the agent is told about one jar.
 type Jar struct {
 	Path   string `json:"jar"` // under serverDir
 	About  string `json:"about,omitempty"`
@@ -136,7 +136,7 @@ func sameHost(a, b string) bool {
 var getenv = os.Getenv
 
 const instructions = `You help a Minecraft server's update tool find newer builds of its plugins.
-The JSON at the end names the server's Minecraft version and the approved jars to look at.
+The JSON at the end names the server's Minecraft version and the jars to look at.
 
 For each jar, find the newest stable build that runs on Paper for that Minecraft version, from the plugin's own download page or API. Use only https.
 

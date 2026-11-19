@@ -20,7 +20,7 @@ import (
 // heap or goroutines past the first rounds. TT_MINECRAFTD_SOAK sets the
 // rounds, and the test skips without it.
 func TestSoak(t *testing.T) {
-	defer testid.Line(t, "df78e00")
+	defer testid.Line(t, "1a3jpbr")
 	t.Setenv("PATH", t.TempDir()) // nothing on the host can run
 	g := newRig(t)
 	logs := filepath.Join(g.dir, "logs")

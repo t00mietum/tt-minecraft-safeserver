@@ -16,25 +16,14 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
-// cacheDirs are where Paper loads code it wrote itself without checking it:
-// plugin libraries from Maven, and remapped plugins before 26.1.
+// cacheDirs are where Paper keeps code it wrote itself, and loads it again
+// without checking: plugin libraries from Maven, and remapped plugins before
+// 26.1.
 var cacheDirs = []string{"libraries", "plugins/.paper-remapped"}
-
-// IsLibrary says an approved name is one of Paper's cached jars, not a
-// plugin, so update has nothing to fetch for it.
-func IsLibrary(name string) bool {
-	for _, d := range cacheDirs {
-		if strings.HasPrefix(name, d+"/") {
-			return true
-		}
-	}
-	return false
-}
 
 // Libraries lists the jars in cacheDirs, less the ones paper.jar puts back
 // from its own hashes at every start. A link to a folder, or a link at a
-// cache folder itself, is listed too, since Paper would follow it and it
-// can't be approved.
+// cache folder itself, is listed too, since Paper would follow it.
 func Libraries(serverDir string) ([]Jar, error) {
 	own, err := paperOwn(serverDir)
 	if err != nil {
@@ -118,14 +107,4 @@ func paperOwn(serverDir string) (map[string]bool, error) {
 		break
 	}
 	return own, nil
-}
-
-// CheckLibraries compares the jars from Libraries with approved, the same way
-// CheckJars does for plugins.
-func CheckLibraries(serverDir string, approved []Approved, sums *Sums) (Check, error) {
-	jars, err := Libraries(serverDir)
-	if err != nil {
-		return Check{}, err
-	}
-	return compare(jars, approved, sums, true)
 }

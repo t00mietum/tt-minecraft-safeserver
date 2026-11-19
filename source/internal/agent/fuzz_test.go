@@ -15,7 +15,7 @@ import (
 // The reply comes from a model or a command the operator set up, so any
 // text at all. What Check passes on reaches the terminal and the downloader.
 func FuzzParse(f *testing.F) {
-	defer testid.Line(f, "df78700")
+	defer testid.Line(f, "1a3jnnw")
 	f.Add(`{"jars":[]}`)
 	f.Add("Sure:\n```json\n{\"jars\":[{\"jar\":\"plugins/Chunky.jar\",\"version\":\"1.4.40\",\"url\":\"https://hangarcdn.papermc.io/x/Chunky.jar\",\"sha256\":\"" + sum256 + "\",\"hashFrom\":\"https://hangar.papermc.io/x\"}]}\n```")
 	f.Add(`{"jars": null} {"jars":[{"jar":"plugins/LuckPerms-Bukkit.jar","notes":"\u202eevil\u001b[2J"}]}`)

@@ -18,10 +18,10 @@ import (
 
 var lowerHex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// Whatever the list says, a jar it approves has a path inside the server
-// folder and a whole hash, and a source only when it's an https URL.
+// Whatever the list says, a jar it keeps has a path inside the server folder,
+// a whole hash or none, and a source only when it's an https URL.
 func FuzzReadApproved(f *testing.F) {
-	defer testid.Line(f, "df78900")
+	defer testid.Line(f, "1a3jnw4")
 	f.Add("jar: plugins/Geyser-Spigot.jar\n\tsha256: " + sumA + "\n\tsource: https://download.geysermc.org/x\n")
 	f.Add("jar: ../paper.jar\n\tsha256: " + sumB + "\njar: /etc/passwd\n\tsha256: " + sumB + "\n")
 	f.Add("jar: plugins/a.jar\n\tsha256: " + sumA + "\njar: plugins/a.jar\n\tsha256: " + sumB + "\n\tsource: http://x\n")
@@ -36,8 +36,8 @@ func FuzzReadApproved(f *testing.F) {
 			t.Fatalf("ReadApproved: %v (warnings %v)", err, warns)
 		}
 		for _, j := range jars {
-			if !insideServer(j.Name) || !lowerHex64.MatchString(j.SHA256) {
-				t.Fatalf("approved %#v", j)
+			if !insideServer(j.Name) || j.SHA256 != "" && !lowerHex64.MatchString(j.SHA256) { // empty allowed since 2026111914334569
+				t.Fatalf("kept %#v", j)
 			}
 			if j.Source != "" {
 				if u, err := url.Parse(j.Source); err != nil || u.Scheme != "https" || u.Host == "" {
@@ -62,7 +62,7 @@ func zipOf(files map[string]string) []byte {
 // A downloaded jar names itself. Its name and version reach the terminal, so
 // they must come out as plain text of a sane length.
 func FuzzClaims(f *testing.F) {
-	defer testid.Line(f, "df78a00")
+	defer testid.Line(f, "1a3jnz8")
 	f.Add(zipOf(map[string]string{"plugin.yml": "name: Chunky\nversion: 1.4.40\nmain: x.Y\n"}))
 	f.Add(zipOf(map[string]string{"paper-plugin.yml": "name: \"Geyser\x1b[2J\"\nversion: '2.12.1'\n"}))
 	f.Add([]byte("name: LuckPerms\u202e\nversion: " + string(bytes.Repeat([]byte("\u0436"), 60)) + "\n"))

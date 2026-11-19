@@ -19,7 +19,7 @@ import (
 // before it sends the line. Container start, which reads the log through the
 // runtime, warns. --debug and root don't read the tree.
 func TestLoginGroup(t *testing.T) {
-	defer testid.Line(t, "df68g00")
+	defer testid.Line(t, "1a3fjj0")
 	g := newNativeRig(t)
 	inGroup(t, groupNextLogin)
 	err := g.n.Start(context.Background(), StartMode{})
@@ -75,7 +75,7 @@ func TestLoginGroup(t *testing.T) {
 
 // The real lookup: this process's own group, and one that isn't there.
 func TestLoginGroupHost(t *testing.T) {
-	defer testid.Line(t, "df68h00")
+	defer testid.Line(t, "1a3fjn4")
 	g, err := user.LookupGroupId(strconv.Itoa(os.Getegid()))
 	if err != nil {
 		t.Skip("own group has no name:", err)
@@ -92,7 +92,7 @@ func TestLoginGroupHost(t *testing.T) {
 // is still the server's. A login without the group yet gets told why, not a
 // bare permission denied.
 func TestStartTreeDenied(t *testing.T) {
-	defer testid.Line(t, "df74x00")
+	defer testid.Line(t, "1a3jbam")
 	if os.Geteuid() == 0 {
 		t.Skip("root reads the tree anyway")
 	}

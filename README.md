@@ -97,7 +97,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 - `start` checks the safe settings first: online mode, the whitelist, no RCON or query port, and no proxy settings. When one is off, it refuses and names the setting, and `repair` puts it back.
 
-- Plugin jars are pinned by SHA-256 and mounted read-only. A jar that changed or showed up since it was approved stops the start.
+- Any plugin you add loads, with no approval step and no hashes to look at. Their jars are mounted read-only, so the server can't change them while it runs.
 
 - The tool keeps its own nftables table. It limits who can reach the game ports and how fast one address can join, and blocks the server from opening connections to the LAN or to local services.
 

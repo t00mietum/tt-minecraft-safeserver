@@ -39,12 +39,10 @@ const BootUnit = boot.UnitName
 // logLines is how much of latest.log status shows.
 const logLines = 10
 
-// Probe takes the readings. One Probe can take many, as watch does, and keeps
-// the plugin sums between them.
+// Probe takes the readings. One Probe can take many, as watch does.
 type Probe struct {
-	Run         host.Runner
-	Cfg         *config.Config
-	PluginsFile string
+	Run host.Runner
+	Cfg *config.Config
 	// ReadFile reads /proc and /sys, for the server's mode and memory.
 	ReadFile func(string) ([]byte, error)
 	Ping     func(ctx context.Context, addr string) (server.PingReply, error)
@@ -54,14 +52,13 @@ type Probe struct {
 	// Group says why this login can't read the tree through runGroup, for a
 	// read that was refused. nil leaves that out.
 	Group func(group, what string) error
-	sums  plugins.Sums
 	// denied is a read of the tree refused in this reading.
 	denied bool
 }
 
 // NewProbe gives a Probe on the real host.
-func NewProbe(r host.Runner, c *config.Config, pluginsFile string) *Probe {
-	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0, Group: launch.GroupProblem}
+func NewProbe(r host.Runner, c *config.Config) *Probe {
+	return &Probe{Run: r, Cfg: c, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0, Group: launch.GroupProblem}
 }
 
 // Line is one labeled line. A Line with no label goes on under the one above.
@@ -317,37 +314,21 @@ func (p *Probe) ops() Line {
 	return Line{"Ops", strings.Join(names, ", ")}
 }
 
+// plugins lists the jars the server loads. Since 2026111914293176 they
+// aren't checked against a list, so none is opened.
 func (p *Probe) plugins() Line {
-	approved, _, err := plugins.ReadApproved(p.PluginsFile)
-	if errors.Is(err, fs.ErrNotExist) {
-		return Line{"Plugins", "no approved list at " + p.PluginsFile + " yet"}
-	}
+	jars, err := plugins.Jars(p.Cfg.ServerDir)
 	if err != nil {
-		return Line{"Plugins", "can't read the approved list: " + err.Error()}
+		return Line{"Plugins", "can't list the jars: " + p.cantRead(err)}
 	}
-	c, err := plugins.CheckJars(p.Cfg.ServerDir, approved, &p.sums)
-	if err != nil {
-		return Line{"Plugins", "can't check the jars: " + p.cantRead(err)}
+	if len(jars) == 0 {
+		return Line{"Plugins", "none"}
 	}
-	var text string
-	switch {
-	case c.Jars == 0:
-		text = "none"
-	case c.OK():
-		text = fmt.Sprintf("%d %s, all approved", c.Jars, plural(c.Jars, "jar"))
-	default:
-		text = fmt.Sprintf("%d %s, NOT all approved, so start refuses", c.Jars, plural(c.Jars, "jar"))
+	names := make([]string, 0, len(jars))
+	for _, j := range jars {
+		names = append(names, j.Name)
 	}
-	if len(c.New) > 0 {
-		text += "; new: " + strings.Join(c.New, ", ")
-	}
-	if len(c.Changed) > 0 {
-		text += "; changed: " + strings.Join(c.Changed, ", ")
-	}
-	if len(c.Missing) > 0 {
-		text += "; approved but gone: " + strings.Join(c.Missing, ", ")
-	}
-	return Line{"Plugins", text}
+	return Line{"Plugins", fmt.Sprintf("%d %s: %s", len(jars), plural(len(jars), "jar"), strings.Join(names, ", "))}
 }
 
 func (p *Probe) trees() []Line {

@@ -83,12 +83,6 @@ func newRig(t *testing.T) *rig {
 	if err := os.WriteFile(filepath.Join(dir, "whitelist.json"), []byte(`[{"uuid": "5e0c6c7f-4d0a-4d1e-9a0e-4b9e3c2f1a01", "name": "Steve"}]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Both jars are empty, and approved.
-	list := filepath.Join(base, "plugins.shcl")
-	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	if err := os.WriteFile(list, []byte("jar: paper-26.3-244.jar\n\tsha256: "+empty+"\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+empty+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n", exit: "0\n"}
 	g.r.Reply = g.reply
 	noRuntimes(t)
@@ -102,7 +96,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	g.d = &Boxed{
-		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, FirewallFiles: fw, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
+		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, FirewallFiles: fw, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
 		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
@@ -161,7 +155,7 @@ func (g *rig) changes() []string {
 // create then start, since Podman's run --detach warns when started from a
 // script.
 func TestDockerStart(t *testing.T) {
-	defer testid.Line(t, "df5xp00")
+	defer testid.Line(t, "1a3egrr")
 	g := newRig(t)
 	g.states = []string{"exited", "running"}
 	g.log = "[12:00:09 INFO]: Done (8.1s)! For help, type \"help\"\n"
@@ -201,7 +195,7 @@ func TestDockerStart(t *testing.T) {
 // sudo -v only when that fails. A NOPASSWD rule beside password rules passes
 // sudo -n but not sudo -v.
 func TestStartSudoNoPassword(t *testing.T) {
-	defer testid.Line(t, "df79e00")
+	defer testid.Line(t, "1a3jsfr")
 	for _, free := range []bool{true, false} {
 		g := newRig(t)
 		g.sudoFree = free
@@ -234,7 +228,7 @@ func TestStartSudoNoPassword(t *testing.T) {
 // Another Paper server, such as one the old scripts started, stops start
 // before it changes anything.
 func TestDockerStartRefuses(t *testing.T) {
-	defer testid.Line(t, "df5xq00")
+	defer testid.Line(t, "1a3egvw")
 	g := newRig(t)
 	g.ps = "safeserver 4242 java -Xmx6G -jar paper-26.3-244.jar nogui\n"
 	err := g.d.Start(context.Background(), StartMode{})
@@ -260,7 +254,7 @@ func TestDockerStartRefuses(t *testing.T) {
 // A server that dies while loading gets its log tail shown, and one that's
 // slow is left running with an error.
 func TestDockerStartFails(t *testing.T) {
-	defer testid.Line(t, "df5xr00")
+	defer testid.Line(t, "1a3egz0")
 	g := newRig(t)
 	g.states = []string{"", "exited"}
 	g.log = "Error: Unable to access jarfile paper.jar\n"
@@ -281,7 +275,7 @@ func TestDockerStartFails(t *testing.T) {
 // trees back. One that leaves the server up, or can't tell, says how to get
 // them back. Inside the boot unit, ExecStop's stop does it.
 func TestFailedStartHandsBack(t *testing.T) {
-	defer testid.Line(t, "df7an00")
+	defer testid.Line(t, "1a3jx9m")
 	back := "sudo chown -R -- alice:minecraftd "
 	failing := func(g *rig, step string, cancel func()) {
 		g.r.Reply = func(c host.Cmd) ([]byte, error) {
@@ -356,7 +350,7 @@ func TestFailedStartHandsBack(t *testing.T) {
 // --debug runs attached and hands the trees back after. --foreground skips
 // sudo and waits for the container, for the boot unit. Dry run waits for nothing.
 func TestDockerStartModes(t *testing.T) {
-	defer testid.Line(t, "df5xs00")
+	defer testid.Line(t, "1a3eh24")
 	g := newRig(t)
 	if err := g.d.Start(context.Background(), StartMode{Debug: true}); err != nil {
 		t.Fatal(err)
@@ -390,7 +384,7 @@ func TestDockerStartModes(t *testing.T) {
 }
 
 func TestDockerStop(t *testing.T) {
-	defer testid.Line(t, "df5xt00")
+	defer testid.Line(t, "1a3eh58")
 	g := newRig(t)
 	g.states = []string{"running", "running", "running", "exited"}
 	if err := g.d.Stop(context.Background(), 12); err != nil {
@@ -416,7 +410,7 @@ func TestDockerStop(t *testing.T) {
 // Ctrl-C in the countdown ends it at once, tells the players the stop is
 // off, and fails, with the server and its trees left as they were.
 func TestStopCountdownInterrupt(t *testing.T) {
-	defer testid.Line(t, "df7ab00")
+	defer testid.Line(t, "1a3jwac")
 	g := newRig(t)
 	g.states = []string{"running"}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -472,7 +466,7 @@ func (c cancelConsole) Send(ctx context.Context, line string) error {
 
 // The real clock's wait ends at Ctrl-C.
 func TestPauseInterrupt(t *testing.T) {
-	defer testid.Line(t, "df7ac00")
+	defer testid.Line(t, "1a3jwdg")
 	k := &Kit{}
 	if err := k.pause(context.Background(), time.Millisecond); err != nil {
 		t.Errorf("short wait: %v", err)
@@ -492,7 +486,7 @@ func TestPauseInterrupt(t *testing.T) {
 // goes on, since an exit there makes systemd stop the server. The
 // container's exit code is passed on.
 func TestForegroundSlowLoad(t *testing.T) {
-	defer testid.Line(t, "df7ad00")
+	defer testid.Line(t, "1a3jwgm")
 	g := newRig(t)
 	g.d.Root = true
 	g.states = []string{"", "running"}
@@ -532,7 +526,7 @@ func TestForegroundSlowLoad(t *testing.T) {
 // Only update --mc-version snapshots now, so start and stop with zfsDataset
 // set run no zfs.
 func TestNoStartStopSnapshot(t *testing.T) {
-	defer testid.Line(t, "df78z00")
+	defer testid.Line(t, "1a3jr0w")
 	g := newRig(t)
 	g.d.Cfg.ZfsDataset = "tank/mc"
 	g.states = []string{"exited", "running", "running", "running", "exited"}
@@ -554,7 +548,7 @@ func TestNoStartStopSnapshot(t *testing.T) {
 // Not running: the trees still go back, as after a crash. Stuck: SIGTERM,
 // then SIGKILL after docker's grace time.
 func TestDockerStopEdges(t *testing.T) {
-	defer testid.Line(t, "df5xv00")
+	defer testid.Line(t, "1a3eh8c")
 	g := newRig(t)
 	g.states = []string{"exited"}
 	if err := g.d.Stop(context.Background(), 30); err != nil {
@@ -599,7 +593,7 @@ func (failConsole) Send(context.Context, string) error { return errors.New("no s
 // An unsafe setting stops a start in either mode, after sudo and before
 // anything changes. A likely mistake only warns.
 func TestStartChecksSettings(t *testing.T) {
-	defer testid.Line(t, "df5yj00")
+	defer testid.Line(t, "1a3ekg8")
 	for _, native := range []bool{false, true} {
 		g := newNativeRig(t)
 		start := g.d.Start
@@ -640,7 +634,7 @@ func TestStartChecksSettings(t *testing.T) {
 // With firewall on, a start without the table stops after sudo, in either
 // mode, before anything changes. With it off, nft isn't asked.
 func TestStartChecksFirewall(t *testing.T) {
-	defer testid.Line(t, "df66f00")
+	defer testid.Line(t, "1a3fc6w")
 	for _, native := range []bool{false, true} {
 		g := newNativeRig(t)
 		start := g.d.Start
@@ -679,7 +673,7 @@ func TestStartChecksFirewall(t *testing.T) {
 // Rules written for another config, or that miss a new IPv6 subnet, stop a
 // start in either mode before anything changes, even with the table loaded.
 func TestStartChecksFirewallRules(t *testing.T) {
-	defer testid.Line(t, "df7a500")
+	defer testid.Line(t, "1a3jvqm")
 	for _, native := range []bool{false, true} {
 		for what, change := range map[string]func(g *nativeRig){
 			"allowFrom": func(g *nativeRig) { g.d.Cfg.AllowFrom = []string{"any"} },
@@ -713,75 +707,109 @@ func TestStartChecksFirewallRules(t *testing.T) {
 
 // A new or changed jar stops a start in either mode, after sudo and before
 // anything changes. Geyser extensions count, and get read-only mounts too.
-func TestStartChecksPlugins(t *testing.T) {
-	defer testid.Line(t, "df5z400")
-	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+// Commented out by 2026111914334569: start no longer checks jars against an approved list. TestStartTrustsJars covers what replaced it.
+// func TestStartChecksPlugins(t *testing.T) {
+// 	defer testid.Line(t, "1a3en8g")
+// 	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+// 	ext := filepath.Join("plugins", "Geyser-Spigot", "extensions", "thing.jar")
+// 	for _, native := range []bool{false, true} {
+// 		for _, c := range []struct {
+// 			what, file, text, says string
+// 		}{
+// 			{"new", "plugins/floodgate.jar", "", "not approved: plugins/floodgate.jar"},
+// 			{"changed", "plugins/Geyser-Spigot.jar", "evil", "changed since it was approved: plugins/Geyser-Spigot.jar"},
+// 			{"paper", "paper-26.3-244.jar", "evil", "changed since it was approved: paper-26.3-244.jar"},
+// 			{"extension", ext, "", "not approved: " + filepath.ToSlash(ext)},
+// 		} {
+// 			g := newNativeRig(t)
+// 			start := g.d.Start
+// 			if native {
+// 				start = g.n.Start
+// 			}
+// 			if err := os.MkdirAll(filepath.Dir(filepath.Join(g.dir, c.file)), 0o700); err != nil {
+// 				t.Fatal(err)
+// 			}
+// 			if err := os.WriteFile(filepath.Join(g.dir, c.file), []byte(c.text), 0o600); err != nil {
+// 				t.Fatal(err)
+// 			}
+// 			err := start(context.Background(), StartMode{})
+// 			if err == nil || !strings.Contains(err.Error(), "repair --approve-plugins") || len(g.changes()) != 1 || !strings.Contains(g.out.String(), c.says) {
+// 				t.Errorf("native %v, %s: err %v, ran %q, output %q", native, c.what, err, g.changes(), g.out.String())
+// 			}
+// 		}
+//
+// 		g := newNativeRig(t)
+// 		start := g.d.Start
+// 		if native {
+// 			start = g.n.Start
+// 		}
+// 		g.d.PluginsFile, g.n.PluginsFile = filepath.Join(t.TempDir(), "none.shcl"), filepath.Join(t.TempDir(), "none.shcl")
+// 		if err := start(context.Background(), StartMode{}); err == nil || !strings.Contains(g.out.String(), "not approved: paper-26.3-244.jar") {
+// 			t.Errorf("native %v, no list: err %v, output %q", native, err, g.out.String())
+// 		}
+// 	}
+//
+// 	g := newRig(t)
+// 	g.d.DryRun = true
+// 	if err := os.MkdirAll(filepath.Join(g.dir, filepath.Dir(ext)), 0o700); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if err := os.WriteFile(filepath.Join(g.dir, ext), nil, 0o600); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	f, err := os.OpenFile(g.d.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if _, err := f.WriteString("jar: " + filepath.ToSlash(ext) + "\n\tsha256: " + empty + "\n"); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	f.Close()
+// 	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
+// 	if create := g.r.Lines()[len(g.r.Ran)-2]; !strings.Contains(create, mount) {
+// 		t.Errorf("no read-only mount for the extension in %q", create)
+// 	}
+// }
+
+// A new or changed jar, Paper build, or Geyser extension doesn't stop a
+// start in either mode, and still gets a read-only mount (2026111914293176).
+func TestStartTrustsJars(t *testing.T) {
+	defer testid.Line(t, "1a4j19g")
 	ext := filepath.Join("plugins", "Geyser-Spigot", "extensions", "thing.jar")
 	for _, native := range []bool{false, true} {
-		for _, c := range []struct {
-			what, file, text, says string
-		}{
-			{"new", "plugins/floodgate.jar", "", "not approved: plugins/floodgate.jar"},
-			{"changed", "plugins/Geyser-Spigot.jar", "evil", "changed since it was approved: plugins/Geyser-Spigot.jar"},
-			{"paper", "paper-26.3-244.jar", "evil", "changed since it was approved: paper-26.3-244.jar"},
-			{"extension", ext, "", "not approved: " + filepath.ToSlash(ext)},
-		} {
-			g := newNativeRig(t)
-			start := g.d.Start
-			if native {
-				start = g.n.Start
-			}
-			if err := os.MkdirAll(filepath.Dir(filepath.Join(g.dir, c.file)), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(g.dir, c.file), []byte(c.text), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			err := start(context.Background(), StartMode{})
-			if err == nil || !strings.Contains(err.Error(), "repair --approve-plugins") || len(g.changes()) != 1 || !strings.Contains(g.out.String(), c.says) {
-				t.Errorf("native %v, %s: err %v, ran %q, output %q", native, c.what, err, g.changes(), g.out.String())
-			}
-		}
-
 		g := newNativeRig(t)
 		start := g.d.Start
+		g.d.DryRun, g.n.DryRun = true, true
 		if native {
 			start = g.n.Start
 		}
-		g.d.PluginsFile, g.n.PluginsFile = filepath.Join(t.TempDir(), "none.shcl"), filepath.Join(t.TempDir(), "none.shcl")
-		if err := start(context.Background(), StartMode{}); err == nil || !strings.Contains(g.out.String(), "not approved: paper-26.3-244.jar") {
-			t.Errorf("native %v, no list: err %v, output %q", native, err, g.out.String())
+		for file, text := range map[string]string{"plugins/floodgate.jar": "", "plugins/Geyser-Spigot.jar": "changed", "paper-26.3-244.jar": "changed", ext: ""} {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(g.dir, file)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(g.dir, file), []byte(text), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-
-	g := newRig(t)
-	g.d.DryRun = true
-	if err := os.MkdirAll(filepath.Join(g.dir, filepath.Dir(ext)), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(g.dir, ext), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.OpenFile(g.d.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("jar: " + filepath.ToSlash(ext) + "\n\tsha256: " + empty + "\n"); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
-		t.Fatal(err)
-	}
-	mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
-	if create := g.r.Lines()[len(g.r.Ran)-2]; !strings.Contains(create, mount) {
-		t.Errorf("no read-only mount for the extension in %q", create)
+		if err := start(context.Background(), StartMode{}); err != nil || strings.Contains(g.out.String(), "approve") {
+			t.Errorf("native %v: err %v, output %q", native, err, g.out.String())
+		}
+		if native {
+			continue
+		}
+		mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
+		if create := g.r.Lines()[len(g.r.Ran)-2]; !strings.Contains(create, mount) {
+			t.Errorf("no read-only mount for the extension in %q", create)
+		}
 	}
 }
 
 // Podman gets the same run command as Docker, through sudo.
 func TestPodmanStart(t *testing.T) {
-	defer testid.Line(t, "df64f00")
+	defer testid.Line(t, "1a3f5yw")
 	docker := newRig(t)
 	docker.states = []string{"", "running"}
 	docker.log = "Done (1.0s)! For help, type \"help\""
@@ -820,7 +848,7 @@ func TestPodmanStart(t *testing.T) {
 // A container from before a runMode change is found under the other runtime,
 // and stop goes there. Only runMode's runtime has to answer.
 func TestFindContainer(t *testing.T) {
-	defer testid.Line(t, "df64g00")
+	defer testid.Line(t, "1a3f620")
 	states := map[string]string{}
 	fails := map[string]bool{}
 	installed := map[string]bool{}
@@ -903,23 +931,24 @@ func TestFindContainer(t *testing.T) {
 
 // A jar's name comes from the server account, so start's refusal shows it
 // without its escape codes.
-func TestStartCleansJarName(t *testing.T) {
-	defer testid.Line(t, "df79s00")
-	g := newRig(t)
-	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "\x1b]0;owned\x07\x1b[2K\rGeyser-Spigot.jar"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	err := g.d.Start(context.Background(), StartMode{})
-	out := g.out.String()
-	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "not approved: plugins/]0;owned[2KGeyser-Spigot.jar\n") {
-		t.Errorf("err %v, output %q", err, out)
-	}
-}
+// Commented out by 2026111914334569: start no longer prints jar names, since it doesn't check them.
+// func TestStartCleansJarName(t *testing.T) {
+// 	defer testid.Line(t, "1a3jtj4")
+// 	g := newRig(t)
+// 	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "\x1b]0;owned\x07\x1b[2K\rGeyser-Spigot.jar"), nil, 0o600); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	err := g.d.Start(context.Background(), StartMode{})
+// 	out := g.out.String()
+// 	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "not approved: plugins/]0;owned[2KGeyser-Spigot.jar\n") {
+// 		t.Errorf("err %v, output %q", err, out)
+// 	}
+// }
 
 // The log tail of a server that died while loading is the server's text, so
 // it's shown without escape codes, a line per line.
 func TestStartCleansLogTail(t *testing.T) {
-	defer testid.Line(t, "df79t00")
+	defer testid.Line(t, "1a3jtn8")
 	g := newRig(t)
 	g.states = []string{"", "exited"}
 	g.log = "first \x1b]52;c;ZWNobyBoaQ==\x07line\r\nsecond\x1b[2J line\n"
@@ -933,23 +962,15 @@ func TestStartCleansLogTail(t *testing.T) {
 // Two plugin jars that link to one file give one mount, since Docker and
 // Podman refuse a destination given twice.
 func TestStartJarLinksOneMount(t *testing.T) {
-	defer testid.Line(t, "df7b100")
+	defer testid.Line(t, "1a3jyf4")
 	g := newRig(t)
 	g.d.DryRun = true
-	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	f, err := os.OpenFile(g.d.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Approving them went in 2026111914334569.
 	for _, name := range []string{"one.jar", "two.jar"} {
 		if err := os.Symlink("Geyser-Spigot.jar", filepath.Join(g.dir, "plugins", name)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.WriteString("jar: plugins/" + name + "\n\tsha256: " + empty + "\n"); err != nil {
-			t.Fatal(err)
-		}
 	}
-	f.Close()
 	// So do two trees that are one folder.
 	alias := filepath.Join(filepath.Dir(g.dir), "alias")
 	if err := os.Symlink("server", alias); err != nil {

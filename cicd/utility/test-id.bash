@@ -4,10 +4,10 @@
 
 ##	Purpose:
 ##		- Checks that every Go test has its own ID, and lists them.
-##		- An ID is 7 characters of lowercase Crockford base 32 (0-9, a-z less i, l, o, u): 5 for the
-##		  minutes since 2000-01-01 UTC when it was made, then a 2-character counter, 00 unless that
-##		  minute already has one. `--new` prints the next free one. IDs made before the counter came
-##		  in took 00.
+##		- An ID is 7 characters of lowercase Crockford base 32 (0-9, a-z less i, l, o, u): the minutes
+##		  since 2000-01-01 UTC when it was made, times 100, plus a counter from 00 to 99 that's 00
+##		  unless that minute already has one, padded with leading zeros. The counter goes in at base
+##		  10 so an ID still reads as one number. `--new` prints the next free one.
 ##		- A Go test has it as the first line of its body, `defer testid.Line(t, "<id>")`, or `f` in a
 ##		  fuzz target. A root host check has it as the first argument of a `check` call in
 ##		  cicd/root-host/checks.bash, or of a function there that hands its arguments to `check`.
@@ -81,11 +81,11 @@ fi
 digits=0123456789abcdefghjkmnpqrstvwxyz
 
 if [[ "${mode}" == new ]]; then
-	min=$(( ($(date -u +%s) - 946684800) / 60 )); stem=""
-	for _ in 1 2 3 4 5; do stem="${digits:min%32:1}${stem}"; min=$((min / 32)); done
-	used="$({ fGoTests | cut -f1; fRootChecks | cut -f1; } | grep "^${stem}" || true)"
-	for ((n = 0; n < 1024; n++)); do
-		id="${stem}${digits:n/32:1}${digits:n%32:1}"
+	min=$(( ($(date -u +%s) - 946684800) / 60 )); base=$((min * 100))
+	used="$({ fGoTests | cut -f1; fRootChecks | cut -f1; } || true)"
+	for ((n = 0; n < 100; n++)); do
+		v=$((base + n)); id=""
+		for _ in 1 2 3 4 5 6 7; do id="${digits:v%32:1}${id}"; v=$((v / 32)); done
 		grep -qx "${id}" <<<"${used}" || { printf '%s\n' "${id}"; exit 0; }
 	done
 	printf 'test-id: no free ID this minute\n' >&2; exit 1
@@ -114,3 +114,5 @@ exit "${bad}"
 ##		  arguments to `check`, count too, and a check ID used twice in checks.bash is a repeat.
 ##		- 2026-11-19: IDs are the clock's minute plus a 2-character counter, 7 characters in all, and
 ##		  `--new` prints one. A root host check's ID is checked for form too.
+##		- 2026-11-19: The counter goes in at base 10, before the Crockford step: an ID is the minute
+##		  times 100 plus the counter. Every existing ID was re-encoded the same way.

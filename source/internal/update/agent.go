@@ -165,7 +165,7 @@ func (u *Update) question(asks []plugins.Approved) agent.Question {
 	return q
 }
 
-// agentStep is a newer build of an approved jar that the agent found, not
+// agentStep is a newer build of a jar in the tree that the agent found, not
 // yet downloaded.
 type agentStep struct {
 	jar   plugins.Approved
@@ -410,7 +410,7 @@ func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	case kind == "SHA-256" && got.SHA256 != sum, kind == "SHA-512" && got.SHA512 != sum:
 		err = fmt.Errorf("its %s doesn't match the one on its hash page", kind)
 	case oldName == "":
-		err = errors.New("the approved jar doesn't say which plugin it is, so the download can't be matched to it")
+		err = errors.New("the jar in the tree doesn't say which plugin it is, so the download can't be matched to it")
 	case newName != oldName:
 		err = fmt.Errorf("the download says it's %q, not %q", newName, oldName)
 	}
@@ -430,11 +430,8 @@ func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	if err := got.Keep(); err != nil {
 		return err
 	}
+	// plugins.shcl isn't touched: the agent's address isn't a source update
+	// knows how to follow.
 	fmt.Fprintf(u.Out, "%-7s %s %s downloaded over %s\n", "FIXED", newName, f.Version, s.jar.Name)
-	// No source: the agent's address isn't one update knows how to follow.
-	if err := plugins.Approve(u.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: s.jar.Name}, SHA256: got.SHA256, Size: got.Size}}); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
-	}
-	fmt.Fprintf(u.Out, "%-7s %s approved\n", "FIXED", s.jar.Name)
 	return nil
 }
