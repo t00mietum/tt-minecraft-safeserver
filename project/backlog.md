@@ -384,17 +384,30 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A quick run leaves a stale SHA256SUMS beside new binaries in the release folder
 	- ID: 2026111715275362
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261117-152753
 	- Opened by:
 	- Incorrect behavior [Bug]: The build step writes binaries into the release version's folder in every mode, but only the package step writes SHA256SUMS, and a quick run skips it. Dev builds then sit beside sums that don't match them.
 	- Expected behavior [Bug]: The sums are written with the binaries, or the stale file is removed.
-	- Reproduced [Bug]: No. Read only.
+	- Reproduced [Bug]: Yes. df7b8, on the unfixed cicd.bash, left the older run's SHA256SUMS beside the new binaries, and `sha256sum -c` failed on both.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 35. Detail in detail_backlog.md.
-	- Origin: bb4ab14 cicd pipeline. Not seen before. Plausible.
+		- 2026-11-19: Verified: df7b8 fails on the unfixed cicd.bash and passes after. Quick gate passed.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Actual cause [Bug]: Only the package step wrote SHA256SUMS, so a run that built without packaging kept the older run's file.
+	- Actual fix [Bug]: The build step writes SHA256SUMS over the binaries it just built. The package step writes it again over every file in the folder. Both go through one function, `fReleaseSums`.
+	- Decisions:
+		- Sums are written rather than the file removed, so a quick or `--no-package` build can still be checked against them.
+		- After a build without the package step, packages from an older run stay in the folder but aren't listed in SHA256SUMS, since they hold an older build. They aren't removed, since the build step never deleted files before.
+	- Swept: SHA256SUMS is written only in cicd.bash's build and package steps (`grep -rn SHA256SUMS cicd`). verify-release.bash and install.bash only read one. Dogfood reads the binary, not the sums.
+	- Branch: nov19-2026111715275362
+	- Commit: 3abffeb
+	- Test case: df7b8 TestReleaseSums (the build step as a quick run calls it, over an older run's SHA256SUMS and package; then the package step's sums)
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Closed: 20261119-115818
 
 - install-dev.bash --dir=~/path makes a folder named ~
 	- ID: 2026111715275377

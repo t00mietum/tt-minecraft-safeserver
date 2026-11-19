@@ -650,7 +650,7 @@ fStepCodeql(){
 
 relDir=""
 fStepBuild(){
-	local t os arch out epoch rel sum1 sum2
+	local t os arch out epoch rel sum1 sum2 built=()
 	epoch="$(fCommitEpoch)"; rel="$(fIsRelease)"
 	relDir="${root}/${RELEASE_DIR}/${goVersion}"
 	mkdir -p -- "${relDir}"
@@ -662,8 +662,12 @@ fStepBuild(){
 			-ldflags "${GO_LDFLAGS_COMMON} -X main.version=${goVersion} -X main.buildEpoch=${epoch} -X main.release=${rel}" -o "${out}" "${GO_MAIN_PKG}" \
 			|| fDie "go build failed for ${os}/${arch}"
 		cp -f -- "${out}" "${relDir}/${EXE_NAME}-${os}-${arch}"
+		built+=("${EXE_NAME}-${os}-${arch}")
 		fEcho_Clean "built ${EXE_NAME}-${os}-${arch}  $(sha256sum "${out}" | cut -c1-16)  $(stat -c %s "${out}") bytes"
 	done
+	## Sums for these binaries now, since a run without the package step would leave an older
+	## run's SHA256SUMS beside them. Packages left from an older run aren't listed until it runs.
+	fReleaseSums "${built[@]}"
 	if [[ "${mode}" != quick ]]; then
 		## The same source has to give the same bytes from a copy at another path. The second build gets
 		## an empty cache of its own, or it only links again from the first one's objects.
@@ -681,7 +685,7 @@ fStepBuild(){
 	fEcho_Clean "$("${runTmp}/build/${EXE_NAME}-linux-amd64" --version 2>&1 || true)"
 }
 fStepPackage(){
-	local t arch f ver="${goVersion#v}" yaml epoch fmt named
+	local t arch f ver="${goVersion#v}" yaml epoch fmt named files=()
 	## A package's place per the FHS and Debian policy. /usr/local/bin is for hand installs: setup's
 	## copy, install.bash, dogfood. The build skips its copy and runs this one when it's there, so it
 	## has to name both, and nothing else. See design.md, Boot.
@@ -722,9 +726,17 @@ EOF_YAML
 			fEcho_Clean "packaged ${EXE_NAME}_${ver}_${arch}.${fmt}"
 		done
 	done
-	(cd "${relDir}" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > "${runTmp}/sums" && cp -f -- "${runTmp}/sums" SHA256SUMS)
-	fEcho_Clean "SHA256SUMS: $(wc -l < "${relDir}/SHA256SUMS") file(s)"
+	mapfile -t files < <(find "${relDir}" -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n')
+	fReleaseSums "${files[@]}"
 	fReleaseRotate
+}
+## SHA256SUMS in relDir over the named files there, sorted, and nothing else.
+fReleaseSums(){ ## file...
+	local files=()
+	mapfile -t files < <(printf '%s\n' "$@" | LC_ALL=C sort)
+	(cd "${relDir}" && sha256sum -- "${files[@]}" > "${runTmp}/sums") || fDie "can't checksum the release files"
+	cp -f -- "${runTmp}/sums" "${relDir}/SHA256SUMS"
+	fEcho_Clean "SHA256SUMS: ${#files[@]} file(s)"
 }
 ## The package's own file list has the binary at dst. Read on this box, with dpkg-deb or rpm.
 fPkgHas(){ ## fmt file dst
@@ -970,3 +982,4 @@ fEcho_Clean
 ##		- 2026-11-18: the gate marker needs every step to PASS on the commit the run started on. gofmt runs
 ##		  in the image and its errors fail, govulncheck skips only a failed fetch, and the second build is from a copy.
 ##		- 2026-11-19: the .deb and .rpm put the binary in /usr/bin, and the build has to name that path.
+##		- 2026-11-19: the build step writes SHA256SUMS for its binaries, so a run without the package step leaves no stale one.
