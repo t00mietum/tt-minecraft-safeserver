@@ -73,6 +73,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. df797 and design.md are done.
 
+- Trust the plugins an admin adds, with no approval step
+	- ID: 2026111914293176
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261119-142931
+	- Opened by: JC
+	- Related IDs: 2026111715275425, 2026111914262600
+	- Requirements [Feature]:
+		- An admin never has to look into a plugin or its hash. A jar they add, and a jar another plugin needs, counts as OK, unless it's on a public bad list (2026111914262600).
+		- `start`, `status` and `repair` stop checking jars against an approved list, and `start` no longer refuses a new or changed jar. `paper.jar` is the same.
+		- `repair --approve-plugins` and setup's approve step go. `plugins-refused/` is only for a jar on the bad list.
+		- `plugins.shcl` keeps only the optional `source` per jar, for `update --plugins`. setup and repair still give Geyser and Floodgate GeyserMC's source, without asking. update judges a jar up to date by the hash of the file on disk.
+		- Jars stay mounted read-only in container modes, since that costs the admin nothing.
+		- The update agent's finds still need a yes before they're installed, since that's new code from a lookup, not something the admin added.
+		- design.md's Summary, start, status, setup, update, repair, Plugin pinning, Update agent and Security, and README, say so. A Direction decisions entry records the reversal and the trade: a jar the server writes into `plugins/` while it runs would load at the next start.
+	- Progress log:
+		- 2026-11-19: t00mietum, after the plugin library answer: admins shouldn't have to investigate plugins or hashes. A plugin they add, or one another plugin needs, is OK unless it's on a public bad list.
+	- Decisions:
+		- This reverses the hash pinning chosen at the start of the project (9058841). The library pinning in 2026111715275425 goes with it.
+
 - Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
 	- ID: 2026111715275425
 	- Type: Enhancement
@@ -116,6 +138,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- So the library pinning goes: `plugins.Libraries` and its checks, start's `clearLibraries`, the repair prompt, and update's library skips. Start leaves `libraries/` alone.
 		- `update --plugins`, and a plain `update`, remove the plugins' libraries as `runUser` instead, Paper's own left out by `libraries.list`, so Paper downloads fresh ones at the next start. Code written there then lasts until the next update, not for good.
 		- design.md's start, repair, update and Plugin pinning say so. The known-bad check is its own item, 2026111914262600.
+		- 2026-11-19: Plugin approval as a whole goes too, in 2026111914293176. Work the two together, since both take out parts of the approved list.
 	- Branch: nov19-2026111715275425, nov19b-2026111715275425
 	- Commit: 6ca2410, 1cbed80
 	- Test case: df7bg, df7bh, dfh8a00, dfh8a01, dfh8a02
@@ -161,10 +184,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Priority: Low
 	- Opened: 20261119-142626
 	- Opened by: JC
-	- Related IDs: 2026111715275425
+	- Related IDs: 2026111715275425, 2026111914293176
 	- Requirements [Feature]:
 		- Look for a maintained list of malicious or known-bad Minecraft plugins, by hash or by name and version, that the tool could read without an account.
-		- If one exists and is easy to use, `update` or `repair` checks the approved jars against it, and removes or refuses a match.
+		- If one exists and is easy to use, `start`, `update` and `repair` check the jars in the tree against it, and move a match to `plugins-refused/` with a message. With approval gone (2026111914293176), this is the only check on what a plugin is.
 		- If none is easy, close it with what was found.
 	- Progress log:
 		- 2026-11-19: From t00mietum's answer on plugin libraries: checking for known-dangerous plugins and removing them is welcome, if easily possible.
