@@ -22,6 +22,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- test-id.bash's header says to take an ID from the clock, against the next-after-highest rule
+	- ID: 2026111911594103
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261119-115941
+	- Opened by:
+	- Estimated effort: Low
+	- Progress log:
+		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to df7b7 and df7b8.
+		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
