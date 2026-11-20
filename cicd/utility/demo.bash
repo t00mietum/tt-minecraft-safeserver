@@ -8,7 +8,7 @@
 ##		  no network, since it writes a made-up install under /etc and /srv.
 ##		- Everything in it is made up: the players, the host name, and the plugin. ss and systemctl
 ##		  and nft are stand-ins for the sockets, the boot unit and the firewall counters.
-##		- demo/gen-demo-gif.py types and runs the steps in demo/scenario.toml and draws the gif,
+##		- demo/gen-demo-gif.py, a copy of gitsby's, types and runs the steps in demo/scenario.toml and draws the gif,
 ##		  with Pillow and gifsicle, so no window or display is used. demo/script.txt is the plan.
 ##	Syntax:
 ##		demo.bash EXE WORK_DIR OUT_GIF
@@ -87,9 +87,11 @@ printf '{"nftables":[%s,%s,%s,%s,%s,%s]}\n' "$(c in_refused 41)" "$(c in_flood 3
 EOF
 chmod 0755 "${work}/bin/ss" "${work}/bin/systemctl" "${work}/bin/nft"
 
-## The steps run as typed, with the stand-ins first on PATH. --bin is only for the scenario's
-## {prog}, which it doesn't use, so the installed copy is what runs and what the output names.
-export PATH="${work}/bin:${PATH}" TERM=dumb
+## The steps run the installed copy by name, with the stand-ins first on PATH, from a home of
+## their own.
+export PATH="${work}/bin:${PATH}" HOME="${work}/home" TERM=dumb
+mkdir -p -- "${HOME}"
+cd "${HOME}"
 env -u DISPLAY -u WAYLAND_DISPLAY python3 "${here}/demo/gen-demo-gif.py" --scenario "${here}/demo/scenario.toml" \
 	--out "${outGif}" --bin "${exe}"
 
@@ -99,3 +101,4 @@ env -u DISPLAY -u WAYLAND_DISPLAY python3 "${here}/demo/gen-demo-gif.py" --scena
 ##		- 2026-11-14: Podman in the made-up config, since native mode is off.
 ##		- 2026-11-19: Drawn by demo/gen-demo-gif.py from demo/scenario.toml: typed by hand, 50 fps,
 ##		  a drawn window, and 3 s of black before the loop.
+##		- 2026-11-20: gitsby's generator and font, so the gif looks like gitsby's.

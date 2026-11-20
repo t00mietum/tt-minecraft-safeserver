@@ -39,6 +39,9 @@ NODE_SHA256_ARM64="013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35
 SHELLCHECK_VERSION="v0.11.0"
 SHELLCHECK_SHA256_AMD64="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
 SHELLCHECK_SHA256_ARM64="12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588"
+## The demo gif's font, the same release gitsby's demo uses.
+MONASPACE_VERSION="1.400"
+MONASPACE_SHA256="ab66d71be751495f679727332a3345597943bd4d7beebca03f5cde04bf994de7"
 MARKDOWNLINT_VERSION="$(sed -n 's/^ *"markdownlint-cli": "\(.*\)".*/\1/p' "${BASH_SOURCE[0]%/*}/container/markdownlint/package.json")"
 ## Without the container, the host's copies are used, and compared with these.
 TOOL_VERSIONS=(
