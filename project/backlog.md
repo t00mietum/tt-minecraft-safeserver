@@ -92,6 +92,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Verified: build, vet and the quick gate on the plugins area pass.
 	- Decisions:
 		- The Refuse tests (1a3en5c, 1a3js38) are commented out with the reason, per the never-delete rule. The root host check covers linksafe.Mkdir elsewhere.
+		- 2026-11-19: t00mietum: keep 1a3en5c and 1a3js38 as comments.
 	- Swept: grep for Refuse, RefusedDir and plugins-refused in source, cicd, design.md and README.md finds only the commented tests and unrelated words.
 	- Actual effort: Low
 	- Acceptance signoff: Self-closed: mechanical removal of unused code.
