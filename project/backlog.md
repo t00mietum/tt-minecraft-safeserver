@@ -1173,7 +1173,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual cause [Bug]: Text read from the server tree, the ping, and HTTP status lines was printed as read. Only log lines, op names and plugin.yml claims went through `server.Clean`.
 	- Actual fix [Bug]: The places that print clean what they're given: status's `Report.Write` cleans every line, start's `Kit.say` cleans every text argument, and repair's report line and the error `run` prints are cleaned line by line through the new `server.CleanLines`. Repair's question, setup's and update's jar lines clean the names they show. `paper.Current` refuses a link text with control characters, and HTTP errors name the status by its code through `download.Status`, not the server's own reason text. design.md's update section says so.
 	- Swept: every site in the Sweep row. launch/links.go and setup.go's Describe error are returned errors, which `run` cleans. Twins: agent/fetch.go also printed `resp.Status`, start's settings warnings go through `Kit.say`, and update's approved-list warnings and skip lines print approved names. Left alone: settings.Warnings already cleans op names, config and tree warnings hold the operator's own paths, Paper and Geyser build names from the download APIs are checked against a name pattern, and update's `s.jar.Name` always equals a checked build path. `console` passes the terminal through by design.
-	- Test case: 1a3jtf0, 1a3jtj4, 1a3jtn8, 1a3jtrc, 1a3jtvg, 1a3jtym, 1a3jv1r, 1a3jv4w, 1a3jv80
+	- Test case: 1a3jtf0, 1a3jtj4, 1a3jtn8, 1a3jtrc, 1a3jtvg, 1a3jtym, 1a3jv1r, 1a3jv4w, 1a3jv80. 1a3jtj4 and 1a3jv4w are commented out since 2026111914334569, as start and repair no longer show jar names.
 	- Verified: all 9 fail on the old code and pass with the fix. With only the 4 print funnels added to the old code, 1a3jtf0, 1a3jtj4, 1a3jtn8, 1a3jv4w and 1a3jv80 pass, so each funnel holds by itself. The quick gate passes.
 	- Branch: fixes-2026111715274877
 	- Commit: 8f7239f
@@ -1832,7 +1832,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual fix [Bug]: Refuse opens serverDir, the jar's folder, plugins/ and plugins-refused/ as folder handles without following links, makes plugins-refused with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST. The handle code moved out of the settings package into source/internal/linksafe, which settings now uses too.
 	- Branch: nov17-2026111709090977
 	- Commit: f7b8dc6
-	- Test case: 1a3js38, 1a3en5c
+	- Test case: 1a3js38, 1a3en5c. Both are commented out since 2026111918161429, which removed Refuse.
 	- Acceptance signoff: Self-closed: 1a3js38 fails on the old code and passes now.
 	- Closed: 20261117-134237
 	- Decisions:
@@ -2701,6 +2701,35 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- amd64 and arm64 both have pins, so the image still builds on an arm64 box.
 		- The image grows from 1.44 GB to 1.67 GB, most of it Node.
 
+- CICD gaps: CodeQL skips the modules, the soak keeps no heap profile, the root host steps check a host build, and the demo misses the gif rules
+	- ID: 2026111918554301
+	- Type: Task
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261119-185543
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111311485847, 2026111311485831, 2026111311485862
+	- Progress log:
+		- CodeQL reports only on code under its source root, so the 3 modules weren't checked. The step now vendors them into its copy and turns on the extractor's vendor option.
+		- The soak compared the heap at rounds N and 2N but kept no profile of what grew.
+		- The root host steps built their own binary with this box's Go, not the pinned one, and their image had no run label. --keep-temp didn't reach them.
+		- The demo gif was 820x518 with no typing, scroll, window, prompt colors, or black end, and had no plan file.
+		- Verified: the quick gate passed, with CodeQL over the vendored modules. The build, root host, ZFS and demo steps passed in one run. The soak step kept both soaks' profiles, and pprof -base read them.
+	- Decisions:
+		- CodeQL found 10 results in the YAML module and none in the rest. 8 are behind a round-trip check CodeQL doesn't read as a bound, and 2 cut an int only on 32-bit targets, which aren't built. They're listed with their reasons in `cicd/codeql-known.txt`, and any other result still fails the step. An entry that stops matching prints a warning.
+		- The demo is drawn by a copy of tukfs-hash's gif script. JetBrains Mono stands in for Monaspace Argon in the build image, since Debian has no Monaspace package. The scenario still asks for Monaspace first.
+		- Renders stay in the gitignored artifacts folder, not the private tree, so a fresh clone can render one. Only a release run updates `assets/demo.gif`, as before.
+		- No dogfood run script. The tool runs itself through sudo, and the boot unit runs the `/usr/local/bin` copy that the dogfood step installs. A versioned copy in `~/.local/bin` would come first on the operator's PATH and differ from what the boot unit runs.
+		- Release files keep `amd64` in their names rather than `x86_64`, since `v1.0.0-alpha.1` published that scheme and its links shouldn't change. It's also Debian's name for the arch. Check: entry in questions.md.
+	- Branch: cicd-fixup
+	- Closed reason: Done
+	- Test case: 1a4jssw for the soak's profiles. The rest are pipeline steps: CodeQL failed when a known entry was moved off its line and named the stale entry, both root host steps passed on the run's release build, and the demo step passed with its frames checked by eye.
+	- Acceptance signoff: Self-closed: each step was watched to fail and to pass. The gif follows the CICD process's gif rules, and README's copy changes only at the next release.
+	- Closed: 20261119-190400
+	- Commit: ed59063
+
 - update --mc-version
 	- ID: 2026111117302963
 	- Type: Feature
@@ -2968,7 +2997,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `repair --approve-plugins` does the same, so a Geyser jar put in by hand follows GeyserMC too. design.md updated in both places.
 		- Swept: every `plugins.Approve` caller. setup's downloads already pass the source, update's keep it, and the agent's jars get none by design. An entry approved before this fix stays without a source; the live server hasn't been adopted yet.
 	- Branch: r1112b
-	- Test case: 1a3jgwr, 1a3jgzw, 1a3jh30, 1a3fjbr and 1a3jgsm (root host)
+	- Test case: 1a3jgwr, 1a3jgzw, 1a3jh30, 1a3fjbr and 1a3jgsm (root host). 1a3jh30 is commented out since 2026111914334569, as repair gives the source without asking.
 	- Closed: 20261112-104958
 
 - Container start says only permission denied before a new login
@@ -3087,7 +3116,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The host check runs in podman mode only. Native mode shares `Kit.snapshot` and `Kit.stop`, and 1a3jkxm covers its `start` order.
 		- `--zfs` is its own run, not part of every root host run, since its pool lives in the host's kernel while it runs.
 	- Branch: r1112b
-	- Test case: 1a3jkxm, 1a3jm0r, 1a3jm3w, 1a3jm70, 1a3jn00, 1a3jn34, 1a3jn68, 1a3jn9c, 1a3jncg
+	- Test case: 1a3jkxm, 1a3jm0r, 1a3jm3w, 1a3jm70, 1a3jn00, 1a3jn34, 1a3jn68, 1a3jn9c, 1a3jncg. Since 2026111318002875, start and stop take no snapshot: 1a3jkxm and 1a3jn34 to 1a3jncg are commented out, 1a3jm3w was removed with its file, and 1a3jqxr checks that none is taken.
 	- Acceptance signoff: Self-closed: 1a3jn00 to 1a3jncg pass in the root host check with `--zfs`, per the standing close policy.
 	- Closed: 20261112-111928
 
@@ -3300,7 +3329,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Same calls as `update --image`. A changed value may still come back quoted.
 		- Swept: `Approve` is the only `SaveFile` in `plugins`; `update --image` already used keep-lines.
 	- Branch: r1112b
-	- Test case: 1a3en28
+	- Test case: 1a3en28. Commented out since 2026111914334585, which removed Approve.
 	- Acceptance signoff: Self-closed: 1a3en28 passes, per the standing close policy.
 	- Closed: 20261112-135900
 
@@ -3428,7 +3457,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The checks after setup run in a new login, since the group setup adds counts from the next login, as setup says.
 		- Not part of the gate yet. The CI/CD item can run it in the full run.
 	- Branch: root-host
-	- Test case: 1a3fh00, 1a3fh34, 1a3fh68, 1a3fh9c, 1a3fhcg, 1a3fhfm, 1a3fhjr, 1a3fhnw, 1a3fhs0, 1a3fhw4, 1a3fhz8, 1a3fj2c, 1a3fj5g, 1a3fj8m, 1a3fjbr, 1a3fjew
+	- Test case: 1a3fh00, 1a3fh34, 1a3fh68, 1a3fh9c, 1a3fhcg, 1a3fhfm, 1a3fhjr, 1a3fhnw, 1a3fhs0, 1a3fhw4, 1a3fhz8, 1a3fj2c, 1a3fj5g, 1a3fj8m, 1a3fjbr, 1a3fjew. 1a3fhz8 is commented out since 2026111914334569, as start no longer checks jars.
 	- Closed: 20261112-075653
 
 - Current Geyser needs TCP on the Bedrock port too
@@ -3487,7 +3516,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
 	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off), 2026111112163174 (Docker mode), and 2026111112163393 (status and watch) are done, and 2026111112163284 (native mode) waits on a hand test.
-	- Test case: its children's: 2026111112162268: 1a3efsg, 1a3efwm, 1a3efzr, 1a3eg2w, 1a3eg60, 1a3eg94, 1a3egc8, 1a3egfc, 1a3egjg, 1a3egnm; 2026111112163174: 1a3egrr, 1a3egvw, 1a3egz0, 1a3eh24, 1a3eh58, 1a3eh8c, 1a3ehbg, 1a3ehhr, 1a3ehmw; 2026111112163284: 1a3ehr0, 1a3ehv4, 1a3ehy8, 1a3ej1c, 1a3ej4g, 1a3ej7m, 1a3ejar; 2026111112163393: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3ejtc, 1a3ejxg, 1a3ek0m, 1a3ek3r, 1a3ek6w, 1a3eka0, 1a3ekd4
+	- Test case: its children's: 2026111112162268: 1a3efsg, 1a3efwm, 1a3efzr, 1a3eg2w, 1a3eg60, 1a3eg94, 1a3egc8, 1a3egfc, 1a3egjg, 1a3egnm; 2026111112163174: 1a3egrr, 1a3egvw, 1a3egz0, 1a3eh24, 1a3eh58, 1a3eh8c, 1a3ehbg, 1a3ehhr, 1a3ehmw; 2026111112163284: 1a3ehr0, 1a3ehv4, 1a3ehy8, 1a3ej1c, 1a3ej4g, 1a3ej7m, 1a3ejar; 2026111112163393: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3ejtc, 1a3ejxg, 1a3ek0m, 1a3ek3r, 1a3ek6w, 1a3eka0, 1a3ekd4. 1a3ek3r is commented out since 2026111914334569.
 	- 20261111: children 2026111112163284 wait on UAT, and the rest are closed
 	- 20261112: the children that waited on UAT passed the root host check, and are closed.
 	- Acceptance signoff: Self-closed: all children closed.
@@ -3917,7 +3946,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261111: `TestMissingConfig` (1a3egnm) no longer expects `status` to say it isn't built. It checks the config path `status` reads beside instead.
 		- Swept: every file read from the tree goes through `openRegular` or `Sums.Sum`; both modes judge "running" through the same calls as `start`, `launch.ContainerState` and `launch.UnitUp`.
 	- Branch: r1111
-	- Test case: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3ejtc, 1a3ejxg, 1a3ek0m, 1a3ek3r, 1a3ek6w, 1a3eka0, 1a3ekd4
+	- Test case: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3ejtc, 1a3ejxg, 1a3ek0m, 1a3ek3r, 1a3ek6w, 1a3eka0, 1a3ekd4. 1a3ek3r is commented out since 2026111914334569, which removed CheckJars.
 	- Closed: 20261111-181653
 
 - console and cmd
@@ -4398,7 +4427,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261111: the status tests' approved list gained the Paper build, and their jar counts went from 2 to 3 and from 3 to 4 (1a3ejdw, 1a3ejm4, 1a3ekd4), since `paper.jar` is now counted.
 		- Swept: every reader of jars goes through `plugins.Jars` (`CheckJars`, `lockedJars`, `repair`); both modes call `Kit.checkPlugins`; status reads the list through the same path as `start`.
 	- Branch: r1111
-	- Test case: 1a3emw0, 1a3emz4, 1a3en28, 1a3en5c, 1a3en8g, 1a3enbm
+	- Test case: 1a3emw0, 1a3emz4, 1a3en28, 1a3en5c, 1a3en8g, 1a3enbm. Plugin approval is gone since 2026111914334569: 1a3en28, 1a3en5c, 1a3en8g and 1a3enbm are commented out.
 	- Closed: 20261111-131704
 
 - repair

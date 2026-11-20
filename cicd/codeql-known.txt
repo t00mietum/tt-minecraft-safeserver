@@ -1,0 +1,20 @@
+## CodeQL results in vendored modules, looked at and let through. One per line:
+##   rule name|path|line|why
+## Only third-party code goes here. A result in our own code gets fixed. A pinned module's lines
+## don't move, so a bump shows its results again, and the run warns about entries left unmatched.
+
+## go.yaml.in/yaml/v3 v3.0.6. Each int(intv) is behind intv == int64(int(intv)), which CodeQL
+## doesn't read as a bound check.
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|195|round-trip check
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|196|round-trip check
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|214|round-trip check
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|215|round-trip check
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|241|round-trip check
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|242|round-trip check
+## The -0b and -0o branches skip that check with "true ||". int is 64 bits on every target we
+## build (RELEASE_TARGETS), so nothing is cut.
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|228|64-bit targets only
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/resolve.go|255|64-bit targets only
+## Behind resolved <= math.MaxInt64.
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/decode.go|642|bound checked
+Incorrect conversion between integer types|vendor/go.yaml.in/yaml/v3/decode.go|643|bound checked

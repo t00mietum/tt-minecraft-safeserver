@@ -55,7 +55,7 @@ RUN apt-get update -qq \
 	&& apt-get install -y -qq --no-install-recommends zstd >/dev/null \
 	&& rm -rf /var/lib/apt/lists/*
 
-# ImageMagick, a monospace font and gifsicle draw the README's demo gif.
+# Pillow, fontconfig, 2 monospace fonts and gifsicle draw the README's demo gif.
 RUN apt-get update -qq \
-	&& apt-get install -y -qq --no-install-recommends imagemagick fonts-dejavu-core gifsicle >/dev/null \
+	&& apt-get install -y -qq --no-install-recommends python3 python3-pil fontconfig fonts-jetbrains-mono fonts-dejavu-core gifsicle >/dev/null \
 	&& rm -rf /var/lib/apt/lists/*

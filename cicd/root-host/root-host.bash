@@ -10,6 +10,8 @@
 ##		- --zfs runs setup and then the ZFS snapshot checks instead, on a throwaway pool backed by a
 ##		  file in the run's folder. The container shares this host's kernel, so the pool shows in its
 ##		  zpool list until the run destroys it.
+##		- ROOT_HOST_BIN names a linux/amd64 build to check, such as cicd.bash's release build, which
+##		  comes from the pinned Go. Without it, this box's go builds one.
 ##	Syntax:
 ##		root-host.bash [--keep-temp] [--zfs]
 ##	History: At bottom of script.
@@ -103,13 +105,19 @@ jobs=$((cpus / 2))
 (($(cut -d. -f1 /proc/loadavg) > cpus / 2)) && jobs=$((cpus / 4))
 ((jobs < 1)) && jobs=1
 
-echo "Building tt-minecraftd"
-(cd "${repo}" && CGO_ENABLED=0 GOFLAGS="-p=${jobs}" nice -n 19 go build -o "${runDir}/tt-minecraftd" ./source/cmd/tt-minecraftd)
+if [[ -n "${ROOT_HOST_BIN:-}" ]]; then
+	[[ -f "${ROOT_HOST_BIN}" && -x "${ROOT_HOST_BIN}" ]] || { echo "ROOT_HOST_BIN isn't a program: ${ROOT_HOST_BIN}" >&2; exit 2; }
+	echo "Checking ${ROOT_HOST_BIN}"
+	cp -- "${ROOT_HOST_BIN}" "${runDir}/tt-minecraftd"
+else
+	echo "Building tt-minecraftd"
+	(cd "${repo}" && CGO_ENABLED=0 GOFLAGS="-p=${jobs}" nice -n 19 go build -o "${runDir}/tt-minecraftd" ./source/cmd/tt-minecraftd)
+fi
 
 tag="${projectName}-root-host:$(sha256sum "${here}/Dockerfile" | cut -c1-12)"
 if ! docker image inspect "${tag}" > /dev/null 2>&1; then
 	echo "Building ${tag}"
-	nice -n 19 docker build -q --label "dev.project=${projectName}" -t "${tag}" "${here}" > /dev/null
+	nice -n 19 docker build -q --label "dev.project=${projectName}" --label "dev.run=${runName}" -t "${tag}" "${here}" > /dev/null
 fi
 
 echo "Starting ${box}"
@@ -146,3 +154,4 @@ docker exec -u op -e TERM=xterm -e ZFS_POOL="${pool}" -e ZFS_FILE="${pool:+${run
 ##		- 2026-11-12: Created, with fixes from its first runs.
 ##		- 2026-11-12: --zfs: snapshot checks on a throwaway pool.
 ##		- 2026-11-13: Native checks skip while native mode is off.
+##		- 2026-11-19: ROOT_HOST_BIN checks a given build, and the image gets the run's label.

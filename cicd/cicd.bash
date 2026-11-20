@@ -71,7 +71,8 @@
 ##	  --no-container. It uses a quarter of the cores, and skips on a box that isn't Linux amd64.
 ##	- The demo step records the README's CLI demo gif from the linux/amd64 build, with
 ##	  utility/demo.bash, in the build container as root with no network, since it writes a made-up
-##	  install under /etc and /srv. Each render goes to DEMO_DIR in config.bash, GFS-rotated. Only a
+##	  install under /etc and /srv. utility/demo/scenario.toml has the steps, and script.txt beside
+##	  it the plan. Each render goes to DEMO_DIR in config.bash, GFS-rotated. Only a
 ##	  release run copies it to DEMO_GIF, which the publish stage then commits. Without the container
 ##	  it's a SKIP.
 ##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
@@ -568,14 +569,25 @@ fStepFuzz(){
 	fEcho_Clean "fuzzing: ${n} target(s), nothing found"
 }
 
+## The heap profiles from round N and 2N, one tar per run, kept on a pass or a fail.
+fSoakKeep(){ ## PROFILE_DIR
+	local tar="soak_${stamp}.tar"
+	[[ -n "$(find "$1" -name '*.pb.gz' -print -quit)" ]] || return 0
+	mkdir -p -- "${root}/${SOAK_DIR}"
+	tar -C "$1" -cf "${root}/${SOAK_DIR}/${tar}" . || { fEcho "WARNING: can't keep the soak profiles"; return 0; }
+	gfs_rotate "${root}/${SOAK_DIR}" soak tar >/dev/null 2>&1 || true
+	fEcho_Clean "heap profiles kept in ${SOAK_DIR}; to see what grew: go tool pprof -base <test>_half.pb.gz <test>_double.pb.gz"
+}
 ## Each TestSoak, with the rounds set: the tests skip without them.
 fStepSoak(){
-	local log="${runTmp}/soak.log" rounds="${SOAK_ROUNDS}" rc=0 n
+	local log="${runTmp}/soak.log" rounds="${SOAK_ROUNDS}" rc=0 n prof="${runTmp}/soakprof"
 	[[ "${mode}" != long ]] || rounds="${SOAK_ROUNDS_LONG}"
 	rounds="${CICD_SOAK_ROUNDS:-${rounds}}"
 	[[ "${rounds}" =~ ^[1-9][0-9]*$ ]] || fDie "soak rounds '${rounds}' isn't a count"
 	fEcho_Clean "rounds ${rounds} and $((rounds * 2)), ${HEAVY_JOBS} worker(s)"
-	fGo soak HEAVY=1 "${SOAK_ENV}=${rounds}" -- go test -count=1 -p "${HEAVY_JOBS}" -v -run '^TestSoak$' "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
+	mkdir -- "${prof}"
+	fGo soak HEAVY=1 "${SOAK_ENV}=${rounds}" "${SOAK_PROFILE_ENV}=${prof}" -- go test -count=1 -p "${HEAVY_JOBS}" -v -run '^TestSoak$' "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
+	fSoakKeep "${prof}"
 	## A test's numbers, then its PASS or FAIL line: go test prints each package's output in one piece.
 	grep -E '^((PASS|FAIL|SKIP) [0-9a-z]{7} |[[:space:]]+soak_test\.go:[0-9]+: )' "${log}" | sed -E 's/^[[:space:]]*/  /' || true
 	if ((rc)); then
@@ -629,23 +641,43 @@ fStepCodeql(){
 	while IFS= read -r -d '' f; do [[ ! -f "${f}" ]] || files+=("${f}"); done < <(git ls-files -z -- source go.mod go.sum)
 	((${#files[@]})) || fDie "no tracked Go files to analyze"
 	cp --parents -t "${copy}" -- "${files[@]}"
-	fEcho_Clean "${#files[@]} tracked file(s), ${HEAVY_JOBS} thread(s), ${ram} MB, suite ${CODEQL_SUITE#*:}"
+	## CodeQL only reports on code under the source root, so the modules go in as vendor/.
+	fGo codeql -- go -C "${copy}" mod vendor >> "${log}" 2>&1 || { tail -n 20 "${log}"; fDie "go mod vendor failed"; }
+	fEcho_Clean "${#files[@]} tracked file(s) and $(grep -c '^# ' "${copy}/vendor/modules.txt") vendored module(s), ${HEAVY_JOBS} thread(s), ${ram} MB, suite ${CODEQL_SUITE#*:}"
 	rc=0
 	fGo codeql HEAVY=1 "${mount[@]}" -- "${cql}" database create "${db}" --language=go --source-root="${copy}" \
+		--extractor-option=go.extract_vendor_dirs=true \
 		--command="go build -p ${HEAVY_JOBS} ./..." --threads="${HEAVY_JOBS}" --ram="${ram}" >> "${log}" 2>&1 || rc=$?
 	((rc == 0)) || { tail -n 40 "${log}"; fDie "codeql database create failed"; }
 	fGo codeql HEAVY=1 "${mount[@]}" -- "${cql}" database analyze "${db}" "${CODEQL_SUITE}" --format=csv --output="${out}" \
 		--threads="${HEAVY_JOBS}" --ram="${ram}" >> "${log}" 2>&1 || rc=$?
 	((rc == 0)) || { tail -n 40 "${log}"; fDie "codeql database analyze failed"; }
-	## name, description, severity, message, path, line, ...
+	## name, description, severity, message, path, line, ... A message can run over several lines.
 	re='^"(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","([0-9]+)"'
+	local rec="" q key shown="${runTmp}/codeql.txt" stale=()
+	local -i nNew=0 nKnown=0
+	## Third-party results looked at and let through: "rule|path|line|why". Read the file for each one's reason.
+	local -A known=()
+	if [[ -f "${root}/${CODEQL_KNOWN}" ]]; then
+		while IFS='|' read -r f key q _; do [[ "${f}" =~ ^[[:space:]]*(#|$) ]] || known["${f}|${key}|${q}"]=0; done < "${root}/${CODEQL_KNOWN}"
+	fi
+	: > "${shown}"
 	while IFS= read -r f; do
-		if [[ "${f}" =~ ${re} ]]; then printf '  %s:%s: %s: %s (%s)\n' "${BASH_REMATCH[9]#/}" "${BASH_REMATCH[11]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[7]//\"\"/\"}" "${BASH_REMATCH[1]}"
-		else printf '  %s\n' "${f}"; fi
-	done < "${out}" | fLintOut
-	n="$(grep -c . "${out}" || true)"
-	((n == 0)) || fDie "CodeQL: ${n} result(s)"
-	fEcho_Clean "CodeQL ${CODEQL_VERSION}: no results"
+		rec+="${rec:+ }${f}"; q="${rec//[^\"]/}"
+		((${#q} % 2 == 0)) || continue
+		if [[ "${rec}" =~ ${re} ]]; then
+			key="${BASH_REMATCH[1]}|${BASH_REMATCH[9]#/}|${BASH_REMATCH[11]}"
+			if [[ -n "${known[${key}]+x}" ]]; then known["${key}"]=1; nKnown+=1; rec=""; continue; fi
+			printf '  %s:%s: %s: %s (%s)\n' "${BASH_REMATCH[9]#/}" "${BASH_REMATCH[11]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[7]//\"\"/\"}" "${BASH_REMATCH[1]}"
+		else printf '  %s\n' "${rec}"; fi >> "${shown}"
+		nNew+=1; rec=""
+	done < "${out}"
+	fLintOut < "${shown}"
+	for key in "${!known[@]}"; do ((known[${key}])) || stale+=("${key}"); done
+	((${#stale[@]} == 0)) || fEcho "WARNING: ${CODEQL_KNOWN} has ${#stale[@]} entry(ies) that matched nothing, so take them out: ${stale[*]}"
+	((nNew == 0)) || fDie "CodeQL: ${nNew} result(s)"
+	q=""; ((nKnown == 0)) || q=", and ${nKnown} known third-party one(s) let through, per ${CODEQL_KNOWN}"
+	fEcho_Clean "CodeQL ${CODEQL_VERSION}: no new results${q}"
 }
 
 relDir=""
@@ -789,9 +821,13 @@ fStepArm64(){
 	fEcho_Clean "arm64 on ${ARM64_HOST}: $(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true) test line(s) passed"
 }
 fRootHost(){ ## [--zfs]
-	local log="${runTmp}/roothost${1:-}.log" rc=0
+	local log="${runTmp}/roothost${1:-}.log" rc=0 bin="${runTmp}/build/${EXE_NAME}-linux-amd64" envs=() opts=("$@")
 	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fSkip "no docker here"; return 0; fi
-	nice -n 19 bash "${here}/root-host/root-host.bash" "${@}" > "${log}" 2>&1 || rc=$?
+	## The release build from the pinned Go, when this run made one, rather than this box's go.
+	[[ ! -x "${bin}" ]] || envs+=("ROOT_HOST_BIN=${bin}")
+	((! keepTemp)) || opts+=(--keep-temp)
+	env "${envs[@]}" nice -n 19 bash "${here}/root-host/root-host.bash" "${opts[@]}" > "${log}" 2>&1 || rc=$?
+	grep -E '^(Checking|Building) ' "${log}" | head -n 1 | sed 's/^/  /' || true
 	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
 	if ((rc)); then tail -n 60 "${log}"; fDie "root host checks failed"; fi
 	fEcho_Clean "root host: $(grep -cE '^PASS ' "${log}" || true) check(s) passed"
@@ -983,3 +1019,5 @@ fEcho_Clean
 ##		  in the image and its errors fail, govulncheck skips only a failed fetch, and the second build is from a copy.
 ##		- 2026-11-19: the .deb and .rpm put the binary in /usr/bin, and the build has to name that path.
 ##		- 2026-11-19: the build step writes SHA256SUMS for its binaries, so a run without the package step leaves no stale one.
+##		- 2026-11-19: CodeQL checks the vendored modules too, with known results in CODEQL_KNOWN. The soak keeps its
+##		  heap profiles. The root host steps check the run's release build. The demo is drawn by gen-demo-gif.py.

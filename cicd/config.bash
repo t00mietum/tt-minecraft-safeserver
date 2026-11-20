@@ -72,10 +72,15 @@ FUZZ_TIME_LONG="5m"
 CODEQL_VERSION="2.27.4"
 CODEQL_SHA256="d79b33f86ec8b20af73d3456041349a2780c1081ee8c0eca624b9a25c5cb2e15"
 CODEQL_SUITE="codeql/go-queries:codeql-suites/go-security-and-quality.qls"
+## The modules are vendored into the copy, so their code is checked too. Results in them that were
+## looked at and let through are listed here, by rule, path and line, each with why.
+CODEQL_KNOWN="cicd/codeql-known.txt"
 
 ## Soak: rounds of the main actions before the first heap and goroutine sample, and again before
 ## the second. The tests skip outside the soak step.
 SOAK_ENV="TT_MINECRAFTD_SOAK"   ## soak.Env in source/internal/soak
+SOAK_PROFILE_ENV="TT_MINECRAFTD_SOAK_PROFILES"   ## soak.ProfileEnv
+SOAK_DIR="cicd/artifacts/soak"   ## the heap profiles, GFS-rotated
 SOAK_ROUNDS="100"
 SOAK_ROUNDS_LONG="1000"
 
