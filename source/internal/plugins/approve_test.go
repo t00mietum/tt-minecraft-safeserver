@@ -210,86 +210,87 @@ func TestSetSources(t *testing.T) {
 	}
 }
 
-// Refuse moves a plugin out of the way, and never paper.
-func TestRefuse(t *testing.T) {
-	defer testid.Line(t, "1a3en5c")
-	dir := t.TempDir()
-	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.Local)
-	for i := range 2 {
-		put(t, filepath.Join(dir, "plugins", "bad.jar"), "bad")
-		dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now)
-		want := filepath.Join(dir, RefusedDir, "bad.jar")
-		if i == 1 {
-			want += ".20261111-120000"
-		}
-		if err != nil || dest != want {
-			t.Errorf("Refuse = %q, %v; want %q", dest, err, want)
-		}
-		if _, err := os.Stat(want); err != nil {
-			t.Error(err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, "plugins", "bad.jar")); err == nil {
-		t.Error("still in plugins/")
-	}
-	put(t, filepath.Join(dir, "paper-26.3-244.jar"), "paper")
-	if _, err := Refuse(dir, Jar{Name: "paper-26.3-244.jar"}, now); err == nil {
-		t.Error("moved paper")
-	}
-}
-
-// Refuse runs as root, so a link the server planted in the way is refused,
-// and the jar and the link's target stay as they were.
-func TestRefuseLinks(t *testing.T) {
-	defer testid.Line(t, "1a3js38")
-	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.Local)
-	empty := func(t *testing.T, dir string) {
-		t.Helper()
-		if got, _ := os.ReadDir(dir); len(got) != 0 {
-			t.Errorf("%s has %d files", dir, len(got))
-		}
-	}
-
-	dir, outside := t.TempDir(), t.TempDir()
-	put(t, filepath.Join(dir, "plugins", "bad.jar"), "bad")
-	if err := os.Symlink(outside, filepath.Join(dir, RefusedDir)); err != nil {
-		t.Fatal(err)
-	}
-	if dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now); err == nil {
-		t.Errorf("moved through a linked %s to %s", RefusedDir, dest)
-	}
-	empty(t, outside)
-	if _, err := os.Stat(filepath.Join(dir, "plugins", "bad.jar")); err != nil {
-		t.Error(err)
-	}
-
-	dir, outside = t.TempDir(), t.TempDir()
-	put(t, filepath.Join(outside, "bad.jar"), "bad")
-	if err := os.Symlink(outside, filepath.Join(dir, "plugins")); err != nil {
-		t.Fatal(err)
-	}
-	if dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now); err == nil {
-		t.Errorf("moved out of a linked plugins/ to %s", dest)
-	}
-	if _, err := os.Stat(filepath.Join(outside, "bad.jar")); err != nil {
-		t.Error(err)
-	}
-
-	// A jar that's a link goes as the link, and a new folder is ug+rwx.
-	dir = t.TempDir()
-	put(t, filepath.Join(outside, "target.jar"), "x")
-	put(t, filepath.Join(dir, "plugins", "a.jar"), "a")
-	if err := os.Symlink(filepath.Join(outside, "target.jar"), filepath.Join(dir, "plugins", "link.jar")); err != nil {
-		t.Fatal(err)
-	}
-	dest, err := Refuse(dir, Jar{Name: "plugins/link.jar"}, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi, err := os.Lstat(dest); err != nil || fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("%s isn't the link: %v", dest, err)
-	}
-	if fi, err := os.Stat(filepath.Join(dir, RefusedDir)); err != nil || fi.Mode().Perm() != 0o770 {
-		t.Errorf("%s: %v %v", RefusedDir, fi.Mode(), err)
-	}
-}
+// Commented out by 2026111918161429: plugins.Refuse and RefusedDir are gone, since nothing calls them now that there is no bad-list check.
+// // Refuse moves a plugin out of the way, and never paper.
+// func TestRefuse(t *testing.T) {
+// 	defer testid.Line(t, "1a3en5c")
+// 	dir := t.TempDir()
+// 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.Local)
+// 	for i := range 2 {
+// 		put(t, filepath.Join(dir, "plugins", "bad.jar"), "bad")
+// 		dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now)
+// 		want := filepath.Join(dir, RefusedDir, "bad.jar")
+// 		if i == 1 {
+// 			want += ".20261111-120000"
+// 		}
+// 		if err != nil || dest != want {
+// 			t.Errorf("Refuse = %q, %v; want %q", dest, err, want)
+// 		}
+// 		if _, err := os.Stat(want); err != nil {
+// 			t.Error(err)
+// 		}
+// 	}
+// 	if _, err := os.Stat(filepath.Join(dir, "plugins", "bad.jar")); err == nil {
+// 		t.Error("still in plugins/")
+// 	}
+// 	put(t, filepath.Join(dir, "paper-26.3-244.jar"), "paper")
+// 	if _, err := Refuse(dir, Jar{Name: "paper-26.3-244.jar"}, now); err == nil {
+// 		t.Error("moved paper")
+// 	}
+// }
+//
+// // Refuse runs as root, so a link the server planted in the way is refused,
+// // and the jar and the link's target stay as they were.
+// func TestRefuseLinks(t *testing.T) {
+// 	defer testid.Line(t, "1a3js38")
+// 	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.Local)
+// 	empty := func(t *testing.T, dir string) {
+// 		t.Helper()
+// 		if got, _ := os.ReadDir(dir); len(got) != 0 {
+// 			t.Errorf("%s has %d files", dir, len(got))
+// 		}
+// 	}
+//
+// 	dir, outside := t.TempDir(), t.TempDir()
+// 	put(t, filepath.Join(dir, "plugins", "bad.jar"), "bad")
+// 	if err := os.Symlink(outside, filepath.Join(dir, RefusedDir)); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now); err == nil {
+// 		t.Errorf("moved through a linked %s to %s", RefusedDir, dest)
+// 	}
+// 	empty(t, outside)
+// 	if _, err := os.Stat(filepath.Join(dir, "plugins", "bad.jar")); err != nil {
+// 		t.Error(err)
+// 	}
+//
+// 	dir, outside = t.TempDir(), t.TempDir()
+// 	put(t, filepath.Join(outside, "bad.jar"), "bad")
+// 	if err := os.Symlink(outside, filepath.Join(dir, "plugins")); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if dest, err := Refuse(dir, Jar{Name: "plugins/bad.jar"}, now); err == nil {
+// 		t.Errorf("moved out of a linked plugins/ to %s", dest)
+// 	}
+// 	if _, err := os.Stat(filepath.Join(outside, "bad.jar")); err != nil {
+// 		t.Error(err)
+// 	}
+//
+// 	// A jar that's a link goes as the link, and a new folder is ug+rwx.
+// 	dir = t.TempDir()
+// 	put(t, filepath.Join(outside, "target.jar"), "x")
+// 	put(t, filepath.Join(dir, "plugins", "a.jar"), "a")
+// 	if err := os.Symlink(filepath.Join(outside, "target.jar"), filepath.Join(dir, "plugins", "link.jar")); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	dest, err := Refuse(dir, Jar{Name: "plugins/link.jar"}, now)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if fi, err := os.Lstat(dest); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+// 		t.Errorf("%s isn't the link: %v", dest, err)
+// 	}
+// 	if fi, err := os.Stat(filepath.Join(dir, RefusedDir)); err != nil || fi.Mode().Perm() != 0o770 {
+// 		t.Errorf("%s: %v %v", RefusedDir, fi.Mode(), err)
+// 	}
+// }

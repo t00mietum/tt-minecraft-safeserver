@@ -12,19 +12,12 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/yottacore/shcl/source/go/v3"
 )
-
-// RefusedDir is where a refused jar goes, under serverDir, so the server
-// doesn't load it.
-const RefusedDir = "plugins-refused"
 
 // Info is what an operator sees about a jar.
 type Info struct {
@@ -193,52 +186,4 @@ func Unsourced(serverDir, file string) ([]Info, error) {
 		out = append(out, info)
 	}
 	return out, nil
-}
-
-// Refuse moves a jar from pinnedDirs into RefusedDir, owned like plugins/.
-// One that's already there with the same name gets the time added to the new
-// one's name. It runs as root, so nothing on the way is followed as a link.
-func Refuse(serverDir string, j Jar, now time.Time) (string, error) {
-	from := path.Dir(j.Name)
-	if !slices.Contains(pinnedDirs, from) {
-		return "", fmt.Errorf("%s isn't a plugin, so it stays where it is", j.Name)
-	}
-	top, err := linksafe.Open(serverDir)
-	if err != nil {
-		return "", err
-	}
-	defer top.Close()
-	src, err := top.Walk(from)
-	if err != nil {
-		return "", err
-	}
-	defer src.Close()
-	plugins, err := top.Sub("plugins")
-	if err != nil {
-		return "", err
-	}
-	owner, err := plugins.Stat()
-	plugins.Close()
-	if err != nil {
-		return "", err
-	}
-	refused, err := top.Sub(RefusedDir)
-	if errors.Is(err, fs.ErrNotExist) {
-		refused, err = top.Mkdir(RefusedDir, owner)
-	}
-	if err != nil {
-		return "", err
-	}
-	defer refused.Close()
-	base := path.Base(j.Name)
-	name := base
-	err = src.Move(base, refused, name)
-	if errors.Is(err, fs.ErrExist) {
-		name += "." + now.Format("20060102-150405")
-		err = src.Move(base, refused, name)
-	}
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(serverDir, RefusedDir, name), nil
 }
