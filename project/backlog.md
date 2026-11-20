@@ -2722,7 +2722,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The demo is drawn by a copy of tukfs-hash's gif script. JetBrains Mono stands in for Monaspace Argon in the build image, since Debian has no Monaspace package. The scenario still asks for Monaspace first.
 		- Renders stay in the gitignored artifacts folder, not the private tree, so a fresh clone can render one. Only a release run updates `assets/demo.gif`, as before.
 		- No dogfood run script. The tool runs itself through sudo, and the boot unit runs the `/usr/local/bin` copy that the dogfood step installs. A versioned copy in `~/.local/bin` would come first on the operator's PATH and differ from what the boot unit runs.
-		- Release files keep `amd64` in their names rather than `x86_64`, since `v1.0.0-alpha.1` published that scheme and its links shouldn't change. It's also Debian's name for the arch. Check: entry in questions.md.
+		- Release files keep `amd64` in their names rather than `x86_64`, since `v1.0.0-alpha.1` published that scheme and its links shouldn't change. It's also Debian's name for the arch. OKed by t00mietum on 2026-11-20, for this project.
 	- Branch: cicd-fixup
 	- Closed reason: Done
 	- Test case: 1a4jssw for the soak's profiles. The rest are pipeline steps: CodeQL failed when a known entry was moved off its line and named the stale entry, both root host steps passed on the run's release build, and the demo step passed with its frames checked by eye.
