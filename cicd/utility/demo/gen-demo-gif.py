@@ -1,1046 +1,849 @@
 #!/usr/bin/env python3
 
-##	Purpose: Draw the README's demo gif. Each command in a TOML scenario is
-##		typed into a fake terminal the way a person types, mistakes and all,
-##		then run for real against the release binary, so the output shown
-##		can't go stale. 50 fps: the cursor eases between cells, and output
-##		scrolls smoothly once it reaches the bottom. The loop ends on a cut to
-##		black. Pillow only, so nothing opens a window or needs a screen.
-##		From tukfs-hash's gen-demo-gif.py, run as root in a throwaway container.
-##	Syntax: gen-demo-gif.py --scenario FILE --out FILE --bin PATH [--seed N] [--font NAME] [--quiet]
-##	Exit: 0 wrote the gif; 1 a step, the leak check or the frame timing failed; 2 skipped, no Pillow or no font.
+##	Purpose: Render an animated demo GIF of a CLI program, without recording a
+##		real terminal (no ttyd, no asciinema, no ffmpeg - just Pillow). A TOML
+##		scenario file scripts the session; each command is "typed" into a fake
+##		terminal window with human timing (slower digits, a beat before flags,
+##		the occasional corrected typo), then actually executed so the captured
+##		output can never go stale. A command that stops to ask something gets a
+##		terminal on its stdin, so it really does ask, and its answer is typed on
+##		camera like every other keystroke. Scrolling is pixel-smooth (content settles
+##		back onto the line grid at rest) and the cursor glides between cells
+##		rather than teleporting. At the end it holds the last frame still, then
+##		hard-cuts to a black frame before repeating - a held black frame is one
+##		cheap frame, not a bloaty fade. Frames share one exact master palette,
+##		so nothing is ever re-dithered. Project-agnostic - point it at any scenario.
+##	Syntax:
+##		gen-demo-gif.py --scenario FILE --out FILE [--bin PATH] [--seed N] [-q]
+##		  --scenario FILE  TOML scenario (see fLoadScenario for the format)
+##		  --out FILE       GIF to write (required)
+##		  --bin PATH       program under demo; substituted for {bin} in run=
+##		  --seed N         RNG seed; fixed default so reruns are byte-stable
+##		  --font NAME      override the scenario's font preference list
+##		  -q, --quiet      only errors
+##	Exit: 0 wrote the GIF, 2 non-fatal skip (no Pillow, bad scenario, cmd failed).
 ##	History: At bottom of script.
 
-##	Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+##	Copyright (c) 2026 Bubbles
 ##	Licensed under The MIT License (MIT). Full text at:
 ##		https://mit-license.org/
 ##	SPDX-License-Identifier: MIT
 
 
-from __future__ import annotations
-
 import argparse
-import getpass
-import io
 import os
 import random
 import re
-import secrets
 import shlex
-import shutil
-import socket
 import subprocess
 import sys
-import tempfile
-from collections import deque
-from dataclasses import dataclass
-from difflib import get_close_matches
-from enum import Enum, auto
-from pathlib import Path
-from typing import Any, NamedTuple, NoReturn, TypeVar
+import time
+import unicodedata
 
 try:
-    import tomllib
+	import tomllib
 except ImportError:
-    sys.stderr.write("gen-demo-gif: needs python 3.11 or newer, for tomllib\n")
-    sys.exit(2)
+	sys.stderr.write("gen-demo-gif: needs python 3.11+ (tomllib)\n")
+	sys.exit(2)
 try:
-    from PIL import Image, ImageDraw, ImageFont
+	from PIL import Image, ImageDraw, ImageFont
 except ImportError:
-    sys.stderr.write("gen-demo-gif: Pillow isn't installed\n")
-    sys.exit(2)
+	sys.stderr.write("gen-demo-gif: Pillow not installed\n")
+	sys.exit(2)
 
 
-##	960x540, and the window fills it but for a black edge. Square corners.
+##	Canvas and window chrome. 960x540 total; the window fills the whole view
+##	except a thin black border. Square corners, no shadow.
 CANVAS_W, CANVAS_H = 960, 540
-MARGIN = 4
-TITLE_H = 34
-PAD = 12
+MARGIN     = 4        # thin black border around the window
+TITLE_H    = 34       # title bar height
+PAD        = 12       # text inset inside the terminal area
 
-Rgb = tuple[int, int, int]
-Span = tuple[str, str]  # (text, THEME key)
-T = TypeVar("T")
-KINDS = {str: "a string", int: "a whole number", float: "a number", bool: "true or false"}
-
-THEME: dict[str, Rgb] = {
-    "outer": (0, 0, 0),
-    "border": (58, 58, 62),
-    "titlebar": (44, 44, 48),
-    "titletxt": (150, 150, 152),
-    "bg": (30, 32, 30),
-    "fg": (166, 227, 161),
-    "gray": (148, 148, 148),
-    "dim": (106, 112, 106),
+THEME = {
+	"outer":    (0, 0, 0),         # thin border around the window
+	"border":   (58, 58, 62),      # 1px window outline
+	"titlebar": (44, 44, 48),
+	"titletxt": (150, 150, 152),
+	"dots":     [(158, 96, 92), (158, 142, 92), (105, 148, 100)],   # muted traffic lights
+	"bg":       (30, 32, 30),      # terminal background: dark gray, hint of warmth
+	"fg":       (166, 227, 161),   # bright pale green
+	"gray":     (148, 148, 148),   # prompt punctuation ("standard gray")
+	"dim":      (106, 112, 106),   # comments, truncation ellipsis
 }
-TRAFFIC_LIGHTS: list[Rgb] = [(158, 96, 92), (158, 142, 92), (105, 148, 100)]
-##	Dimmer than fg, and across the wheel from green. 2 picked per seed.
-IDENT_TINTS: list[Rgb] = [
-    (196, 148, 108),
-    (160, 136, 200),
-    (112, 178, 196),
-    (198, 140, 156),
-    (170, 166, 108),
+##	user@host tints: dimmer than fg, complementary hues (green sits across from
+##	these on the wheel). Two distinct picks per run, seeded.
+IDENT_TINTS = [
+	(196, 148, 108),   # tan
+	(160, 136, 200),   # violet
+	(112, 178, 196),   # cyan
+	(198, 140, 156),   # rose
+	(170, 166, 108),   # olive
 ]
 IDENT_USERS = ["mika", "joss", "arlo", "remy", "kai", "nova", "wren", "finn"]
 IDENT_HOSTS = ["basalt", "kestrel", "onyx", "lyra", "quartz", "mesa", "flint", "juno"]
 
-WPM_LETTERS = (160, 200)
-WPM_DIGITS = 100
-WPM_NOTES = (268, 302)
-FLAG_PAUSE_MS = (200, 380)  # a beat of thought before a -flag
-TYPO_RATE = 0.018  # per letter, at most 2 fixes a command
-BLINK_MS = 530
-##	A gif delay is in centiseconds, and browsers bump 0 and 1 up to 10, so 2
-##	is as fast as it goes.
-FRAME_MS = 20
-SCROLL_RATE = 448  # px/s
-GLIDE_FRAMES = 3
-GIFSICLE_TIMEOUT_S = 600
+##	Typing model. WPM -> ms/char at the usual 5 chars/word.
+WPM_LETTERS   = (135, 183)   # per-command draw, then per-char jitter
+WPM_DIGITS    = 63           # default; scenario wpm_digits overrides
+WPM_NOTES     = (233, 263)   # "# comment" lines fly by
+FLAG_PAUSE_MS = (200, 380)   # a beat of thought before a -flag token
+TYPO_RATE     = 0.018        # per letter; capped at 2 fixes per command
+BLINK_MS      = 520          # a multiple of FRAME_MS, so blinks stay on the grid
+FRAME_MS      = 20           # 50 fps: every frame duration is a multiple of this
+SCROLL_RATE   = 150          # px/s smooth scroll; per-step scrollrate overrides
+NOTE_HOLD_MS  = 700          # a caption that appears whole still has to be read
 
 QWERTY_ROWS = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"]
+
 ANSI_RE = re.compile(r"\x1b(\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|.)")
-HOME_MARK = ".gen-demo-gif"
-##	Printable ASCII, the one range every font here draws, plus the copyright
-##	sign in --version, which they all have too.
-UNDRAWABLE_RE = re.compile(r"[^\x20-\x7e\u00a9]")
 
 
-class KeyAction(Enum):
-    TYPE = auto()
-    BACKSPACE = auto()
-    PAUSE = auto()
+def fEmojiInit():
+	##	Color emoji are beyond FreeType-via-Pillow now (Noto ships COLRv1), so
+	##	glyph tiles come from Pango+cairo instead. Everything here is optional:
+	##	if any piece is missing the chars just draw through the monochrome
+	##	fallback like before.
+	try:
+		import gi
+		import cairo
+		gi.require_version("Pango", "1.0")
+		gi.require_version("PangoCairo", "1.0")
+		from gi.repository import Pango, PangoCairo
+		from fontTools.ttLib import TTFont
+	except (ImportError, ValueError):
+		return None
+	try:
+		out = subprocess.run(["fc-match", "-f", "%{file}\t%{family}", "emoji"],
+		                     capture_output=True, text=True, timeout=10).stdout
+		path, family = (out.split("\t") + [""])[:2]
+		if "emoji" not in family.lower():
+			return None
+		cmap = set(TTFont(path, lazy=True).getBestCmap())
+	except Exception:
+		return None
+	return {"Pango": Pango, "PangoCairo": PangoCairo, "cairo": cairo,
+	        "family": family, "cmap": cmap}
 
 
-class KeyEvent(NamedTuple):
-    action: KeyAction
-    text: str | None
-    delay: float  # ms
+EMOJI = fEmojiInit()
 
 
-class TypedLine(NamedTuple):
-    text: str
-    color: str  # "fg" a command, "dim" a note
-    wpm: tuple[float, float]
-    typos: bool
-    scale: float
+def fSkip(msg):
+	##	2 = non-fatal skip, same convention as the other cicd utilities: the
+	##	stage warns and the pipeline continues.
+	sys.stderr.write(f"gen-demo-gif: {msg}\n")
+	sys.exit(2)
 
 
-class Ident(NamedTuple):
-    user: str
-    host: str
+def fFindFont(prefs, size):
+	##	Resolve the first available preference via fc-match. fc-match always
+	##	answers with its best match, so verify the family before trusting it;
+	##	the final fallback takes whatever monospace fontconfig offers.
+	for name in prefs + ["monospace"]:
+		try:
+			out = subprocess.run(
+				["fc-match", "-f", "%{file}\t%{family}\t%{style}", name],
+				capture_output=True, text=True, timeout=10).stdout
+		except OSError:
+			break
+		path, family, style = (out.split("\t") + ["", ""])[:3]
+		want = re.sub(r"[^a-z]", "", name.lower())
+		got  = re.sub(r"[^a-z]", "", (family + style).lower())
+		if name == "monospace" or (path and want in got):
+			try:
+				return ImageFont.truetype(path, size), f"{family} {style}".strip()
+			except OSError:
+				continue
+	fSkip("no usable monospace font found")
 
 
-@dataclass(frozen=True)
-class Step:
-    note: list[str]
-    show: str
-    run: str | None  # None: run show
-    expect_exit: int
-    pause: float
-    overflow: str
-    clear: bool | None  # None: when the output wouldn't fit
-    recall: bool
-    scrollrate: float
-    linems: float
-    gap: bool
-    preenter: float
-    typescale: float
-    notepause: float
+def fLoadScenario(path):
+	##	Scenario format (TOML):
+	##	  title = "window title"        prog = "name shown in typed commands"
+	##	  font = ["pref1", "pref2"]     seed = 11
+	##	  wpm_digits = 42               digit typing speed (numbers-heavy demos: raise it)
+	##	  type_notes = false            captions appear whole instead of being typed out
+	##	  end_hold = 3.0                seconds the final frame holds before the loop
+	##	  end_black = 2.0               seconds of black after the hold, then repeat
+	##	  [[step]]
+	##	  note = "shown as a typed # comment first"     (optional)
+	##	  show = "{prog} 255 16"        the command line as typed
+	##	  run  = "echo hi | {bin} ..."  what actually executes (default: show)
+	##	  pause = 2.6                   read time after the output, seconds
+	##	  overflow = "truncate"         or "wrap" for real feature output
+	##	  scrollrate = 260              px/s smooth scroll during this step's output
+	##	  linems = 20                   ms per output line before scrolling kicks in
+	##	  clear = true                  wipe the scrollback first, as `clear` does
+	##	  cwd = "~/dev/thing"           shown in the prompt (default: "~")
+	##	  ask = "Continue? (y|n): "     text the command stops on and waits for input
+	##	  answer = "y"                  typed on camera in reply, then Enter
+	##	  askpause = 3.0                seconds to read the plan before the answer
+	try:
+		with open(path, "rb") as f:
+			sc = tomllib.load(f)
+	except (OSError, tomllib.TOMLDecodeError) as e:
+		fSkip(f"scenario: {e}")
+	if not sc.get("step"):
+		fSkip("scenario has no [[step]] entries")
+	return sc
 
 
-@dataclass(frozen=True)
-class MapRule:
-    find: re.Pattern[str]
-    put: str
+def fLines(text):
+	##	Captured bytes -> terminal lines: escapes gone, tabs expanded, no trailing
+	##	blanks on the ends of lines.
+	return [ln.expandtabs(8).rstrip() for ln in ANSI_RE.sub("", text).split("\n")]
 
 
-@dataclass(frozen=True)
-class Scenario:
-    title: str | None
-    prog: str | None
-    seed: int
-    font: list[str]
-    fontsize: float
-    end_hold: float
-    end_black: float
-    home_as: str
-    setup: str
-    maps: list[MapRule]
-    steps: list[Step]
+def fRunStep(step, prog, binpath):
+	##	Execute the step's command for real, and hand back the pieces the step will
+	##	draw: ("out", lines) for ordinary output, ("ask", question, answer) where the
+	##	command stopped and waited. stderr shares the stdout pipe rather than being
+	##	appended after it, so a program that mixes the two (git writes most of its
+	##	progress to stderr) reads in the order it actually printed.
+	cmd = step.get("run", step["show"])
+	cmd = cmd.replace("{bin}", shlex.quote(binpath)).replace("{prog}", shlex.quote(binpath))
+	if step.get("ask"):
+		return fRunAsked(cmd, str(step["ask"]), str(step.get("answer", "")))
+	try:
+		res = subprocess.run(["bash", "-c", cmd], stdout=subprocess.PIPE,
+		                     stderr=subprocess.STDOUT, text=True,
+		                     timeout=30, errors="replace")
+	except subprocess.TimeoutExpired:
+		fSkip(f"command timed out: {cmd}")
+	return [("out", fLines(res.stdout.rstrip("\n")))]
 
 
-def skip(msg: str) -> NoReturn:
-    ##	2 is a skip the stage warns about and gets past.
-    sys.stderr.write(f"gen-demo-gif: {msg}\n")
-    sys.exit(2)
+def fRunAsked(cmd, ask, answer):
+	##	A command that asks before it acts will not ask a pipe - it either skips the
+	##	question or refuses - so stdin gets a real terminal. Only stdin: stdout stays
+	##	a pipe, so colour and cursor tricks meant for a terminal stay out of the
+	##	captured text and the frames look the same as every other step's.
+	##	The answer goes in here to unblock the command; drawing it is the render
+	##	loop's job, from this same string, so what runs and what is on screen cannot
+	##	disagree.
+	import pty      # local: no ptys off Unix, and only this path needs one
+	import select
+	master, slave = pty.openpty()
+	proc = subprocess.Popen(["bash", "-c", cmd], stdin=slave,
+	                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	os.close(slave)
+	buf, sent, deadline = b"", False, time.monotonic() + 30
+	while True:
+		if time.monotonic() > deadline:
+			proc.kill()
+			fSkip(f"command never asked {ask!r}, and timed out: {cmd}")
+		if select.select([proc.stdout], [], [], 0.2)[0]:
+			chunk = os.read(proc.stdout.fileno(), 65536)
+			if not chunk:
+				break
+			buf += chunk
+		if not sent and ANSI_RE.sub("", buf.decode("utf-8", "replace")).endswith(ask):
+			os.write(master, (answer + "\n").encode())
+			sent = True
+	proc.wait()
+	os.close(master)
+	text = ANSI_RE.sub("", buf.decode("utf-8", "replace"))
+	if not sent:
+		fSkip(f"command exited without asking {ask!r}: {cmd}")
+	##	The question is written without a newline and the answer is read back, so
+	##	neither is a line yet. Split there: what precedes it is ordinary output, the
+	##	last piece of it shares the question's line, and what follows starts with the
+	##	newline the typed Enter would have supplied.
+	at = text.index(ask)
+	before = fLines(text[:at])
+	lead = before.pop()
+	return [("out", before), ("ask", lead + ask, answer),
+	        ("out", fLines(text[at + len(ask):].rstrip("\n")))]
 
 
-def fail(msg: str) -> NoReturn:
-    sys.stderr.write(f"gen-demo-gif: {msg}\n")
-    sys.exit(1)
+def fStepText(segs):
+	##	Every line a step will put on screen, for the palette scan below.
+	for seg in segs:
+		if seg[0] == "ask":
+			yield seg[1] + seg[2]
+		else:
+			yield from seg[1]
 
 
-def optimize_gif(path: Path) -> str | None:
-    ##	Lossless: gifsicle can make single unchanged pixels transparent, where
-    ##	Pillow writes one changed box per frame. Pixels and delays don't change.
-    ##	None once it has run, or why it didn't, for the summary. Why it failed
-    ##	goes to stderr, since only a missing gifsicle is expected.
-    tmp = path.with_name(path.name + ".gifsicle")
-    try:
-        res = subprocess.run(
-            ["gifsicle", "-O2", "--no-warnings", str(path), "-o", str(tmp)],
-            capture_output=True,
-            text=True,
-            timeout=GIFSICLE_TIMEOUT_S,
-        )
-    except FileNotFoundError:
-        return "no gifsicle"
-    except OSError as e:
-        why = f"could not start: {e}"
-    except subprocess.TimeoutExpired:
-        why = f"didn't finish in {GIFSICLE_TIMEOUT_S} s"
-    else:
-        if res.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
-            tmp.replace(path)
-            return None
-        why = f"exited {res.returncode}" if res.returncode else "wrote nothing"
-        if err := res.stderr.strip():
-            why += f": {err}"
-    sys.stderr.write(f"gen-demo-gif: gifsicle {why}\n")
-    tmp.unlink(missing_ok=True)
-    return "gifsicle didn't run"
+def fTypeEvents(text, rng, wpm_range, typos=True, wpmDigits=WPM_DIGITS):
+	##	Turn a command string into ((action, char), delay_ms) keystroke events.
+	##	Letters ride the per-command WPM draw with per-char jitter, digits get
+	##	their own WPM (slow by default, fast for numbers-heavy demos), a -flag
+	##	token gets a small hesitation, and a couple of seeded typos get noticed
+	##	and backspaced away.
+	wpm = rng.uniform(*wpm_range)
+	events, fixes = [], 0
+	firstSpace = text.find(" ")
+	for i, ch in enumerate(text):
+		if ch.isdigit():
+			delay = 60000.0 / (wpmDigits * 5) * rng.uniform(0.82, 1.22)
+		else:
+			delay = 60000.0 / (wpm * 5) * rng.uniform(0.70, 1.34)
+			if i < firstSpace:
+				delay *= 0.78        # the leading token is muscle memory
+		if ch == "-" and (i == 0 or text[i - 1] == " "):
+			delay += rng.uniform(*FLAG_PAUSE_MS)
+		if typos and fixes < 2 and ch.isalpha() and rng.random() < TYPO_RATE:
+			wrong = fNeighborKey(ch, rng)
+			events.append((("type", wrong), delay))
+			overshoot = None
+			if i + 1 < len(text) and text[i + 1].isalpha() and rng.random() < 0.4:
+				overshoot = text[i + 1]      # one more char before noticing
+				events.append((("type", overshoot), 60000.0 / (wpm * 5)))
+			events.append((("pause", None), rng.uniform(320, 640)))
+			for _ in range(2 if overshoot else 1):
+				events.append((("bs", None), rng.uniform(95, 150)))
+			events.append((("type", ch), rng.uniform(140, 260)))
+			fixes += 1
+			continue
+		events.append((("type", ch), delay))
+	return events
 
 
-def find_font(prefs: list[str], size: float) -> tuple[ImageFont.FreeTypeFont, str]:
-    ##	fc-match always answers with something, so the family has to match
-    ##	before it's taken. Plain "monospace" takes whatever it gets.
-    for name in [*prefs, "monospace"]:
-        try:
-            out = subprocess.run(
-                ["fc-match", "-f", "%{file}\t%{family}\t%{style}", name],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            ).stdout
-        except (OSError, subprocess.TimeoutExpired):
-            break
-        path, family, style = ([*out.split("\t"), "", ""])[:3]
-        want = re.sub(r"[^a-z]", "", name.lower())
-        got = re.sub(r"[^a-z]", "", (family + style).lower())
-        if path and (name == "monospace" or want in got):
-            try:
-                ##	Debian 12's Pillow 9.4 takes only a whole size.
-                return ImageFont.truetype(path, round(size)), f"{family.split(',')[0]} {style.split(',')[0]}".strip()
-            except OSError:
-                continue
-    skip("no monospace font found")
+def fNeighborKey(ch, rng):
+	for row in QWERTY_ROWS:
+		pos = row.find(ch.lower())
+		if pos < 0:
+			continue
+		near = [row[j] for j in (pos - 1, pos + 1) if 0 <= j < len(row)]
+		pick = rng.choice(near)
+		return pick.upper() if ch.isupper() else pick
+	return ch
 
 
-class Table:
-    ##	One TOML table, read a key at a time. A key nothing read, such as a
-    ##	misspelled one, fails the render once the table is done.
-    def __init__(self, raw: object, where: str) -> None:
-        if not isinstance(raw, dict):
-            fail(f"scenario: {where} isn't a table")
-        self.left: dict[str, Any] = dict(raw)
-        self.known: list[str] = []
-        self.where = where
-
-    def get(self, key: str, default: T) -> T:
-        self.known.append(key)
-        val = self.left.pop(key, default)
-        if isinstance(default, float) and type(val) is int:
-            val = float(val)
-        if type(val) is not type(default):
-            fail(f"scenario: {self.where}: {key} = {val!r} isn't {KINDS[type(default)]}")
-        return val
-
-    def maybe(self, key: str, kind: T) -> T | None:
-        return self.get(key, kind) if key in self.left else None
-
-    def need(self, key: str, kind: T) -> T:
-        if key not in self.left:
-            fail(f"scenario: {self.where} has no {key}")
-        return self.get(key, kind)
-
-    def strs(self, key: str) -> list[str]:
-        ##	One string, or a list of them.
-        self.known.append(key)
-        val = self.left.pop(key, [])
-        val = [val] if isinstance(val, str) else val
-        if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
-            fail(f"scenario: {self.where}: {key} isn't a string or a list of them")
-        return val
-
-    def tables(self, key: str) -> list[Table]:
-        self.known.append(key)
-        val = self.left.pop(key, [])
-        if not isinstance(val, list):
-            fail(f"scenario: {key} isn't an array of tables")
-        return [Table(t, f"[[{key}]] {i}") for i, t in enumerate(val, 1)]
-
-    def done(self) -> None:
-        for key in self.left:
-            near = get_close_matches(key, self.known, n=1)
-            fail(f"scenario: {self.where}: no such key: {key}{f' (meant {near[0]}?)' if near else ''}")
-
-
-def load_scenario(path: str) -> Scenario:
-    ##	Scenario, TOML:
-    ##	  title, prog, seed, font = [...]   window title, name typed, typing seed, fonts to try
-    ##	  fontsize = 15                      the font size
-    ##	  end_hold = 2.0, end_black = 3.0    seconds on the last frame, then on black
-    ##	  home_as = "/home/{user}"           what the demo home shows as in output
-    ##	  setup = "..."                      runs first in the demo home, unseen
-    ##	  [[map]] find = 're', put = 'text'  applied to output after the home, in order
-    ##	  [[step]]
-    ##	    note = "..." or [...]            typed as # comments first
-    ##	    show = "{prog} ..."              the command as typed. No show: run unseen
-    ##	    run = "{bin} ..."                what runs, default show. $? is the last shown step's
-    ##	    expect_exit = 0                  anything else fails the render
-    ##	    pause = 2.6                      read time after the output, seconds
-    ##	    overflow = "wrap"                or "truncate"
-    ##	    clear = true                     start on a blank screen. Default: when the output wouldn't fit
-    ##	    recall = true                    the last command comes back, as with the up arrow,
-    ##	                                     and the rest of show is typed
-    ##	    scrollrate, linems, gap, preenter, typescale, notepause
-    ##	Any other key fails it, as does a value of the wrong type.
-    try:
-        with Path(path).open("rb") as f:
-            top = Table(tomllib.load(f), "top level")
-    except (OSError, tomllib.TOMLDecodeError) as e:
-        fail(f"scenario: {e}")
-    maps = [load_map(t) for t in top.tables("map")]
-    steps = [load_step(t) for t in top.tables("step")]
-    if not steps:
-        fail("scenario has no [[step]]")
-    sc = Scenario(
-        title=top.maybe("title", ""),
-        prog=top.maybe("prog", ""),
-        seed=top.get("seed", 11),
-        font=top.strs("font"),
-        fontsize=top.get("fontsize", 15.0),
-        end_hold=top.get("end_hold", 2.0),
-        end_black=top.get("end_black", 3.0),
-        home_as=top.get("home_as", "/home/{user}"),
-        setup=top.get("setup", ""),
-        maps=maps,
-        steps=steps,
-    )
-    top.done()
-    return sc
-
-
-def load_map(t: Table) -> MapRule:
-    find, put = t.need("find", ""), t.need("put", "")
-    t.done()
-    try:
-        return MapRule(re.compile(find), put)
-    except re.error as e:
-        fail(f"scenario: {t.where}: {e}")
-
-
-def load_step(t: Table) -> Step:
-    step = Step(
-        note=t.strs("note"),
-        show=t.get("show", ""),
-        run=t.maybe("run", ""),
-        expect_exit=t.get("expect_exit", 0),
-        pause=t.get("pause", 2.6),
-        overflow=t.get("overflow", "wrap"),
-        clear=t.maybe("clear", False),
-        recall=t.get("recall", False),
-        scrollrate=t.get("scrollrate", float(SCROLL_RATE)),
-        linems=t.get("linems", 26.0),
-        gap=t.get("gap", False),
-        preenter=t.get("preenter", 0.0),
-        typescale=t.get("typescale", 1.0),
-        notepause=t.get("notepause", 0.0),
-    )
-    t.done()
-    if step.overflow not in ("wrap", "truncate"):
-        fail(f"scenario: {t.where}: overflow is wrap or truncate, not {step.overflow!r}")
-    if not step.show and not step.run and not step.note:
-        fail(f"scenario: {t.where} has no show, run or note")
-    return step
-
-
-def demo_env(home: Path) -> dict[str, str]:
-    ##	A home of its own, so nothing from the box running it gets in.
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("XDG_", "TT_MINECRAFTD_"))}
-    env["HOME"] = str(home)
-    env["PWD"] = str(home)
-    for var, sub in (
-        ("XDG_CONFIG_HOME", ".config"),
-        ("XDG_CACHE_HOME", ".cache"),
-        ("XDG_DATA_HOME", ".local/share"),
-        ("XDG_STATE_HOME", ".local/state"),
-    ):
-        env[var] = str(home / sub)
-    return env
-
-
-def expand(cmd: str, binpath: str, here: str) -> str:
-    for name, val in (("{bin}", binpath), ("{prog}", binpath), ("{here}", here)):
-        cmd = cmd.replace(name, shlex.quote(val))
-    return cmd
-
-
-def run_cmd(cmd: str, home: Path, env: dict[str, str]) -> tuple[int, str]:
-    ##	stderr down the same pipe, so lines come in the order a terminal shows them.
-    try:
-        res = subprocess.run(
-            ["bash", "-c", cmd],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            errors="replace",
-            timeout=60,
-            cwd=home,
-            env=env,
-        )
-    except subprocess.TimeoutExpired:
-        fail(f"timed out: {cmd}")
-    return res.returncode, res.stdout
-
-
-class Scrubber:
-    ##	Output is from a temp dir on this box, so the dir is shown as a generic
-    ##	home, and this box's names as the prompt's. Then anything personal still
-    ##	left fails the render rather than going into the README.
-    def __init__(self, sc: Scenario, home: Path, binpath: str, prog: str, ident: Ident) -> None:
-        shown_home = sc.home_as.replace("{user}", ident.user)
-        homes = sorted({str(home), str(home.resolve())}, key=len, reverse=True)
-        self.literal = [(binpath, prog), *((h, shown_home) for h in homes)]
-        self.tokens: list[tuple[re.Pattern[str], str]] = []
-        ##	root, in the throwaway container, is nobody's name, and the tool's output says it.
-        user = "" if getpass.getuser() == "root" else getpass.getuser()
-        for real, fake in ((socket.gethostname(), ident.host), (user, ident.user)):
-            if len(real) >= 2:
-                self.tokens.append((token_re(real), fake))
-        self.maps = sc.maps
-        self.leaks = {user, os.environ.get("HOME", ""), str(home), str(home.resolve())}
-        self.leaks |= {str(Path(tempfile.gettempdir()).resolve()), "/mnt/", "/tmp/", "/media/", "/run/user"}
-        self.leaks = {s for s in self.leaks if len(s) >= 3}
-        self.leak_tokens = [near_re(h) for h in {socket.gethostname(), socket.getfqdn()} if h]
-
-    def __call__(self, text: str) -> str:
-        for real, fake in self.literal:
-            text = text.replace(real, fake)
-        for pat, fake in self.tokens:
-            text = pat.sub(fake, text)
-        for m in self.maps:
-            text = m.find.sub(m.put, text)
-        return text
-
-    def leak(self, text: str) -> str | None:
-        for s in self.leaks:
-            if s in text:
-                return s
-        for pat in self.leak_tokens:
-            if pat.search(text):
-                return pat.pattern
-        return None
-
-
-def token_re(word: str) -> re.Pattern[str]:
-    ##	A whole token only. Checksums are base64url, so a host name can't be
-    ##	found inside one.
-    return re.compile(rf"(?<![A-Za-z0-9_.-]){re.escape(word)}(?![A-Za-z0-9_-])")
-
-
-def near_re(word: str) -> re.Pattern[str]:
-    ##	For the leak check: the word next to anything but a letter or digit,
-    ##	such as b23-old or b23_snap, which token_re leaves alone. It can catch
-    ##	one inside a checksum too, but a failed render beats a leaked name.
-    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(word)}(?![A-Za-z0-9])")
-
-
-def run_all(sc: Scenario, binpath: str, here: str, home: Path, scrub: Scrubber) -> list[list[str]]:
-    ##	Every command runs before the first frame, in order, in one home.
-    env = demo_env(home)
-    if sc.setup:
-        rc, out = run_cmd(expand(sc.setup, binpath, here), home, env)
-        if rc:
-            fail(f"setup exited {rc}: {out.strip()}")
-    last_rc = 0
-    outs: list[list[str]] = []
-    for step in sc.steps:
-        cmd = step.show if step.run is None else step.run
-        if not cmd:
-            outs.append([])
-            continue
-        rc, out = run_cmd(f"(exit {last_rc}); " + expand(cmd, binpath, here), home, env)
-        ##	A renamed flag would print an error, and the gif would show it as
-        ##	if it were the tool working.
-        want = step.expect_exit
-        if rc != want:
-            fail(f"step exited {rc}, not {want}: {cmd}\n{out}")
-        if step.show:
-            last_rc = rc
-        else:
-            out = ""
-        lines = [scrub(ln.expandtabs(8).rstrip()) for ln in ANSI_RE.sub("", out).rstrip("\n").split("\n")]
-        outs.append(lines if out else [])
-    return outs
-
-
-def make_home() -> tuple[Path, str]:
-    home = Path(tempfile.mkdtemp(prefix="gen-demo-gif.")).resolve()
-    token = secrets.token_hex(16)
-    (home / HOME_MARK).write_text(token + "\n")
-    return home, token
-
-
-def remove_home(home: Path, token: str) -> None:
-    ##	rm -rf only on the dir make_home made: right under the temp dir, by its
-    ##	name, ours, no link, and with the mark it wrote.
-    base = Path(tempfile.gettempdir()).resolve()
-    try:
-        got = (home / HOME_MARK).read_text().strip()
-        ok = home.is_absolute() and home.parent == base and re.fullmatch(r"gen-demo-gif\.[A-Za-z0-9_]{6,}", home.name) is not None and not home.is_symlink() and home.resolve() == home and home.stat().st_uid == os.getuid() and str(home) not in ("/", "/tmp", os.environ.get("HOME", "/")) and got == token
-    except OSError:
-        ok = False
-    if not ok:
-        sys.stderr.write(f"gen-demo-gif: left {home}, it doesn't look like the one made here\n")
-        return
-    shutil.rmtree(home)
-
-
-def type_events(
-    text: str,
-    rng: random.Random,
-    wpm_range: tuple[float, float],
-    typos: bool = True,
-    scale: float = 1.0,
-) -> list[KeyEvent]:
-    ##	Letters at the command's speed with jitter, digits slower, a beat before
-    ##	a -flag, and the odd wrong key noticed and fixed.
-    wpm = rng.uniform(*wpm_range) * scale
-    events: list[KeyEvent] = []
-    fixes = 0
-    lead_len = len(text.partition(" ")[0])
-    for i, ch in enumerate(text):
-        if ch.isdigit():
-            delay = 60000.0 / (WPM_DIGITS * scale * 5) * rng.uniform(0.82, 1.22)
-        else:
-            delay = 60000.0 / (wpm * 5) * rng.uniform(0.70, 1.34)
-            if i < lead_len:
-                delay *= 0.78  # the program's name is muscle memory
-        if ch == "-" and (i == 0 or text[i - 1] == " "):
-            delay += rng.uniform(*FLAG_PAUSE_MS)
-        if typos and fixes < 2 and ch.isalpha() and rng.random() < TYPO_RATE:
-            events.append(KeyEvent(KeyAction.TYPE, neighbor_key(ch, rng), delay))
-            overshoot = None
-            if i + 1 < len(text) and text[i + 1].isalpha() and rng.random() < 0.4:
-                overshoot = text[i + 1]
-                events.append(KeyEvent(KeyAction.TYPE, overshoot, 60000.0 / (wpm * 5)))
-            events.append(KeyEvent(KeyAction.PAUSE, None, rng.uniform(320, 640)))
-            backs = 2 if overshoot else 1
-            events.extend(KeyEvent(KeyAction.BACKSPACE, None, rng.uniform(95, 150)) for _ in range(backs))
-            events.append(KeyEvent(KeyAction.TYPE, ch, rng.uniform(140, 260)))
-            fixes += 1
-            continue
-        events.append(KeyEvent(KeyAction.TYPE, ch, delay))
-    return events
-
-
-def neighbor_key(ch: str, rng: random.Random) -> str:
-    for row in QWERTY_ROWS:
-        pos = row.find(ch.lower())
-        if pos < 0:
-            continue
-        pick = rng.choice([row[j] for j in (pos - 1, pos + 1) if 0 <= j < len(row)])
-        return pick.upper() if ch.isupper() else pick
-    return ch
-
-
-def build_palette(user_tint: Rgb, host_tint: Rgb) -> Image.Image:
-    ##	One table for every frame, with short ramps from each text color to the
-    ##	background, so antialiased edges map without dithering.
-    def blend(a: Rgb, b: Rgb, k: float) -> Rgb:
-        r, g, bl = (round(a[i] + (b[i] - a[i]) * k) for i in range(3))
-        return r, g, bl
-
-    t = THEME
-    colors = [*t.values(), user_tint, host_tint, *TRAFFIC_LIGHTS]
-    ramps = (t["fg"], t["gray"], t["dim"], user_tint, host_tint)
-    colors.extend(blend(t["bg"], c, k) for c in ramps for k in (0.22, 0.45, 0.68, 0.86))
-    colors.extend(blend(t["titlebar"], t["titletxt"], k) for k in (0.35, 0.7))
-    colors = list(dict.fromkeys(colors))
-    colors = (colors + [(0, 0, 0)] * 256)[:256]
-    pal = Image.new("P", (1, 1))
-    pal.putpalette([v for c in colors for v in c])
-    return pal
+##	Palette: one shared 256-entry table for every frame. The text colors carry
+##	short blend ramps toward their background so antialiased edges quantize
+##	cleanly instead of dithering, and the leftover entries are median-cut from
+##	the emoji tiles the scenario actually produces. One global table means no
+##	per-frame palette cost.
+def fBuildPalette(userTint, hostTint, emojiTiles):
+	def blend(a, b, k):
+		return tuple(round(a[i] + (b[i] - a[i]) * k) for i in range(3))
+	t = THEME
+	colors = [(0, 0, 0), t["outer"], t["border"], t["titlebar"],
+	          t["titletxt"], t["bg"], t["fg"], t["gray"], t["dim"],
+	          userTint, hostTint] + t["dots"]
+	for c in (t["fg"], t["gray"], t["dim"], userTint, hostTint):
+		for k in (0.22, 0.45, 0.68, 0.86):
+			colors.append(blend(t["bg"], c, k))
+	for k in (0.35, 0.7):
+		colors.append(blend(t["titlebar"], t["titletxt"], k))
+	colors = list(dict.fromkeys(colors))
+	if emojiTiles:
+		w = sum(tile.width for tile in emojiTiles)
+		h = max(tile.height for tile in emojiTiles)
+		strip = Image.new("RGB", (max(w, 1), max(h, 1)), t["bg"])
+		x = 0
+		for tile in emojiTiles:
+			strip.paste(tile, (x, 0), tile)
+			x += tile.width
+		room = min(256 - len(colors), 220)
+		q = strip.quantize(colors=room, method=Image.Quantize.MEDIANCUT)
+		qp = q.getpalette()
+		got = [tuple(qp[i:i + 3]) for i in range(0, room * 3, 3)]
+		colors = list(dict.fromkeys(colors + got))
+	##	Pad to the next power of two rather than a flat 256: GIF's LZW code width
+	##	tracks the palette size, so a text-only demo (~35 colors) writes about 12%
+	##	smaller at 64 entries, pixel for pixel identical.
+	slots = 2
+	while slots < len(colors):
+		slots *= 2
+	colors = (colors + [(0, 0, 0)] * slots)[:slots]
+	pal = Image.new("P", (1, 1))
+	pal.putpalette([v for c in colors for v in c])
+	return pal
 
 
 class Screen:
-    ##	Scrollback plus the line being typed, seen through a window scrolled by
-    ##	the pixel.
-    def __init__(self, font: ImageFont.FreeTypeFont, title: str, prompt: list[Span], pal: Image.Image) -> None:
-        self.font, self.title, self.prompt, self.pal = font, title, prompt, pal
-        self.show_prompt = True  # off while a command's output comes in
-        ascent, descent = font.getmetrics()
-        self.cw = font.getlength("0")
-        self.lh = ascent + descent + 3
-        self.win_w = CANVAS_W - 2 * MARGIN
-        self.win_h = CANVAS_H - 2 * MARGIN
-        self.term_x = MARGIN + PAD
-        self.term_y = MARGIN + TITLE_H + PAD
-        self.cols = int((self.win_w - 2 * PAD) // self.cw)
-        self.rows = int((self.win_h - TITLE_H - 2 * PAD) // self.lh)
-        self.view_w = self.win_w - 2 * PAD
-        self.view_h = self.rows * self.lh
-        self.lines: list[list[Span]] = []
-        self.typed = ""
-        self.typed_key = "fg"  # dim while a note is typed
-        self.scroll = 0.0  # px
-        self._live: tuple[str, str, list[list[Span]]] | None = None
-        self.chrome = self.draw_chrome()
+	##	The fake terminal: a scrollback of styled lines plus an in-progress
+	##	prompt line, viewed through a pixel-scrolled window. render() draws the
+	##	full chrome each time and quantizes straight to the master palette.
+	def __init__(self, font, fontName, title, prompt, palImg, fontSize):
+		self.font, self.title, self.prompt, self.pal = font, title, prompt, palImg
+		self.fontSize = fontSize
+		self.showPrompt = True   # hidden while a command's output is scrolling in
+		self._glyphFont = {}     # ch -> font that can draw it
+		self._fbFonts = {}       # font file -> ImageFont
+		self._emojiTiles = {}    # ch -> RGBA tile (or None if it would not render)
+		self._notdef = self._mask(font, "\U000FFFFD")
+		ascent, descent = font.getmetrics()
+		self.cw = font.getlength("0")
+		self.lh = ascent + descent + 3
+		self.winW = CANVAS_W - 2 * MARGIN
+		self.winH = CANVAS_H - 2 * MARGIN
+		self.termX = MARGIN + PAD
+		self.termY = MARGIN + TITLE_H + PAD
+		self.cols = int((self.winW - 2 * PAD) // self.cw)
+		self.rows = int((self.winH - TITLE_H - 2 * PAD) // self.lh)
+		self.textW = self.winW - 2 * PAD
+		self.viewH = self.rows * self.lh
+		self.lines = []          # committed scrollback: list of [(text, colorkey)]
+		self.typed = ""          # text after the prompt on the live line
+		self.scroll = 0.0        # view offset into the content, px
+		self.fontName = fontName
 
-    def put(self, spans: list[Span]) -> None:
-        self.lines.append(spans)
+	def fPut(self, spans):
+		self.lines.append(spans)
 
-    def wrap(self, text: str, key: str = "fg", overflow: str = "wrap") -> list[list[Span]]:
-        if overflow == "truncate" and len(text) > self.cols:
-            return [[(text[: self.cols - 1], key), ("~", "dim")]]
-        rows = [text[i : i + self.cols] for i in range(0, max(len(text), 1), self.cols)]
-        return [[(r, key)] for r in rows]
+	@staticmethod
+	def _mask(font, ch):
+		##	getmask returns a raw ImagingCore; box it to get comparable bytes.
+		return Image.Image()._new(font.getmask(ch)).tobytes()
 
-    def wrap_spans(self, spans: list[Span]) -> list[list[Span]]:
-        ##	A long command wraps the way a terminal wraps it, colors kept.
-        rows: list[list[list[str]]] = []
-        row: list[list[str]] = []
-        used = 0
-        for text, key in spans:
-            for ch in text:
-                if used + 1 > self.cols and row:
-                    rows.append(row)
-                    row, used = [], 0
-                if row and row[-1][1] == key:
-                    row[-1][0] += ch
-                else:
-                    row.append([ch, key])
-                used += 1
-        rows.append(row)
-        return [[(t, k) for t, k in r] for r in rows]
+	def fFontFor(self, ch):
+		##	The primary font, unless it draws ch as .notdef; then whatever
+		##	fontconfig says covers that codepoint (e.g. a CJK face for the
+		##	Kanji/Hanzi base aliases). Cached hard - fc-match is not cheap.
+		if ord(ch) < 0x80:
+			return self.font
+		hit = self._glyphFont.get(ch)
+		if hit:
+			return hit
+		use = self.font
+		if self._mask(self.font, ch) == self._notdef:
+			try:
+				path = subprocess.run(
+					["fc-match", "-f", "%{file}", f":charset={ord(ch):x}"],
+					capture_output=True, text=True, timeout=10).stdout.strip()
+			except OSError:
+				path = ""
+			if path:
+				if path not in self._fbFonts:
+					try:
+						self._fbFonts[path] = ImageFont.truetype(path, self.fontSize)
+					except OSError:
+						self._fbFonts[path] = self.font
+				use = self._fbFonts[path]
+		self._glyphFont[ch] = use
+		return use
 
-    def live_rows(self) -> list[list[Span]]:
-        if self._live is None or self._live[:2] != (self.typed, self.typed_key):
-            self._live = (self.typed, self.typed_key, self.wrap_spans([*self.prompt, (self.typed, self.typed_key)]))
-        return self._live[2]
+	def fIsEmoji(self, ch):
+		##	Only chars the emoji face covers, and only from the emoji blocks -
+		##	CJK and friends stay on the monochrome fallback fonts.
+		return EMOJI is not None and ord(ch) >= 0x2600 and ord(ch) in EMOJI["cmap"]
 
-    def clear(self) -> None:
-        ##	The screen resets, with no `clear` typed.
-        self.lines = []
-        self.scroll = 0.0
+	def fEmojiTile(self, ch):
+		##	Rasterize one emoji via Pango+cairo at 4x, then shrink into the cell
+		##	box (two columns wide, like a terminal). Cached; None = unrenderable.
+		if ch in self._emojiTiles:
+			return self._emojiTiles[ch]
+		e = EMOJI
+		px = self.lh * 4
+		surf = e["cairo"].ImageSurface(e["cairo"].FORMAT_ARGB32, px * 2, px * 2)
+		ctx = e["cairo"].Context(surf)
+		layout = e["PangoCairo"].create_layout(ctx)
+		desc = e["Pango"].FontDescription(e["family"])
+		desc.set_absolute_size(px * e["Pango"].SCALE)
+		layout.set_font_description(desc)
+		layout.set_text(ch, -1)
+		e["PangoCairo"].show_layout(ctx, layout)
+		surf.flush()
+		img = Image.frombuffer("RGBA", (px * 2, px * 2), bytes(surf.get_data()),
+		                       "raw", "BGRa", surf.get_stride())
+		box = img.getbbox()
+		tile = None
+		if box:
+			glyph = img.crop(box)
+			s = min((2 * self.cw - 1) / glyph.width, (self.lh - 2) / glyph.height)
+			tile = glyph.resize((max(1, round(glyph.width * s)),
+			                     max(1, round(glyph.height * s))), Image.LANCZOS)
+		self._emojiTiles[ch] = tile
+		return tile
 
-    def rest_scroll(self) -> float:
-        rows = len(self.lines) + (len(self.live_rows()) if self.show_prompt else 0)
-        return max(0.0, float(rows * self.lh - self.view_h))
+	def fDrawText(self, d, img, x, y, text, fill):
+		##	Draw in runs of a single font, so fallback glyphs slot inline. Emoji
+		##	go down as color tiles pasted on two terminal cells.
+		i = 0
+		while i < len(text):
+			ch = text[i]
+			if self.fIsEmoji(ch):
+				tile = self.fEmojiTile(ch)
+				if tile:
+					img.paste(tile, (round(x + (2 * self.cw - tile.width) / 2),
+					                 round(y + (self.lh - 2 - tile.height) / 2) + 1), tile)
+					x += 2 * self.cw
+					i += 1
+					continue
+			f = self.fFontFor(ch)
+			j = i + 1
+			##	Combining marks ride the run of their base char, else shaping
+			##	splits and a Devanagari matra draws as dotted-circle + box.
+			while j < len(text) and not self.fIsEmoji(text[j]) \
+					and (unicodedata.category(text[j]).startswith("M")
+					     or self.fFontFor(text[j]) is f):
+				j += 1
+			d.text((x, y), text[i:j], font=f, fill=fill)
+			x += d.textlength(text[i:j], font=f)
+			i = j
+		return x
 
-    def cursor_target(self) -> tuple[float, float]:
-        live = self.live_rows()
-        x = self.font.getlength("".join(t for t, _ in live[-1]))
-        return x, (len(self.lines) + len(live) - 1) * self.lh - self.scroll
+	def fCells(self, ch):
+		##	Terminal cell count: emoji and East-Asian wide chars take two.
+		if self.fIsEmoji(ch) or unicodedata.east_asian_width(ch) in ("W", "F"):
+			return 2
+		return 1
 
-    def draw_chrome(self) -> Image.Image:
-        ##	The window around the view, the same in every frame.
-        img = Image.new("RGB", (CANVAS_W, CANVAS_H), THEME["outer"])
-        d = ImageDraw.Draw(img)
-        x0 = y0 = MARGIN
-        d.rectangle([x0, y0, x0 + self.win_w - 1, y0 + self.win_h - 1], fill=THEME["bg"], outline=THEME["border"])
-        d.rectangle([x0 + 1, y0 + 1, x0 + self.win_w - 2, y0 + TITLE_H], fill=THEME["titlebar"])
-        for i, c in enumerate(TRAFFIC_LIGHTS):
-            dot_x = x0 + 18 + i * 20
-            d.ellipse([dot_x, y0 + 12, dot_x + 11, y0 + 23], fill=c)
-        tw = d.textlength(self.title, font=self.font)
-        d.text(
-            (x0 + (self.win_w - tw) / 2, y0 + (TITLE_H - self.lh) / 2 + 1),
-            self.title,
-            font=self.font,
-            fill=THEME["titletxt"],
-        )
-        return img
+	def fPutText(self, text, colorkey="fg", overflow="truncate"):
+		##	Split on terminal cell widths, not char counts, so wide glyphs
+		##	(emoji, CJK) don't push a line past the window edge.
+		while True:
+			used, cut = 0, len(text)
+			for i, ch in enumerate(text):
+				used += self.fCells(ch)
+				if used > self.cols:
+					cut = i
+					break
+			if overflow == "truncate" and cut < len(text):
+				self.fPut([(text[: max(0, cut - 1)], colorkey), ("…", "dim")])
+				return
+			self.fPut([(text[:cut], colorkey)])
+			text = text[cut:]
+			if not text:
+				break
 
-    def render(self, cursor: tuple[float, float] | None, colors: dict[str, Rgb]) -> Image.Image:
-        img = self.chrome.copy()
+	def fTextW(self, text):
+		##	Pixel width with the same runs fDrawText uses.
+		w, i = 0.0, 0
+		while i < len(text):
+			if self.fIsEmoji(text[i]) and self.fEmojiTile(text[i]):
+				w += 2 * self.cw
+				i += 1
+				continue
+			f = self.fFontFor(text[i])
+			j = i + 1
+			while j < len(text) and not self.fIsEmoji(text[j]) \
+					and (unicodedata.category(text[j]).startswith("M")
+					     or self.fFontFor(text[j]) is f):
+				j += 1
+			w += f.getlength(text[i:j])
+			i = j
+		return w
 
-        ##	A layer the size of the view, so lines part way out clip at its edges.
-        layer = Image.new("RGB", (self.view_w, self.view_h), THEME["bg"])
-        ld = ImageDraw.Draw(layer)
-        content = self.lines + (self.live_rows() if self.show_prompt else [])
-        first = max(0, int(self.scroll // self.lh))
-        last = min(len(content), int((self.scroll + self.view_h) // self.lh) + 2)
-        for i in range(first, last):
-            x = 0.0
-            y = round(i * self.lh - self.scroll)
-            for text, key in content[i]:
-                ld.text((x, y), text, font=self.font, fill=colors[key])
-                x += ld.textlength(text, font=self.font)
-        if cursor is not None:
-            cx, cy = cursor
-            ld.rectangle([cx + 1, cy + 1, cx + self.cw, cy + self.lh - 3], fill=THEME["fg"])
-        img.paste(layer, (self.term_x, self.term_y))
-        return img.quantize(palette=self.pal, dither=Image.Dither.NONE)
+	def fRestScroll(self):
+		##	Where the view settles: content bottom (incl. the live line when the
+		##	prompt is showing) on the grid.
+		rows = len(self.lines) + (1 if self.showPrompt else 0)
+		return max(0.0, rows * self.lh - self.viewH)
 
+	def fCursorTarget(self):
+		##	Cursor cell on the live line, in view (layer) px at current scroll.
+		x = self.fTextW("".join(t for t, _ in self.prompt) + self.typed)
+		return x, len(self.lines) * self.lh - self.scroll
 
-def after_first_image(gif: bytes) -> int:
-    ##	Offset past the first image: header and color table, extensions, then
-    ##	the image descriptor, its table and its data.
-    pos = 13
-    if gif[10] & 0x80:
-        pos += 3 << ((gif[10] & 7) + 1)
-    while gif[pos] == 0x21:
-        pos += 2
-        while gif[pos]:
-            pos += gif[pos] + 1
-        pos += 1
-    if gif[pos] != 0x2C:
-        raise ValueError("no image in encoded batch")
-    flags = gif[pos + 9]
-    pos += 10
-    if flags & 0x80:
-        pos += 3 << ((flags & 7) + 1)
-    pos += 1
-    while gif[pos]:
-        pos += gif[pos] + 1
-    return pos + 1
+	def render(self, cursor, identColors):
+		##	cursor: None = hidden, else (x, y) view px of the block's top-left.
+		img = Image.new("RGB", (CANVAS_W, CANVAS_H), THEME["outer"])
+		d = ImageDraw.Draw(img)
+		x0, y0 = MARGIN, MARGIN
+		d.rectangle([x0, y0, x0 + self.winW, y0 + self.winH],
+		            fill=THEME["bg"], outline=THEME["border"])
+		d.rectangle([x0, y0, x0 + self.winW, y0 + TITLE_H],
+		            fill=THEME["titlebar"])
+		for i, c in enumerate(THEME["dots"]):
+			cx = x0 + 18 + i * 20
+			d.ellipse([cx, y0 + 12, cx + 11, y0 + 23], fill=c)
+		tw = d.textlength(self.title, font=self.font)
+		self.fDrawText(d, img, x0 + (self.winW - tw) / 2,
+		               y0 + (TITLE_H - self.lh) / 2 + 1, self.title, THEME["titletxt"])
 
-
-def frame_delays(gif: bytes) -> list[int]:
-    ##	Each frame's delay in ms, read off its graphic control block.
-    pos = 13
-    if gif[10] & 0x80:
-        pos += 3 << ((gif[10] & 7) + 1)
-    delays: list[int] = []
-    pending = 0
-    while pos < len(gif) and gif[pos] != 0x3B:
-        if gif[pos] == 0x21:
-            if gif[pos + 1] == 0xF9:
-                pending = int.from_bytes(gif[pos + 4 : pos + 6], "little") * 10
-            pos += 2
-            while gif[pos]:
-                pos += gif[pos] + 1
-            pos += 1
-        elif gif[pos] == 0x2C:
-            flags = gif[pos + 9]
-            pos += 10
-            if flags & 0x80:
-                pos += 3 << ((flags & 7) + 1)
-            pos += 1
-            while gif[pos]:
-                pos += gif[pos] + 1
-            pos += 1
-            delays.append(pending)
-            pending = 0
-        else:
-            raise ValueError(f"bad gif block at {pos}")
-    return delays
+		##	Text: content lines at their scrolled offsets, drawn on a layer the
+		##	size of the view so partial lines clip cleanly at the edges.
+		colors = dict(THEME, **identColors)
+		layer = Image.new("RGB", (self.textW, self.viewH), THEME["bg"])
+		ld = ImageDraw.Draw(layer)
+		content = self.lines + ([self.prompt + [(self.typed, "fg")]]
+		                        if self.showPrompt else [])
+		first = max(0, int(self.scroll // self.lh))
+		last = min(len(content), int((self.scroll + self.viewH) // self.lh) + 2)
+		for i in range(first, last):
+			x, y = 0, round(i * self.lh - self.scroll)
+			for text, key in content[i]:
+				x = self.fDrawText(ld, layer, x, y, text, colors[key])
+		if cursor is not None:
+			cx, cy = cursor
+			ld.rectangle([cx + 1, cy + 1, cx + self.cw, cy + self.lh - 3],
+			             fill=THEME["fg"])
+		img.paste(layer, (self.termX, self.termY))
+		return img.quantize(palette=self.pal, dither=Image.Dither.NONE)
 
 
 class Movie:
-    ##	Frames with their times. A frame the same as the one before makes that
-    ##	one longer. Times round to whole 50 fps frames, with the rest added to
-    ##	the next, so typing keeps its pace. Encoded 32 at a time, each batch
-    ##	behind the last frame of the one before, since held raw they ran to
-    ##	over a GB.
-    BATCH = 32
+	##	Ordered (frame, duration) list. Identical consecutive frames merge into
+	##	one longer frame. Durations snap to the FRAME_MS grid rather than GIF's
+	##	own centisecond one, so the whole loop plays at an exact 50 fps instead
+	##	of drifting onto odd 30/50/90ms frames; bank the rounding remainder
+	##	instead of losing it every keystroke.
+	def __init__(self):
+		self.frames, self.durs, self._rem = [], [], 0.0
 
-    def __init__(self) -> None:
-        self.durs: list[int] = []
-        self._rem = 0.0
-        self._pending: list[Image.Image] = []
-        self._last_bytes: bytes | None = None
-        self._lead: Image.Image | None = None
-        self._done = 0
-        self._gif: list[bytes] = []
-
-    def add(self, img: Image.Image, ms: float) -> None:
-        ms += self._rem
-        dur = max(FRAME_MS, round(ms / FRAME_MS) * FRAME_MS)
-        self._rem = ms - dur if ms > FRAME_MS else 0.0
-        raw = img.tobytes()
-        if raw == self._last_bytes:
-            self.durs[-1] += dur
-            return
-        self._last_bytes = raw
-        if len(self._pending) >= self.BATCH:
-            self._encode()
-        self._pending.append(img)
-        self.durs.append(dur)
-
-    def _encode(self) -> None:
-        frames = self._pending
-        durs = self.durs[self._done : self._done + len(frames)]
-        if self._lead is not None:
-            frames = [self._lead, *frames]
-            durs = [self.durs[self._done - 1], *durs]
-        buf = io.BytesIO()
-        frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=durs, loop=0, optimize=False)
-        gif = buf.getvalue()
-        cut = after_first_image(gif) if self._lead is not None else 0
-        self._gif.append(gif[cut:-1])  # one trailer, at the end
-        self._done += len(self._pending)
-        self._lead = self._pending[-1]
-        self._pending = []
-
-    def save(self, path: Path) -> None:
-        if self._pending:
-            self._encode()
-        with path.open("wb") as f:
-            f.writelines(self._gif)
-            f.write(b";")
+	def add(self, img, ms):
+		ms += self._rem
+		dur = max(FRAME_MS, int(round(ms / FRAME_MS)) * FRAME_MS)
+		self._rem = ms - dur if ms > FRAME_MS else 0.0
+		if self.frames and img.tobytes() == self.frames[-1].tobytes():
+			self.durs[-1] += dur
+		else:
+			self.frames.append(img)
+			self.durs.append(dur)
 
 
-class Player:
-    ##	Plays the steps onto a Movie. The cursor is drawn where it's shown,
-    ##	which trails where it's headed while it glides.
-    def __init__(self, scr: Screen, colors: dict[str, Rgb], rng: random.Random, prog: str) -> None:
-        self.scr, self.colors, self.rng, self.prog = scr, colors, rng, prog
-        self.mov = Movie()
-        self.shown = scr.cursor_target()
-        self.last_cmd = ""
+def fMain():
+	ap = argparse.ArgumentParser(add_help=True)
+	ap.add_argument("--scenario", required=True)
+	ap.add_argument("--out", required=True)
+	ap.add_argument("--bin", default="")
+	ap.add_argument("--seed", type=int, default=None)
+	ap.add_argument("--font", default="")
+	ap.add_argument("-q", "--quiet", action="store_true")
+	args = ap.parse_args()
 
-    def snap(self, ms: float, cursor: bool = True) -> None:
-        self.mov.add(self.scr.render(self.shown if cursor else None, self.colors), ms)
+	sc = fLoadScenario(args.scenario)
+	rng = random.Random(args.seed if args.seed is not None else sc.get("seed", 11))
+	prog = sc.get("prog", "prog")
+	binpath = args.bin or sc.get("bin", prog)
 
-    def glide_cursor(self, ms: float) -> None:
-        ##	Ease toward the cell, then sit for the rest of the keystroke. The
-        ##	glide never takes longer than the keystroke does.
-        tx, ty = self.scr.cursor_target()
-        x0, y0 = self.shown
-        steps = max(1, min(int(ms // FRAME_MS), GLIDE_FRAMES))
-        glide_ms: float = steps * FRAME_MS
-        rest = ms - glide_ms
-        if rest < FRAME_MS:
-            glide_ms, rest = ms, 0.0
-        for s in range(1, steps + 1):
-            k = s / steps
-            k = k * k * (3.0 - 2.0 * k)
-            self.shown = (x0 + (tx - x0) * k, y0 + (ty - y0) * k)
-            self.snap(glide_ms / steps)
-        self.shown = (tx, ty)
-        if rest:
-            self.snap(rest)
+	prefs = [args.font] if args.font else sc.get("font", [])
+	prefs = prefs + ["Monaspace Argon SemiBold", "JetBrains Mono",
+	                 "Cascadia Mono", "DejaVu Sans Mono"]
+	font, fontName = fFindFont([p for p in prefs if p], sc.get("fontsize", 15))
 
-    def settle(self, rate: float, cursor: bool = True) -> None:
-        scr = self.scr
-        step = rate * FRAME_MS / 1000.0
-        while abs(scr.rest_scroll() - scr.scroll) >= 0.5:
-            d = scr.rest_scroll() - scr.scroll
-            scr.scroll += (1 if d > 0 else -1) * min(abs(d), step)
-            self.shown = scr.cursor_target()
-            self.snap(FRAME_MS, cursor)
-        scr.scroll = scr.rest_scroll()
-        self.shown = scr.cursor_target()
+	userTint, hostTint = rng.sample(IDENT_TINTS, 2)
+	user = rng.choice(IDENT_USERS)
+	host = rng.choice(IDENT_HOSTS)
 
-    def emit(self, out_lines: list[str], rate: float, line_ms: float, overflow: str) -> None:
-        ##	Lines go in as the view catches up, rather than settling after each
-        ##	one, so the scroll keeps one speed instead of stuttering at every line.
-        scr = self.scr
-        step = rate * FRAME_MS / 1000.0
-        pending = deque(row for text in out_lines for row in scr.wrap(text, "fg", overflow))
-        while True:
-            if pending and scr.rest_scroll() - scr.scroll <= step + 0.5:
-                scr.put(pending.popleft())
-                if scr.rest_scroll() - scr.scroll <= 0.5:
-                    self.snap(line_ms, cursor=False)  # still room, nothing scrolls
-                    continue
-            d = scr.rest_scroll() - scr.scroll
-            if d <= 0.5:
-                break
-            scr.scroll += min(d, step)
-            self.snap(FRAME_MS, cursor=False)
-        scr.scroll = scr.rest_scroll()
+	def fPromptFor(cwd):
+		##	Per step, because a demo about folders has to show the folder. Steps
+		##	that say nothing get "~", so a scenario written before this reads the same.
+		return [(user, "user"), ("@", "gray"), (host, "host"), (":", "gray"),
+		        (cwd, "gray"), ("$ ", "gray")]
 
-    def blink_pause(self, total_ms: float) -> None:
-        on = True
-        left = total_ms
-        while left > 0:
-            step = min(BLINK_MS, left)
-            self.snap(step, cursor=on)
-            on = not on
-            left -= step
+	identColors = {"user": userTint, "host": hostTint}
 
-    def play_step(self, step: Step, out: list[str]) -> None:
-        scr = self.scr
-        rate, overflow = step.scrollrate, step.overflow
-        rows_out = sum(len(scr.wrap(t, "fg", overflow)) for t in out)
-        rows_in = len(step.note) + (1 if step.show else 0) + rows_out + 2
-        if (rows_in > scr.rows if step.clear is None else step.clear) and scr.lines:
-            scr.clear()
-            self.shown = scr.cursor_target()
-            self.snap(260)
-        typing = [TypedLine("# " + n, "dim", WPM_NOTES, False, 1.0) for n in step.note]
-        if step.show:
-            typing.append(TypedLine(step.show.replace("{prog}", self.prog), "fg", WPM_LETTERS, True, step.typescale))
-        for tl in typing:
-            self.type_line(tl, step)
-            if tl.color == "dim":
-                self.after_note(step, rate)
-            else:
-                self.show_output(step, out, rate, overflow)
-        if not step.show:
-            self.blink_pause(1000 * step.pause)
+	scr = Screen(font, fontName, sc.get("title", prog),
+	             fPromptFor(sc["step"][0].get("cwd", "~")), None, sc.get("fontsize", 15))
 
-    def type_line(self, tl: TypedLine, step: Step) -> None:
-        ##	Typed, then Enter, leaving the line in the scrollback.
-        scr, rng = self.scr, self.rng
-        line, key = tl.text, tl.color
-        scr.typed_key = key
-        if key == "fg" and step.recall:
-            ##	Up arrow: the last command comes back whole, and only the
-            ##	rest is typed.
-            if not self.last_cmd or not line.startswith(self.last_cmd):
-                fail(f"recall: {line!r} doesn't start with the last command")
-            self.snap(rng.uniform(380, 520))
-            scr.typed = self.last_cmd
-            self.glide_cursor(rng.uniform(260, 360))
-            line = line[len(self.last_cmd) :]
-        for event in type_events(line, rng, tl.wpm, tl.typos, tl.scale):
-            if event.action is KeyAction.TYPE and event.text:
-                scr.typed += event.text
-            elif event.action is KeyAction.BACKSPACE:
-                scr.typed = scr.typed[:-1]
-            self.glide_cursor(event.delay)
-        self.snap(rng.uniform(260, 480) if key == "fg" else 130)  # a beat before Enter
-        if key == "fg" and step.preenter:
-            self.blink_pause(1000 * step.preenter)
-        for row in scr.wrap_spans([*scr.prompt, (scr.typed, key)]):
-            scr.put(row)
-        if key == "fg":
-            self.last_cmd = scr.typed
-        scr.typed = ""
+	##	A typed line past the right edge is cut off with nothing said, which reads back as a
+	##	typo in the caption rather than as a caption that needs shortening - and the budget
+	##	moves whenever a step's cwd does. Output lines are left alone: overflow= already says
+	##	what should happen to those, and they are the program's to decide, not the author's.
+	for stepNo, step in enumerate(sc["step"], 1):
+		promptW = len("".join(t for t, _ in fPromptFor(step.get("cwd", "~"))))
+		typed = [("note", "# " + step["note"]) if step.get("note") else None,
+		         ("show", step["show"].replace("{prog}", prog).replace("{bin}", prog))]
+		for what, text in (t for t in typed if t):
+			if promptW + len(text) > scr.cols:
+				sys.stderr.write(
+					f"gen-demo-gif: step {stepNo} {what} is {promptW + len(text) - scr.cols}"
+					f" characters wider than the {scr.cols}-column screen, and will be cut off\n")
 
-    def after_note(self, step: Step, rate: float) -> None:
-        if self.scr.rest_scroll() > self.scr.scroll + 0.5:
-            self.settle(rate)
-        else:
-            self.glide_cursor(130)
-        self.snap(140)
-        if step.notepause:
-            self.blink_pause(1000 * step.notepause)
+	##	Run every command up front: the outputs feed the demo AND tell the
+	##	palette which emoji it must carry before the first frame renders.
+	stepOut = [fRunStep(step, prog, binpath) for step in sc["step"]]
+	emojiSet = sorted({ch for segs in stepOut for ln in fStepText(segs) for ch in ln
+	                   if scr.fIsEmoji(ch)})
+	tiles = [t for t in (scr.fEmojiTile(ch) for ch in emojiSet) if t]
+	scr.pal = fBuildPalette(userTint, hostTint, tiles)
 
-    def show_output(self, step: Step, out: list[str], rate: float, overflow: str) -> None:
-        scr = self.scr
-        ##	The prompt comes back only once the output is all in, as in a shell.
-        scr.show_prompt = False
-        if scr.rest_scroll() > scr.scroll + 0.5:
-            self.settle(rate, cursor=False)
-        out_lines = ([""] if step.gap else []) + out
-        self.emit(out_lines, rate, step.linems, overflow)
-        ##	A blank line before the next prompt, to read it apart.
-        if out_lines and out_lines[-1].strip():
-            scr.put([("", "fg")])
-        scr.show_prompt = True
-        self.shown = scr.cursor_target()
-        if scr.rest_scroll() > scr.scroll + 0.5:
-            self.settle(rate)
-        self.snap(60)
-        self.blink_pause(1000 * step.pause)
+	mov = Movie()
+	wpmDigits = sc.get("wpm_digits", WPM_DIGITS)
+	typeNotes = bool(sc.get("type_notes", True))
+	shown = list(scr.fCursorTarget())    # displayed cursor; glides toward its cell
 
-    def finish(self, hold_ms: float, black_ms: float) -> None:
-        ##	A still last frame, then a cut to black, so the loop's seam is plain.
-        ##	The black is one frame, where a fade would be dozens.
-        if hold_ms > 0:
-            self.snap(hold_ms)
-        if black_ms > 0:
-            black = Image.new("RGB", (CANVAS_W, CANVAS_H), (0, 0, 0))
-            self.mov.add(black.quantize(palette=self.scr.pal, dither=Image.Dither.NONE), black_ms)
+	def snap(ms, cursor=True):
+		mov.add(scr.render(tuple(shown) if cursor else None, identColors), ms)
 
+	def glideCursor(ms):
+		##	Slide the shown cursor toward its cell across the keystroke's time,
+		##	one step per frame - a cap here would judder the long keystrokes
+		##	(flag beats, slowed digits) that most need the glide.
+		tx, ty = scr.fCursorTarget()
+		steps = max(1, int(ms // FRAME_MS))
+		x0, y0 = shown
+		for s in range(1, steps + 1):
+			shown[0] = x0 + (tx - x0) * s / steps
+			shown[1] = y0 + (ty - y0) * s / steps
+			snap(ms / steps)
 
-def check_shown(lines: list[str], scrub: Scrubber) -> None:
-    for i, ln in enumerate(lines):
-        hit = scrub.leak(ln)
-        if hit:
-            fail(f"line {i + 1} of the output or script shows {hit!r}")
-        if UNDRAWABLE_RE.search(ln):
-            fail(f"line {i + 1} has a character the font may not draw: {ln!r}")
+	def settle(rate, cursor=True):
+		##	Smooth-scroll the view to rest; the cursor rides along on its line.
+		while abs(scr.fRestScroll() - scr.scroll) >= 0.5:
+			d = scr.fRestScroll() - scr.scroll
+			scr.scroll += (1 if d > 0 else -1) * min(abs(d), rate * FRAME_MS / 1000.0)
+			shown[:] = scr.fCursorTarget()
+			snap(FRAME_MS, cursor)
+		scr.scroll = scr.fRestScroll()
+		shown[:] = scr.fCursorTarget()
 
+	def blinkPause(totalMs):
+		##	Idle at the prompt: block cursor blinking at the usual cadence.
+		on = True
+		left = totalMs
+		while left > 0:
+			step = min(BLINK_MS, left)
+			snap(step, cursor=on)
+			on = not on
+			left -= step
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Draw a demo gif of a CLI from a TOML scenario.")
-    ap.add_argument("--scenario", required=True)
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--bin", required=True)
-    ap.add_argument("--seed", type=int, default=None)
-    ap.add_argument("--font", default="")
-    ap.add_argument("--quiet", action="store_true")
-    args = ap.parse_args()
+	def drawOut(lines, rate, lineMs, overflow):
+		for ln in lines:
+			scr.fPutText(ln, "fg", overflow)
+			if scr.fRestScroll() > scr.scroll + 0.5:
+				settle(rate, cursor=False)
+			else:
+				snap(lineMs, cursor=False)
 
-    sc = load_scenario(args.scenario)
-    binpath = str(Path(args.bin).resolve())
-    if not os.access(binpath, os.X_OK):
-        fail(f"no program to run at {args.bin}")
-    rng = random.Random(args.seed if args.seed is not None else sc.seed)
-    prog = Path(binpath).name if sc.prog is None else sc.prog
+	def drawAsk(ask, answer, rate, askPause):
+		##	The question is a live line, the way the shell's own prompt is: it holds
+		##	the cursor, the answer types onto it, and Enter commits the pair. A demo
+		##	of a tool whose whole claim is that it asks first has to show somebody
+		##	being asked, so this is played out rather than skipped past.
+		shellPrompt = scr.prompt
+		scr.prompt, scr.showPrompt = [(ask, "fg")], True
+		shown[:] = scr.fCursorTarget()
+		if scr.fRestScroll() > scr.scroll + 0.5:
+			settle(rate)
+		readMs = rng.uniform(900, 1400)              # drawn either way, so the rest of the run doesn't shift
+		blinkPause(readMs if askPause is None else 1000 * askPause)   # read the plan before answering
+		for (action, ch), delay in fTypeEvents(answer, rng, WPM_LETTERS, False, wpmDigits):
+			if action == "type":
+				scr.typed += ch
+			elif action == "bs":
+				scr.typed = scr.typed[:-1]
+			glideCursor(delay)
+		snap(rng.uniform(260, 480))                  # beat before Enter
+		scr.fPut([(ask, "fg"), (scr.typed, "fg")])
+		scr.typed = ""
+		scr.prompt, scr.showPrompt = shellPrompt, False
+		if scr.fRestScroll() > scr.scroll + 0.5:
+			settle(rate, cursor=False)
 
-    prefs = [args.font] if args.font else list(sc.font)
-    prefs += ["Monaspace Argon SemiBold", "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono"]
-    font, font_name = find_font([p for p in prefs if p], sc.fontsize)
+	snap(700)                                        # opening frame = loop-in target
+	for stepIdx, step in enumerate(sc["step"]):
+		rate = float(step.get("scrollrate", SCROLL_RATE))
+		lineMs = float(step.get("linems", FRAME_MS))
+		##	Before the clear below, which re-places the cursor against this prompt's width.
+		scr.prompt = fPromptFor(step.get("cwd", "~"))
+		if step.get("clear"):
+			##	Start the step at the top of a fresh screen. Smooth scrolling
+			##	costs a near-full-frame delta per frame, so a demo that never
+			##	builds a long scrollback stays far smaller than one that does.
+			scr.lines, scr.scroll = [], 0.0
+			shown[:] = scr.fCursorTarget()
+		for noteOrCmd, key, wpm, typos in (
+				(("# " + step["note"]) if step.get("note") else None, "dim", WPM_NOTES, False),
+				(step["show"].replace("{prog}", prog).replace("{bin}", prog), "fg", WPM_LETTERS, True)):
+			if noteOrCmd is None:
+				continue
+			if key == "dim" and not typeNotes:
+				##	A caption is narration, not demonstration. Watching one arrive a
+				##	letter at a time costs more screen time than the command it
+				##	introduces, so it appears whole and is simply read.
+				scr.typed = noteOrCmd
+				shown[:] = scr.fCursorTarget()
+				blinkPause(NOTE_HOLD_MS)
+			else:
+				for (action, ch), delay in fTypeEvents(noteOrCmd, rng, wpm, typos, wpmDigits):
+					if action == "type":
+						scr.typed += ch
+					elif action == "bs":
+						scr.typed = scr.typed[:-1]
+					glideCursor(delay)
+				snap(rng.uniform(260, 480) if key == "fg" else 130)   # beat before Enter
+			scr.fPut(list(scr.prompt) + [(scr.typed, key)])
+			scr.typed = ""
+			if key == "dim":                         # notes: no output to run
+				if scr.fRestScroll() > scr.scroll + 0.5:
+					settle(rate)
+				else:
+					glideCursor(130)                 # cursor hop onto the new line
+				snap(140)
+				continue
+			##	Prompt stays hidden until the command's output is fully in, the
+			##	way a real shell does it - except where the command stops to ask
+			##	something, which puts a live line back on screen mid-output.
+			scr.showPrompt = False
+			if scr.fRestScroll() > scr.scroll + 0.5:
+				settle(rate, cursor=False)
+			tail = []
+			for seg in stepOut[stepIdx]:
+				if seg[0] == "ask":
+					drawAsk(seg[1], seg[2], rate, step.get("askpause"))
+					tail = []
+				else:
+					drawOut(seg[1], rate, lineMs, step.get("overflow", "truncate"))
+					tail = seg[1]
+			if tail and tail[-1].strip():
+				scr.fPut([("", "fg")])               # breathe before the next prompt
+				settle(rate, cursor=False)
+			scr.showPrompt = True
+			shown[:] = scr.fCursorTarget()
+			if scr.fRestScroll() > scr.scroll + 0.5:
+				settle(rate)
+			snap(60)
+			blinkPause(1000 * float(step.get("pause", 2.6)))
 
-    user_tint, host_tint = rng.sample(IDENT_TINTS, 2)
-    ident = Ident(rng.choice(IDENT_USERS), rng.choice(IDENT_HOSTS))
-    prompt: list[Span] = [
-        (ident.user, "user"),
-        ("@", "gray"),
-        (ident.host, "host"),
-        (":", "gray"),
-        ("~", "gray"),
-        ("$ ", "gray"),
-    ]
-    colors = dict(THEME, user=user_tint, host=host_tint)
-    scr = Screen(font, prog if sc.title is None else sc.title, prompt, build_palette(user_tint, host_tint))
+	##	Tail: hold the last frame dead still, then a hard cut to black before the
+	##	loop repeats. The black is one held frame (a cut, not a fade), so it costs
+	##	almost nothing.
+	holdMs  = 1000 * float(sc.get("end_hold", 3.0))
+	blackMs = 1000 * float(sc.get("end_black", 2.0))
+	if holdMs > 0:
+		snap(holdMs)
+	if blackMs > 0:
+		black = Image.new("RGB", (CANVAS_W, CANVAS_H), (0, 0, 0)).quantize(
+			palette=scr.pal, dither=Image.Dither.NONE)
+		mov.add(black, blackMs)
 
-    here = str(Path(args.scenario).resolve().parent)
-    home, token = make_home()
-    try:
-        scrub = Scrubber(sc, home, binpath, prog, ident)
-        step_out = run_all(sc, binpath, here, home, scrub)
-    finally:
-        remove_home(home, token)
-
-    typed = [step.show.replace("{prog}", prog) for step in sc.steps]
-    typed += [n for step in sc.steps for n in step.note]
-    check_shown([ln for lines in step_out for ln in lines] + typed, scrub)
-
-    player = Player(scr, colors, rng, prog)
-    player.snap(700)
-    for step, out in zip(sc.steps, step_out, strict=True):
-        player.play_step(step, out)
-    player.finish(1000 * sc.end_hold, 1000 * sc.end_black)
-
-    out_path = Path(args.out)
-    player.mov.save(out_path)
-    why_big = optimize_gif(out_path)
-    delays = frame_delays(out_path.read_bytes())
-    if not delays or min(delays) != FRAME_MS or any(d % FRAME_MS for d in delays):
-        fail(f"frame times aren't all whole 50 fps frames: shortest {min(delays, default=0)} ms")
-    if not args.quiet:
-        secs = sum(delays) / 1000.0
-        kb = out_path.stat().st_size // 1024
-        print(f"gen-demo-gif: {len(delays)} frames, {secs:.1f} s loop, 50 fps, {kb} KiB{f' ({why_big}, so bigger)' if why_big else ''}, font {font_name}, {scr.cols}x{scr.rows} cells, shown as {ident.user}@{ident.host}")
+	os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
+	mov.frames[0].save(args.out, format="GIF", save_all=True, append_images=mov.frames[1:],
+	                   duration=mov.durs, loop=0, optimize=False)
+	if not args.quiet:
+		secs = sum(mov.durs) / 1000.0
+		kb = os.path.getsize(args.out) // 1024
+		print(f"gen-demo-gif: {args.out}: {len(mov.frames)} frames, "
+		      f"{secs:.1f}s loop, {kb} KiB, font: {fontName}, "
+		      f"{scr.cols}x{scr.rows} cells, ident: {user}@{host}")
 
 
 if __name__ == "__main__":
-    main()
+	fMain()
 
 
 ##	History:
-##		- 2026-10-23: Copied from convert-base-v2's, cut down to ASCII output with
-##		  one font. Steps check their exit code, $? is the last shown step's, a
-##		  step with no show runs unseen, and output is shown with the temp home
-##		  as a generic one and the box's names as the prompt's. Anything
-##		  personal left fails it. 3 s of black at the end, and every frame time
-##		  checked to be whole 50 fps frames.
-##		- 2026-10-28: A gifsicle that fails or times out is reported as not
-##		  running, with its error, not as missing. The playback moved out of
-##		  main() into Player.
-##		- 2026-10-28: The leak check finds the host next to -, _ and . too.
-##		- 2026-11-08: The scenario and its steps are dataclasses. An unknown key,
-##		  or a value of the wrong type, fails the render.
-##		- 2026-11-19: Copied to tt-minecraft-safeserver. root isn't treated as a
-##		  personal name, since the demo runs as root in a throwaway container.
-##		  The font size is rounded, for Debian 12's Pillow, and the copyright
-##		  sign is drawn.
+##		- 20261120: Copied from gitsby to tt-minecraft-safeserver, unchanged.
+##		- 20261110: askpause= sets how long a step that asks holds on the plan
+##			before its answer is typed.
+##		- 20261107: One import per line, no `;` statements.
+##		- 20260916: type_notes = false shows each caption whole instead of typing
+##			it out. Typing them was 12.9s of a 67.4s loop - more screen time than
+##			the commands they introduce, spent on narration.
+##		- 20260916: A step can carry ask= and answer=. The command runs with a
+##			terminal on its stdin, so it really does stop and ask, and the answer
+##			is typed on camera before the rest of its output arrives. stdout stays
+##			a pipe, so nothing a program saves for a terminal reaches the frames.
+##		- 20260914: -q is accepted as well as --quiet. The pipeline hands the
+##			same flag to everything it runs.
+##		- 20260727: Every frame duration now snaps to the FRAME_MS grid, so the
+##			loop really is 50 fps end to end (it had been drifting onto 30/50/
+##			90ms frames off GIF's own centisecond rounding). Cursor glide runs
+##			one step per frame, uncapped. Scroll slowed to 150 px/s - 7 frames
+##			per line instead of 5, which is where it stops reading as stepped -
+##			while non-scrolling output drops to one frame per line, so a screen
+##			fills instantly and only the scroll is deliberate. Scroll frames are
+##			~97% of the file, so that rate is the one real size dial.
+##		- 20260725: 50 fps (20ms) frame interval for scrolling and cursor glide -
+##			at the old 80ms any scrollrate over ~275 px/s finished a line in one
+##			frame, so the scroll was a jump and the rate knob did nothing. New
+##			per-step clear= wipes the scrollback, which keeps a smooth scroll
+##			affordable (every scroll frame is a near-full-frame delta).
+##		- 20260725: stderr shares the stdout pipe, so mixed-stream output keeps
+##			its real order. Palette padded to the next power of two instead of
+##			256, so the GIF's LZW code width matches the colors actually in use.
+##		- 20260713: End of loop holds the final frame (end_hold, 3s) then hard-
+##			cuts to black (end_black, 2s) before repeating.
+##		- 20260711: v1.2. Antialiased text again (ramped 256 palette), color
+##			emoji tiles, prompt hidden until output lands, faster typing and
+##			scrolling, cell-width wrap.
+##		- 20260711: v1.1. Pixel-smooth scrolling and cursor glide; scenario
+##			knobs wpm_digits, scrollrate, linems.
+##		- 20260711: v1.0. Scenario-driven typing/render/fade engine.

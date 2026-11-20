@@ -361,7 +361,7 @@ fCtrSetup(){
 	local tag
 	((! noContainer)) || { fEcho_Clean "Container: off (--no-container), running on this box"; return 0; }
 	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fEcho_Clean "Container: no docker here, running on this box"; return 0; fi
-	tag="${APP_NAME}-cicd:$({ cat "${here}/container/Dockerfile" "${here}/container/markdownlint/package-lock.json"; grep -E '^(GO_IMAGE|STATICCHECK_VERSION|GOVULNCHECK_VERSION|GOSEC_VERSION|NFPM_VERSION|NODE_[A-Z0-9_]*|SHELLCHECK_[A-Z0-9_]*)=' "${here}/config.bash"; } | sha256sum | cut -c1-12)"
+	tag="${APP_NAME}-cicd:$({ cat "${here}/container/Dockerfile" "${here}/container/markdownlint/package-lock.json"; grep -E '^(GO_IMAGE|STATICCHECK_VERSION|GOVULNCHECK_VERSION|GOSEC_VERSION|NFPM_VERSION|NODE_[A-Z0-9_]*|SHELLCHECK_[A-Z0-9_]*|MONASPACE_[A-Z0-9_]*)=' "${here}/config.bash"; } | sha256sum | cut -c1-12)"
 	if ! docker image inspect "${tag}" >/dev/null 2>&1; then
 		fEcho_Clean "Container: building ${tag}"
 		if ! nice -n 19 docker build -q --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" \
@@ -369,7 +369,8 @@ fCtrSetup(){
 			--build-arg "GOSEC_VERSION=${GOSEC_VERSION}" --build-arg "NFPM_VERSION=${NFPM_VERSION}" \
 			--build-arg "NODE_VERSION=${NODE_VERSION}" --build-arg "NODE_SHA256_AMD64=${NODE_SHA256_AMD64}" --build-arg "NODE_SHA256_ARM64=${NODE_SHA256_ARM64}" \
 			--build-arg "SHELLCHECK_VERSION=${SHELLCHECK_VERSION}" --build-arg "SHELLCHECK_SHA256_AMD64=${SHELLCHECK_SHA256_AMD64}" \
-			--build-arg "SHELLCHECK_SHA256_ARM64=${SHELLCHECK_SHA256_ARM64}" -t "${tag}" "${here}/container" >/dev/null; then
+			--build-arg "SHELLCHECK_SHA256_ARM64=${SHELLCHECK_SHA256_ARM64}" \
+			--build-arg "MONASPACE_VERSION=${MONASPACE_VERSION}" --build-arg "MONASPACE_SHA256=${MONASPACE_SHA256}" -t "${tag}" "${here}/container" >/dev/null; then
 			fEcho_Clean "Container: the image would not build, running on this box"; return 0
 		fi
 	fi

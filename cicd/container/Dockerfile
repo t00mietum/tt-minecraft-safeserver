@@ -14,6 +14,8 @@ ARG NODE_SHA256_ARM64
 ARG SHELLCHECK_VERSION
 ARG SHELLCHECK_SHA256_AMD64
 ARG SHELLCHECK_SHA256_ARM64
+ARG MONASPACE_VERSION
+ARG MONASPACE_SHA256
 ARG TARGETARCH
 
 ENV GOTOOLCHAIN=local \
@@ -55,7 +57,13 @@ RUN apt-get update -qq \
 	&& apt-get install -y -qq --no-install-recommends zstd >/dev/null \
 	&& rm -rf /var/lib/apt/lists/*
 
-# Pillow, fontconfig, 2 monospace fonts and gifsicle draw the README's demo gif.
+# Pillow, fontconfig, the fonts and gifsicle draw the README's demo gif. Monaspace
+# Argon SemiBold is its face, checked against its pinned sum, with DejaVu behind it.
 RUN apt-get update -qq \
-	&& apt-get install -y -qq --no-install-recommends python3 python3-pil fontconfig fonts-jetbrains-mono fonts-dejavu-core gifsicle >/dev/null \
-	&& rm -rf /var/lib/apt/lists/*
+	&& apt-get install -y -qq --no-install-recommends python3 python3-pil fontconfig fonts-dejavu-core gifsicle unzip >/dev/null \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& curl -fsSL -o /tmp/m.zip "https://github.com/githubnext/monaspace/releases/download/v${MONASPACE_VERSION}/monaspace-static-v${MONASPACE_VERSION}.zip" \
+	&& echo "${MONASPACE_SHA256}  /tmp/m.zip" | sha256sum -c - \
+	&& mkdir -p /usr/local/share/fonts/monaspace \
+	&& unzip -j -q /tmp/m.zip 'Static Fonts/Monaspace Argon/MonaspaceArgon-SemiBold.otf' -d /usr/local/share/fonts/monaspace \
+	&& rm -f /tmp/m.zip && fc-cache -f >/dev/null

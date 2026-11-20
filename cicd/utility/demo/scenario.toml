@@ -1,36 +1,32 @@
-# The README's demo gif, for gen-demo-gif.py beside this. script.txt is the
-# plan; edit that, then this. demo.bash builds the made-up install and the
-# stand-ins first, as root in a throwaway container. Each step is typed, run for
-# real, and its output shown.
+# The README's demo gif, for gen-demo-gif.py beside this, a copy of gitsby's.
+# script.txt is the plan; edit that, then this. demo.bash builds the made-up
+# install and the stand-ins first, as root in a throwaway container. Each step
+# types show=, runs run= for real, and shows the output. run= calls the
+# installed copy by name, so the output names it the way a user sees it. The
+# echo puts a blank line between the command and its output, as in gitsby's.
+#
+# Every step clears first, so a smooth scroll never has a scrollback to move.
 
 title = "tt-minecraftd"
 prog  = "tt-minecraftd"
-seed  = 26
-font  = ["Monaspace Argon SemiBold", "JetBrains Mono", "DejaVu Sans Mono"]
-end_hold  = 1.5
+seed  = 11
+font  = ["Monaspace Argon SemiBold"]
+end_hold  = 1.6
 end_black = 3.0
-home_as = "/home/{user}"
 
-# A build that isn't a release shows its date. Pinned, so a render only
-# differs when the tool's output or this file does.
-[[map]]
-find = ' \(\d{4}-\d{2}-\d{2}\)'
-put  = ' (2026-11-19)'
+# Captions appear whole rather than typed, as in gitsby's demo.
+type_notes = false
 
 [[step]]
-note  = "Which build is this?"
-show  = "tt-minecraftd --version"
-pause = 2.0
-
-[[step]]
+clear = true
 note  = "The server, its players, and what the firewall turned away"
-show  = "tt-minecraftd status"
-clear = true
-pause = 4.5
+show  = "{prog} status"
+run   = "echo; tt-minecraftd status"
+pause = 5.0
 
 [[step]]
-note  = "Unsafe settings stop a start, before anything runs"
-show  = "tt-minecraftd start --dry-run"
 clear = true
-expect_exit = 1
-pause = 5.0
+note  = "Unsafe settings stop a start, before anything runs"
+show  = "{prog} start --dry-run"
+run   = "echo; tt-minecraftd start --dry-run"
+pause = 5.5
