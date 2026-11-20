@@ -22,30 +22,6 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- Remove plugins.Refuse and RefusedDir, which nothing calls now
-	- ID: 2026111918161429
-	- Type: Task
-	- Status: Closed
-	- Closed reason: Done
-	- Target version: v1.0.0-beta.1
-	- Priority: Low
-	- Opened: 20261119-181614
-	- Opened by: JC
-	- Related IDs: 2026111914262600, 2026111914293176
-	- Requirements [Feature]: Remove plugins.Refuse and plugins.RefusedDir from source/internal/plugins/approve.go, and any docs that name plugins-refused/. Comment out their tests with the reason, per the never-delete rule.
-	- Estimated effort: Low
-	- Progress log:
-		- 2026-11-19: Kept only for the known-bad check, which found no usable list. t00mietum OKed removing them.
-		- 2026-11-20: Removed both. No doc names plugins-refused/ outside the backlog.
-	- Test case: none, since the removed code has no caller. 1a3en5c and 1a3js38 tested only Refuse and are commented out.
-	- Verified: build, vet and the quick gate on the plugins area pass.
-	- Decisions:
-		- The Refuse tests (1a3en5c, 1a3js38) are commented out with the reason, per the never-delete rule. The root host check covers linksafe.Mkdir elsewhere.
-	- Swept: grep for Refuse, RefusedDir and plugins-refused in source, cicd, design.md and README.md finds only the commented tests and unrelated words.
-	- Actual effort: Low
-	- Acceptance signoff: Self-closed: mechanical removal of unused code.
-	- Closed: 20261120-022900
-
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -96,6 +72,30 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. 1a3jrsw and design.md are done.
+
+- Remove plugins.Refuse and RefusedDir, which nothing calls now
+	- ID: 2026111918161429
+	- Type: Task
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261119-181614
+	- Opened by: JC
+	- Related IDs: 2026111914262600, 2026111914293176
+	- Requirements [Feature]: Remove plugins.Refuse and plugins.RefusedDir from source/internal/plugins/approve.go, and any docs that name plugins-refused/. Comment out their tests with the reason, per the never-delete rule.
+	- Estimated effort: Low
+	- Progress log:
+		- 2026-11-19: Kept only for the known-bad check, which found no usable list. t00mietum OKed removing them.
+		- 2026-11-20: Removed both. No doc names plugins-refused/ outside the backlog.
+	- Test case: none, since the removed code has no caller. 1a3en5c and 1a3js38 tested only Refuse and are commented out.
+	- Verified: build, vet and the quick gate on the plugins area pass.
+	- Decisions:
+		- The Refuse tests (1a3en5c, 1a3js38) are commented out with the reason, per the never-delete rule. The root host check covers linksafe.Mkdir elsewhere.
+	- Swept: grep for Refuse, RefusedDir and plugins-refused in source, cicd, design.md and README.md finds only the commented tests and unrelated words.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical removal of unused code.
+	- Closed: 20261120-022900
 
 - Trust the plugins an admin adds, with no approval step
 	- ID: 2026111914293176
