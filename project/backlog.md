@@ -22,6 +22,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Remove plugins.Refuse and RefusedDir, which nothing calls now
+	- ID: 2026111918161429
+	- Type: Task
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261119-181614
+	- Opened by: JC
+	- Related IDs: 2026111914262600, 2026111914293176
+	- Requirements [Feature]: Remove plugins.Refuse and plugins.RefusedDir from source/internal/plugins/approve.go, and any docs that name plugins-refused/. Comment out their tests with the reason, per the never-delete rule.
+	- Estimated effort: Low
+	- Progress log:
+		- 2026-11-19: Kept only for the known-bad check, which found no usable list. t00mietum OKed removing them.
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
