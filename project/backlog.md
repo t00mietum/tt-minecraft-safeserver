@@ -25,7 +25,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Remove plugins.Refuse and RefusedDir, which nothing calls now
 	- ID: 2026111918161429
 	- Type: Task
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261119-181614
@@ -35,6 +36,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Low
 	- Progress log:
 		- 2026-11-19: Kept only for the known-bad check, which found no usable list. t00mietum OKed removing them.
+		- 2026-11-20: Removed both. No doc names plugins-refused/ outside the backlog.
+	- Test case: none, since the removed code has no caller. 1a3en5c and 1a3js38 tested only Refuse and are commented out.
+	- Verified: build, vet and the quick gate on the plugins area pass.
+	- Decisions:
+		- The Refuse tests (1a3en5c, 1a3js38) are commented out with the reason, per the never-delete rule. The root host check covers linksafe.Mkdir elsewhere.
+	- Swept: grep for Refuse, RefusedDir and plugins-refused in source, cicd, design.md and README.md finds only the commented tests and unrelated words.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical removal of unused code.
+	- Closed: 20261120-022900
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
