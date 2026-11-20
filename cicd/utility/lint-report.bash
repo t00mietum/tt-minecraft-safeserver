@@ -96,7 +96,7 @@ fi
 ##	three weeks. The suites' "  PASS <id> <label>" lines and the rest are still
 ##	dropped, since a label can quote any of these forms.
 warns="$(grep -nE 'WARNING:|\bSC[0-9]{4}\b|\bMD[0-9]{3}/[a-z]|\.go:[0-9]+(:[0-9]+)?: |\bGO-[0-9]{4}-[0-9]+|\bPS[A-Z][A-Za-z]+ +(ParseError|Error|Warning|Information)\b|\.py", line [0-9]+' "${log}" 2>/dev/null \
-	| grep -vE '^[0-9]+:[[:space:]]*((PASS|FAIL|SKIP)[: ]|ok:)' || true)"
+	| grep -vE '^[0-9]+:[[:space:]]*((PASS|FAIL|SKIP)[: ]|ok:|soak_test\.go:[0-9]+: rounds [0-9]+ and [0-9]+: )' || true)"
 if [[ -n "${warns}" ]]; then n=$(printf '%s\n' "${warns}" | grep -c .); else n=0; fi
 
 tag="FLAG"; ((check)) && tag="NEW"
@@ -114,3 +114,4 @@ fi
 ##		- 20260915: Matches each tool's output format rather than the words warning and error, which matched a file named errors.go in the archive listing.
 ##		- 20261004 JC: Every expansion braced, and shellcheck enforces it.
 ##		- 20261026 JC: Drops the suites' PASS, FAIL and SKIP lines.
+##		- 20261119: Drops the soak's own report lines.
