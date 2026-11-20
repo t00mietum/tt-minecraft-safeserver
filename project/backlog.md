@@ -2728,6 +2728,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: 1a4jssw for the soak's profiles. The rest are pipeline steps: CodeQL failed when a known entry was moved off its line and named the stale entry, both root host steps passed on the run's release build, and the demo step passed with its frames checked by eye.
 	- Acceptance signoff: Self-closed: each step was watched to fail and to pass. The gif follows the CICD process's gif rules, and README's copy changes only at the next release.
 	- Closed: 20261119-190400
+	- Commit: ed59063
 
 - update --mc-version
 	- ID: 2026111117302963
