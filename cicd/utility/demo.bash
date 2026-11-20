@@ -8,7 +8,8 @@
 ##		  no network, since it writes a made-up install under /etc and /srv.
 ##		- Everything in it is made up: the players, the host name, and the plugin. ss and systemctl
 ##		  and nft are stand-ins for the sockets, the boot unit and the firewall counters.
-##		- No window and no display: each screen is drawn with ImageMagick and joined with gifsicle.
+##		- demo/gen-demo-gif.py types and runs the steps in demo/scenario.toml and draws the gif,
+##		  with Pillow and gifsicle, so no window or display is used. demo/script.txt is the plan.
 ##	Syntax:
 ##		demo.bash EXE WORK_DIR OUT_GIF
 ##		  WORK_DIR must be empty or missing. OWNER=UID:GID hands WORK_DIR and OUT_GIF to that account.
@@ -28,16 +29,13 @@ exe="$1"; work="${2%/}"; outGif="$3"
 ## It writes into /etc and /srv, so only where those are thrown away after.
 if ! [[ -f /.dockerenv || -f /run/.containerenv ]] || ((EUID != 0)); then echo "demo: runs only as root in a throwaway container" >&2; exit 2; fi
 [[ -x "${exe}" ]] || { echo "demo: no program at ${exe}" >&2; exit 2; }
-for t in convert gifsicle; do command -v "${t}" >/dev/null 2>&1 || { echo "demo: needs ${t}" >&2; exit 1; }; done
+for t in python3 fc-match gifsicle; do command -v "${t}" >/dev/null 2>&1 || { echo "demo: needs ${t}" >&2; exit 1; }; done
 mkdir -p -- "${work}"
 [[ -z "$(ls -A -- "${work}")" ]] || { echo "demo: ${work} isn't empty" >&2; exit 2; }
 ## Handed back on failure too, or the caller can't remove its own run folder.
 trap '[[ -z "${OWNER:-}" ]] || chown -R -- "${OWNER}" "${work}" "${outGif}" 2>/dev/null || true' EXIT
 
-## Screen size in characters, and how it's drawn.
-cols=88; rows=26; font="DejaVu-Sans-Mono"; pt=15; fg="#c5c8c6"; bg="#1d1f21"
-cellW=9; cellH=19; padX=14; padY=12
-prompt='$ '
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ## The made-up install.
 install -D -m 0755 -- "${exe}" /usr/local/bin/tt-minecraftd
@@ -89,54 +87,15 @@ printf '{"nftables":[%s,%s,%s,%s,%s,%s]}\n' "$(c in_refused 41)" "$(c in_flood 3
 EOF
 chmod 0755 "${work}/bin/ss" "${work}/bin/systemctl" "${work}/bin/nft"
 
-## The session: each command as typed, then its real output.
-session=(
-	"tt-minecraftd --version"
-	"tt-minecraftd status"
-	"tt-minecraftd start --dry-run"
-)
-
-## One screen per frame: the last rows lines of the session so far, plus a cursor.
-frames="${work}/frames"; mkdir -p -- "${frames}"
-declare -i nFrame=0
-screen=()
-fShot(){ ## DELAY_CS [CURSOR_LINE]: draw the screen as it is now, shown for DELAY_CS hundredths
-	local delay="$1" last="${2:-}" f txt lines
-	printf -v f '%s/%05d' "${frames}" "${nFrame}"
-	lines=("${screen[@]}")
-	[[ -z "${last}" ]] || lines+=("${last}")
-	((${#lines[@]} <= rows)) || lines=("${lines[@]: -rows}")
-	printf -v txt '%s\n' "${lines[@]}"
-	## -annotate reads \ and % as escapes, and a leading @ as a file name.
-	txt="${txt//\\/\\\\}"; txt="${txt//%/%%}"; [[ "${txt}" != @* ]] || txt="\\${txt}"
-	convert -size "$((cols * cellW + 2 * padX))x$((rows * cellH + 2 * padY))" "xc:${bg}" -font "${font}" -pointsize "${pt}" -fill "${fg}" \
-		-interline-spacing 2 -gravity northwest -annotate "+${padX}+${padY}" "${txt}" -depth 8 "${f}.gif" 2> "${f}.err" \
-		|| { cat "${f}.err" >&2; return 1; }
-	echo "${delay}" > "${f}.delay"
-	nFrame+=1
-}
-
-export PATH="${work}/bin:${PATH}" HOME="${work}/home" TERM=dumb COLUMNS="${cols}"
-mkdir -p -- "${HOME}"
-cd "${HOME}"
-fShot 80 "${prompt}_"
-for cmd in "${session[@]}"; do
-	## Typed a few characters at a time, which keeps the frame count down.
-	for ((i = 3; i < ${#cmd}; i += 3)); do fShot 7 "${prompt}${cmd:0:i}_"; done
-	fShot 50 "${prompt}${cmd}_"
-	screen+=("${prompt}${cmd}")
-	out="$(bash -c "${cmd}" 2>&1 || true)"
-	while IFS= read -r line; do screen+=("${line:0:cols}"); done <<< "${out}"
-	fShot 350 "${prompt}_"
-done
-fShot 200 "${prompt}_"
-
-args=()
-for f in "${frames}"/*.gif; do read -r d < "${f%.gif}.delay"; args+=("-d${d}" "${f}"); done
-gifsicle --no-warnings --loop -O3 --colors 16 "${args[@]}" -o "${outGif}"
-echo "demo: ${nFrame} frames, $(stat -c %s "${outGif}") bytes -> ${outGif}"
+## The steps run as typed, with the stand-ins first on PATH. --bin is only for the scenario's
+## {prog}, which it doesn't use, so the installed copy is what runs and what the output names.
+export PATH="${work}/bin:${PATH}" TERM=dumb
+env -u DISPLAY -u WAYLAND_DISPLAY python3 "${here}/demo/gen-demo-gif.py" --scenario "${here}/demo/scenario.toml" \
+	--out "${outGif}" --bin "${exe}"
 
 
 ##	History:
 ##		- 2026-11-13: Created.
 ##		- 2026-11-14: Podman in the made-up config, since native mode is off.
+##		- 2026-11-19: Drawn by demo/gen-demo-gif.py from demo/scenario.toml: typed by hand, 50 fps,
+##		  a drawn window, and 3 s of black before the loop.

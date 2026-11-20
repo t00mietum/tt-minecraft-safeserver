@@ -1,0 +1,24 @@
+@ The plan for the README's demo gif. Edit this, then scenario.toml to match.
+@ A bare line is typed on camera. A # line is the caption before it. An @ line is a note and never shows.
+@ Gif only, no video, since it's a CLI: 960x540, 50 fps, font 100%. -> assets/demo.gif, at a release only.
+@ Drawn by gen-demo-gif.py, not recorded, so no window opens. demo.bash builds the world first.
+@ The set: a drawn window, dark gray, pale green text, a made-up user@host in tinted colors.
+@ Typed at a person's pace, with the odd typo fixed. Each scene after the first starts on a clear screen.
+@ The world: a made-up install as root in a throwaway container with no network. 3 made-up players,
+@   one made-up plugin, Podman mode. ss, systemctl and nft are stand-ins with fixed answers.
+@ Everything anonymized: no real names, paths, or hosts. A leak fails the render.
+
+# Which build is this?
+tt-minecraftd --version
+	@ pause 2 seconds
+
+# The server, its players, and what the firewall turned away
+tt-minecraftd status
+	@ pause 4.5 seconds
+
+# Unsafe settings stop a start, before anything runs
+tt-minecraftd start --dry-run
+	@ exits 1, which is the point
+	@ pause 5 seconds
+
+@ hold 1.5 seconds, then 3 seconds of black before the loop

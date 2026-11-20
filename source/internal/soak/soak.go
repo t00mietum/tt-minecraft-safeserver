@@ -9,14 +9,21 @@ package soak
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
 
 // Env is the rounds per half, for the soak tests. They skip when it's unset.
 const Env = "TT_MINECRAFTD_SOAK"
+
+// ProfileEnv names a folder for a heap profile at each sample, so
+// go tool pprof -base can show what grew.
+const ProfileEnv = "TT_MINECRAFTD_SOAK_PROFILES"
 
 // HeapSlack and GoroutineSlack are what a soak may grow by between the 2
 // samples without failing.
@@ -60,6 +67,11 @@ type Result struct {
 // Run does round n times, takes a sample, does n more, and takes another.
 // It stops at the first error.
 func Run(n int, round func(i int) error) (Result, error) {
+	return run(n, round, nil)
+}
+
+// snap, when there is one, runs right after each sample, with "half" or "double".
+func run(n int, round func(i int) error, snap func(which string) error) (Result, error) {
 	r := Result{Rounds: n}
 	for i := 0; i < 2*n; i++ {
 		if err := round(i); err != nil {
@@ -67,10 +79,43 @@ func Run(n int, round func(i int) error) (Result, error) {
 		}
 		if i == n-1 {
 			r.Half = Take()
+			if snap != nil {
+				if err := snap("half"); err != nil {
+					return r, err
+				}
+			}
 		}
 	}
 	r.Double = Take()
+	if snap != nil {
+		if err := snap("double"); err != nil {
+			return r, err
+		}
+	}
 	return r, nil
+}
+
+// heapTo writes the heap profile, as of the GC Take just ran, to
+// dir/<test binary>_<test>_<which>.pb.gz.
+func heapTo(dir, test string) func(string) error {
+	bin := strings.TrimSuffix(filepath.Base(os.Args[0]), ".test")
+	test = strings.NewReplacer("/", "_", " ", "_").Replace(test)
+	return func(which string) error {
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		f, err := root.Create(bin + "_" + test + "_" + which + ".pb.gz")
+		if err != nil {
+			return err
+		}
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			_ = f.Close()
+			return err
+		}
+		return f.Close()
+	}
 }
 
 // Leak says what grew past the slack, or "" when nothing did.
@@ -111,8 +156,12 @@ func Rounds(t testing.TB) int {
 func Check(t testing.TB, round func(i int) error) {
 	t.Helper()
 	n := Rounds(t)
+	var snap func(string) error
+	if dir := os.Getenv(ProfileEnv); dir != "" {
+		snap = heapTo(dir, t.Name())
+	}
 	start := time.Now()
-	r, err := Run(n, round)
+	r, err := run(n, round, snap)
 	if err != nil {
 		t.Fatal(err)
 	}

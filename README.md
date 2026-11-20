@@ -60,6 +60,8 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 
 <p align="center"><img src="assets/demo.gif" alt="tt-minecraftd showing its version, the server status, and the unsafe settings that stop a start"></p>
 
+<!-- <p align="center"><a href="https://www.youtube.com/watch?v=VIDEO_ID">Watch the video</a></p> -->
+
 <!-- TOC ignore:true -->
 ## Table of contents
 
