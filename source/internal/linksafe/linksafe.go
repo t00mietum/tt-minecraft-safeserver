@@ -241,16 +241,29 @@ func (d Dir) Move(name string, to Dir, newName string) error {
 	if errors.Is(err, syscall.EINVAL) {
 		// A filesystem without the flag. The server can still race a name in,
 		// but the rename only replaces it, in a folder it can write anyway.
-		switch _, err = os.Lstat(to.Name(newName)); {
+		// The check goes through to's handle, since its path may be a link
+		// by now.
+		switch err = existsAt(to.fd, newName); {
 		case err == nil:
 			err = syscall.EEXIST
-		case errors.Is(err, fs.ErrNotExist):
+		case errors.Is(err, syscall.ENOENT):
 			err = syscall.Renameat(d.fd, name, to.fd, newName)
 		}
 	}
 	if err != nil {
 		return &os.LinkError{Op: "rename", Old: d.Name(name), New: to.Name(newName), Err: err}
 	}
+	return nil
+}
+
+// existsAt is nil when name is there under dirfd, a link included. O_PATH
+// opens nothing for reading, so a pipe or device there runs no driver.
+func existsAt(dirfd int, name string) error {
+	fd, err := syscall.Openat(dirfd, name, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	_ = syscall.Close(fd) // O_PATH handle, nothing to lose
 	return nil
 }
 

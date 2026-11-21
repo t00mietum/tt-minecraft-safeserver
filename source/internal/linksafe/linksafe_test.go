@@ -453,3 +453,41 @@ func rootSide(t *testing.T) {
 		t.Errorf("refused-file: %v", err)
 	}
 }
+
+// On a filesystem without RENAME_NOREPLACE, Move checks the new name through
+// to's handle. A folder swapped for a link after it was opened can't hide a
+// file that's there, and so get it replaced.
+func TestMoveFallbackChecksHandle(t *testing.T) {
+	defer testid.Line(t, "1a4q5bg")
+	renameat2 = func(int, string, int, string, uint) error { return syscall.EINVAL }
+	t.Cleanup(func() { renameat2 = sysRenameat2Call })
+	top, empty := t.TempDir(), t.TempDir()
+	mkdirs(t, filepath.Join(top, "from"), filepath.Join(top, "to"))
+	put(t, filepath.Join(top, "from", "b.jar"), "b")
+	put(t, filepath.Join(top, "to", "b.jar"), "old b")
+	d := open(t, top)
+	from, err := d.Sub("from")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer from.Close()
+	to, err := d.Sub("to")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer to.Close()
+	if err := os.Rename(filepath.Join(top, "to"), filepath.Join(top, "to-real")); err != nil {
+		t.Fatal(err)
+	}
+	link(t, empty, filepath.Join(top, "to"))
+
+	if err := from.Move("b.jar", to, "b.jar"); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("b.jar over b.jar: %v, want fs.ErrExist", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(top, "to-real", "b.jar")); string(b) != "old b" {
+		t.Errorf("b.jar replaced: %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(top, "from", "b.jar")); string(b) != "b" {
+		t.Errorf("b.jar source: %q", b)
+	}
+}

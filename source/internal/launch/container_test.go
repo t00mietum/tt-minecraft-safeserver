@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -268,6 +269,62 @@ func TestDockerStartFails(t *testing.T) {
 	err = g.d.Start(context.Background(), StartMode{})
 	if err == nil || !strings.Contains(err.Error(), "didn't finish loading") || g.slept != 5*time.Second {
 		t.Errorf("slow: err %v, slept %s", err, g.slept)
+	}
+}
+
+// markWriter notes the kit's clock at each line that names a wait's start or end.
+type markWriter struct {
+	k     *Kit
+	w     io.Writer
+	marks []time.Duration
+}
+
+func (m *markWriter) Write(p []byte) (int, error) {
+	if s := string(p); strings.Contains(s, "Waiting for the server") || strings.Contains(s, "still up after") {
+		m.marks = append(m.marks, m.k.slept)
+	}
+	return m.w.Write(p)
+}
+
+// The load and stop waits end at their timeout, however long each look takes.
+func TestWaitDeadline(t *testing.T) {
+	defer testid.Line(t, "1a4q5y8")
+	const look = 300 * time.Millisecond
+	slow := func(g *rig) *markWriter {
+		reply := g.r.Reply
+		g.r.Reply = func(c host.Cmd) ([]byte, error) {
+			g.d.slept += look
+			return reply(c)
+		}
+		m := &markWriter{k: &g.d.Kit, w: g.out}
+		g.d.Out = m
+		return m
+	}
+
+	g := newRig(t)
+	g.states = []string{"", "running"}
+	m := slow(g)
+	err := g.d.Start(context.Background(), StartMode{})
+	end := g.d.slept
+	if !errors.Is(err, errSlowLoad) || len(m.marks) != 1 {
+		t.Fatalf("start: err %v, marks %v", err, m.marks)
+	}
+	// One pass (log and state) can run past the deadline, no more.
+	if took := end - m.marks[0]; took < g.d.Cfg.StartTimeout || took > g.d.Cfg.StartTimeout+2*look {
+		t.Errorf("start waited %s, timeout %s", took, g.d.Cfg.StartTimeout)
+	}
+
+	g = newRig(t)
+	g.states = []string{"running"}
+	m = slow(g)
+	if err := g.d.Stop(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.marks) != 2 {
+		t.Fatalf("stop: marks %v, output %q", m.marks, g.out.String())
+	}
+	if took := m.marks[1] - m.marks[0]; took < g.d.Cfg.StopTimeout || took > g.d.Cfg.StopTimeout+look {
+		t.Errorf("stop waited %s, timeout %s", took, g.d.Cfg.StopTimeout)
 	}
 }
 

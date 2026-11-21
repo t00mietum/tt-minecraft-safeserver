@@ -31,16 +31,17 @@ docsGate=("${root}/cicd/cicd.bash" --backlog-run-quick --no-codeql)
 [[ -z "${CICD_DOCS_GATE_CMD:-}" ]] || read -r -a docsGate <<< "${CICD_DOCS_GATE_CMD}"
 
 fOnlyDocs(){ ## FROM TO: true when every changed path matches the list
-	local from="$1" to="$2" f g ok pats=() range
+	local from="$1" to="$2" f g ok pats=()
+	## A push that makes the branch has no old commit to diff from, so it gets the merge gate.
+	[[ ! "${from}" =~ ^0+$ ]] || return 1
 	while IFS= read -r g; do [[ -z "${g}" || "${g}" == \#* ]] || pats+=("${g}"); done < "${root}/cicd/docs-only-paths"
-	if [[ "${from}" =~ ^0+$ ]]; then range="${to}"; else range="${from}..${to}"; fi
 	local n=0
 	while IFS= read -r f; do
 		n=$((n + 1)); ok=0
 		# shellcheck disable=SC2053  ## the pattern is a glob on purpose
 		for g in "${pats[@]}"; do [[ "${f}" == ${g} ]] && { ok=1; break; }; done
 		((ok)) || return 1
-	done < <(git -C "${root}" diff --name-only "${range}" 2>/dev/null || echo __unknown__)
+	done < <(git -C "${root}" diff --name-only "${from}..${to}" 2>/dev/null || echo __unknown__)
 	((n > 0))
 }
 
@@ -66,3 +67,4 @@ exit 0
 ##		- 2026-11-12: Created.
 ##		- 2026-11-14: Skips the gate for the commit a merge gate already passed on.
 ##		- 2026-11-18: A docs-only push runs the quick gate, since docs are read by lint and tests.
+##		- 2026-11-20: A push that makes main always runs the merge gate, rather than diffing against the working tree.

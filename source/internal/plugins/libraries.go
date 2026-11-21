@@ -23,7 +23,8 @@ var cacheDirs = []string{"libraries", "plugins/.paper-remapped"}
 
 // Libraries lists the jars in cacheDirs, less the ones paper.jar puts back
 // from its own hashes at every start. A link to a folder, or a link at a
-// cache folder itself, is listed too, since Paper would follow it.
+// cache folder itself, is listed too, since Paper would follow it. A folder
+// that's gone by the time it's read is left out.
 func Libraries(serverDir string) ([]Jar, error) {
 	own, err := paperOwn(serverDir)
 	if err != nil {
@@ -32,9 +33,10 @@ func Libraries(serverDir string) ([]Jar, error) {
 	var jars []Jar
 	for _, dir := range cacheDirs {
 		root := filepath.Join(serverDir, filepath.FromSlash(dir))
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		err := walkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
-				if p == root && errors.Is(err, fs.ErrNotExist) {
+				// A running Paper can take a folder away mid-walk.
+				if errors.Is(err, fs.ErrNotExist) {
 					return nil
 				}
 				return err
@@ -64,6 +66,9 @@ func Libraries(serverDir string) ([]Jar, error) {
 	}
 	return jars, nil
 }
+
+// walkDir is a var so a test can take a folder away mid-walk.
+var walkDir = filepath.WalkDir
 
 // paperOwn names the files Paperclip keeps in libraries/ for the build
 // paper.jar points to, from its META-INF/libraries.list. Paperclip checks

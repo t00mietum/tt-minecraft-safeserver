@@ -190,7 +190,7 @@ func (a API) Install(ctx context.Context, exe string, r Release) error {
 	if err != nil {
 		return err
 	}
-	if err := ready(dirfd, dir, s, r, old); err != nil {
+	if err := ready(dir, s, r, old); err != nil {
 		s.Drop()
 		return err
 	}
@@ -209,7 +209,7 @@ func statAt(dirfd int, name string) (syscall.Stat_t, error) {
 	return st, err
 }
 
-func ready(dirfd int, dir string, s *download.Staged, r Release, old syscall.Stat_t) error {
+func ready(dir string, s *download.Staged, r Release, old syscall.Stat_t) error {
 	switch {
 	case r.Size > 0 && s.Size != r.Size:
 		return fmt.Errorf("%s: got %d bytes, the release said %d", r.Asset, s.Size, r.Size)
@@ -217,15 +217,10 @@ func ready(dirfd int, dir string, s *download.Staged, r Release, old syscall.Sta
 		return fmt.Errorf("%s: SHA-256 doesn't match the release's %s; not used", r.Asset, SumsName)
 	}
 	// No setuid or setgid, even if the old one had them. Keep sets these
-	// again through its fd; they're set here so --version can run.
+	// again; they're set here so --version can run.
 	s.UID, s.GID, s.Mode = int(old.Uid), int(old.Gid), old.Mode&0o777|0o100
-	if os.Geteuid() == 0 {
-		if err := syscall.Fchownat(dirfd, s.Temp, s.UID, s.GID, download.AtSymlinkNoFollow); err != nil {
-			return fmt.Errorf("chown %s: %w", s.Temp, err)
-		}
-	}
-	if err := syscall.Fchmodat(dirfd, s.Temp, s.Mode, 0); err != nil {
-		return fmt.Errorf("chmod %s: %w", s.Temp, err)
+	if err := s.SetOwner(); err != nil {
+		return err
 	}
 	return checkVersion(filepath.Join(dir, s.Temp), r.Tag)
 }

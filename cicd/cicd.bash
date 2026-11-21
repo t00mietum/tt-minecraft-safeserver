@@ -962,7 +962,8 @@ fi
 if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/null; then
 	gfs_rotate "${root}/${LINT_LOG_DIR}" run log >/dev/null 2>&1 || true
 	gfs_rotate "${root}/${LINT_LOG_DIR}" lint txt >/dev/null 2>&1 || true
-	exec > >(tee "${root}/${LINT_LOG_DIR}/run_${stamp}.log") 2>&1
+	## The tee ignores Ctrl-C, or it dies first and the EXIT trap's first write takes SIGPIPE, skipping cleanup.
+	exec > >(trap '' INT TERM; exec tee "${root}/${LINT_LOG_DIR}/run_${stamp}.log") 2>&1
 	## Wait for tee to drain, else the prompt comes back mid-flush.
 	teePid=$!
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
@@ -1030,3 +1031,4 @@ fEcho_Clean
 ##		- 2026-11-19: the build step writes SHA256SUMS for its binaries, so a run without the package step leaves no stale one.
 ##		- 2026-11-19: CodeQL checks the vendored modules too, with known results in CODEQL_KNOWN. The soak keeps its
 ##		  heap profiles. The root host steps check the run's release build. The demo is drawn by gen-demo-gif.py.
+##		- 2026-11-20: the run log's tee ignores Ctrl-C, so the exit trap's cleanup still runs.

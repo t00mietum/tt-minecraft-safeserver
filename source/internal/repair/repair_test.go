@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -384,6 +385,64 @@ func TestOwnershipCheck(t *testing.T) {
 	hasAll(t, "missing tree", look(t, h, ownershipCheck), "tree "+filepath.Join(filepath.Dir(h.Cfg.ServerDir), "gone")+" is missing")
 }
 
+// A running Paper saves through temp files it renames, so a file or folder
+// can go between the walk's listing and its look at it.
+func TestOwnershipCheckFileGone(t *testing.T) {
+	defer testid.Line(t, "1a4q4c8")
+	h, _ := ownHost(t, true, "running")
+	world := filepath.Join(h.Cfg.ServerDir, "world")
+	if err := os.MkdirAll(filepath.Join(world, "playerdata", "inner"), 0o770); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"level.dat_new", "playerdata/a.dat_tmp", "playerdata/inner/b.dat"} {
+		if err := os.WriteFile(filepath.Join(world, filepath.FromSlash(p)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One open file is left, so the walk is shown to go on past the gaps.
+	open := filepath.Join(world, "zz-open.txt")
+	if err := os.WriteFile(open, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	gone := map[string]func(string) error{
+		// Renamed before its lstat, as Paper does with level.dat_new.
+		filepath.Join(world, "level.dat_new"): func(p string) error {
+			return os.Rename(p, filepath.Join(world, "level.dat"))
+		},
+		// Gone before its lstat.
+		filepath.Join(world, "playerdata", "a.dat_tmp"): os.Remove,
+		// A folder gone before it's read.
+		filepath.Join(world, "playerdata", "inner"): os.RemoveAll,
+	}
+	seen := map[string]bool{}
+	old := walkDir
+	t.Cleanup(func() { walkDir = old })
+	walkDir = func(root string, fn fs.WalkDirFunc) error {
+		return old(root, func(p string, d fs.DirEntry, err error) error {
+			if take := gone[p]; take != nil && !seen[p] {
+				seen[p] = true
+				if err := take(p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return fn(p, d, err)
+		})
+	}
+	hasAll(t, "files gone mid-walk", look(t, h, ownershipCheck), "has 1 file other accounts can reach [fix]")
+	if len(seen) != len(gone) {
+		t.Errorf("the walk reached %d of the %d files taken away", len(seen), len(gone))
+	}
+
+	// A tree root that's gone is still an error.
+	if _, _, err := walkTree(filepath.Join(world, "nowhere"), 0, 0, true, nil); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing root: %v", err)
+	}
+}
+
 func TestBedrockCheck(t *testing.T) {
 	defer testid.Line(t, "1a3epe0")
 	h, f := testHost(t, "", "", nil)
@@ -717,6 +776,26 @@ func TestHostFirewallCheck(t *testing.T) {
 	}
 	if got := look(t, h, hostFirewallCheck); !reflect.DeepEqual(got, want) {
 		t.Errorf("ufw other ports: %q", got)
+	}
+	// First match wins: a deny from Anywhere ahead of the allow blocks the port.
+	open := "25565/tcp                  ALLOW IN    Anywhere\n19132/udp                  ALLOW IN    Anywhere\n"
+	blocked := func(rule, p string) string {
+		return fmt.Sprintf("ufw is active and its rule %q blocks players on %s, ahead of any rule that lets them in", rule, p)
+	}
+	for _, c := range []struct{ rules, want string }{
+		{"19132/tcp                  DENY IN     Anywhere\n19000:19200/tcp            ALLOW IN    Anywhere\n" + open, "ufw is active and doesn't let players in on 19132/tcp; sudo ufw allow 19132/tcp adds it"},
+		{"19000:19200/tcp            DENY IN     Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, blocked("19000:19200/tcp DENY IN Anywhere", "19132/tcp")},
+		{"Anywhere/udp               REJECT IN   Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, blocked("Anywhere/udp REJECT IN Anywhere", "19132/udp")},
+		{"19132,25565/tcp            DENY IN     Anywhere\n19132/tcp (v6)             ALLOW IN    Anywhere (v6)\n" + open, blocked("19132,25565/tcp DENY IN Anywhere", "25565/tcp")},
+		{"19132/tcp                  ALLOW IN    Anywhere\n19132/tcp                  DENY IN     Anywhere\n" + open, ""},
+		{"19132/tcp                  DENY IN     10.0.0.0/8\n19132/tcp                  ALLOW IN    Anywhere\n" + open, ""},
+		{"19132/tcp                  DENY OUT    Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, ""},
+	} {
+		ufw = head + c.rules
+		got := look(t, h, hostFirewallCheck)
+		if c.want == "" && len(got) != 0 || c.want != "" && !slices.Contains(got, c.want) {
+			t.Errorf("ufw %q: %q", c.rules, got)
+		}
 	}
 
 	units["ufw"], units["firewalld"] = false, true

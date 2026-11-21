@@ -267,7 +267,7 @@ func (s *Staged) Open() (*os.File, error) {
 // Keep gives the download its owner and mode, then renames it over the name
 // it's for. A file put in place of the one Stage wrote is refused.
 func (s *Staged) Keep() error {
-	err := s.ready()
+	err := s.SetOwner()
 	if err == nil {
 		err = syscall.Renameat(s.dirfd, s.Temp, s.dirfd, s.Name)
 		if err != nil {
@@ -282,7 +282,9 @@ func (s *Staged) Keep() error {
 	return nil
 }
 
-func (s *Staged) ready() error {
+// SetOwner gives the staged file UID, GID and Mode through its own handle,
+// once the temp name is checked to still be that file. Keep calls it again.
+func (s *Staged) SetOwner() error {
 	f, err := s.Open()
 	if err != nil {
 		return err

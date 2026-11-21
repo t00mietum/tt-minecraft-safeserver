@@ -5,3 +5,6 @@ package linksafe
 
 // Package syscall stopped at an older table on amd64.
 const sysRenameat2 = 316
+
+// Nor has it O_PATH there. This is the kernel's generic value.
+const oPath = 0x200000

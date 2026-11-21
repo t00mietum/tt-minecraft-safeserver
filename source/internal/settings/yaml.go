@@ -114,7 +114,10 @@ func yamlCopies(root *yaml.Node, path []string) []yamlCopy {
 				}
 			case k.Kind != yaml.ScalarNode || k.Value != path[level]:
 			case level == len(path)-1:
-				found = append(found, yamlCopy{k, v, direct && v.Kind == yaml.ScalarNode && v.Line == k.Line &&
+				// The value is what the alias points at, as SnakeYAML reads it.
+				// Editing in place goes by the node on the key's line.
+				target, _ := yamlDeref(v)
+				found = append(found, yamlCopy{k, target, direct && v.Kind == yaml.ScalarNode && v.Line == k.Line &&
 					(v.Style == 0 || v.Style == yaml.DoubleQuotedStyle || v.Style == yaml.SingleQuotedStyle)})
 			default:
 				walk(v, level+1, direct)

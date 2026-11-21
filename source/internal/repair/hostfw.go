@@ -17,14 +17,16 @@ import (
 type port struct {
 	num   int
 	proto string
+	// deny is the ufw rule that blocks it ahead of any allow, if one does.
+	deny string
 }
 
 func (p port) String() string { return fmt.Sprintf("%d/%s", p.num, p.proto) }
 
 func gamePorts(c *config.Config) []port {
-	ports := []port{{c.GamePort, "tcp"}}
+	ports := []port{{num: c.GamePort, proto: "tcp"}}
 	if c.Bedrock {
-		ports = append(ports, port{c.BedrockPort, "tcp"}, port{c.BedrockPort, "udp"})
+		ports = append(ports, port{num: c.BedrockPort, proto: "tcp"}, port{num: c.BedrockPort, proto: "udp"})
 	}
 	return ports
 }
@@ -90,6 +92,10 @@ var hostFirewallCheck = Check{
 				continue
 			}
 			for _, p := range missing {
+				if p.deny != "" {
+					found = append(found, Finding{Problem: fmt.Sprintf("%s is active and its rule %q blocks players on %s, ahead of any rule that lets them in", fw.unit, p.deny, p)})
+					continue
+				}
 				found = append(found, Finding{Problem: fmt.Sprintf("%s is active and doesn't let players in on %s; %s adds it", fw.unit, p, fw.add(p))})
 			}
 		}
@@ -102,22 +108,56 @@ func ufwMissing(ctx context.Context, h *Host) ([]port, error) {
 	if err != nil {
 		return nil, err
 	}
-	var specs []string
+	type rule struct {
+		to   []string
+		deny string
+	}
+	var rules []rule
 	for _, line := range strings.Split(string(out), "\n") {
 		if strings.HasPrefix(line, "Default:") && strings.Contains(line, "allow (incoming)") {
 			return nil, nil
 		}
 		// verbose always names the direction; ALLOW OUT and ALLOW FWD don't let players in.
 		// LIMIT IN does, and only refuses an address that connects 6 times in 30 s.
+		// A DENY or REJECT counts only from Anywhere, as the From column of an
+		// allow isn't read either.
 		f := strings.Fields(line)
 		for i, word := range f {
-			if (word == "ALLOW" || word == "LIMIT") && i > 0 && i+1 < len(f) && f[i+1] == "IN" {
-				specs = append(specs, f[:i]...)
-				break
+			if i == 0 || i+1 >= len(f) || f[i+1] != "IN" {
+				continue
 			}
+			switch word {
+			case "ALLOW", "LIMIT":
+				rules = append(rules, rule{to: f[:i]})
+			case "DENY", "REJECT":
+				if i+2 < len(f) && f[i+2] == "Anywhere" {
+					rules = append(rules, rule{to: f[:i], deny: strings.Join(f, " ")})
+				}
+			}
+			break
 		}
 	}
-	return uncovered(gamePorts(h.Cfg), specs), nil
+	// ufw lists its rules in the order it checks them, and the first match
+	// wins. The IPv6 ones come last, so they decide only a port no IPv4
+	// rule names.
+	var missing []port
+	for _, p := range gamePorts(h.Cfg) {
+		i := slices.IndexFunc(rules, func(r rule) bool {
+			return slices.ContainsFunc(r.to, func(s string) bool { return covers(s, p) })
+		})
+		switch {
+		case i < 0:
+			missing = append(missing, p)
+		case rules[i].deny == "":
+		case strings.TrimSuffix(strings.Join(rules[i].to, " "), " (v6)") == p.String():
+			// ufw allow replaces a rule that differs only in its action.
+			missing = append(missing, p)
+		default:
+			p.deny = rules[i].deny
+			missing = append(missing, p)
+		}
+	}
+	return missing, nil
 }
 
 // firewalldMissing reads the default zone's ports. A service that opens the

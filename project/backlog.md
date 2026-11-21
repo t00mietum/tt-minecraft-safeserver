@@ -76,7 +76,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Root host checks pass on an empty counter or line number
 	- ID: 2026112017592969
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261120-175929
@@ -85,11 +85,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: counter and the line lookups fail unless they get a number.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/root-host/checks.bash, fStun and the adopt check.
+		- Verified: 1a4q3sg runs counter, fStun and before from checks.bash with a stub nft. Its nft-fails STUN case and no-source-lines adopt case fail on the old checks.bash and pass on the new one. The quick gate passed.
+		- Swept: every [[ -eq|-ne|-lt|-gt|-le|-ge ]] on a command substitution in cicd/root-host. fFirewallOut's 2 counter reads had the same gap and are fixed. The other 2 live ones read grep -c and wc -l, which always print a number.
+		- Verified: 2026-11-20, root-host.bash on nov20b passed 1a3fhjr, 1a3fhnw, 1a3fhs0 and 1a3fjbr, 16 PASS and 0 FAIL.
+	- Decisions: counter checks for a whole number before any arithmetic, which also keeps a stray value out of bash arithmetic.
+	- Needs external testing: No
+	- Reproduced [Bug]: 20261120, by 1a4q3sg: on the old checks.bash, fStun passed with nft failing, and the old adopt compare passed with no source lines.
+	- Origin: c076344 (counter) and 2b322c0 (the adopt compare). Not seen before. Confirmed.
+	- Actual cause [Bug]: A failed command substitution prints nothing, and [[ -eq ]] and [[ -lt ]] read an empty side as 0.
+	- Actual fix [Bug]: counter fails unless nft and python give a whole number, and its callers in fStun and fFirewallOut stop on that. The adopt check goes through a new before helper, which fails unless both lines are found.
+	- Actual effort: Low
+	- Branch: nov20b-2026112017592969
+	- Commit: fe0fb5e
+	- Test case: 1a4q3sg
+	- Closed reason: Done
+	- Closed: 20261120-185302
 
 - repair fails its tree check when Paper renames a file mid-walk
 	- ID: 2026112017592200
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261120-175922
@@ -98,11 +113,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: A file that's gone by the time it's looked at is skipped. Only a missing tree root is an error.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/repair/files.go, the WalkDir callback.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-20: a loop renaming 200 files in place made 1020 of 2000 walks fail on the old code, and none with the fix.
+	- Actual cause [Bug]: The walk's callback returned every error, so a file or folder gone between the listing and its lstat or read ended the whole walk.
+	- Actual fix [Bug]: The walk skips a file or folder that's gone by the time it's looked at. A missing tree root is still an error. plugins.Libraries, which update runs while the server may be up, skips a cache folder that's gone the same way.
+	- Test case: 1a4q4c8, 1a4q4fc
+	- Verified: 1a4q4c8 and 1a4q4fc fail on the old code and pass with the fix. Each of the walk's two skips was taken out alone, and 1a4q4c8 failed each time. The quick gate passes.
+	- Swept: every filepath.WalkDir in source. plugins.Libraries had the same failure on a folder gone mid-walk, fixed and pinned by 1a4q4fc. It reads no file info, so a renamed file never failed it. Left alone: launch's boxLinks runs at start before Paper does, and only warns on a folder it can't read.
+	- Branch: nov20b-2026112017592200
+	- Commit: b141647
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261120-182955
+	- Decisions:
+		- The skip applies whether or not the server runs, since a file that's gone has no owner or mode left to judge.
+		- Both walks call filepath.WalkDir through a package var, walkDir, so a test can take a file away between the listing and the look. That keeps the tests exact rather than racing a rename loop.
 
 - console.py can call a clean Ctrl-C detach a failure
 	- ID: 2026112017593367
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175933
@@ -111,37 +140,75 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: waitpid is polled for about 2 s before it counts as a failure.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/root-host/console.py.
+		- Verified: 1a4q3wm's late-exit case fails on the old console.py and passes on the new one. Its control, a console that never exits, still fails with "console didn't leave on Ctrl-C" after 2 s. The quick gate passed.
+		- Swept: console.py is the only pty driver under cicd. Its other waits are the fixed pumps.
+		- Verified: 2026-11-20, root-host.bash on nov20b passed 1a3fhjr, 1a3fhnw, 1a3fhs0 and 1a3fjbr, 16 PASS and 0 FAIL.
+	- Needs external testing: No
+	- Reproduced [Bug]: 20261120, by 1a4q3wm: a stand-in console that closes the pty and exits half a second later fails on the old console.py.
+	- Origin: c076344 root host checks. Not seen before. Confirmed.
+	- Actual cause [Bug]: The pty's EIO comes when the child closes its fds, before it can be reaped, and console.py tried waitpid only once.
+	- Actual fix [Bug]: After the last pump, console.py polls waitpid every 50 ms for up to 2 s.
+	- Actual effort: Low
+	- Branch: nov20b-2026112017592969
+	- Commit: fe0fb5e
+	- Test case: 1a4q3wm
+	- Closed reason: Done
+	- Closed: 20261120-185302
 
 - pre-push reads a new branch's first push by the working tree
 	- ID: 2026112017593230
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175932
 	- Opened by:
 	- Incorrect behavior [Bug]: For an all-zero remote sha, fOnlyDocs diffs the pushed commit against the working tree. A first push of main from a tree with only doc edits reads as docs-only and skips the merge gate.
 	- Expected behavior [Bug]: A push that creates the branch always gets the merge gate.
+	- Reproduced [Bug]: 20261120. 1a4q4vw fails on the unfixed hook: a code commit with a docs edit left in the tree ran the docs gate.
+	- Actual cause [Bug]: With no old commit, fOnlyDocs ran `git diff --name-only <sha>`, which compares the commit with the working tree.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/hooks/pre-push.
+		- 20261120: Verified: 1a4q4vw fails on the unfixed hook and passes with the fix. 1a3jwx4 still passes, and the quick gate passed.
+	- Actual fix [Bug]: A push that makes the branch never reads as docs-only, so it gets the merge gate, unless the merge gate already passed on that commit.
+	- Branch: nov20b-2026112017593230
+	- Commit: d380fa7
+	- Test case: 1a4q4vw TestPrePushNewBranch
+	- Swept: the hook is the only place that reads an all-zero sha; the delete case (all-zero local sha) was already skipped.
+	- Decisions:
+		- A commit the merge gate already passed on still skips it on a first push, as for any other push.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261120-183409
 
 - Ctrl-C in cicd.bash skips its cleanup
 	- ID: 2026112017593100
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175931
 	- Opened by:
 	- Incorrect behavior [Bug]: The run log's tee gets the Ctrl-C and dies, so the EXIT trap's first write gets SIGPIPE. The run folder, container and volume cleanup are skipped until fSweepRuns 2 days later.
 	- Expected behavior [Bug]: The tee ignores INT and TERM, so cleanup runs.
+	- Reproduced [Bug]: 20261120. 1a4q4vx fails on the unfixed script: after SIGINT to the process group, the trap's cleanup never ran and the log ended at the last line before it.
+	- Actual cause [Bug]: The tee shared the run's process group and kept the default INT action.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/cicd.bash, the exec into tee. See the bash-traps skill.
+		- 20261120: Verified: 1a4q4vx fails on the unfixed script 3 of 3 times and passes with the fix 5 of 5. The quick gate passed, and ran it in the container.
+	- Actual fix [Bug]: The tee starts as `trap '' INT TERM; exec tee ...`, so it outlives the Ctrl-C and drains once the trap closes the output.
+	- Branch: nov20b-2026112017593230
+	- Commit: d380fa7
+	- Test case: 1a4q4vx TestRunLogCtrlC: the tee and EXIT trap lines copied out of cicd.bash, then SIGINT to the process group.
+	- Swept: no other `>(tee` in the repo. root-host.bash has no tee of its own output.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261120-183409
 
 - selfupdate's chmod of the staged build follows a link
 	- ID: 2026112017592840
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175928
@@ -150,11 +217,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: chmod and chown go through the staged file's own handle.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/selfupdate/selfupdate.go. Harmless while update --self is deferred and the binary's folder is root-owned.
+	- Closed reason: Done
+	- Actual cause [Bug]: `ready` set the staged build's mode with `Fchmodat` on the temp name, which follows a link, and its owner by name too.
+	- Actual fix [Bug]: `download.Staged` gained `SetOwner`, the step `Keep` already ran: it checks the temp name is still the file `Stage` wrote, then sets owner and mode through that file's own handle. `ready` calls it, so a link or another file at the temp name is refused.
+	- Test case: 1a4q5em
+	- Verified: 1a4q5em fails on the old code (the link's target became 0750) and passes with the fix. 1a3jkm8 still passes, and the quick gate passes, CodeQL included. Only the non-root path ran.
+	- Swept: `grep -rn 'Fchmodat\|Fchownat\|os.Chmod\|os.Chown\|os.Lchown' source` finds no other chmod or chown by name in a folder another account can write. paper.go's `Fchownat` doesn't follow links, and the `os.Chmod` calls are under `/etc` or `/var/lib`.
+	- Decisions:
+		- checkVersion still runs the new build by path. The folder is root-owned, and `Keep` refuses a file swapped in at the temp name afterwards.
+	- Branch: nov20b-2026112017592840
+	- Commit: 613954c
+	- Acceptance signoff: Self-closed: 1a4q5em fails on the old code and passes now.
+	- Closed: 20261120-184000
 
 - linksafe's no-RENAME_NOREPLACE move checks the target by path
 	- ID: 2026112017592711
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175927
@@ -163,11 +242,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: The check goes through the folder handle with O_PATH and O_NOFOLLOW, like the rest of the package.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/linksafe/linksafe.go. ZFS and ext4 both have the flag, so this path seldom runs.
+	- Closed reason: Done
+	- Actual cause [Bug]: `Move`'s fallback checked the new name with `os.Lstat` on the full path, so a folder swapped for a link after it was opened could hide a file that was there, and the rename then replaced it.
+	- Actual fix [Bug]: The check opens the name under the folder handle with O_PATH and O_NOFOLLOW (`existsAt`), so it sees the same folder the rename uses. O_PATH runs no driver for a device or pipe there.
+	- Test case: 1a4q5bg
+	- Verified: 1a4q5bg fails on the old code (the file was replaced) and passes with the fix. 1a3k0dm still passes, both arches vet, and the quick gate passes, CodeQL included.
+	- Swept: `Move` is the only fallback with a path check in linksafe. Its other calls all go through handles.
+	- Branch: nov20b-2026112017592840
+	- Commit: 613954c
+	- Acceptance signoff: Self-closed: 1a4q5bg fails on the old code and passes now.
+	- Closed: 20261120-184000
 
 - start and stop waits run past their timeouts
 	- ID: 2026112017592582
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175925
@@ -176,11 +265,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Each wait ends at a deadline set once, from the clock.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/launch/kit.go.
+		- 20261120: Verified: 1a4q5y8 fails on the old loops (start waited 8s on a 5s timeout, stop 3.9s on 3s, with 300 ms looks) and passes with the fix. The quick gate passed, and race tests of launch.
+		- Swept: the countdown's pauses and cmd's answer wait count passes too, but they send or read a local file between pauses, not sudo looks, so they're left. Native foreground polls every 5 s with no deadline.
+	- Closed reason: Done
+	- Actual cause [Bug]: waitLoaded and waitStopped counted passes, one per second of the timeout, so each pass's sudo looks added to the wait.
+	- Actual fix [Bug]: each wait sets a deadline once and polls until it passes, and the last pause is cut to what's left. Under the tests' clock, the time asked of Sleep is the clock.
+	- Actual effort: Low
+	- Test case: 1a4q5y8
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: 1a4q5y8 fails on the old loops and passes now.
+	- Closed: 20261120-184803
+	- Decisions:
+		- 20261120: the end-of-wait message and the last check are as before. The last pass can run past the deadline by one look, no more.
 
 - A YAML alias to a safe value reads as a section
 	- ID: 2026112017592452
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175924
@@ -189,11 +291,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: The copy's value is the alias target, as SnakeYAML reads it. Whether it can be edited in place is still judged on the alias node.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/settings/yaml.go, the level == len(path)-1 case.
+		- 20261120: Verified: 1a3jtbw's alias to false row fails on the old reader (check found settings.bungeecord, fix said to set it by hand) and passes now. The quick gate passed.
+		- Swept: yamlCopies is the only place a copy's value is taken. yamlLast and yamlChild already deref, and the Geyser reader goes through the same scan.
+	- Closed reason: Done
+	- Actual cause [Bug]: yamlCopies kept the alias node as the copy's value, and only a scalar counts as safe.
+	- Actual fix [Bug]: the copy's value is the alias target. Whether it can be edited in place is still judged on the node on the key's line, so an alias to a bad value is still left to set by hand.
+	- Actual effort: Low
+	- Test case: 1a3jtbw (alias to false row)
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: the new 1a3jtbw row fails on the old reader and passes now.
+	- Closed: 20261120-184803
 
 - repair's ufw check misses a DENY rule above the ALLOW
 	- ID: 2026112017592322
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175923
@@ -202,6 +315,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Rules are read in order, first match wins, as ufw does, so a DENY IN or REJECT IN that covers the port first leaves it missing.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/repair/hostfw.go. It only reports, so it's low.
+		- 20261120: Verified: 1a3eptg's 7 new rule sets: the 4 with a deny first fail on the old check (nothing reported) and pass now. The quick gate passed.
+		- Swept: ufwMissing is the only ufw reader. firewalld's --list-ports has no deny rules, so it keeps uncovered.
+	- Closed reason: Done
+	- Actual cause [Bug]: ufwMissing gathered every ALLOW IN and LIMIT IN port and ignored the rest, so a deny above them never counted.
+	- Actual fix [Bug]: rules are read in order and the first that matches a port wins. A DENY IN or REJECT IN from Anywhere blocks it. When that rule names only the port, the report keeps sudo ufw allow, which replaces it; otherwise it names the rule. design.md's repair check 10 says so.
+	- Actual effort: Low
+	- Test case: 1a3eptg
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: 1a3eptg's new rule sets fail on the old check and pass now.
+	- Closed: 20261120-184803
+	- Decisions:
+		- 20261120: a deny counts only from Anywhere, since an allow's From column isn't read either. A deny from one address would otherwise report a port players can reach.
+		- 20261120: the IPv6 rules come after the IPv4 ones in ufw's list, so they decide only a port no IPv4 rule names. A rule only for IPv6 still counts, as before.
+		- 20261120: ufw allow replaces a rule that differs only in its action, so it's still the advice for a deny that names only the port. For a wider deny it would add a rule below it, so the report names the rule instead.
 
 - Remove plugins.Refuse and RefusedDir, which nothing calls now
 	- ID: 2026111918161429
@@ -942,6 +1070,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: Link refusal at each step, the rename fallback, temp file cleanup on error, and Mkdir's chown are only tested through callers. Its coverage is 50 to 60 percent, and it's the code root relies on in the server tree.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
+		- 2026-11-20: The Move fallback's path lstat noted in Decisions was replaced by a check under the folder handle in 2026112017592711.
 	- Origin: Not seen before.
 	- Closed reason: Done
 	- Actual fix: linksafe has its own tests. They cover a link or a file at each step of Walk and Sub, Read refusing a link, a pipe, a folder and an oversized file, Write replacing a link rather than writing through it and leaving no temp file when the rename fails, Move never replacing on both the RENAME_NOREPLACE path and the EINVAL fallback, and Mkdir's mode and its refusal of a folder swapped for a link. 1a3k0kw runs Mkdir's and Write's chown as root in a user namespace, including the chown failure path. Each error path also checks that no handle is left open.

@@ -344,6 +344,7 @@ Common:  --config PATH, --set KEY=VALUE
 	10. When ufw or firewalld is active, it lets players connect to the game ports. A missing rule is reported with the command that adds it, and never added.
 		- For firewalld that's the ports in the default zone. A port opened through a service shows as missing.
 		- For ufw, an `ALLOW IN` or `LIMIT IN` rule counts, with a port, a port list, a range, or no port at all.
+		- ufw rules are read in order, and the first that matches a port wins, as in ufw. A `DENY IN` or `REJECT IN` from Anywhere ahead of any rule that lets players in blocks the port. When that rule names only the port, `ufw allow` replaces it, so that command is given. Otherwise the report names the rule.
 	11. In container mode, the image is there, and a stopped container under the runtime `runMode` doesn't name gets removed. One under `runMode`'s runtime stays, so its `logs` works, and `start` removes it. In Podman mode, `catatonit` is installed. A missing one is reported with the command that adds it.
 	12. With a dataset configured, it exists and is mounted.
 	13. The boot unit is installed and enabled only when `startAtBoot` is on.
