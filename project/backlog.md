@@ -152,28 +152,52 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - pre-push reads a new branch's first push by the working tree
 	- ID: 2026112017593230
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175932
 	- Opened by:
 	- Incorrect behavior [Bug]: For an all-zero remote sha, fOnlyDocs diffs the pushed commit against the working tree. A first push of main from a tree with only doc edits reads as docs-only and skips the merge gate.
 	- Expected behavior [Bug]: A push that creates the branch always gets the merge gate.
+	- Reproduced [Bug]: 20261120. 1a4q4vw fails on the unfixed hook: a code commit with a docs edit left in the tree ran the docs gate.
+	- Actual cause [Bug]: With no old commit, fOnlyDocs ran `git diff --name-only <sha>`, which compares the commit with the working tree.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/hooks/pre-push.
+		- 20261120: Verified: 1a4q4vw fails on the unfixed hook and passes with the fix. 1a3jwx4 still passes, and the quick gate passed.
+	- Actual fix [Bug]: A push that makes the branch never reads as docs-only, so it gets the merge gate, unless the merge gate already passed on that commit.
+	- Branch: nov20b-2026112017593230
+	- Commit: d380fa7
+	- Test case: 1a4q4vw TestPrePushNewBranch
+	- Swept: the hook is the only place that reads an all-zero sha; the delete case (all-zero local sha) was already skipped.
+	- Decisions:
+		- A commit the merge gate already passed on still skips it on a first push, as for any other push.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261120-183409
 
 - Ctrl-C in cicd.bash skips its cleanup
 	- ID: 2026112017593100
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175931
 	- Opened by:
 	- Incorrect behavior [Bug]: The run log's tee gets the Ctrl-C and dies, so the EXIT trap's first write gets SIGPIPE. The run folder, container and volume cleanup are skipped until fSweepRuns 2 days later.
 	- Expected behavior [Bug]: The tee ignores INT and TERM, so cleanup runs.
+	- Reproduced [Bug]: 20261120. 1a4q4vx fails on the unfixed script: after SIGINT to the process group, the trap's cleanup never ran and the log ended at the last line before it.
+	- Actual cause [Bug]: The tee shared the run's process group and kept the default INT action.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/cicd.bash, the exec into tee. See the bash-traps skill.
+		- 20261120: Verified: 1a4q4vx fails on the unfixed script 3 of 3 times and passes with the fix 5 of 5. The quick gate passed, and ran it in the container.
+	- Actual fix [Bug]: The tee starts as `trap '' INT TERM; exec tee ...`, so it outlives the Ctrl-C and drains once the trap closes the output.
+	- Branch: nov20b-2026112017593230
+	- Commit: d380fa7
+	- Test case: 1a4q4vx TestRunLogCtrlC: the tee and EXIT trap lines copied out of cicd.bash, then SIGINT to the process group.
+	- Swept: no other `>(tee` in the repo. root-host.bash has no tee of its own output.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261120-183409
 
 - selfupdate's chmod of the staged build follows a link
 	- ID: 2026112017592840

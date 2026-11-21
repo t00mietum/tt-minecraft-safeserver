@@ -153,6 +153,26 @@ func TestPrePushGates(t *testing.T) {
 	}
 }
 
+// A push that makes main has an all-zero remote sha. A docs edit left in the working tree must not
+// make a code commit read as docs-only.
+func TestPrePushNewBranch(t *testing.T) {
+	defer testid.Line(t, "1a4q4vw")
+	r := newHookRig(t)
+	r.write("source/main.go", "package main // new\n")
+	sha := r.commit()
+	r.write("README.md", "# edited, not committed\n")
+	r.base = strings.Repeat("0", 40)
+	if ran, code := r.push("refs/heads/main", sha, "0"); ran != "merge" || code != 0 {
+		t.Errorf("code commit, docs edit in the tree: ran %q, exit %d; want \"merge\", exit 0", ran, code)
+	}
+	r.git("checkout", "-q", "--", "README.md")
+	r.write("README.md", "# docs only\n")
+	sha = r.commit()
+	if ran, code := r.push("refs/heads/main", sha, "0"); ran != "merge" || code != 0 {
+		t.Errorf("docs commit: ran %q, exit %d; want \"merge\", exit 0", ran, code)
+	}
+}
+
 // fGateWhole, copied out of cicd.bash, over every merge step: any SKIP but arm64's, a step
 // turned off, a dirty tree, or HEAD moving keeps the marker from being written.
 func TestGateMarker(t *testing.T) {
