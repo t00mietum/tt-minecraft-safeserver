@@ -536,9 +536,8 @@ func writeJar(t *testing.T, file, pluginYML string) {
 	}
 }
 
-// The jars to approve show before Go ahead, so a yes covers jars that were
-// seen. A no approves none. Since 2026111914334569 that's the Geyser jar that
-// gets a source, not every jar.
+// The Geyser jar that gets a source shows before Go ahead, so a yes covers
+// what was seen. A no writes none.
 func TestJarsListedBeforeAsking(t *testing.T) {
 	defer testid.Line(t, "1a3fgww")
 	r := newRig(t, []string{"docker"}, "n\n")
@@ -562,7 +561,7 @@ func TestJarsListedBeforeAsking(t *testing.T) {
 		t.Errorf("jar listed at %d, asked at %d:\n%s", listed, asked, out)
 	}
 	if _, err := os.Stat(r.s.PluginsFile); err == nil {
-		t.Error("approved list written after a no")
+		t.Error("plugins.shcl written after a no")
 	}
 }
 

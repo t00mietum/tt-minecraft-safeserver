@@ -36,7 +36,7 @@ var containerCheck = Check{
 			}
 			state, err := launch.ContainerState(ctx, h.Run, other)
 			if err != nil || state == "" || state == "running" {
-				continue // the image finding already says when runMode's runtime can't be asked
+				continue // nothing to clean up in a runtime that can't be asked
 			}
 			found = append(found, Finding{
 				Problem: "an old container, " + launch.Container + ", is still there under " + other + ", " + state,

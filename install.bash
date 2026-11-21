@@ -111,8 +111,9 @@ fNewest(){
 ## fFetch URL [OUTFILE]. stdout with no OUTFILE.
 fFetch(){
 	local url="$1" out="${2:--}"
-	if [[ "${fetcher}" == curl ]]; then curl -fsSL -o "${out}" "${url}"
-	else wget -q -O "${out}" "${url}"; fi
+	## https only, redirects too, since the sums come over the same channel as the build.
+	if [[ "${fetcher}" == curl ]]; then curl --proto '=https' --tlsv1.2 -fsSL -o "${out}" "${url}"
+	else wget --https-only -q -O "${out}" "${url}"; fi
 }
 
 ## Through sudo when fMain set useSudo.
@@ -196,9 +197,9 @@ fMain(){
 	local listJson releases tag note=""
 	## The list, not releases/latest, which leaves out pre-releases.
 	listJson="$(fFetch "${apiUrl}")" || fDie "couldn't reach the GitHub API (offline, or rate-limited?)"
-	## A captive portal or proxy answers with a page, which would read as no releases at all.
+	## A captive portal or proxy returns a page, which would read as no releases at all.
 	if [[ "${listJson}" != *'"tag_name"'* && "${listJson//[[:space:]]/}" != "[]" ]]; then
-		fDie "the GitHub API answered with something that isn't a release list. Something between here and GitHub may be catching the request."
+		fDie "the GitHub API returned something that isn't a release list. Something between here and GitHub may be catching the request."
 	fi
 	releases="$(fListReleases <<< "${listJson}" || true)"
 	if [[ "${release}" == stable ]]; then
@@ -217,7 +218,7 @@ fMain(){
 	local url="${dlBase}/${tag}/${asset}"
 	local destPath="${destDir}/${exeName}"
 	local sums want
-	## Fetched before the plan, since a local build can carry the release's version and only its bytes tell them apart.
+	## Fetched before the plan, since a local build can have the release's version, and only its bytes tell them apart.
 	sums="$(fFetch "${dlBase}/${tag}/SHA256SUMS")" || fDie "download failed: SHA256SUMS for ${tag}"
 	## Either case of hash and either line ending, as sha256sum -c takes.
 	sums="${sums//$'\r'/}"
@@ -340,3 +341,4 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##		  before it goes into a URL, SHA256SUMS takes either case and CRLF, and a page from a captive
 ##		  portal is named as one. Option values take any case. Errors have a blank line either side, and
 ##		  with no terminal to ask on it says to add --yes.
+##		- 2026-11-20: Downloads are https only, redirects included.

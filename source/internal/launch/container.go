@@ -104,8 +104,8 @@ func FindContainer(ctx context.Context, r host.Runner, runMode string) (runtime,
 		if rt == runMode || !Installed(rt) {
 			continue
 		}
-		// Only runMode's runtime has to answer. Docker's daemon may well be
-		// down on a host that moved to Podman.
+		// Only runMode's runtime has to work. Docker's daemon may be down on
+		// a host that moved to Podman.
 		other, err := ContainerState(ctx, r, rt)
 		switch {
 		case err != nil || other == "":
@@ -364,7 +364,7 @@ func LockedJars(serverDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	jars := make([]string, 0, len(found))
+	jars := make([]string, 0, len(found)+1)
 	jars = append(jars, paper)
 	// Several links may lead to one file, and Docker and Podman refuse a
 	// mount destination given twice.

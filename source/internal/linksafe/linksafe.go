@@ -101,8 +101,8 @@ func (d Dir) Walk(rel string) (Dir, error) {
 	return cur, nil
 }
 
-// Mkdir makes a folder under d and opens it. It's owned like like, or like d
-// when that's nil, and ug+rwx per design.md's Tree ownership.
+// Mkdir makes a folder under d and opens it. It gets like's owner and group,
+// or d's when like is nil, and ug+rwx per design.md's Tree ownership.
 func (d Dir) Mkdir(name string, like *syscall.Stat_t) (Dir, error) {
 	if like == nil {
 		st, err := d.Stat()

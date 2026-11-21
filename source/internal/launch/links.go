@@ -23,6 +23,7 @@ const maxLinkHops = 40
 func boxLinks(trees, mounts []string) (warns []string, err error) {
 	var bad, unread []string
 	for _, root := range trees {
+		// The callback never fails, so neither does the walk.
 		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				unread = append(unread, path)

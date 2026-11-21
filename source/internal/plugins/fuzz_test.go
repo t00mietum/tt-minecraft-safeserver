@@ -9,17 +9,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
-var lowerHex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
 // Whatever the list says, a jar it keeps has a path inside the server folder,
-// a whole hash or none, and a source only when it's an https URL.
+// no hash, and a source only when it's an https URL.
 func FuzzReadApproved(f *testing.F) {
 	defer testid.Line(f, "1a3jnw4")
 	f.Add("jar: plugins/Geyser-Spigot.jar\n\tsha256: " + sumA + "\n\tsource: https://download.geysermc.org/x\n")
@@ -36,7 +33,7 @@ func FuzzReadApproved(f *testing.F) {
 			t.Fatalf("ReadApproved: %v (warnings %v)", err, warns)
 		}
 		for _, j := range jars {
-			if !insideServer(j.Name) || j.SHA256 != "" && !lowerHex64.MatchString(j.SHA256) { // empty allowed since 2026111914334569
+			if !insideServer(j.Name) || j.SHA256 != "" { // a list's sha256 isn't read since 2026111914334569
 				t.Fatalf("kept %#v", j)
 			}
 			if j.Source != "" {

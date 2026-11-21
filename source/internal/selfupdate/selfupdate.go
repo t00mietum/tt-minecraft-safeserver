@@ -33,9 +33,6 @@ const DefaultBase = "https://api.github.com/repos/t00mietum/tt-minecraft-safeser
 // SumsName is the release's checksum file, in sha256sum's format.
 const SumsName = "SHA256SUMS"
 
-// atSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
-const atSymlinkNoFollow = 0x100
-
 // maxBinary caps a download, whatever size the API gives.
 const maxBinary = 256 << 20
 
@@ -173,9 +170,9 @@ func (a API) sumFor(ctx context.Context, url, name string) (string, error) {
 // following links.
 func (a API) Install(ctx context.Context, exe string, r Release) error {
 	dir, name := filepath.Dir(exe), filepath.Base(exe)
-	dirfd, err := syscall.Open(dir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	dirfd, err := download.OpenDir(dir)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: dir, Err: err}
+		return err
 	}
 	defer syscall.Close(dirfd)
 	old, err := statAt(dirfd, name)
@@ -223,7 +220,7 @@ func ready(dirfd int, dir string, s *download.Staged, r Release, old syscall.Sta
 	// again through its fd; they're set here so --version can run.
 	s.UID, s.GID, s.Mode = int(old.Uid), int(old.Gid), old.Mode&0o777|0o100
 	if os.Geteuid() == 0 {
-		if err := syscall.Fchownat(dirfd, s.Temp, s.UID, s.GID, atSymlinkNoFollow); err != nil {
+		if err := syscall.Fchownat(dirfd, s.Temp, s.UID, s.GID, download.AtSymlinkNoFollow); err != nil {
 			return fmt.Errorf("chown %s: %w", s.Temp, err)
 		}
 	}

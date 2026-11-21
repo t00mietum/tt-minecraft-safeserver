@@ -58,7 +58,7 @@ mkdir -- "${work}/src"
 git archive "${commit}" | tar -x -C "${work}/src"
 source "${work}/src/cicd/config.bash"
 version="$(sed -n 's/^var version = "\(.*\)".*/\1/p' "${work}/src/${VERSION_FILE}" | head -n 1)"
-[[ "${version}" == "${tag}" ]] || fFail "${tag} holds version ${version:-none}; a release's tag and version are the same"
+[[ "${version}" == "${tag}" ]] || fFail "${tag} has version ${version:-none}; a release's tag and version are the same"
 goVer="$(sed -n 's/^.*golang:\([0-9][0-9.]*\)-.*$/\1/p' <<< "${GO_IMAGE}")"
 [[ -n "${goVer}" ]] || fFail "no Go version in GO_IMAGE: ${GO_IMAGE}"
 

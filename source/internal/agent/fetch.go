@@ -210,7 +210,7 @@ func public(addr netip.Addr) bool {
 			return false
 		}
 	}
-	// These carry an IPv4 address, which a gateway on the path connects to.
+	// These have an IPv4 address inside, which a gateway on the path connects to.
 	b := addr.As16()
 	switch {
 	case nat64.Contains(addr):

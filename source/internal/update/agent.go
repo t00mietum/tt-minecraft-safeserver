@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/url"
 	"os"
 	"path"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 )
@@ -243,13 +243,18 @@ func (s agentStep) plan(dryRun bool) string {
 const maxHashPage = 4 << 20
 
 // fetcher gets the agent's jars and hash pages, with redirects held to
-// agentHosts like the addresses themselves.
+// agentHosts like the addresses themselves. The client is made once a run,
+// so its connections are shared.
 func (u *Update) fetcher() download.Client {
 	c := u.Fetch
-	if c.HTTP == nil {
-		c.HTTP = agent.PublicClient(10 * time.Minute)
+	if u.held == nil {
+		base := c.HTTP
+		if base == nil {
+			base = agent.PublicClient(10 * time.Minute)
+		}
+		u.held = agent.HoldTo(base, u.Cfg.AgentHosts)
 	}
-	c.HTTP = agent.HoldTo(c.HTTP, u.Cfg.AgentHosts)
+	c.HTTP = u.held
 	return c
 }
 
@@ -273,22 +278,19 @@ func (u *Update) hashOnPage(ctx context.Context, page, sum string) error {
 // openUnder opens the folder rel under serverDir without following links,
 // since the server account may own the tree.
 func openUnder(serverDir, rel string) (int, error) {
-	fd, err := download.OpenDir(serverDir)
+	top, err := linksafe.Open(serverDir)
 	if err != nil {
 		return -1, err
 	}
-	for _, part := range strings.Split(rel, "/") {
-		if part == "" || part == "." {
-			continue
-		}
-		next, err := syscall.Openat(fd, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-		_ = syscall.Close(fd) // a folder, opened to read
-		if err != nil {
-			return -1, &fs.PathError{Op: "open", Path: filepath.Join(serverDir, rel), Err: err}
-		}
-		fd = next
+	if rel = strings.TrimSuffix(rel, "/"); rel == "" {
+		return top.Fd(), nil
 	}
-	return fd, nil
+	defer top.Close()
+	d, err := top.Walk(rel)
+	if err != nil {
+		return -1, err
+	}
+	return d.Fd(), nil
 }
 
 // claimedName is the plugin name the jar named name in dirfd says it is.

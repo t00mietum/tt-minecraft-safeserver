@@ -182,7 +182,7 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 		{"agent: chatgpt", "isn't one of: none, openai, anthropic, command"},
 		{"agentURL: http://192.168.1.5:11434/v1", "plain http only goes to a loopback address"},
 		{"agentURL: http://localhost.example.com/v1", "plain http only goes to a loopback address"},
-		{"agentURL: https://me:sk-123@api.example.com", "can't hold a user or key"},
+		{"agentURL: https://me:sk-123@api.example.com", "can't have a user name or key"},
 		{"agentURL: ftp://api.example.com", "isn't https"},
 		{"agentURL: api.openai.com/v1", "isn't a web address"},
 		{"agentModel: \"gpt 5\"", "isn't a model name"},

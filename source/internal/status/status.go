@@ -204,12 +204,13 @@ func (p *Probe) ports(ctx context.Context) []Line {
 	if err != nil {
 		lines = append(lines, Line{"Ports", "can't list sockets: " + err.Error()})
 	} else {
-		lines = append(lines, portLines(out, "tcp", p.Cfg.GamePort, "")...)
+		rows := ssRows(out)
+		lines = append(lines, portLines(rows, "tcp", p.Cfg.GamePort, "")...)
 		if p.Cfg.Bedrock {
 			// NetherNet: signaling on TCP, game traffic on UDP. Geyser opens
 			// the UDP socket per join, so it's normally closed when idle.
-			lines = append(lines, portLines(out, "tcp", p.Cfg.BedrockPort, "")...)
-			lines = append(lines, portLines(out, "udp", p.Cfg.BedrockPort,
+			lines = append(lines, portLines(rows, "tcp", p.Cfg.BedrockPort, "")...)
+			lines = append(lines, portLines(rows, "udp", p.Cfg.BedrockPort,
 				fmt.Sprintf("udp %d opens when a Bedrock player joins", p.Cfg.BedrockPort))...)
 		}
 		lines[0].Label = "Ports"
@@ -251,15 +252,26 @@ func (p *Probe) firewall(ctx context.Context) []Line {
 	}
 }
 
-// portLines reads ss -H -t -u -a -n: netid, state, queues, local, peer.
-// idle, when set, replaces the line for a port nothing listens on.
-func portLines(ss []byte, proto string, port int, idle string) []Line {
+// ssRows splits ss -H -t -u -a -n into fields: netid, state, queues, local,
+// peer. Short lines are left out.
+func ssRows(ss []byte) [][]string {
+	var rows [][]string
+	for l := range strings.Lines(string(ss)) {
+		if f := strings.Fields(l); len(f) >= 6 {
+			rows = append(rows, f)
+		}
+	}
+	return rows
+}
+
+// portLines reads ssRows for one port. idle, when set, replaces the line for
+// a port nothing listens on.
+func portLines(rows [][]string, proto string, port int, idle string) []Line {
 	want := strconv.Itoa(port)
 	var listen []string
 	conns := 0
-	for _, l := range strings.Split(string(ss), "\n") {
-		f := strings.Fields(l)
-		if len(f) < 6 || f[0] != proto {
+	for _, f := range rows {
+		if f[0] != proto {
 			continue
 		}
 		i := strings.LastIndexByte(f[4], ':')
@@ -309,7 +321,7 @@ func (p *Probe) ops() Line {
 	}
 	names := make([]string, 0, len(list))
 	for _, o := range list {
-		names = append(names, server.Clean(o.Name))
+		names = append(names, o.Name) // Write cleans
 	}
 	return Line{"Ops", strings.Join(names, ", ")}
 }
@@ -383,7 +395,7 @@ func (p *Probe) log() []Line {
 	}
 	lines := []Line{{"Log", file}}
 	for _, l := range tail {
-		lines = append(lines, Line{"", server.Clean(l)})
+		lines = append(lines, Line{"", l})
 	}
 	return lines
 }

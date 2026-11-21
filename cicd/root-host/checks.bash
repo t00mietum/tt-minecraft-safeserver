@@ -422,7 +422,7 @@ fi
 failed="${2:-0}"
 if [[ -n "${pool}" ]]; then
 	trap fZfsGone EXIT
-	check 1a3jn00 "a throwaway pool holds the server's tree" fZfsPool
+	check 1a3jn00 "a throwaway pool has the server's tree" fZfsPool
 	if ((failed == 0)); then
 		check 1a3jqxr "start and stop take no snapshot" fZfsNone
 		# Start and stop snapshots, the prune, and zfs allow went (backlog 2026111318002875).

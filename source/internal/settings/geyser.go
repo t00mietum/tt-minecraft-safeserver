@@ -13,9 +13,9 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 )
 
-// Geyser's config, as the Spigot plugin keeps it. A missing one is wrong too:
-// Geyser's first start writes its defaults, with online mode logins on 19132,
-// and runs with them. Given only these keys, it keeps them and adds the rest.
+// Geyser's config folder for the Spigot plugin. A missing config is wrong
+// too: Geyser's first start writes its defaults, with online mode logins on
+// 19132, and runs with them. Given only these keys, it fills in the rest.
 var geyserDirs = []string{"plugins", "Geyser-Spigot"}
 
 const geyserFile = "config.yml"

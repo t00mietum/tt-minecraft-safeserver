@@ -70,7 +70,7 @@ func NewExec(dryRun bool) *Exec {
 // Run runs c. Under dry run it prints c instead, unless c is a Look.
 func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 	if len(c.Args) == 0 {
-		return nil, fmt.Errorf("empty command")
+		return nil, errors.New("empty command")
 	}
 	argv := c.Args
 	sudo := []string{"sudo"}
@@ -157,7 +157,7 @@ type Fake struct {
 	Reply func(c Cmd) ([]byte, error)
 }
 
-// Run records c, and answers with Reply when it's set.
+// Run records c, and returns what Reply gives when it's set.
 func (f *Fake) Run(_ context.Context, c Cmd) ([]byte, error) {
 	f.Ran = append(f.Ran, c)
 	if f.Reply == nil {

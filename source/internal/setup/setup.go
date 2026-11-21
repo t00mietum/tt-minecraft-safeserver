@@ -7,6 +7,7 @@ package setup
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -90,9 +91,10 @@ type GeyserSource interface {
 
 // Do runs setup: repair on an existing install, the install steps otherwise.
 func (s *Setup) Do(ctx context.Context) error {
-	if _, err := os.Stat(s.ConfigPath); err == nil {
+	switch _, err := os.Stat(s.ConfigPath); {
+	case err == nil:
 		return s.existing(ctx)
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	case !errors.Is(err, fs.ErrNotExist):
 		return err
 	}
 	if err := s.refuseRunning(ctx); err != nil {
@@ -213,7 +215,7 @@ func (s *Setup) existing(ctx context.Context) error {
 	if s.Adopt != "" {
 		return fmt.Errorf("%s is there already, so this isn't a new install; set serverDir in it to move to another server folder", s.ConfigPath)
 	}
-	// Geyser and Floodgate would land in a live server's plugins folder.
+	// Geyser and Floodgate would go into a live server's plugins folder.
 	if err := s.refuseRunning(ctx); err != nil {
 		return err
 	}
@@ -324,7 +326,7 @@ func (s *Setup) pickRuntime() (string, error) {
 		}
 		return "", errors.New("nothing changed; setup needs Podman or Docker")
 	}
-	fmt.Fprintln(s.Out, "\nNeither Podman nor Docker is installed. Podman runs the server in a container, which keeps it away from the rest of the host. Native mode runs it in a systemd sandbox instead, which is less.")
+	fmt.Fprintln(s.Out, "\nNeither Podman nor Docker is installed. Podman runs the server in a container, which keeps it away from the rest of the host. Native mode runs it in a systemd sandbox instead, which keeps it less apart.")
 	if s.confirm("Install Podman and catatonit through apt? n uses native mode [y/n] ") {
 		return "podman", nil
 	}
@@ -398,18 +400,7 @@ func (s *Setup) unsourced(c config.Config) ([]plugins.Info, error) {
 	if _, err := os.Stat(c.ServerDir); errors.Is(err, fs.ErrNotExist) || s.Geyser == nil {
 		return nil, nil
 	}
-	all, err := plugins.Unsourced(c.ServerDir, s.PluginsFile)
-	if err != nil {
-		return nil, err
-	}
-	var jars []plugins.Info
-	for _, info := range all {
-		if p := geyser.Project(info.Name, info.About); p != "" {
-			info.Source = s.Geyser.Source(p)
-			jars = append(jars, info)
-		}
-	}
-	return jars, nil
+	return repair.GeyserSources(c.ServerDir, s.PluginsFile, s.Geyser.Source)
 }
 
 // copyTarget is the binary to copy to BinPath, or empty when it runs from
@@ -433,17 +424,11 @@ func (s *Setup) copyTarget() string {
 }
 
 func (s *Setup) binPath() string {
-	if s.LocalBin != "" {
-		return s.LocalBin
-	}
-	return BinPath
+	return cmp.Or(s.LocalBin, BinPath)
 }
 
 func (s *Setup) oldBuilds() string {
-	if s.OldBuilds != "" {
-		return s.OldBuilds
-	}
-	return oldbuild.Dir
+	return cmp.Or(s.OldBuilds, oldbuild.Dir)
 }
 
 // replaced is where the other build in BinPath goes before the copy, or
@@ -488,7 +473,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 	if build != nil {
 		fmt.Fprintf(w, "  - Download Paper %s build %d, check its SHA-256, and point paper.jar at it.\n", build.Version, build.ID)
 	}
-	if accepted, _ := settings.EULAAccepted(c.ServerDir); !accepted {
+	if accepted, _ := settings.EULAAccepted(c.ServerDir); !accepted { // a read error is the EULA step's to report
 		fmt.Fprintf(w, "  - Ask whether you accept the Minecraft EULA, and write eula.txt only after a yes.\n")
 	}
 	fmt.Fprintf(w, "  - Write the safe server settings.\n")

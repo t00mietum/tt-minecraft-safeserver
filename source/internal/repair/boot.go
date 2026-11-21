@@ -4,6 +4,7 @@
 package repair
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io/fs"
@@ -20,10 +21,7 @@ import (
 var BootCheck = Check{
 	Name: "boot unit",
 	Look: func(ctx context.Context, h *Host) ([]Finding, error) {
-		path := h.BootFile
-		if path == "" {
-			path = boot.UnitFile
-		}
+		path := cmp.Or(h.BootFile, boot.UnitFile)
 		// There's one boot unit, so one written for another config isn't
 		// this config's to change. See design.md, Boot.
 		if other := h.bootOwner(path); other != "" {
@@ -40,7 +38,7 @@ var BootCheck = Check{
 }
 
 // bootOwner is the config the unit at path runs, when that's another one.
-// A unit it can't read or place is taken as this config's, as before.
+// A unit that can't be read or placed counts as this config's.
 func (h *Host) bootOwner(path string) string {
 	text, err := os.ReadFile(path) // #nosec G304 -- the boot unit's path
 	if err != nil {
@@ -76,9 +74,10 @@ func (h *Host) bootOn(ctx context.Context, path string) ([]Finding, error) {
 
 // bootOff disables and removes the unit, and leaves a server it runs alone.
 func (h *Host) bootOff(path string) ([]Finding, error) {
-	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+	switch _, err := os.Lstat(path); {
+	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
-	} else if err != nil {
+	case err != nil:
 		return nil, err
 	}
 	return []Finding{{
@@ -100,23 +99,15 @@ func (h *Host) bootOff(path string) ([]Finding, error) {
 var shadowCheck = Check{
 	Name: "tool on PATH",
 	Look: func(_ context.Context, h *Host) ([]Finding, error) {
-		pkg, local, kept := h.PkgBin, h.LocalBin, h.OldBuilds
-		if pkg == "" {
-			pkg = boot.PkgBin
-		}
-		if local == "" {
-			local = boot.LocalBin
-		}
-		if kept == "" {
-			kept = oldbuild.Dir
-		}
+		pkg, local, kept := cmp.Or(h.PkgBin, boot.PkgBin), cmp.Or(h.LocalBin, boot.LocalBin), cmp.Or(h.OldBuilds, oldbuild.Dir)
 		if boot.Bin(pkg) != boot.PkgBin {
 			return nil, nil
 		}
 		lfi, err := os.Stat(local)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
-		} else if err != nil {
+		}
+		if err != nil {
 			return nil, err
 		}
 		// A link to the package's runs the package's.

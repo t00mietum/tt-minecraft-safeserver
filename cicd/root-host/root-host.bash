@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#  shellcheck disable=1091  ## 'source is valid here, but shellcheck doesn't know the path to it.'
 #  shellcheck enable=require-variable-braces  ## Every expansion braced: "${var}", not "$var".
 
 ##	Purpose:
@@ -25,6 +26,8 @@ set -euo pipefail
 
 projectName=tt-minecraft-safeserver
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${here}/../config.bash"
+source "${here}/../utility/include/safe-rm.bash"
 repo="$(cd "${here}/../.." && pwd)"
 keep=0
 pool=''
@@ -39,31 +42,15 @@ done
 HOST_TEMP="$(realpath -m "${HOST_TEMP:-${TMPDIR:-/tmp}}")"
 mkdir -p "${HOST_TEMP}/${projectName}"
 stamp="$(date +%Y%m%d-%H%M%S)"
-for ((n = 1; ; n++)); do
+for ((n = 1; n < 1000; n++)); do
 	runName="$(printf '%s_%03d' "${stamp}" "${n}")"
 	runDir="${HOST_TEMP}/${projectName}/${runName}"
 	mkdir "${runDir}" 2> /dev/null && break
 done
+[[ -d "${runDir}" ]] || { echo "can't make a run folder in ${HOST_TEMP}/${projectName}" >&2; exit 1; }
 echo $$ > "${runDir}/run.pid"
 box="${projectName}-${runName}-root-host"
 
-fSafeRm() {
-	local p="${1:-}" real='' own="${HOST_TEMP:?}/${projectName:?}"
-	if [[ "${#}" -ne 1 || -z "${p}" || "${p}" == *..* || "${p}" == *//* || "${p}" == *$'\n'* ]]; then
-		printf 'safe-rm: refused, bad path: "%s"\n' "${p}" >&2; return 1
-	fi
-	p="${p%/}"
-	if ! [[ "${p}" =~ ^/(.+/)?tmp/[^/]+(/[^/]+)*$ || "${p}" == "${own}"/?* ]]; then
-		printf 'safe-rm: refused, not under a tmp folder: %s\n' "${p}" >&2; return 1
-	fi
-	if [[ "${p}" == "${HOST_TEMP}" || ( "${p}" == "${HOST_TEMP}"/* && "${p#"${HOST_TEMP}"/}" != */* ) ]]; then
-		printf 'safe-rm: refused, a whole project temp folder: %s\n' "${p}" >&2; return 1
-	fi
-	if [[ -L "${p}" ]]; then printf 'safe-rm: refused, a link: %s\n' "${p}" >&2; return 1; fi
-	real="$(realpath -e -- "${p}" 2> /dev/null)" || { printf 'safe-rm: refused, not there: %s\n' "${p}" >&2; return 1; }
-	if [[ "${real}" != "${p}" ]]; then printf 'safe-rm: refused, goes through a link: %s\n' "${p}" >&2; return 1; fi
-	rm -rf --one-file-system -- "${p}" && printf 'removed %s\n' "${p}"
-}
 
 # Only this run's pool, by the name it made. Its server goes first, since
 # Podman's mounts of the dataset keep it busy.
@@ -100,10 +87,7 @@ fCleanup() {
 }
 trap fCleanup EXIT
 
-cpus="$(nproc)"
-jobs=$((cpus / 2))
-(($(cut -d. -f1 /proc/loadavg) > cpus / 2)) && jobs=$((cpus / 4))
-((jobs < 1)) && jobs=1
+jobs="${BUILD_JOBS}"
 
 if [[ -n "${ROOT_HOST_BIN:-}" ]]; then
 	[[ -f "${ROOT_HOST_BIN}" && -x "${ROOT_HOST_BIN}" ]] || { echo "ROOT_HOST_BIN isn't a program: ${ROOT_HOST_BIN}" >&2; exit 2; }
@@ -155,3 +139,4 @@ docker exec -u op -e TERM=xterm -e ZFS_POOL="${pool}" -e ZFS_FILE="${pool:+${run
 ##		- 2026-11-12: --zfs: snapshot checks on a throwaway pool.
 ##		- 2026-11-13: Native checks skip while native mode is off.
 ##		- 2026-11-19: ROOT_HOST_BIN checks a given build, and the image gets the run's label.
+##		- 2026-11-20: Shared removal guard and job count.

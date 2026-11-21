@@ -4,6 +4,7 @@
 package settings
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -37,11 +38,13 @@ type yamlCopy struct {
 
 // yamlParse reads one YAML document. An empty file has no root.
 func yamlParse(text []byte) (*yaml.Node, error) {
-	dec := yaml.NewDecoder(strings.NewReader(string(text)))
+	dec := yaml.NewDecoder(bytes.NewReader(text))
 	var doc yaml.Node
-	if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
+	err := dec.Decode(&doc)
+	if errors.Is(err, io.EOF) {
 		return nil, nil
-	} else if err != nil {
+	}
+	if err != nil {
 		return nil, err
 	}
 	var more yaml.Node
@@ -57,7 +60,7 @@ func yamlParse(text []byte) (*yaml.Node, error) {
 
 func yamlDeref(n *yaml.Node) (*yaml.Node, bool) {
 	alias := false
-	// An alias can't carry an anchor, so this is one step at most.
+	// An alias can't have an anchor, so this is one step at most.
 	for n != nil && n.Kind == yaml.AliasNode {
 		n, alias = n.Alias, true
 	}
@@ -181,10 +184,11 @@ func yamlScan(name string, text []byte, keysFor func(root *yaml.Node) []yamlKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: can't read it as YAML: %s", name, strings.TrimPrefix(err.Error(), "yaml: "))
 	}
-	lines := strings.Split(string(text), "\n")
+	str := string(text)
+	lines := strings.Split(str, "\n")
 	// The parser also counts a lone CR, NEL, LS and PS as line ends, so its
 	// line numbers wouldn't match these lines.
-	edit := !strings.ContainsAny(strings.ReplaceAll(string(text), "\r\n", "\n"), "\r\u0085\u2028\u2029")
+	edit := !strings.ContainsAny(strings.ReplaceAll(str, "\r\n", "\n"), "\r\u0085\u2028\u2029")
 	var problems []Problem
 	var add []yamlKey
 	for _, k := range keysFor(root) {
@@ -225,7 +229,7 @@ func yamlScalar(v string) string {
 	return v
 }
 
-// yamlOnLine says the line holds the copy as block style does: the key first,
+// yamlOnLine says the copy is on line as block style writes it: the key first,
 // at the parser's column, and then the value.
 func yamlOnLine(line string, c yamlCopy) bool {
 	if len(line)-len(strings.TrimLeft(line, " ")) != c.key.Column-1 {

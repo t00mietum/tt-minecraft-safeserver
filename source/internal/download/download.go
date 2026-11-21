@@ -89,7 +89,7 @@ func (c Client) Get(ctx context.Context, url string) (*http.Response, error) {
 }
 
 // Status names an HTTP status by its code. Not resp.Status, whose text is
-// the server's own and can hold escape codes.
+// the server's own and can have escape codes.
 func Status(code int) string {
 	if text := http.StatusText(code); text != "" {
 		return fmt.Sprintf("%d %s", code, text)
