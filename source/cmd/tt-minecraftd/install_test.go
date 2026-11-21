@@ -32,6 +32,7 @@ type rigRelease struct {
 	tag          string
 	pre, draft   bool
 	badSum, nada bool // a wrong sum listed, or no binary at all
+	broken       bool // a binary that matches its sum and won't run
 }
 
 const rigCurl = `#!@BASH@
@@ -88,7 +89,7 @@ func newInstallRig(t *testing.T, fetcher string) *installRig {
 			t.Fatal(err)
 		}
 	}
-	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat", "mv"} {
+	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat", "mv", "tr"} {
 		p, err := exec.LookPath(tool)
 		if err != nil {
 			t.Fatalf("%s: %v", tool, err)
@@ -141,6 +142,9 @@ func (r *installRig) publish(rels ...rigRelease) {
 		for _, arch := range []string{"amd64", "arm64"} {
 			name := "tt-minecraftd-linux-" + arch
 			body := strings.ReplaceAll(strings.ReplaceAll(rigExe, "@BASH@", r.bashPath), "@TAG@", rel.tag)
+			if rel.broken {
+				body = "#!" + r.bashPath + "\nexit 3\n"
+			}
 			if !rel.nada {
 				r.write(filepath.Join(d, name), body)
 			}
@@ -415,8 +419,90 @@ func TestInstallScript(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish(rigRelease{tag: "v1.0.0"})
 		r.tty = filepath.Join(t.TempDir(), "gone")
-		if out, code := r.run(); code == 0 || r.installed() != "" {
+		if out, code := r.run(); code == 0 || r.installed() != "" || !strings.Contains(out, "Add --yes") {
 			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a build that won't run installs nothing and keeps the old one", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0", broken: true})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		r.write(dest, "#!/bin/sh\n# hand build\n")
+		out, code := r.run("--yes")
+		got, _ := os.ReadFile(dest)
+		if code == 0 || string(got) != "#!/bin/sh\n# hand build\n" || strings.Contains(r.logText(), "setup") || !strings.Contains(out, "won't run on this box (exit 3)") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+		if strings.Contains(r.logText(), "retire-build") {
+			t.Errorf("moved the old build for one that won't run:\n%s", r.logText())
+		}
+		if left, _ := os.ReadDir(r.dest); len(left) != 1 {
+			t.Errorf("left %v", left)
+		}
+	})
+
+	t.Run("SHA256SUMS with upper-case hashes and CRLF", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		f := filepath.Join(r.rel, "v1.0.0", "SHA256SUMS")
+		b, _ := os.ReadFile(f)
+		var sums strings.Builder
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			sum, name, _ := strings.Cut(line, "  ")
+			sums.WriteString(strings.ToUpper(sum) + "  " + name + "\r\n")
+		}
+		r.write(f, sums.String())
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a web page in place of the binary is named as one", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(filepath.Join(r.rel, "v1.0.0", "tt-minecraftd-linux-amd64"), "<html>Sign in to the hotel wifi</html>\n")
+		out, code := r.run("--yes")
+		if code == 0 || r.installed() != "" || !strings.Contains(out, "came back as a web page") {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a web page in place of the release list isn't read as no releases", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(filepath.Join(r.rel, "releases.json"), "<html>Sign in to the hotel wifi</html>\n")
+		out, code := r.run("--yes")
+		if code == 0 || strings.Contains(out, "no stable release") || !strings.Contains(out, "isn't a release list") {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a tag with a path in it is refused before it reaches a URL", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish()
+		r.write(filepath.Join(r.rel, "releases.json"), "[\n  {\n    \"tag_name\": \"v9.0.0/../../../other/repo\",\n    \"draft\": false,\n    \"prerelease\": false\n  }\n]\n")
+		out, code := r.run("--yes")
+		if code == 0 || !strings.Contains(out, "isn't a plain tag name") || strings.Contains(r.logText(), "/releases/download/") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
+	t.Run("option values take any case, and errors have a blank line either side", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v0.9.0"}, rigRelease{tag: "v1.0.0-rc.1", pre: true})
+		if out, code := r.run("--release", "DEV", "--yes"); code != 0 || r.installed() != "v1.0.0-rc.1" {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+		for _, args := range [][]string{{"--release"}, {"--release=nightly"}, {"--bogus"}} {
+			out, code := r.run(args...)
+			if code != 2 || !strings.HasPrefix(out, "\n[ ERROR: ") || !strings.HasSuffix(out, " ]\n\n") || r.logText() != "" {
+				t.Errorf("%v: code %d\n%q", args, code, out)
+			}
+		}
+		r.write(r.osRelease, "ID=nixos\n")
+		if out, _ := r.run("--yes"); !strings.HasPrefix(out, "\n[ ERROR: ") || !strings.HasSuffix(out, " ]\n\n") {
+			t.Errorf("refusal: %q", out)
 		}
 	})
 

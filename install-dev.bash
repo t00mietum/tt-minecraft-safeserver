@@ -23,7 +23,7 @@
 
 set -Eeuo pipefail
 
-installerVersion="1.0.0"
+installerVersion="1.1.0"
 projectName="tt-minecraft-safeserver"
 cloneUrl="https://github.com/t00mietum/tt-minecraft-safeserver.git"
 cloneBranch="main"
@@ -36,10 +36,11 @@ ttyDev="/dev/tty"
 
 fEcho(){       printf '[ %s ]\n' "$*"; }
 fEcho_Clean(){ printf '%s\n' "$*"; }
-fDie(){        printf '[ ERROR: %s ]\n' "$*" >&2; echo >&2; exit 1; }
+fDie(){        { echo; printf '[ ERROR: %s ]\n' "$*"; echo; } >&2; exit 1; }
+fBadArg(){     { echo; printf '[ ERROR: %s ]\n' "$*"; echo; } >&2; }
 
 ## Spelled out rather than read from the header, since under `bash <(curl ...)` there's no file to read.
-fUsage(){ cat <<'EOF'
+fUsage(){ echo; cat <<'EOF'
 Usage:
 	bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash) [options]
 	bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash) [options]
@@ -61,13 +62,15 @@ Notes:
 	  container. --install-docker or --no-docker get past that.
 	- Debian and its derivatives, or any distro with --any-distro.
 EOF
+echo
 }
 
-## Ctrl-D, or no terminal at all, reads as no.
+## Ctrl-D reads as no. The terminal echoes a typed answer, so only Ctrl-D needs the line ended.
 fAsk(){
 	local answer=""
-	if [[ -t 0 ]]; then read -r -p "$1 [y/N] " answer || true
-	elif { : < "${ttyDev}"; } 2> /dev/null; then printf '%s [y/N] ' "$1"; read -r answer < "${ttyDev}" || true; echo
+	if [[ -t 0 ]]; then read -r -p "$1 [y/N] " answer || { answer=""; echo; }
+	elif { : < "${ttyDev}"; } 2> /dev/null; then printf '%s [y/N] ' "$1"; read -r answer < "${ttyDev}" || { answer=""; echo; }
+	else fEcho "There's no terminal to ask on. Add --yes to go ahead without asking."; return 1
 	fi
 	case "${answer}" in y|Y|yes|Yes|YES) return 0 ;; *) return 1 ;; esac
 }
@@ -91,7 +94,7 @@ fRoot(){ if ((useSudo)); then sudo "$@"; else "$@"; fi; }
 fMain(){
 	local dir="" withDocker=1 installDocker=0 anyDistro=0 assumeYes=0
 	while (($#)); do case "$1" in
-		--dir)            dir="${2:-}"; shift; (($#)) && shift ;;
+		--dir)            (($# >= 2)) || { fBadArg "--dir needs a folder"; return 2; }; dir="$2"; shift 2 ;;
 		--dir=*)          dir="${1#*=}"; shift ;;
 		--install-docker) installDocker=1; shift ;;
 		--no-docker)      withDocker=0; shift ;;
@@ -99,23 +102,21 @@ fMain(){
 		-y|--yes)         assumeYes=1; shift ;;
 		--version)        echo "${projectName} dev installer v${installerVersion}"; return 0 ;;
 		-h|--help)        fUsage; return 0 ;;
-		*) printf '[ ERROR: unknown option: %s (try --help) ]\n' "$1" >&2; return 2 ;;
+		*) fBadArg "unknown option: $1 (try --help)"; return 2 ;;
 	esac; done
-	if ((installDocker && ! withDocker)); then printf '[ ERROR: --install-docker and --no-docker cancel each other out ]\n' >&2; return 2; fi
-	if ((installDocker && anyDistro)); then printf "[ ERROR: --any-distro installs nothing, so it doesn't go with --install-docker ]\n" >&2; return 2; fi
+	if ((installDocker && ! withDocker)); then fBadArg "--install-docker and --no-docker cancel each other out"; return 2; fi
+	if ((installDocker && anyDistro)); then fBadArg "--any-distro installs nothing, so it doesn't go with --install-docker"; return 2; fi
 	## Bash leaves a ~ after --dir= alone, which would make a folder named ~ here.
 	# shellcheck disable=SC2088  # a literal ~ is what is being matched
 	if [[ "${dir}" == "~" || "${dir}" == "~/"* ]]; then
-		[[ "${HOME:-}" == /* ]] || { printf "[ ERROR: --dir starts with ~, but HOME isn't set to a full path ]\n" >&2; return 2; }
+		[[ "${HOME:-}" == /* ]] || { fBadArg "--dir starts with ~, but HOME isn't set to a full path"; return 2; }
 		dir="${HOME}${dir:1}"
 	elif [[ "${dir}" == "~"* ]]; then
-		printf "[ ERROR: --dir %s starts with ~, which only means the home folder as ~ or ~/path. Give a full path ]\n" "${dir}" >&2; return 2
+		fBadArg "--dir ${dir} starts with ~, which only means the home folder as ~ or ~/path. Give a full path"; return 2
 	fi
 	if [[ -z "${dir}" ]]; then dir="${PWD}/${projectName}"
 	elif [[ "${dir}" != /* ]]; then dir="${PWD}/${dir}"; fi
 	while [[ "${dir}" == ?*/ ]]; do dir="${dir%/}"; done
-
-	echo
 
 	## What this box is.
 	[[ "$(uname -s)" == Linux ]] || fDie "${projectName} runs on Linux only"
@@ -174,6 +175,7 @@ fMain(){
 	fi
 
 	## The plan.
+	echo
 	fEcho "Plan"
 	if [[ -n "${pkgs}" ]]; then
 		local how=""; if ((useSudo)); then how=", through sudo"; fi
@@ -191,7 +193,7 @@ fMain(){
 	fi
 	echo
 	if ((! assumeYes)); then
-		fAsk "Go ahead?" || { fEcho "Stopped. Nothing was changed."; echo; return 1; }
+		fAsk "Go ahead?" || { echo; fEcho "Stopped. Nothing was changed."; echo; return 1; }
 		echo
 	fi
 
@@ -243,3 +245,5 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##	History:
 ##		- 2026-11-14: Created.
 ##		- 2026-11-17: Docker or Podman is a prerequisite, with --install-docker. Added --any-distro.
+##		- 2026-11-20: Errors have a blank line either side, and with no terminal to ask on it says to
+##		  add --yes. --dir with no value is refused rather than read as the default.

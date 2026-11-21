@@ -26,7 +26,7 @@
 
 set -Eeuo pipefail
 
-installerVersion="1.0.0"
+installerVersion="1.1.0"
 exeName="tt-minecraftd"
 repo="t00mietum/tt-minecraft-safeserver"
 apiUrl="https://api.github.com/repos/${repo}/releases?per_page=100"
@@ -45,10 +45,12 @@ nftPaths="/usr/sbin/nft /sbin/nft"
 
 fEcho(){       printf '[ %s ]\n' "$*"; }
 fEcho_Clean(){ printf '%s\n' "$*"; }
-fDie(){        printf '[ ERROR: %s ]\n' "$*" >&2; echo >&2; exit 1; }
+fDie(){        { echo; printf '[ ERROR: %s ]\n' "$*"; echo; } >&2; exit 1; }
+fBadArg(){     { echo; printf '[ ERROR: %s ]\n' "$*"; echo; } >&2; }
+fLower(){      printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 ## Spelled out rather than read from the header, since under `bash <(curl ...)` there's no file to read.
-fUsage(){ cat <<'EOF'
+fUsage(){ echo; cat <<'EOF'
 Usage:
 	bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash) [options] [-- setup options]
 	bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash) [options] [-- setup options]
@@ -70,6 +72,7 @@ Notes:
 	- With no stable release yet, stable takes the newest pre-release.
 	- Needs systemd, curl or wget, and sha256sum.
 EOF
+echo
 }
 
 ## fAnyFile "PATH PATH...". Paths have no spaces.
@@ -117,30 +120,34 @@ fAsRoot(){
 	if ((useSudo)); then sudo "$@"; else "$@"; fi
 }
 
-## Ctrl-D, or no terminal at all, reads as no.
+## Ctrl-D reads as no. The terminal echoes a typed answer, so only Ctrl-D needs the line ended.
 fAsk(){
 	local answer=""
-	if [[ -t 0 ]]; then read -r -p "$1 [y/N] " answer || true
-	elif { : < "${ttyDev}"; } 2> /dev/null; then printf '%s [y/N] ' "$1"; read -r answer < "${ttyDev}" || true; echo
+	if [[ -t 0 ]]; then read -r -p "$1 [y/N] " answer || { answer=""; echo; }
+	elif { : < "${ttyDev}"; } 2> /dev/null; then printf '%s [y/N] ' "$1"; read -r answer < "${ttyDev}" || { answer=""; echo; }
+	else fEcho "There's no terminal to ask on. Add --yes to go ahead without asking."; return 1
 	fi
 	case "${answer}" in y|Y|yes|Yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+## The tag goes into download URLs, so a path in it would fetch from somewhere the plan doesn't name.
+fTagOk(){
+	[[ "$1" =~ ^[A-Za-z0-9._-]+$ && "$1" != *..* ]]
 }
 
 fMain(){
 	local release="stable" assumeYes=0 anyDistro=0 setupArgs=()
 	while (($#)); do case "$1" in
-		--release)    release="${2:-}"; shift; (($#)) && shift ;;
-		--release=*)  release="${1#*=}"; shift ;;
+		--release)    (($# >= 2)) || { fBadArg "--release needs a value, stable or dev"; return 2; }; release="$(fLower "$2")"; shift 2 ;;
+		--release=*)  release="$(fLower "${1#*=}")"; shift ;;
 		--any-distro) anyDistro=1; shift ;;
 		-y|--yes)     assumeYes=1; shift ;;
 		--version)    echo "${exeName} installer v${installerVersion}"; return 0 ;;
 		-h|--help)    fUsage; return 0 ;;
 		--)           shift; setupArgs=("$@"); break ;;
-		*) printf '[ ERROR: unknown option: %s (try --help) ]\n' "$1" >&2; return 2 ;;
+		*) fBadArg "unknown option: $1 (try --help)"; return 2 ;;
 	esac; done
-	[[ "${release}" == stable || "${release}" == dev ]] || { printf '[ ERROR: --release takes stable or dev ]\n' >&2; return 2; }
-
-	echo
+	[[ "${release}" == stable || "${release}" == dev ]] || { fBadArg "--release takes stable or dev, not '${release}'"; return 2; }
 
 	## What this box is.
 	[[ "$(uname -s)" == Linux ]] || fDie "${exeName} runs on Linux only"
@@ -184,10 +191,15 @@ fMain(){
 	fi
 
 	## Which release.
+	echo
 	fEcho "Looking up the newest ${release} release"
 	local listJson releases tag note=""
 	## The list, not releases/latest, which leaves out pre-releases.
 	listJson="$(fFetch "${apiUrl}")" || fDie "couldn't reach the GitHub API (offline, or rate-limited?)"
+	## A captive portal or proxy answers with a page, which would read as no releases at all.
+	if [[ "${listJson}" != *'"tag_name"'* && "${listJson//[[:space:]]/}" != "[]" ]]; then
+		fDie "the GitHub API answered with something that isn't a release list. Something between here and GitHub may be catching the request."
+	fi
 	releases="$(fListReleases <<< "${listJson}" || true)"
 	if [[ "${release}" == stable ]]; then
 		tag="$(awk '$2 == 0' <<< "${releases}" | fNewest || true)"
@@ -199,6 +211,7 @@ fMain(){
 		tag="$(fNewest <<< "${releases}" || true)"
 	fi
 	[[ -n "${tag}" ]] || fDie "there's no ${release} release to install yet"
+	fTagOk "${tag}" || fDie "the newest release's tag isn't a plain tag name: ${tag}"
 
 	local asset="${exeName}-linux-${arch}"
 	local url="${dlBase}/${tag}/${asset}"
@@ -206,7 +219,9 @@ fMain(){
 	local sums want
 	## Fetched before the plan, since a local build can carry the release's version and only its bytes tell them apart.
 	sums="$(fFetch "${dlBase}/${tag}/SHA256SUMS")" || fDie "download failed: SHA256SUMS for ${tag}"
-	want="$(awk -v f="${asset}" '$2 == f || $2 == "*" f { print $1; exit }' <<< "${sums}")"
+	## Either case of hash and either line ending, as sha256sum -c takes.
+	sums="${sums//$'\r'/}"
+	want="$(awk -v f="${asset}" '$2 == f || $2 == "*" f { print $1; exit }' <<< "${sums}" | tr '[:upper:]' '[:lower:]')"
 	[[ "${want}" =~ ^[0-9a-f]{64}$ ]] || fDie "SHA256SUMS for ${tag} doesn't list ${asset}"
 	local haveVer="" haveSum="" current=0 useSudo=0
 	if [[ -x "${destPath}" ]]; then
@@ -241,7 +256,7 @@ fMain(){
 	fEcho_Clean "    Then .......: ${exeName} setup${setupArgs[0]+ ${setupArgs[*]}}, which shows its own plan and asks again"
 	echo
 	if ((! assumeYes)); then
-		fAsk "Go ahead?" || { fEcho "Stopped. Nothing was changed."; echo; return 1; }
+		fAsk "Go ahead?" || { echo; fEcho "Stopped. Nothing was changed."; echo; return 1; }
 		echo
 	fi
 
@@ -258,13 +273,25 @@ fMain(){
 		fEcho "Checking SHA-256"
 		local got
 		got="$(sha256sum < "${work}/${asset}")"; got="${got%% *}"
-		[[ "${got}" == "${want}" ]] || fDie "${asset} doesn't match SHA256SUMS (listed ${want}, got ${got}). Nothing was installed."
+		if [[ "${got}" != "${want}" ]]; then
+			local first=""
+			IFS= read -r -n 1 first < "${work}/${asset}" || true
+			[[ "${first}" != "<" ]] || fDie "the download came back as a web page, not a binary. Something between here and GitHub is catching it. Nothing was installed."
+			fDie "${asset} doesn't match SHA256SUMS (listed ${want}, got ${got}). Nothing was installed."
+		fi
 
 		fEcho "Installing ${destPath}"
 		## Staged beside it, so the new build can move the old one out of the way first, and the swap is one rename.
 		local stage="${destDir}/.${exeName}.new"
 		fAsRoot install -d -m 0755 "${destDir}" || fDie "couldn't make ${destDir}"
 		fAsRoot install -m 0755 -o root -g root "${work}/${asset}" "${stage}" || fDie "couldn't write ${stage}"
+		## A build that matches its sum can still fail to run here, such as on a noexec mount.
+		local rc=0
+		"${stage}" --version > /dev/null 2>&1 || rc=$?
+		if ((rc)); then
+			fAsRoot rm -f -- "${stage}" || true
+			fDie "the new build won't run on this box (exit ${rc}), so nothing was installed"
+		fi
 		if ((retire)) && ! fAsRoot "${stage}" retire-build "${destPath}"; then
 			fAsRoot rm -f -- "${stage}" || true
 			fDie "couldn't move the old build out of the way, so nothing was installed"
@@ -309,3 +336,7 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##		- 2026-11-17: Added --any-distro, and a systemd check.
 ##		- 2026-11-19: The binary is always installed owned by root. A different build there is moved to
 ##		  /var/lib/tt-minecraftd/old-builds by the new build's retire-build, rather than written over.
+##		- 2026-11-20: The staged build has to run before it replaces anything. The release tag is checked
+##		  before it goes into a URL, SHA256SUMS takes either case and CRLF, and a page from a captive
+##		  portal is named as one. Option values take any case. Errors have a blank line either side, and
+##		  with no terminal to ask on it says to add --yes.

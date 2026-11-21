@@ -267,8 +267,11 @@ func TestInstallDevScript(t *testing.T) {
 			t.Fatalf("empty answer went ahead: code %d\n%s\n%s", code, out, r.logText())
 		}
 		r.tty = filepath.Join(t.TempDir(), "gone")
-		if out, code := r.run(); code == 0 || r.logText() != "" {
+		if out, code := r.run(); code == 0 || r.logText() != "" || !strings.Contains(out, "Add --yes") {
 			t.Fatalf("no terminal went ahead: code %d\n%s", code, out)
+		}
+		if out, code := r.run("--dir"); code != 2 || !strings.HasPrefix(out, "\n[ ERROR: --dir needs a folder ]\n\n") || r.logText() != "" {
+			t.Fatalf("--dir with no value: code %d\n%q", code, out)
 		}
 		r.tty = filepath.Join(t.TempDir(), "tty")
 		r.write(r.tty, "y\n")
