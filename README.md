@@ -71,7 +71,8 @@ tt-minecraft-safeserver runs a Paper Minecraft server for friends and family und
 - [How to connect](#how-to-connect)
 - [Features](#features)
 - [Update agent](#update-agent)
-- [Installing](#installing)
+- [Installation](#installation)
+	- [Packages](#packages)
 	- [Direct stable and dev install script](#direct-stable-and-dev-install-script)
 - [Using the server](#using-the-server)
 - [Uninstalling](#uninstalling)
@@ -166,7 +167,18 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 - `--set agent=none` skips the agent for one run, and `update --plugins --dry-run` shows what it suggests without downloading anything.
 
-## Installing
+## Installation
+
+### Packages
+
+The `.deb` and `.rpm` packages for amd64 and arm64 are on the [releases page](https://github.com/t00mietum/tt-minecraft-safeserver/releases). A package puts `tt-minecraftd` in `/usr/bin` and nothing else, so run setup after it:
+
+~~~bash
+sudo apt install ./tt-minecraftd_<version>_amd64.deb
+tt-minecraftd setup
+~~~
+
+On Fedora and other rpm distros it's `sudo dnf install ./tt-minecraftd_<version>_amd64.rpm`. Install Podman, catatonit, and nftables first there, since setup installs packages only through apt. To update, install the newer package the same way.
 
 ### Direct stable and dev install script
 
