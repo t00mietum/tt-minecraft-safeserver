@@ -6,8 +6,9 @@
 ##		- Records the README's CLI demo: a short session with the built tool, typed out and rendered
 ##		  to a gif. For cicd.bash's demo step, which runs it as root in a throwaway container with
 ##		  no network, since it writes a made-up install under /etc and /srv.
-##		- Everything in it is made up: the players, the host name, and the plugin. ss and systemctl
-##		  and nft are stand-ins for the sockets, the boot unit and the firewall counters.
+##		- Everything in it is made up: the players, the host name, and the plugin. ss, systemctl, nft,
+##		  podman and catatonit are stand-ins for the sockets, the boot unit, the firewall, the
+##		  runtime and its init.
 ##		- demo/gen-demo-gif.py, a copy of gitsby's, types and runs the steps in demo/scenario.toml and draws the gif,
 ##		  with Pillow and gifsicle, so no window or display is used. demo/script.txt is the plan.
 ##	Syntax:
@@ -80,12 +81,25 @@ cat > "${work}/bin/systemctl" <<'EOF'
 #!/bin/sh
 echo enabled
 EOF
+## repair loads the rules with nft -f, start asks for the table, and status reads the counters.
+## repair looks for nft by path, so it goes in /usr/sbin too.
 cat > "${work}/bin/nft" <<'EOF'
 #!/bin/sh
-c(){ printf '{"counter":{"family":"inet","table":"tt_minecraftd","name":"%s","packets":%s}}' "$1" "$2"; }
-printf '{"nftables":[%s,%s,%s,%s,%s,%s]}\n' "$(c in_refused 41)" "$(c in_flood 3)" "$(c in_closed 12)" "$(c out_local 0)" "$(c out_lan 7)" "$(c out_web 2)"
+case "$*" in
+	"list tables inet") echo "table inet tt_minecraftd" ;;
+	"-j list counters inet")
+		c(){ printf '{"counter":{"family":"inet","table":"tt_minecraftd","name":"%s","packets":%s}}' "$1" "$2"; }
+		printf '{"nftables":[%s,%s,%s,%s,%s,%s]}\n' "$(c in_refused 41)" "$(c in_flood 3)" "$(c in_closed 12)" "$(c out_local 0)" "$(c out_lan 7)" "$(c out_web 2)" ;;
+esac
 EOF
-chmod 0755 "${work}/bin/ss" "${work}/bin/systemctl" "${work}/bin/nft"
+## Podman with nothing running and the pinned image pulled, for status, repair and start.
+cat > "${work}/bin/podman" <<'EOF'
+#!/bin/sh
+case "$1 $2" in "image inspect") echo sha256:0f3c9e2a7b5d4c1e8f6a2b9d0c7e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e ;; esac
+EOF
+printf '#!/bin/sh\n' > "${work}/bin/catatonit"
+chmod 0755 "${work}/bin/ss" "${work}/bin/systemctl" "${work}/bin/nft" "${work}/bin/podman" "${work}/bin/catatonit"
+install -m 0755 -- "${work}/bin/nft" /usr/sbin/nft
 
 ## The steps run the installed copy by name, with the stand-ins first on PATH, from a home of
 ## their own.
@@ -102,3 +116,4 @@ env -u DISPLAY -u WAYLAND_DISPLAY python3 "${here}/demo/gen-demo-gif.py" --scena
 ##		- 2026-11-19: Drawn by demo/gen-demo-gif.py from demo/scenario.toml: typed by hand, 50 fps,
 ##		  a drawn window, and 3 s of black before the loop.
 ##		- 2026-11-20: gitsby's generator and font, so the gif looks like gitsby's.
+##		- 2026-11-20: Stand-ins for Podman, catatonit and nft's table list, so repair and the dry run after it pass.

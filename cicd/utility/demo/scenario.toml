@@ -30,3 +30,19 @@ note  = "Unsafe settings stop a start, before anything runs"
 show  = "{prog} start --dry-run"
 run   = "echo; tt-minecraftd start --dry-run"
 pause = 5.5
+
+# Run as root already, so sudo is only typed.
+[[step]]
+clear = true
+note  = "repair puts the safe settings and the firewall back"
+show  = "sudo {prog} repair"
+run   = "echo; tt-minecraftd repair"
+pause = 5.0
+
+# The podman line is cut at the edge. Wrapped, the JVM flags bury the rest.
+[[step]]
+clear = true
+note  = "Now a start would go ahead, and shows what it would run"
+show  = "{prog} start --dry-run"
+run   = "echo; tt-minecraftd start --dry-run"
+pause = 5.0
