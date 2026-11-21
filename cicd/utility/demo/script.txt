@@ -6,7 +6,7 @@
 @ Typed at a person's pace, with the odd typo fixed. Smooth scroll and a gliding cursor.
 @ Each scene starts on a clear screen. A blank line goes between a command and its output, and before the next prompt.
 @ The world: a made-up install as root in a throwaway container with no network. 3 made-up players,
-@   one made-up plugin, Podman mode. ss, systemctl and nft are stand-ins with fixed answers.
+@   one made-up plugin, Podman mode. ss, systemctl, nft, podman and catatonit are stand-ins with fixed answers.
 @ Everything anonymized: no real names, paths, or hosts.
 @ No --version scene. It needs no demo.
 
@@ -18,5 +18,15 @@ tt-minecraftd status
 tt-minecraftd start --dry-run
 	@ exits 1, which is the point
 	@ pause 5.5 seconds
+
+# repair puts the safe settings and the firewall back
+sudo tt-minecraftd repair
+	@ sudo is only typed; the demo already runs as root
+	@ pause 5 seconds
+
+# Now a start would go ahead, and shows what it would run
+tt-minecraftd start --dry-run
+	@ long lines are cut at the edge, since the wrapped podman line is a wall of JVM flags
+	@ pause 5 seconds
 
 @ hold 1.6 seconds, then 3 seconds of black before the loop
