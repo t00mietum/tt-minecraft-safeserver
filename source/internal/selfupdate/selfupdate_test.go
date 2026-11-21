@@ -13,8 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -218,6 +220,45 @@ func TestInstall(t *testing.T) {
 	}
 	if err := api.Install(ctx, link, good); err == nil {
 		t.Error("a link was replaced, not the file it points at")
+	}
+}
+
+// A link put at the staged name is refused before the new build's owner and
+// mode are set, rather than followed to give its target the build's mode.
+func TestReadyRefusesLink(t *testing.T) {
+	defer testid.Line(t, "1a4q5em")
+	newBin := script("v1.0.0-alpha.2")
+	api := fakeGitHub(t, "[]", map[string]string{"new": newBin})
+	base := strings.TrimSuffix(api.Base, "/repo")
+	r := Release{Tag: "v1.0.0-alpha.2", Asset: "tt-minecraftd-linux-arm64", URL: base + "/dl/new", Size: int64(len(newBin)), SHA256: sumHex(newBin)}
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	target := filepath.Join(elsewhere, "secret")
+	if err := os.WriteFile(target, []byte("root's"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirfd, err := download.OpenDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(dirfd)
+	s, err := api.fetch().Stage(context.Background(), dirfd, dir, "tt-minecraftd", r.URL, r.Size+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Drop()
+	staged := filepath.Join(dir, s.Temp)
+	if err := os.Remove(staged); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, staged); err != nil {
+		t.Fatal(err)
+	}
+	old := syscall.Stat_t{Mode: syscall.S_IFREG | 0o750, Uid: uint32(os.Getuid()), Gid: uint32(os.Getgid())}
+	if err := ready(dir, s, r, old); err == nil {
+		t.Error("ready took a link at the staged name")
+	}
+	if st, err := os.Stat(target); err != nil || st.Mode().Perm() != 0o644 {
+		t.Errorf("link target: mode %v, %v", st.Mode(), err)
 	}
 }
 

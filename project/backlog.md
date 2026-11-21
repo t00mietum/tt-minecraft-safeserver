@@ -202,7 +202,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - selfupdate's chmod of the staged build follows a link
 	- ID: 2026112017592840
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175928
@@ -211,11 +211,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: chmod and chown go through the staged file's own handle.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/selfupdate/selfupdate.go. Harmless while update --self is deferred and the binary's folder is root-owned.
+	- Closed reason: Done
+	- Actual cause [Bug]: `ready` set the staged build's mode with `Fchmodat` on the temp name, which follows a link, and its owner by name too.
+	- Actual fix [Bug]: `download.Staged` gained `SetOwner`, the step `Keep` already ran: it checks the temp name is still the file `Stage` wrote, then sets owner and mode through that file's own handle. `ready` calls it, so a link or another file at the temp name is refused.
+	- Test case: 1a4q5em
+	- Verified: 1a4q5em fails on the old code (the link's target became 0750) and passes with the fix. 1a3jkm8 still passes, and the quick gate passes, CodeQL included. Only the non-root path ran.
+	- Swept: `grep -rn 'Fchmodat\|Fchownat\|os.Chmod\|os.Chown\|os.Lchown' source` finds no other chmod or chown by name in a folder another account can write. paper.go's `Fchownat` doesn't follow links, and the `os.Chmod` calls are under `/etc` or `/var/lib`.
+	- Decisions:
+		- checkVersion still runs the new build by path. The folder is root-owned, and `Keep` refuses a file swapped in at the temp name afterwards.
+	- Branch: nov20b-2026112017592840
+	- Commit: 613954c
+	- Acceptance signoff: Self-closed: 1a4q5em fails on the old code and passes now.
+	- Closed: 20261120-184000
 
 - linksafe's no-RENAME_NOREPLACE move checks the target by path
 	- ID: 2026112017592711
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175927
@@ -224,6 +236,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: The check goes through the folder handle with O_PATH and O_NOFOLLOW, like the rest of the package.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/linksafe/linksafe.go. ZFS and ext4 both have the flag, so this path seldom runs.
+	- Closed reason: Done
+	- Actual cause [Bug]: `Move`'s fallback checked the new name with `os.Lstat` on the full path, so a folder swapped for a link after it was opened could hide a file that was there, and the rename then replaced it.
+	- Actual fix [Bug]: The check opens the name under the folder handle with O_PATH and O_NOFOLLOW (`existsAt`), so it sees the same folder the rename uses. O_PATH runs no driver for a device or pipe there.
+	- Test case: 1a4q5bg
+	- Verified: 1a4q5bg fails on the old code (the file was replaced) and passes with the fix. 1a3k0dm still passes, both arches vet, and the quick gate passes, CodeQL included.
+	- Swept: `Move` is the only fallback with a path check in linksafe. Its other calls all go through handles.
+	- Branch: nov20b-2026112017592840
+	- Commit: 613954c
+	- Acceptance signoff: Self-closed: 1a4q5bg fails on the old code and passes now.
+	- Closed: 20261120-184000
 
 - start and stop waits run past their timeouts
 	- ID: 2026112017592582

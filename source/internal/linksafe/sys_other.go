@@ -7,4 +7,7 @@ package linksafe
 
 import "syscall"
 
-const sysRenameat2 = syscall.SYS_RENAMEAT2
+const (
+	sysRenameat2 = syscall.SYS_RENAMEAT2
+	oPath        = syscall.O_PATH
+)
