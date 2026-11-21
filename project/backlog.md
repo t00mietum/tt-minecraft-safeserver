@@ -73,6 +73,501 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. 1a3jrsw and design.md are done.
 
+- Container start mounts any host path that a plugin jar link points to
+	- ID: 2026112110300013
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: A link in `plugins/` named `*.jar` is resolved as root, and its real path is mounted read-only at the same path in the container. The server account can plant one while the server runs. At the next start it can read any host file or folder its own permissions allow, even one behind a parent folder it can't enter. Native start would chown the target to root and make it 0644, though native mode is off for now.
+	- Expected behavior [Bug]: start refuses a jar whose real path isn't a regular file inside a tree, as it does for `paper.jar`. design.md says a link that leads out of the trees stops start.
+	- Reproduced [Bug]: 2026-11-21: a launch test built the mount for a file link and a folder link with no error. A root host run read a host-only file in the container through `plugins/zz-host.jar`, a link to a folder in `/var/tmp`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 1. Detail in detail_backlog.md.
+	- Origin: `LockedJars` from 9058841, plugin pinning. Before 2b322c0 (2026111914293176) a new jar was refused until approved, so a planted link was never mounted. A regression of that removal. Not seen before. Confirmed.
+	- Sweep: every `LockedJars` caller, native `lockJars`, the Geyser extensions folder read as root, `update.treeJars` hashing through `plugins.Sum`, and `Unsourced` reading `plugin.yml` as root.
+
+- A dotted key in spigot.yml turns BungeeCord on past the safe settings check
+	- ID: 2026112110300026
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `settings.bungeecord: true` written as one key passes start's check, even after a safe `settings:` section. Spigot's YAML reader splits keys on dots, so BungeeCord is on for that start. Spigot saves the file back nested, so the next start catches it.
+	- Expected behavior [Bug]: The check reads spigot.yml keys the way Spigot does, as design.md says.
+	- Reproduced [Bug]: 2026-11-21: a settings test (`settings_unsafe_reads_safe_zz_review_test.go`), where `Check` returns nothing for that line. The Spigot side is from Bukkit's `MemorySection.set` source, not a live start.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 2. Detail in detail_backlog.md.
+	- Origin: efca0a2, the fix for 2026111715274861 (Code review 20261117 item 4). A sibling that fix missed. Confirmed on the tool's side.
+	- Sweep: every key checked in spigot.yml. paper-global.yml and Geyser's config.yml use Configurate, which doesn't split keys.
+
+- The safe settings check reads some server.properties lines differently from Java
+	- ID: 2026112110300039
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: Java ends a line at a lone CR, and the tool doesn't. The tool also joins the next line onto a comment that ends in a backslash, and Java never does. Either way a later `white-list=false`, `enable-rcon=true` or `online-mode` line is hidden from the check, and start passes.
+	- Expected behavior [Bug]: The check sees the same keys and values as Java's `Properties.load`.
+	- Reproduced [Bug]: 2026-11-21: `white-list=true\nmotd=hi\rwhite-list=false\n` and `white-list=true\n# old \\\nwhite-list=false\n` both pass the check, and JDK 25 reads `false` for both. A differential of 4000 generated files against `Properties.load` found only these 2 cases.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 3. Detail in detail_backlog.md.
+	- Origin: 91ac8da, the first version. Not seen before. Confirmed.
+	- Sweep: `eula.go` uses the same parser. The file still has to write back byte for byte (FuzzProperties).
+
+- The pre-push hook gates the main checkout's tree, not the commit being pushed
+	- ID: 2026112110300052
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: The hook runs the merge gate or the docs gate on whatever the main checkout holds. A broken commit pushed to main from another branch or worktree passes, and so does one with an uncommitted fix in the tree. `cicd.bash --merge-gate` exits 0 on a dirty tree and only skips the marker.
+	- Expected behavior [Bug]: The gate checks the commit being pushed, or the hook refuses.
+	- Reproduced [Bug]: 2026-11-21: the real hook with stand-in gates. With the checkout on A, a push of a broken B ran the gate on A and exited 0. Repro: `cli_prepush-pushed-commit_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 4. Detail in detail_backlog.md.
+	- Origin: bb4ab14, the first pipeline. A sibling of 2026112017593230, which fixed only the docs-only diff. Confirmed.
+	- Sweep: both gate calls in the hook.
+
+- A CICD step at the memory cap stops the whole run
+	- ID: 2026112110300065
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `mem-cap.bash` starts its scope without `-p OOMPolicy=continue`. With this box's default of `stop`, systemd ends the whole run once one step is killed at the cap. So the run never sees the exit 137 that `--help` promises, and cleanup gets only the stop timeout.
+	- Expected behavior [Bug]: The killed step exits 137 and the run goes on to report and clean up.
+	- Reproduced [Bug]: 2026-11-21: a scope with `MemoryMax=60M`. The child exited 137, then the parent shell got SIGTERM and the scope exited 143.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 5.
+	- Origin: bb4ab14. Not seen before. Confirmed.
+	- Sweep: the sister projects' copies of mem-cap.bash, which this project can't change.
+
+- install.bash on a box with the package moves its own copy away, or makes setup fail
+	- ID: 2026112110300078
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: install.bash never looks at a packaged `/usr/bin/tt-minecraftd`. On an existing install it copies the release to `/usr/local/bin`, runs setup, and setup's repair check 15 moves that copy to old-builds, while the script still says "Installed". On a new install setup skips the copy, the closing `repair --check` fails check 15, and the script says setup didn't finish.
+	- Expected behavior [Bug]: With the package there, install.bash stops before its plan and says to upgrade through the package manager.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 6. Detail in detail_backlog.md.
+	- Origin: 9d7cb3e, install script. The clash came with 0c9de06 (2026111715275041) and check 15's move in f741e0d (2026111911125756). Not seen before. Plausible, read only.
+	- Sweep: only install.bash. setup already guards its copy with `boot.Bin`.
+
+- A new install that stops partway can't be run again as setup says
+	- ID: 2026112110300091
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: When a new install stops at a later step, such as a failed image pull or a missing nft, setup says to fix it and run setup again. By then it has put `paper.jar`, `eula.txt`, settings and Geyser in the server folder, so the second run refuses with "has files in it already; give --adopt".
+	- Expected behavior [Bug]: A second run goes on from a tree setup made itself, as design.md says, or the message names `--adopt`.
+	- Reproduced [Bug]: 2026-11-21: in the setup rig, with `podman pull` failing, and with nft missing and no apt.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 7.
+	- Origin: b21d65f, the first setup. Not seen before. Confirmed.
+
+- Geyser and Floodgate add-ons are taken for Geyser or Floodgate
+	- ID: 2026112110300104
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `geyser.Project` matches names that start with the project's name. GeyserExtras, GeyserSkinManager and GeyserModelEngine count as Geyser, and a Floodgate add-on as Floodgate. setup and repair then give them GeyserMC's source, and every `update --plugins` says to replace the add-on with Geyser by hand. `Installed` counts GeyserExtras as Geyser, so setup skips the real download.
+	- Expected behavior [Bug]: Only the real `Geyser-Spigot` and `floodgate` plugins match.
+	- Reproduced [Bug]: 2026-11-21: a geyser test over those names.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 8.
+	- Origin: 92e72ff and 9f30908. Not seen before. Confirmed.
+	- Against: design.md's rule that the file name and the `plugin.yml` name both start with the project's name.
+
+- Jar names from the server tree reach the terminal raw on the update agent path
+	- ID: 2026112110300117
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: A jar named with escape codes makes `update` print them raw in its "no answer from the update agent" line.
+	- Expected behavior [Bug]: Server text goes through `server.Clean`, as the other update lines do.
+	- Reproduced [Bug]: 2026-11-21: an update test with a jar named `Chunky\x1b]0;owned\x07.jar`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 9.
+	- Origin: cfd6be9. Reachable since 2b322c0 (2026111914293176), since the agent is now asked about every jar. Same class as 2026111715274877. Confirmed.
+	- Sweep: the other raw prints of the jar name in `update/agent.go`.
+
+- retire-build reports a failure after it moved the build, and install.bash then leaves no binary
+	- ID: 2026112110300130
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `oldbuild.Retire` returns the rotation's error even after the move worked. install.bash reads that as "nothing was installed" and removes its staged build, so `/usr/local/bin` has none. setup stops before its install, and repair says FAILED for a build it moved. Even with no error, an interrupt between install.bash's 2 renames leaves no binary.
+	- Expected behavior [Bug]: A failed rotation is a warning, and the moved build counts as kept.
+	- Reproduced [Bug]: 2026-11-21: install.bash's reaction, in its test rig. The Go trigger needs root. The root host check couldn't run it, since its image has no `chattr`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 10. Detail in detail_backlog.md.
+	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed for install.bash, Plausible for the trigger.
+	- Sweep: the 3 callers of `Retire`.
+
+- Retiring a build with an old mtime can prune it at once
+	- ID: 2026112110300143
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `Retire` names the moved build by its mtime and then rotates. A build older than the newest kept ones, such as a copy made with `cp -p`, is pruned in that same call. repair and setup still print "Moved ... to" a file that's gone.
+	- Expected behavior [Bug]: The build just moved is always kept, as design.md says.
+	- Reproduced [Bug]: 2026-11-21: `oldbuild_retire-prunes-itself_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 11.
+	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed.
+
+- install.bash changes the mode of an existing /usr/local/bin
+	- ID: 2026112110300156
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `install -d -m 0755` runs on the folder even when it exists. A `root:staff 2775` folder from an older Debian becomes 2755, and the plan doesn't say so.
+	- Expected behavior [Bug]: The folder is made only when it's missing.
+	- Reproduced [Bug]: 2026-11-21: in the installer rig, a 0775 folder came out 0755.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 12.
+	- Origin: 9d7cb3e. Not seen before. Confirmed.
+
+- install.bash with wget follows an https redirect to plain http
+	- ID: 2026112110300169
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `wget --https-only` follows a redirect from https to http and exits 0. The script says redirects are https only too, which holds only for curl.
+	- Expected behavior [Bug]: Both download tools refuse a redirect to plain http, or the script doesn't claim it for wget.
+	- Reproduced [Bug]: 2026-11-21: a local TLS server answering 302 to a plain http one. wget printed the body, curl refused.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 13.
+	- Origin: 3b7576c, the second code tidy. Not seen before. Confirmed.
+
+- One unreadable jar stops setup --adopt and fails repair's plugin sources step
+	- ID: 2026112110300182
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `plugins.Unsourced` stops at the first jar it can't read, such as a dangling link or a folder named `*.jar`. `setup --adopt` then fails before its plan, and repair's step fails on every run.
+	- Expected behavior [Bug]: Such a jar is skipped with a warning, or only jars whose names match Geyser or Floodgate are read.
+	- Reproduced [Bug]: 2026-11-21: a dangling `plugins/Gone.jar` in a plugins test and in the setup rig.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 14.
+	- Origin: 2b322c0, now in 3b7576c. Not seen before. Confirmed.
+
+- repair's ownership fix fails while Paper renames files, and skips the mode fix
+	- ID: 2026112110300195
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `tree.handOver` runs `chown -R` and then `chmod -R`, and stops at the first error. A file Paper renames during the walk makes chown exit 1, so repair says the fix failed and modes stay open to other accounts.
+	- Expected behavior [Bug]: A file that's gone by then doesn't fail the fix, and the mode fix still runs.
+	- Reproduced [Bug]: 2026-11-21: with a rename loop, coreutils 9.7 `chown -R` failed 46 of 60 runs. A root host run of repair under the same loop said the fix failed.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 15.
+	- Origin: 1099186. The other half of 2026112017592200, whose sweep covered the walks but not these commands. Confirmed.
+
+- status, watch and cmd as root print any file that latest.log links to
+	- ID: 2026112110300208
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `server.OpenRegular` follows links. design.md tells operators to run `status` with sudo, and then a `logs/latest.log` link the server account planted shows a root-only file on the operator's terminal.
+	- Expected behavior [Bug]: As root, files in the server tree open without following a link, as the other root reads do.
+	- Reproduced [Bug]: 2026-11-21: a root host run, where `sudo tt-minecraftd status` printed a 0600 file in `/root` through the link.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 16.
+	- Origin: ba0f959 and 80c5e6f. Same class as 2026111709090967. Confirmed.
+	- Sweep: `settings.ReadPlayers` for the whitelist and ops, the log follower in `launch/session.go`, and native `log()`.
+
+- start and stop waits skip a last look at the deadline
+	- ID: 2026112110300221
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: Paper's Done line logged at 4.5 s of a 5 s `startTimeout` makes start say it didn't finish loading and exit 1. A server gone at 2.5 s of a 3 s `stopTimeout` gets a SIGTERM and a `stop --time 30` it doesn't need.
+	- Expected behavior [Bug]: One last look at the log and the process after the loop, before the error or the kill.
+	- Reproduced [Bug]: 2026-11-21: launch rig tests in `launch_jarlinks-waits_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 17.
+	- Origin: 3a04d86. 2026112017592582 (nov20b) rewrote the loop and kept the gap. Confirmed.
+	- Sweep: `waitLoaded` and `waitStopped`, both modes.
+
+- Ctrl-C during a watch reading draws a screen of errors
+	- ID: 2026112110300234
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: A Ctrl-C while `watch` takes a reading redraws the screen with `context canceled` errors and "Memory: none in use", wiping the last good screen.
+	- Expected behavior [Bug]: watch exits and leaves the last reading on screen.
+	- Reproduced [Bug]: 2026-11-21: `cmd_watch-ctrlc_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 18.
+	- Origin: ba0f959. Not seen before. Confirmed.
+	- Sweep: a one-shot `status`.
+
+- update's library removal checks for a running server long before it removes
+	- ID: 2026112110300247
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `Running` is asked before the plan and the "Go ahead?" prompt, which can wait any length of time. A server started in that window loses library jars it hasn't opened yet, which design.md says update avoids.
+	- Expected behavior [Bug]: update asks again right before it removes.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 19.
+	- Origin: 2b322c0 (2026111914293176). Not seen before. Plausible, read only.
+
+- update --image can rewrite the whole config in canonical form
+	- ID: 2026112110300260
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: In a config where shcl merges a repeated key, `SaveFileKeepLines` falls back to canonical output. Keys come back lower-cased, a line is dropped, and `image` moves, though the code says the other lines stay byte for byte.
+	- Expected behavior [Bug]: update checks the `kept` result, and refuses or says plainly that the file was rewritten.
+	- Reproduced [Bug]: 2026-11-21: `update_pin_image_merge_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 20. shcl friction: the fallback to canonical form is shcl's documented behavior.
+	- Origin: bf1ab06. Not seen before. Confirmed.
+
+- Negated root host checks pass when the command they look with can't run
+	- ID: 2026112110300273
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `fJarsInContainer` passes with no container, since its write is negated. `fZfsNone` and `fZfsPool` pass when `zfs list` fails, since they test for empty output. `fNativeStart` runs `nsenter -t ""` when pgrep finds nothing.
+	- Expected behavior [Bug]: Each check fails unless the look itself worked.
+	- Reproduced [Bug]: 2026-11-21: with a stand-in sudo, 1a3jqxr and 1a3fh9c printed PASS. Repro: `roothost_negated-checks_repro.bash`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 21.
+	- Origin: c076344, 684bd24 and 85d60ca. Same class as 2026112017592969, which fixed only `counter` and `before`. Confirmed.
+
+- test-id.bash --check misses some call forms and counts a commented-out ID
+	- ID: 2026112110300286
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `--check` passes an uppercase or quoted ID in checks.bash, a call after `&&`, and a wrapper written `native () {`, each even when it repeats an ID. A Go test whose only ID line is commented out counts as having one. style_guide.md says `--check` refuses a missing, malformed or repeated ID.
+	- Expected behavior [Bug]: Any call it can't parse fails, and only a live `defer testid.Line` counts.
+	- Reproduced [Bug]: 2026-11-21: `--root` on a stand-in tree.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 22.
+	- Origin: 259938d and c03326e. Not seen before. Confirmed.
+
+- The startup lint check reports CLEAN for a failed or aborted run
+	- ID: 2026112110300299
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `--lint-check` drops `FAIL` lines, so a log with `[ FAILED: ... ]` and `[ CICD ABORTED ... ]` reads as CLEAN with exit 0.
+	- Expected behavior [Bug]: A failed or aborted run is reported as such.
+	- Reproduced [Bug]: 2026-11-21: a stand-in log.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 23.
+	- Origin: before 36903d7; 463c99d touched the line. Not seen before. Confirmed.
+
+- A code file renamed to a docs path reads as a docs-only push
+	- ID: 2026112110300312
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: The hook's `git diff --name-only` folds a rename into its new name, so `git mv main.go notes.md` runs only the docs gate.
+	- Expected behavior [Bug]: Both sides of a rename count.
+	- Reproduced [Bug]: 2026-11-21: `cicd_prepush-rename_repro.bash`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 24.
+	- Origin: 532c922. Not seen before. Confirmed.
+
+- A release run builds and sums files that aren't committed
+	- ID: 2026112110300325
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `fIsRelease` checks only the branch and the tag. An untracked `.go` file under `source/` goes into both release builds, which still match each other, so README's "a tag always builds to the same bytes" fails for that release.
+	- Expected behavior [Bug]: A release build refuses a tree with changes under `source`, `go.mod` or `go.sum`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 25.
+	- Origin: cicd.bash release steps. Not seen before. Plausible, read only.
+
+- cicd.bash --list prints every test ID whatever the run
+	- ID: 2026112110300338
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `--list --backlog-run-quick cli` and `--merge-gate --list` print the same 315 IDs, root host checks included. The help says it prints the test IDs the other options would run.
+	- Expected behavior [Bug]: The list follows the areas and steps, or the help says it's every ID.
+	- Reproduced [Bug]: 2026-11-21: both runs.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 26.
+	- Origin: 3b7576c. Not seen before. Confirmed.
+
+- README's uninstall steps leave the minecraftd group and name a key a new config lacks
+	- ID: 2026112110300351
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `userdel minecraftd` leaves the group when the operator is in it. The steps point to the config's image name, which a new config has only after an `update` pins it. "A package puts `tt-minecraftd` in `/usr/bin` and nothing else" misses the license file it also installs.
+	- Expected behavior [Bug]: The steps remove the group, name where the image is found, and the package line is true.
+	- Reproduced [Bug]: 2026-11-21: `userdel` in the CICD image, and `dpkg-deb -c` on the package.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 27.
+	- Origin: 4afd000 and ae42a4f. Not seen before. Confirmed.
+
+- design.md still describes the removed plugin check in places
+	- ID: 2026112110300364
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: The Testing section says unit tests check "the plugin check against changed and new jars", and the folder-handle rule still covers "a refused jar". Both went with 2026111914293176 and 2026111918161429. There's also a doubled "the the".
+	- Expected behavior [Bug]: design.md describes the code as it is.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 28.
+	- Origin: Left by 2b322c0 and by the 2026111918161429 change. Not seen before. Confirmed by reading.
+
+- Accept a same-bytes build in /usr/local/bin only when root owns it and nobody else can write it
+	- ID: 2026112110300377
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- install.bash and setup's copy count a build as current by SHA-256 alone, a link to one included. Also require a regular file owned by root with no group or other write, since root runs it.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 29. Dogfood's `cp -f` makes such a file where `/usr/local/bin` is writable.
+
+- Remove the code that plugin approval left with no caller
+	- ID: 2026112110300390
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- `paper.IsBuild`, and `plugins.Info.Size` and `Info.Mod`, which are set and never read. Comment out with the reason, per the house rule.
+		- Rename `pinnedDirs` and `ReadApproved`, which keep the approval-era names.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 30. Found by coverage (0%) and a scan for exported names with no outside caller.
+
+- Refuse a config value that an unquoted # cuts short
+	- ID: 2026112110300403
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- `--set serverDir=/srv/games#2` gives `/srv/games` with no error, and the same line in the file gives no warning. setup and repair would then chown that other tree.
+		- `Set` refuses a value whose read-back differs from what was typed. A comment glued to a value in the file gets a warning.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 31. shcl friction: a `#` with no space before it starts a comment.
+
+- Cover status readings in a soak
+	- ID: 2026112110300416
+	- Type: Enhancement
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- Neither soak covers `status.Probe.Take`, the one loop that runs with no end, in `watch`. Add it, so a small leak per reading shows.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 32.
+
+- Publish v1.0.0-beta.1 with or before the install.bash that needs retire-build
+	- ID: 2026112110300429
+	- Type: Task
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- v1.0.0-alpha.1 has no `retire-build`. If dev's install.bash reaches main before beta.1 is published, replacing a build fails, safely, with "couldn't move the old build out of the way".
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 33.
+
 - Root host checks pass on an empty counter or line number
 	- ID: 2026112017592969
 	- Type: Bug
@@ -560,7 +1055,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Low
 	- Progress log:
 		- Every test ID was re-encoded on 2026-11-19, so a row that names an old ID, such as a Test case row on an open item, no longer matches a run log.
-		- Run `private/claude_simple/tools/testid-reencode.py apply <map> repo/project/backlog.md .claude/detail_backlog.md`, with the map `private/claude_simple/tools/testid-map-20261119.tsv`, the same list as under "Test ID re-encode" in details.md. It rewrites only known IDs, as whole words, 5-character ones as their 00 form. Then `check` the same files shows none left.
+		- Run the private re-encode tool over the backlog and the backlog detail file, with the 2026-11-19 map, the same list as under "Test ID re-encode" in details.md. It rewrites only known IDs, as whole words, 5-character ones as their 00 form. Then `check` the same files shows none left.
 		- Edits most items, so it needs a --note that every backlog edit is the round's, and `git add` of the backlog.
 		- 20261119: Ran the re-encode on backlog.md (1032 IDs) and detail_backlog.md (3). Verified: check reports none left.
 	- Closed reason: Done
@@ -4801,6 +5296,50 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions:
 		- MCXboxBroadcast, when this gets picked up. It needs a spare Microsoft account, never the main one.
 		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
+
+- Code review 20261121: observations not filed
+	- ID: 2026112110300442
+	- Type: Task
+	- Status: Canceled
+	- Opened: 20261121-103000
+	- Opened by:
+	- Decided against: `gfs-rotate.bash` against `oldbuild.Rotate`. Both keep the same files, and the script is used only on CICD's own folders.
+	- Decided against: The gap between `download.Staged.Keep`'s check and its rename. update refuses while the server runs, so nothing of the server account's is running then.
+	- Decided against: A config path with a newline breaking the unit's ExecStart. The operator picks the path.
+	- Decided against: Old build names stamped under a different TZ, or in a DST overlap. At most an hour off in the rotation.
+	- Decided against: `Rotate` pruning hand-placed `tt-minecraftd.*` files. The folder is the tool's, and a test pins it.
+	- Decided against: selfupdate not retiring the old build. It's deferred, and design.md says it gets the move when it comes back.
+	- Decided against: install.bash's release list parse leaning on GitHub's pretty-printed JSON. It matches the API today.
+	- Decided against: ufw's v6-only allow counted for IPv4. A test pins it as meant.
+	- Decided against: `plugins.Libraries` keyed to the old `paper.jar`. Paperclip writes its own libraries back from its jar.
+	- Decided against: `rm -f` in the library removal. It runs as runUser on full paths after `--`.
+	- Decided against: The native ownership fix handing locked jars back to runUser. Native mode is off, and the unit keeps them read-only.
+	- Decided against: `linksafe.OpenFile` opening without O_PATH. The container drops all capabilities, and a FIFO opened with O_NONBLOCK is harmless.
+	- Decided against: A backslash in a jar name making `SetSources` refuse the batch. Too contrived.
+	- Decided against: A folder swap after `Mkdir`'s mkdirat. The server can only swap in a folder it could already reach.
+	- Decided against: Hard links in the tree. `protected_hardlinks` limits them to files the server can already reach.
+	- Decided against: Geyser `auth-type` with no `config-version`, both top-level and under `java:`. Crafted only, and offline logins on an online-mode Java server let nobody in.
+	- Decided against: `config-version` written as hex or `5.0`, `!!str false`, and mixed-case `FaLsE`. Contrived, or Paper falls back to its default of false.
+	- Decided against: `agent.Check` cutting `sha256` and `url` to length before it checks them. The download hash check still refuses a wrong one.
+	- Decided against: The GitHub content hosts in `agentHosts`. Same class as the hostile agent on github.com, decided on 2026111715280984.
+	- Decided against: Each jar hashed 2 or 3 times a run. Plugin jars are small.
+	- Decided against: `extraArgs` able to override the safe settings. It's the root-owned config's choice, per design.md.
+	- Decided against: `agent/live_test.go` not driving the `command` kind. Test only.
+	- Decided against: The 401 hint naming only `TT_MINECRAFTD_AGENT_KEY`. Cosmetic.
+	- Decided against: Firewall asymmetry between IPv4 and IPv6. A namespace probe of 18 targets under `egress: web` with Bedrock on gave the same answer for both.
+	- Decided against: Spoofing into `seek4`. It takes a LAN accomplice, and only UDP from 7551 gets through.
+	- Decided against: Global IPv6 LAN clients refused under `lan`, public on-link IPv4 subnets not blocked, and NAT64 not in `lan6`. design.md sets those ranges.
+	- Decided against: start refusing after a new ISP IPv6 prefix until repair. That's the design's rule.
+	- Decided against: `LogThread`'s greedy match on chat text, and a late answer to an async command being cut off. False negatives only, and design.md counts only server-thread lines.
+	- Decided against: Podman's `stopping` or `paused` state counting as not running. Only happens by hand.
+	- Decided against: The CodeQL CSV loop and a last line with no newline. CodeQL ends every row with one.
+	- Decided against: `CICD_FUZZ_TIME` or `CICD_SOAK_ROUNDS` weakening a merge gate that still writes its marker. Deliberate operator overrides.
+	- Decided against: `fGoTestRun` not failing on 0 passed lines. Areas are checked against real folders, and test-id.bash finds missing IDs.
+	- Decided against: Small uncapped `docker run --rm` helper calls on the cache volume. Tiny and short-lived.
+	- Decided against: `fSweepRuns` removing a kept `--zfs` run folder while the pool is imported. ZFS holds the file open.
+	- Decided against: verify-release.bash not clearing `go env -w` settings. An odd setup.
+	- Decided against: Lint leads `agent.go` badCond, `launch/links.go` nilerr, `settings/yaml.go` nilnil, and the hugeParam notes. Each is meant, or costs nothing.
+	- Decided against: The 2026-11-18 line length directive. MD013 is off, and no other width is set in the repo.
 
 - Code review 20261117: observations not filed
 	- ID: 2026111715280984
