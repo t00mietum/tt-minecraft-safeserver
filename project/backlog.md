@@ -1025,6 +1025,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Requirements [Feature]: Link refusal at each step, the rename fallback, temp file cleanup on error, and Mkdir's chown are only tested through callers. Its coverage is 50 to 60 percent, and it's the code root relies on in the server tree.
 	- Progress log:
 		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
+		- 2026-11-20: The Move fallback's path lstat noted in Decisions was replaced by a check under the folder handle in 2026112017592711.
 	- Origin: Not seen before.
 	- Closed reason: Done
 	- Actual fix: linksafe has its own tests. They cover a link or a file at each step of Walk and Sub, Read refusing a link, a pipe, a folder and an oversized file, Write replacing a link rather than writing through it and leaving no temp file when the rename fails, Move never replacing on both the RENAME_NOREPLACE path and the EINVAL fallback, and Mkdir's mode and its refusal of a folder swapped for a link. 1a3k0kw runs Mkdir's and Write's chown as root in a user namespace, including the chown failure path. Each error path also checks that no handle is left open.
