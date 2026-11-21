@@ -155,16 +155,24 @@ var ownershipCheck = Check{
 // walkTree counts files with the wrong owner, and while the server runs, the
 // ones other accounts can reach. A mode tighter than ug+rwX passes, since Java
 // makes its temp files 0600 whatever the umask, and Paper saves through them.
-// Links aren't followed or counted.
+// Links aren't followed or counted. A file or folder that's gone by the time
+// it's looked at is left out, since a running Paper saves through temp files
+// it renames. Only a missing root is an error.
 func walkTree(root string, uid, gid uint32, up bool, skip map[string]bool) (owners, modes int, err error) {
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = walkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path != root && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if d.Type()&fs.ModeSymlink != 0 || skip[path] {
 			return nil
 		}
 		fi, err := d.Info()
+		if path != root && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -183,6 +191,9 @@ func walkTree(root string, uid, gid uint32, up bool, skip map[string]bool) (owne
 	})
 	return owners, modes, err
 }
+
+// walkDir is a var so a test can take a file away mid-walk.
+var walkDir = filepath.WalkDir
 
 func plural(n int, word string) string {
 	if n == 1 {

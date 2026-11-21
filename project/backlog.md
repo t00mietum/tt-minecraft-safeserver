@@ -101,7 +101,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair fails its tree check when Paper renames a file mid-walk
 	- ID: 2026112017592200
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261120-175922
@@ -110,6 +110,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: A file that's gone by the time it's looked at is skipped. Only a missing tree root is an error.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/repair/files.go, the WalkDir callback.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-20: a loop renaming 200 files in place made 1020 of 2000 walks fail on the old code, and none with the fix.
+	- Actual cause [Bug]: The walk's callback returned every error, so a file or folder gone between the listing and its lstat or read ended the whole walk.
+	- Actual fix [Bug]: The walk skips a file or folder that's gone by the time it's looked at. A missing tree root is still an error. plugins.Libraries, which update runs while the server may be up, skips a cache folder that's gone the same way.
+	- Test case: 1a4q4c8, 1a4q4fc
+	- Verified: 1a4q4c8 and 1a4q4fc fail on the old code and pass with the fix. Each of the walk's two skips was taken out alone, and 1a4q4c8 failed each time. The quick gate passes.
+	- Swept: every filepath.WalkDir in source. plugins.Libraries had the same failure on a folder gone mid-walk, fixed and pinned by 1a4q4fc. It reads no file info, so a renamed file never failed it. Left alone: launch's boxLinks runs at start before Paper does, and only warns on a folder it can't read.
+	- Branch: nov20b-2026112017592200
+	- Commit: b141647
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261120-182955
+	- Decisions:
+		- The skip applies whether or not the server runs, since a file that's gone has no owner or mode left to judge.
+		- Both walks call filepath.WalkDir through a package var, walkDir, so a test can take a file away between the listing and the look. That keeps the tests exact rather than racing a rename loop.
 
 - console.py can call a clean Ctrl-C detach a failure
 	- ID: 2026112017593367

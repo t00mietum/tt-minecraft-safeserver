@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -382,6 +383,64 @@ func TestOwnershipCheck(t *testing.T) {
 
 	h.Cfg.OwnerTrees = append(h.Cfg.OwnerTrees, filepath.Join(filepath.Dir(h.Cfg.ServerDir), "gone"))
 	hasAll(t, "missing tree", look(t, h, ownershipCheck), "tree "+filepath.Join(filepath.Dir(h.Cfg.ServerDir), "gone")+" is missing")
+}
+
+// A running Paper saves through temp files it renames, so a file or folder
+// can go between the walk's listing and its look at it.
+func TestOwnershipCheckFileGone(t *testing.T) {
+	defer testid.Line(t, "1a4q4c8")
+	h, _ := ownHost(t, true, "running")
+	world := filepath.Join(h.Cfg.ServerDir, "world")
+	if err := os.MkdirAll(filepath.Join(world, "playerdata", "inner"), 0o770); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"level.dat_new", "playerdata/a.dat_tmp", "playerdata/inner/b.dat"} {
+		if err := os.WriteFile(filepath.Join(world, filepath.FromSlash(p)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One open file is left, so the walk is shown to go on past the gaps.
+	open := filepath.Join(world, "zz-open.txt")
+	if err := os.WriteFile(open, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	gone := map[string]func(string) error{
+		// Renamed before its lstat, as Paper does with level.dat_new.
+		filepath.Join(world, "level.dat_new"): func(p string) error {
+			return os.Rename(p, filepath.Join(world, "level.dat"))
+		},
+		// Gone before its lstat.
+		filepath.Join(world, "playerdata", "a.dat_tmp"): os.Remove,
+		// A folder gone before it's read.
+		filepath.Join(world, "playerdata", "inner"): os.RemoveAll,
+	}
+	seen := map[string]bool{}
+	old := walkDir
+	t.Cleanup(func() { walkDir = old })
+	walkDir = func(root string, fn fs.WalkDirFunc) error {
+		return old(root, func(p string, d fs.DirEntry, err error) error {
+			if take := gone[p]; take != nil && !seen[p] {
+				seen[p] = true
+				if err := take(p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return fn(p, d, err)
+		})
+	}
+	hasAll(t, "files gone mid-walk", look(t, h, ownershipCheck), "has 1 file other accounts can reach [fix]")
+	if len(seen) != len(gone) {
+		t.Errorf("the walk reached %d of the %d files taken away", len(seen), len(gone))
+	}
+
+	// A tree root that's gone is still an error.
+	if _, _, err := walkTree(filepath.Join(world, "nowhere"), 0, 0, true, nil); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing root: %v", err)
+	}
 }
 
 func TestBedrockCheck(t *testing.T) {

@@ -3,6 +3,61 @@
 
 package plugins
 
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
+)
+
+// update lists the cache while the server may run, and a running Paper can
+// take a folder away between the listing and the read.
+func TestLibrariesFolderGone(t *testing.T) {
+	defer testid.Line(t, "1a4q4fc")
+	dir := t.TempDir()
+	for _, name := range []string{"libraries/org/a/a-1.jar", "libraries/org/b/b-1.jar", "libraries/org/z/z-1.jar"} {
+		file := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gone := filepath.Join(dir, "libraries", "org", "b")
+	took := false
+	old := walkDir
+	t.Cleanup(func() { walkDir = old })
+	walkDir = func(root string, fn fs.WalkDirFunc) error {
+		return old(root, func(p string, d fs.DirEntry, err error) error {
+			if p == gone && !took {
+				took = true
+				if err := os.RemoveAll(p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return fn(p, d, err)
+		})
+	}
+	jars, err := Libraries(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !took {
+		t.Fatal("the walk never reached the folder taken away")
+	}
+	want := []Jar{
+		{"libraries/org/a/a-1.jar", filepath.Join(dir, "libraries", "org", "a", "a-1.jar")},
+		{"libraries/org/z/z-1.jar", filepath.Join(dir, "libraries", "org", "z", "z-1.jar")},
+	}
+	if !reflect.DeepEqual(jars, want) {
+		t.Errorf("got %v, want %v", jars, want)
+	}
+}
+
 // Commented out by 2026111914334569: CheckLibraries went with library pinning.
 
 // import (
