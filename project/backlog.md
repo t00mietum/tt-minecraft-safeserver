@@ -73,6 +73,136 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. 1a3jrsw and design.md are done.
 
+- Root host checks pass on an empty counter or line number
+	- ID: 2026112017592969
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261120-175929
+	- Opened by:
+	- Incorrect behavior [Bug]: In checks.bash, [[ "$(counter out_local)" -eq 0 ]] is true when nft or the python step fails and prints nothing, so 1a3fhnw passes its loopback half. 1a3fjbr's line number compare passes the same way when adopt.out has no source lines.
+	- Expected behavior [Bug]: counter and the line lookups fail unless they get a number.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/root-host/checks.bash, fStun and the adopt check.
+
+- repair fails its tree check when Paper renames a file mid-walk
+	- ID: 2026112017592200
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261120-175922
+	- Opened by:
+	- Incorrect behavior [Bug]: While the server runs, Paper saves through temp files it renames, such as playerdata and level.dat_new. The walk lists one, Paper renames it, and the lstat behind d.Info gets ENOENT, which ends the whole walk with FAILED tree ownership.
+	- Expected behavior [Bug]: A file that's gone by the time it's looked at is skipped. Only a missing tree root is an error.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/repair/files.go, the WalkDir callback.
+
+- console.py can call a clean Ctrl-C detach a failure
+	- ID: 2026112017593367
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175933
+	- Opened by:
+	- Incorrect behavior [Bug]: pump returns at the pty's EIO, and waitpid with WNOHANG runs at once. The child closes its fds before it's a zombie, so a console that left can read as "console didn't leave on Ctrl-C" and 1a3fhjr flakes.
+	- Expected behavior [Bug]: waitpid is polled for about 2 s before it counts as a failure.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/root-host/console.py.
+
+- pre-push reads a new branch's first push by the working tree
+	- ID: 2026112017593230
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175932
+	- Opened by:
+	- Incorrect behavior [Bug]: For an all-zero remote sha, fOnlyDocs diffs the pushed commit against the working tree. A first push of main from a tree with only doc edits reads as docs-only and skips the merge gate.
+	- Expected behavior [Bug]: A push that creates the branch always gets the merge gate.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/hooks/pre-push.
+
+- Ctrl-C in cicd.bash skips its cleanup
+	- ID: 2026112017593100
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175931
+	- Opened by:
+	- Incorrect behavior [Bug]: The run log's tee gets the Ctrl-C and dies, so the EXIT trap's first write gets SIGPIPE. The run folder, container and volume cleanup are skipped until fSweepRuns 2 days later.
+	- Expected behavior [Bug]: The tee ignores INT and TERM, so cleanup runs.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/cicd.bash, the exec into tee. See the bash-traps skill.
+
+- selfupdate's chmod of the staged build follows a link
+	- ID: 2026112017592840
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175928
+	- Opened by:
+	- Incorrect behavior [Bug]: ready calls Fchmodat on the staged name with no flags, so a link put there would be followed, though Install's doc says nothing follows links.
+	- Expected behavior [Bug]: chmod and chown go through the staged file's own handle.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/selfupdate/selfupdate.go. Harmless while update --self is deferred and the binary's folder is root-owned.
+
+- linksafe's no-RENAME_NOREPLACE move checks the target by path
+	- ID: 2026112017592711
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175927
+	- Opened by:
+	- Incorrect behavior [Bug]: The fallback for a filesystem without RENAME_NOREPLACE checks the target with os.Lstat on the full path, which follows a parent link the server may have put in after the folder was opened.
+	- Expected behavior [Bug]: The check goes through the folder handle with O_PATH and O_NOFOLLOW, like the rest of the package.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/linksafe/linksafe.go. ZFS and ext4 both have the flag, so this path seldom runs.
+
+- start and stop waits run past their timeouts
+	- ID: 2026112017592582
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175925
+	- Opened by:
+	- Incorrect behavior [Bug]: The start and stop waits loop startTimeout or stopTimeout times, each a 1 s pause plus 2 sudo commands. At 300 s with 100 to 200 ms of commands a pass, the wait is 330 to 360 s, while the messages say 300.
+	- Expected behavior [Bug]: Each wait ends at a deadline set once, from the clock.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/launch/kit.go.
+
+- A YAML alias to a safe value reads as a section
+	- ID: 2026112017592452
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175924
+	- Opened by:
+	- Incorrect behavior [Bug]: yamlCopies keeps the alias node itself, so settings.bungeecord: *f with f: &f false fails as a section. start refuses the safe file, and repair says to set it by hand.
+	- Expected behavior [Bug]: The copy's value is the alias target, as SnakeYAML reads it. Whether it can be edited in place is still judged on the alias node.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/settings/yaml.go, the level == len(path)-1 case.
+
+- repair's ufw check misses a DENY rule above the ALLOW
+	- ID: 2026112017592322
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175923
+	- Opened by:
+	- Incorrect behavior [Bug]: ufwMissing reads only ALLOW IN and LIMIT IN rules. With 19132/tcp DENY IN above 19000:19200/tcp ALLOW IN, ufw drops Bedrock and the check says OK.
+	- Expected behavior [Bug]: Rules are read in order, first match wins, as ufw does, so a DENY IN or REJECT IN that covers the port first leaves it missing.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/repair/hostfw.go. It only reports, so it's low.
+
 - Remove plugins.Refuse and RefusedDir, which nothing calls now
 	- ID: 2026111918161429
 	- Type: Task

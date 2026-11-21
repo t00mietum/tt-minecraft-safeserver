@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package plugins lists the jars the server loads, and reads and writes plugins.shcl, which keeps where update gets each one. See Plugin jars in design.md.
+// Package plugins lists the jars the server loads, and reads and writes plugins.shcl, which says where update gets each one. See Plugin jars in design.md.
 package plugins
 
 import (
-	"encoding/hex"
 	"fmt"
 	"net/url"
 	"path"
@@ -19,7 +18,7 @@ import (
 // it only says where update gets the jar.
 type Approved struct {
 	Name   string // path under serverDir, such as plugins/Geyser-Spigot.jar
-	SHA256 string // lower-case hex, or empty: an old pinned list's, or the file's own from update
+	SHA256 string // lower-case hex of the file on disk, from update, or empty
 	Source string // where update --plugins gets it, or empty
 	Line   int
 }
@@ -41,8 +40,6 @@ func ReadApproved(file string) ([]Approved, []config.Warning, error) {
 		}
 	}
 
-	// shcl merges entries with the same path into one, so a jar listed twice
-	// with 2 hashes shows up below as one with more than one sha256.
 	count := doc.Count("jar")
 	jars := make([]Approved, 0, count)
 	for i := 0; i < count; i++ {
@@ -67,22 +64,10 @@ func readJar(doc *shcl.Document, base string, warn func(int, string, ...any)) (A
 	}
 
 	for _, child := range doc.ReadChildFields(base).Value {
+		// An old pinned list has a sha256 per jar, which nothing reads now.
 		if child.Name != "sha256" && child.Name != "source" {
 			warn(child.Line, "unknown key %q under jar %s", child.Name, jar.Name)
 		}
-	}
-
-	// An old pinned list has a sha256 per jar. Nothing checks it now, so a
-	// bad one only loses the hash.
-	sum := doc.ReadString(base + ".sha256")
-	switch {
-	case sum.Status == shcl.NotFound:
-	case sum.Status == shcl.Multiple:
-		warn(jar.Line, "%s has more than one sha256; ignored", jar.Name)
-	case sum.Status != shcl.Good || !isSHA256(sum.Value):
-		warn(sum.Line, "%s: sha256 isn't 64 hex digits; ignored", jar.Name)
-	default:
-		jar.SHA256 = strings.ToLower(sum.Value)
 	}
 
 	// A bad source only costs update --plugins.
@@ -105,12 +90,4 @@ func readJar(doc *shcl.Document, base string, warn func(int, string, ...any)) (A
 func insideServer(name string) bool {
 	return name != "" && !path.IsAbs(name) && path.Clean(name) == name &&
 		name != ".." && !strings.HasPrefix(name, "../") && !strings.Contains(name, "\\")
-}
-
-func isSHA256(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	_, err := hex.DecodeString(s)
-	return err == nil
 }

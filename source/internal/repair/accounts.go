@@ -28,8 +28,8 @@ type group struct {
 	members []string
 }
 
-// accounts reads passwd and group files fresh, since a fix just before may
-// have changed them.
+// accounts is the passwd and group files, read fresh each time, since a fix
+// just before may have changed them.
 type accounts struct {
 	users  []account
 	groups []group

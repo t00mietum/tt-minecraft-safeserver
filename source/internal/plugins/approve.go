@@ -19,7 +19,7 @@ import (
 	"github.com/yottacore/shcl/source/go/v3"
 )
 
-// Info is what an operator sees about a jar.
+// Info is a jar with what's known about it.
 type Info struct {
 	Jar
 	SHA256 string
@@ -60,6 +60,21 @@ func Describe(j Jar) (Info, error) {
 func about(r io.ReaderAt, size int64) string {
 	name, version := claims(r, size)
 	return strings.TrimSpace(name + " " + version)
+}
+
+// aboutFile is about for a jar on disk, with no hash, since setup and repair
+// only want the name.
+func aboutFile(file string) (string, error) {
+	f, err := server.OpenRegular(file)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	return about(f, fi.Size()), nil
 }
 
 // Claims gives the plugin name and version an open jar says it is, from the
@@ -158,9 +173,9 @@ func SetSources(file string, jars []Info) error {
 	return nil
 }
 
-// Unsourced describes the jars in plugins/ that plugins.shcl gives no
-// source, so setup and repair can give Geyser and Floodgate theirs. No list
-// yet means none has one.
+// Unsourced lists the jars in plugins/ that plugins.shcl gives no source,
+// each with About, so setup and repair can give Geyser and Floodgate
+// theirs. No list yet means none has one.
 func Unsourced(serverDir, file string) ([]Info, error) {
 	listed, _, err := ReadApproved(file)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -179,11 +194,11 @@ func Unsourced(serverDir, file string) ([]Info, error) {
 		if path.Dir(j.Name) != "plugins" || has[j.Name] {
 			continue
 		}
-		info, err := Describe(j)
+		about, err := aboutFile(j.File)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", j.Name, err)
 		}
-		out = append(out, info)
+		out = append(out, Info{Jar: j, About: about})
 	}
 	return out, nil
 }

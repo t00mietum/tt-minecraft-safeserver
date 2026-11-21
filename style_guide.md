@@ -20,7 +20,7 @@ Code here takes the boring, obvious way over the clever one. Where a formatter o
 
 - A package-level `var` that tests replace says so in its comment. That's how tests stay off the host's real sudo, accounts, and network.
 
-- Root never follows a link inside the server tree, since the server account can write there. Writes go through folder handles opened with `O_NOFOLLOW`, as `source/internal/settings` does.
+- Root never follows a link inside the server tree, since the server account can write there. Writes go through `source/internal/linksafe`, whose folder handles are opened with `O_NOFOLLOW`.
 
 - Text that the server or a plugin wrote goes through `server.Clean` before it reaches the terminal.
 

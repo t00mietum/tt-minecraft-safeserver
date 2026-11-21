@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,9 +39,9 @@ const (
 // Bins are the paths a unit may run the tool from, the package's first.
 var Bins = []string{PkgBin, LocalBin}
 
-// Bin is the tool the unit runs: the package's when it's installed, so a
-// package upgrade reaches the unit, else setup's copy. pkg stands in for
-// PkgBin, and empty means the real one.
+// Bin is the tool the unit runs: the package's when it's installed, so the
+// unit runs what a package upgrade installs, else setup's copy. pkg stands
+// in for PkgBin, and empty means the real one.
 func Bin(pkg string) string {
 	if pkg == "" {
 		pkg = PkgBin
@@ -66,9 +67,10 @@ func Command(bin, configPath string) string {
 // quote is one argument for an Exec line. systemd expands % specifiers and $
 // variables there, even inside quotes.
 func quote(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$")
-	return `"` + r.Replace(s) + `"`
+	return `"` + unitQuoter.Replace(s) + `"`
 }
+
+var unitQuoter = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$")
 
 // unquote undoes quote. false when s isn't something quote gives.
 func unquote(s string) (string, bool) {
@@ -100,7 +102,7 @@ func unquote(s string) (string, bool) {
 }
 
 // ExecStart is the unit's ExecStart line, which also tells whose config the
-// unit serves.
+// unit runs.
 func ExecStart(bin, configPath string) string {
 	return "ExecStart=" + Command(bin, configPath) + " start --foreground"
 }
@@ -207,15 +209,21 @@ func Serves(ctx context.Context, r host.Runner, unitFile, configPath string) (bo
 	text, err := os.ReadFile(unitFile) // #nosec G304 -- the boot unit's path
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
-	} else if err != nil {
+	}
+	if err != nil {
 		return false, err
 	}
 	// Either path, since a unit written before the package came keeps
 	// setup's copy until the next repair.
+	want := make([]string, 0, len(Bins))
+	for _, bin := range Bins {
+		want = append(want, ExecStart(bin, configPath))
+	}
 	found := false
 	for line := range strings.Lines(string(text)) {
-		for _, bin := range Bins {
-			found = found || strings.TrimSpace(line) == ExecStart(bin, configPath)
+		if slices.Contains(want, strings.TrimSpace(line)) {
+			found = true
+			break
 		}
 	}
 	if !found {

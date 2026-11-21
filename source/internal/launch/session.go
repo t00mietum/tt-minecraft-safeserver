@@ -162,7 +162,7 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 		return nil
 	}
 	// Only the server thread's lines count, since the answer comes from there.
-	// Geyser's STUN lines just after a start used to end the wait before it.
+	// Geyser's STUN lines right after a start used to end the wait before it.
 	// A line with no thread goes with the one before it.
 	seen, quiet, ours := false, 0, true
 	for i := range answerMax {
@@ -175,7 +175,7 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 		}
 		heard := false
 		for _, l := range lines {
-			k.say("%s", server.Clean(l))
+			k.say("%s", l)
 			if thread, ok := server.LogThread(l); ok {
 				ours = thread == server.MainThread
 			}

@@ -4,6 +4,7 @@
 package repair
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io/fs"
@@ -42,15 +43,8 @@ func (h *Host) hasNft() bool {
 // fwFiles gives the firewall's files, which tests point elsewhere. An empty
 // field left in Files means the real file.
 func (h *Host) fwFiles() (f firewall.Files, unit string) {
-	f = firewall.Files{Rules: h.RulesFile, ResolvConf: h.ResolvConf, Routes: h.Routes}
-	if f.Rules == "" {
-		f.Rules = firewall.RulesFile
-	}
-	unit = h.UnitFile
-	if unit == "" {
-		unit = firewall.UnitFile
-	}
-	return f, unit
+	f = firewall.Files{Rules: cmp.Or(h.RulesFile, firewall.RulesFile), ResolvConf: h.ResolvConf, Routes: h.Routes}
+	return f, cmp.Or(h.UnitFile, firewall.UnitFile)
 }
 
 // sameFile says whether path has text. A missing file isn't an error.

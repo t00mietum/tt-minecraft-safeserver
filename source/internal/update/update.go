@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -80,9 +81,10 @@ type Update struct {
 	// AgentNote says why Agent is nil though agent is set, such as a run
 	// that started as root.
 	AgentNote string
-	// Fetch gets the agent's jars and hash pages. Its zero value reaches
+	// Fetch gets the agent's jars and hash pages. Its zero value gets from
 	// public addresses only.
 	Fetch download.Client
+	held  *http.Client // Fetch's client with redirects held, made once
 	// MCVersion is --mc-version's, the Minecraft version to move Paper to.
 	MCVersion string
 	// Root skips the zfs try without sudo.
@@ -360,17 +362,16 @@ func (u *Update) treeJars() (jars []plugins.Approved, skipped []string) {
 	if err != nil {
 		return nil, []string{err.Error()}
 	}
-	listed, _, _ := plugins.ReadApproved(u.PluginsFile)
+	listed, _, _ := plugins.ReadApproved(u.PluginsFile) // only the sources matter here; pluginLookup shows a bad list's warnings
 	source := make(map[string]string, len(listed))
 	for _, a := range listed {
 		source[a.Name] = a.Source
 	}
-	var sums plugins.Sums
 	for _, j := range found {
 		if !strings.HasPrefix(j.Name, "plugins/") {
 			continue
 		}
-		sum, err := sums.Sum(j.File)
+		sum, err := plugins.Sum(j.File)
 		if err != nil {
 			skipped = append(skipped, fmt.Sprintf("%s: can't read it: %v", j.Name, err))
 			continue

@@ -17,6 +17,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
 
@@ -280,4 +281,21 @@ func closeKey(serverDir string) error {
 		return &fs.PathError{Op: "chmod", Path: f.Name(), Err: err}
 	}
 	return nil
+}
+
+// GeyserSources are the Geyser and Floodgate jars in plugins/ that file gives
+// no source, as on an adopted tree, each with source's for its project.
+func GeyserSources(serverDir, file string, source func(project string) string) ([]plugins.Info, error) {
+	all, err := plugins.Unsourced(serverDir, file)
+	if err != nil {
+		return nil, err
+	}
+	var jars []plugins.Info
+	for _, info := range all {
+		if p := geyser.Project(info.Name, info.About); p != "" {
+			info.Source = source(p)
+			jars = append(jars, info)
+		}
+	}
+	return jars, nil
 }

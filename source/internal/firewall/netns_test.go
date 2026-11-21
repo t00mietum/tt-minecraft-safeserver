@@ -197,15 +197,10 @@ func udpStandIn(args []string) int {
 	return 0
 }
 
-// LAN discovery: a client broadcasts, and the server answers it straight
-// back. Conntrack keys the probe on the broadcast address, so the answer
-// from the server's own address isn't a reply. With the rules loaded, the
-// answer to a broadcast on 7551 gets out, and one on 19132 is a new packet
-// to the LAN that out_lan drops. A unicast probe still gets its answer, and
-// the server can't send from 7551 to a LAN host that didn't ask. The run
-// without the rules is the control.
-func TestBroadcastAnswer(t *testing.T) {
-	defer testid.Line(t, "1a3jrsw")
+// netnsBin skips without nft in a user namespace, ip, or nsenter, and gives
+// the test binary, which the namespaces run again as stand-ins.
+func netnsBin(t *testing.T) string {
+	t.Helper()
 	if !nftCheck(t, "") {
 		t.Skip("no unprivileged network namespace with nft")
 	}
@@ -218,6 +213,19 @@ func TestBroadcastAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return bin
+}
+
+// LAN discovery: a client broadcasts, and the server answers it straight
+// back. Conntrack keys the probe on the broadcast address, so the answer
+// from the server's own address isn't a reply. With the rules loaded, the
+// answer to a broadcast on 7551 gets out, and one on 19132 is a new packet
+// to the LAN that out_lan drops. A unicast probe still gets its answer, and
+// the server can't send from 7551 to a LAN host that didn't ask. The run
+// without the rules is the control.
+func TestBroadcastAnswer(t *testing.T) {
+	defer testid.Line(t, "1a3jrsw")
+	bin := netnsBin(t)
 	cfg := config.Defaults()
 	// The test runs as uid 0 in its own user namespace.
 	cfg.RunUser = "root"
@@ -300,18 +308,7 @@ grep got "$LOG" | sort | uniq -c
 // run without the rules is the control.
 func TestLANv6AndMulticastBlocked(t *testing.T) {
 	defer testid.Line(t, "1a3jvmg")
-	if !nftCheck(t, "") {
-		t.Skip("no unprivileged network namespace with nft")
-	}
-	for _, tool := range []string{"ip", "nsenter"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skip("no " + tool)
-		}
-	}
-	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	bin := netnsBin(t)
 	tries := []string{"[2001:db8:77::2]:40000", "[ff02::1%vs0]:40000", "224.0.0.251:5353", "255.255.255.255:40000", "192.168.77.2:40000", "[2001:db8:99::1]:40000", "203.0.113.9:40000"}
 	script := `set -e
 for f in all default; do echo 0 > /proc/sys/net/ipv6/conf/$f/disable_ipv6; done
@@ -371,18 +368,7 @@ done
 // its own while the shared one is spent. The same goes for IPv6.
 func TestFloodSetFull(t *testing.T) {
 	defer testid.Line(t, "1a3k0q0")
-	if !nftCheck(t, "") {
-		t.Skip("no unprivileged network namespace with nft")
-	}
-	for _, tool := range []string{"ip", "nsenter"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skip("no " + tool)
-		}
-	}
-	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	bin := netnsBin(t)
 	was := floodSize
 	floodSize = 2
 	t.Cleanup(func() { floodSize = was })

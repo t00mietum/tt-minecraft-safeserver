@@ -12,52 +12,19 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
-// Sums hashes jars, and keeps each sum until the file's size or time changes,
-// so a second look doesn't read every jar again.
-type Sums struct {
-	seen map[string]seenSum
-}
-
-type seenSum struct {
-	size int64
-	mod  time.Time
-	sum  string
-}
-
-// ErrNotRegular is a jar that's a pipe, a device, a socket, or a folder. The
-// server owns plugins/, so it could leave one there, or a link to one, to
-// hang a reader or have root open a device.
-var ErrNotRegular = server.ErrNotRegular
-
 // Sum gives the lower-case hex SHA-256 of the file, after links. Anything
-// but a regular file is refused before it's opened.
-func (s *Sums) Sum(file string) (string, error) {
+// but a regular file is refused before it's opened (server.ErrNotRegular).
+func Sum(file string) (string, error) {
 	f, err := server.OpenRegular(file)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if old, ok := s.seen[file]; ok && old.size == fi.Size() && old.mod.Equal(fi.ModTime()) {
-		return old.sum, nil
-	}
-	sum, err := hashOf(f)
-	if err != nil {
-		return "", err
-	}
-	if s.seen == nil {
-		s.seen = make(map[string]seenSum)
-	}
-	s.seen[file] = seenSum{fi.Size(), fi.ModTime(), sum}
-	return sum, nil
+	return hashOf(f)
 }
 
 func hashOf(r io.Reader) (string, error) {

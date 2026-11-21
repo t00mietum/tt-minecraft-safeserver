@@ -306,7 +306,7 @@ fRunTmpDone(){
 	fEcho_Clean
 }
 if ((! listOnly)); then
-	## Once, so every path under it is spelled the same.
+	## Once, so every path under it is written the same.
 	HOST_TEMP="$(realpath -e -- "${HOST_TEMP:-${TMPDIR:-/tmp}}")" || fDie "no temp folder at ${HOST_TEMP:-${TMPDIR:-/tmp}}"
 	export HOST_TEMP
 	runRoot="${HOST_TEMP}/${APP_NAME}"
@@ -344,7 +344,8 @@ fGlobFiles shellFiles "${SHELL_LINT_GLOBS[@]}"
 fGlobFiles mdFiles "${MD_LINT_GLOBS[@]}"
 
 ## The version, read from its one place.
-goVersion="$(sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1)"
+fReadVersion(){ sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1 ;}
+goVersion="$(fReadVersion)"
 [[ -n "${goVersion}" ]] || fDie "no version in ${VERSION_FILE}"
 fCommitEpoch(){ git log -1 --format=%ct 2>/dev/null || echo 0 ;}
 fIsRelease(){ [[ "$(git branch --show-current 2>/dev/null)" == main && "$(git describe --exact-match --tags HEAD 2>/dev/null || true)" == "${goVersion}" ]] && echo 1 || echo 0 ;}
@@ -405,9 +406,9 @@ fGo(){
 	else
 		( for w in "${envs[@]:-}"; do [[ -z "${w}" || "${w}" == HEAVY=1 || "${w}" == MOUNT=* ]] || export "${w?}"; done
 		  export GOMAXPROCS="${jobs}" GOFLAGS="${GOFLAGS:+${GOFLAGS} }-buildvcs=false"
-		  cmd="$1"; shift
+		  tool="$1"; cmd="$1"; shift
 		  case "${cmd}" in
-			staticcheck|gosec|govulncheck|nfpm) cmd="$(fHostTool "${cmd}")"; [[ -n "${cmd}" ]] || { echo "not installed: $1" >&2; exit 127; } ;;
+			staticcheck|gosec|govulncheck|nfpm) cmd="$(fHostTool "${tool}")"; [[ -n "${cmd}" ]] || { echo "not installed: ${tool}" >&2; exit 127; } ;;
 		  esac
 		  "${cmd}" "$@" )
 	fi
@@ -438,7 +439,7 @@ fStepSync(){
 		fi
 	fi
 	## Read after the sync, which can move HEAD.
-	goVersion="$(sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1)"
+	goVersion="$(fReadVersion)"
 }
 
 formatChanged=()
@@ -496,6 +497,12 @@ fStepLint(){
 	((${#drift[@]} == 0)) || fEcho "WARNING: tool versions differ from the recorded set: ${drift[*]}"
 }
 
+## A test ID line, as testid.Line prints it. The ID's length is set by test-id.bash.
+idRe='[0-9a-z]{7}'
+fIdLines(){ grep -E "^(PASS|FAIL|SKIP) ${idRe} " "$1" | sed 's/^/  /' || true ;}  ## LOG
+fTestNoise(){ grep -vE "^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS ${idRe} |SKIP ${idRe} )" "$1" | tail -n "$2" || true ;}  ## LOG N: what's left once the ID lines are out
+fPassCount(){ grep -cE "^PASS ${idRe} " "$1" || true ;}  ## LOG
+
 ## One line per test with its ID, from the test binary's own output, then the verdict.
 fGoTestRun(){ ## LABEL [VAR=value...]: go test over the chosen packages, to a log in the run folder
 	local label="$1" log rc=0 extra=()
@@ -503,12 +510,12 @@ fGoTestRun(){ ## LABEL [VAR=value...]: go test over the chosen packages, to a lo
 	log="${runTmp}/gotest_${label}.log"
 	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
 	fGo test "${extra[@]}" "$@" -- go test -count=1 -p "${testJobs}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
+	fIdLines "${log}"
 	if ((rc)); then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{7} |SKIP [0-9a-z]{7} )' "${log}" | tail -n 80 || true
+		fTestNoise "${log}" 80
 		fDie "go test failed (${label})"
 	fi
-	fEcho_Clean "go test (${label}): $(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true) test line(s) passed"
+	fEcho_Clean "go test (${label}): $(fPassCount "${log}") test line(s) passed"
 }
 fStepTest(){
 	local fresh="${runTmp}/gotmp"
@@ -524,8 +531,8 @@ fStepRace(){
 	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
 	## -race needs cgo, and the container has gcc.
 	fGo race "${extra[@]}" HEAVY=1 CGO_ENABLED=1 "TMPDIR=${fresh}" -- go test -race -count=1 -p "${HEAVY_JOBS}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
-	if ((rc)); then grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{7} |SKIP [0-9a-z]{7} )' "${log}" | tail -n 80 || true; fDie "race test failed"; fi
-	fEcho_Clean "go test -race: $(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true) test line(s) passed"
+	if ((rc)); then fTestNoise "${log}" 80; fDie "race test failed"; fi
+	fEcho_Clean "go test -race: $(fPassCount "${log}") test line(s) passed"
 }
 fStepVuln(){
 	local out rc=0
@@ -553,13 +560,13 @@ fStepFuzz(){
 	cp -a -- source go.mod go.sum "${copy}/"
 	fEcho_Clean "${budget} per target, ${HEAVY_JOBS} worker(s)"
 	while IFS= read -r f; do
-		dir="./$(dirname "${f}")"
+		dir="./${f%/*}"
 		while IFS= read -r name; do
 			n=$((n + 1)); rc=0
 			fGo fuzz HEAVY=1 -- go -C "${copy}" test -count=1 -run '^$' -fuzz "^${name}\$" -fuzztime "${budget}" -parallel "${HEAVY_JOBS}" "${dir}" > "${log}" 2>&1 || rc=$?
-			grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
+			fIdLines "${log}"
 			if ((rc)); then
-				grep -vE '^(fuzz: elapsed|(PASS|FAIL|SKIP) [0-9a-z]{7} )' "${log}" | tail -n 40 || true
+				grep -vE "^(fuzz: elapsed|(PASS|FAIL|SKIP) ${idRe} )" "${log}" | tail -n 40 || true
 				found="$(find "${copy}/${dir#./}/testdata/fuzz/${name}" -type f -newer "${copy}/go.mod" 2>/dev/null | head -n 1)"
 				[[ -z "${found}" ]] || { fEcho_Clean "failing input: ${found}"; sed 's/^/  /' "${found}"; }
 				fDie "fuzzing found a failure in ${name} (${dir})"
@@ -590,14 +597,14 @@ fStepSoak(){
 	fGo soak HEAVY=1 "${SOAK_ENV}=${rounds}" "${SOAK_PROFILE_ENV}=${prof}" -- go test -count=1 -p "${HEAVY_JOBS}" -v -run '^TestSoak$' "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
 	fSoakKeep "${prof}"
 	## A test's numbers, then its PASS or FAIL line: go test prints each package's output in one piece.
-	grep -E '^((PASS|FAIL|SKIP) [0-9a-z]{7} |[[:space:]]+soak_test\.go:[0-9]+: )' "${log}" | sed -E 's/^[[:space:]]*/  /' || true
+	grep -E "^((PASS|FAIL|SKIP) ${idRe} |[[:space:]]+soak_test\.go:[0-9]+: )" "${log}" | sed -E 's/^[[:space:]]*/  /' || true
 	if ((rc)); then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|(PASS|FAIL|SKIP) [0-9a-z]{7} |[[:space:]]+soak_test\.go:)' "${log}" | tail -n 40 || true
+		grep -vE "^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|(PASS|FAIL|SKIP) ${idRe} |[[:space:]]+soak_test\.go:)" "${log}" | tail -n 40 || true
 		fDie "soak test failed"
 	fi
 	## A skip here means the rounds never reached the test, so it checked nothing.
-	! grep -qE '^SKIP [0-9a-z]{7} ' "${log}" || fDie "a soak test skipped: ${SOAK_ENV} didn't reach it"
-	n="$(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true)"
+	! grep -qE "^SKIP ${idRe} " "${log}" || fDie "a soak test skipped: ${SOAK_ENV} didn't reach it"
+	n="$(fPassCount "${log}")"
 	((n)) || { fSkip "no soak tests in ${pkgs[*]}"; return 0; }
 	fEcho_Clean "soak: ${n} test(s), nothing grew"
 }
@@ -674,7 +681,7 @@ fStepCodeql(){
 		nNew+=1; rec=""
 	done < "${out}"
 	fLintOut < "${shown}"
-	for key in "${!known[@]}"; do ((known[${key}])) || stale+=("${key}"); done
+	for key in "${!known[@]}"; do [[ "${known[${key}]}" == 1 ]] || stale+=("${key}"); done
 	((${#stale[@]} == 0)) || fEcho "WARNING: ${CODEQL_KNOWN} has ${#stale[@]} entry(ies) that matched nothing, so take them out: ${stale[*]}"
 	((nNew == 0)) || fDie "CodeQL: ${nNew} result(s)"
 	q=""; ((nKnown == 0)) || q=", and ${nKnown} known third-party one(s) let through, per ${CODEQL_KNOWN}"
@@ -812,14 +819,14 @@ fStepArm64(){
 		fSkip "${ARM64_HOST} isn't there, or stayed busy past ${lockWait}s; exit ${rc}"; return 0
 	fi
 	grep -E '^(box: |work folder: |removed |arm64-tests: )' "${log}" || true
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
+	fIdLines "${log}"
 	if [[ -f "${state}/rc" ]]; then read -r testRc < "${state}/rc" || true; fi
 	if [[ "${testRc}" != 0 ]]; then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{7} |SKIP [0-9a-z]{7} )' "${log}" | tail -n 80 || true
+		fTestNoise "${log}" 80
 		fDie "arm64 tests failed on ${ARM64_HOST}"
 	fi
 	((rc == 0)) || fEcho "WARNING: ${VM_STATE_TOOL} exited ${rc} after the tests passed; check ${ARM64_HOST} went back as found"
-	fEcho_Clean "arm64 on ${ARM64_HOST}: $(grep -cE '^PASS [0-9a-z]{7} ' "${log}" || true) test line(s) passed"
+	fEcho_Clean "arm64 on ${ARM64_HOST}: $(fPassCount "${log}") test line(s) passed"
 }
 fRootHost(){ ## [--zfs]
 	local log="${runTmp}/roothost${1:-}.log" rc=0 bin="${runTmp}/build/${EXE_NAME}-linux-amd64" envs=() opts=("$@")
@@ -829,7 +836,7 @@ fRootHost(){ ## [--zfs]
 	((! keepTemp)) || opts+=(--keep-temp)
 	env "${envs[@]}" nice -n 19 bash "${here}/root-host/root-host.bash" "${opts[@]}" > "${log}" 2>&1 || rc=$?
 	grep -E '^(Checking|Building) ' "${log}" | head -n 1 | sed 's/^/  /' || true
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{7} ' "${log}" | sed 's/^/  /' || true
+	fIdLines "${log}"
 	if ((rc)); then tail -n 60 "${log}"; fDie "root host checks failed"; fi
 	fEcho_Clean "root host: $(grep -cE '^PASS ' "${log}" || true) check(s) passed"
 }
@@ -878,7 +885,7 @@ fStepPublish(){
 	local f branch changed=("${formatChanged[@]}" "${demoChanged[@]}")
 	if ((${#changed[@]})); then
 		[[ -n "${publishMsg}" ]] || publishMsg="${APP_NAME} CI/CD ${stamp}"
-		for f in "${changed[@]}"; do fGitTool add -- "${f}"; done
+		fGitTool add -- "${changed[@]}"
 		fGitTool commit -m "${publishMsg}" -- "${changed[@]}" >/dev/null
 		fEcho_Clean "committed ${#changed[@]} file(s) the run changed: ${changed[*]}: \"${publishMsg}\""
 	else
@@ -938,8 +945,9 @@ for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || offNote+="${s} ($
 fEcho_Clean
 
 if ((listOnly)); then
-	fEcho_Clean "$(bash "${here}/utility/test-id.bash" --list | grep -c .) test(s) with IDs:"
-	bash "${here}/utility/test-id.bash" --list | sed 's/^/  /'
+	ids="$(bash "${here}/utility/test-id.bash" --list)"
+	fEcho_Clean "$(grep -c . <<< "${ids}") test(s) with IDs:"
+	while IFS= read -r l; do printf '  %s\n' "${l}"; done <<< "${ids}"
 	fEcho_Clean
 	exit 0
 fi

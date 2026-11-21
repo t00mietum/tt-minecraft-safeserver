@@ -47,6 +47,14 @@ const (
 var (
 	lan4 = []string{"10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"}
 	lan6 = []string{"fc00::/7", "fe80::/10"}
+
+	lan6Nets = func() []netip.Prefix {
+		nets := make([]netip.Prefix, 0, len(lan6))
+		for _, s := range lan6 {
+			nets = append(nets, netip.MustParsePrefix(s))
+		}
+		return nets
+	}()
 )
 
 // floodSize is how many addresses each rate limit set tracks. A var so a test
@@ -243,11 +251,8 @@ func OnLink(r io.Reader) ([]netip.Prefix, error) {
 // tidy keeps the global unicast prefixes that the fixed ranges and each
 // other don't already cover, in order, so the file reads the same each time.
 func tidy(nets []netip.Prefix) []netip.Prefix {
-	fixed := make([]netip.Prefix, 0, len(lan6))
-	for _, s := range lan6 {
-		fixed = append(fixed, netip.MustParsePrefix(s))
-	}
-	// within says whether one of by holds p. A prefix isn't within itself.
+	fixed := lan6Nets
+	// within says whether a prefix in by contains p, other than p itself.
 	within := func(p netip.Prefix, by []netip.Prefix) bool {
 		return slices.ContainsFunc(by, func(q netip.Prefix) bool { return q != p && q.Bits() <= p.Bits() && q.Contains(p.Addr()) })
 	}
@@ -513,8 +518,8 @@ func Loaded(ctx context.Context, r host.Runner) (bool, error) {
 // by name. It's empty when the table isn't loaded. Reading them needs root,
 // and it doesn't use sudo, so the caller checks.
 func Counters(ctx context.Context, r host.Runner) (map[string]uint64, error) {
-	// Listing every inet counter, rather than the table's, has nft answer
-	// the same way when the table is gone.
+	// Every inet counter rather than the table's own, since nft still exits
+	// 0, with none of ours, when the table is gone.
 	out, err := r.Run(ctx, host.Cmd{Look: true, Args: []string{"nft", "-j", "list", "counters", "inet"}})
 	if err != nil {
 		return nil, fmt.Errorf("can't list the nftables counters: %w", err)

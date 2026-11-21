@@ -42,8 +42,8 @@ func TestReadApprovedList(t *testing.T) {
 		t.Fatalf("err %v, warnings %v", err, warns)
 	}
 	want := []Approved{
-		{"plugins/Geyser-Spigot.jar", sumA, "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot", 2},
-		{"paper-26.3-244.jar", sumB, "", 5},
+		{"plugins/Geyser-Spigot.jar", "", "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot", 2},
+		{"paper-26.3-244.jar", "", "", 5},
 	}
 	if !reflect.DeepEqual(jars, want) {
 		t.Errorf("got  %+v\nwant %+v", jars, want)
@@ -76,17 +76,18 @@ func TestBadEntriesAreLeftOut(t *testing.T) {
 	if got := strings.Join(names, " "); got != "plugins/good.jar@ plugins/nosum.jar@ plugins/short.jar@ plugins/http.jar@ plugins/twice.jar@ plugins/extra.jar@ plugins/same.jar@" {
 		t.Errorf("kept %s", got)
 	}
+	// An old list's sha256 is read past without a word.
 	wantLines := map[int]string{
-		1:  "more than one sha256",
-		5:  "isn't 64 hex digits",
 		6:  "isn't a path under the server folder",
 		8:  "isn't a path under the server folder",
 		14: "source isn't an https URL",
-		15: "more than one sha256",
 		20: `unknown key "version"`,
 		21: `unknown key "jars"`,
 	}
 	for _, w := range warns {
+		if strings.Contains(w.Text, "sha256") {
+			t.Errorf("warning on line %d: %s", w.Line, w.Text)
+		}
 		if says, ok := wantLines[w.Line]; ok && strings.Contains(w.Text, says) {
 			delete(wantLines, w.Line)
 		}

@@ -55,7 +55,6 @@ fGoTests(){
 				id = substr($0, RSTART, RLENGTH); sub(/^.*, "/, "", id); sub(/".*$/, "", id)
 				printf "%s\t%s\t%s\n", id, fileOf, name; name = ""; next }
 			if (n >= 3) { printf "-\t%s\t%s\n", fileOf, name; name = "" } }
-		FNR == 1 && name != "" { }
 		END { if (name != "") printf "-\t%s\t%s\n", fileOf, name }'
 }
 ## "<id>\t<name>" per root host check, once per call, so a repeat shows. A check runs through
@@ -93,15 +92,18 @@ fi
 
 bad=0
 re='^[0-9a-hjkmnp-tv-z]{7}$'
+goTests="$(fGoTests)"; rootChecks="$(fRootChecks)"
 while IFS=$'\t' read -r id file name; do
+	[[ -n "${id}" ]] || continue
 	rel="${file#"${root}"/}"
 	if [[ "${id}" == - ]]; then printf 'no ID: %s %s\n' "${rel}" "${name}"; bad=1
 	elif [[ ! "${id}" =~ ${re} ]]; then printf 'bad ID "%s": %s %s\n' "${id}" "${rel}" "${name}"; bad=1; fi
-done < <(fGoTests)
+done <<< "${goTests}"
 while IFS=$'\t' read -r id name; do
+	[[ -n "${id}" ]] || continue
 	[[ "${id}" =~ ${re} ]] || { printf 'bad ID "%s": cicd/root-host/checks.bash %s\n' "${id}" "${name}"; bad=1; }
-done < <(fRootChecks)
-dups="$({ fGoTests | awk -F'\t' '$1 != "-" { print $1 }'; fRootChecks | cut -f1; } | sort | uniq -d)"
+done <<< "${rootChecks}"
+dups="$({ awk -F'\t' '$1 != "-" { print $1 }' <<< "${goTests}"; cut -f1 <<< "${rootChecks}"; } | sed '/^$/d' | sort | uniq -d)"
 if [[ -n "${dups}" ]]; then printf 'ID used twice: %s\n' "${dups//$'\n'/ }"; bad=1; fi
 ((bad)) || { ((quiet)) || printf 'test IDs: every test has its own\n'; }
 exit "${bad}"
@@ -116,3 +118,4 @@ exit "${bad}"
 ##		  `--new` prints one. A root host check's ID is checked for form too.
 ##		- 2026-11-19: The counter goes in at base 10, before the Crockford step: an ID is the minute
 ##		  times 100 plus the counter. Every existing ID was re-encoded the same way.
+##		- 2026-11-20: --check reads the tests once.

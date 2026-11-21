@@ -13,7 +13,7 @@ import (
 )
 
 // The reply comes from a model or a command the operator set up, so any
-// text at all. What Check passes on reaches the terminal and the downloader.
+// text at all. What Check passes on is shown on the terminal and handed to the downloader.
 func FuzzParse(f *testing.F) {
 	defer testid.Line(f, "1a3jnnw")
 	f.Add(`{"jars":[]}`)

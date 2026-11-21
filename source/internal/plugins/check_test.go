@@ -4,8 +4,6 @@
 package plugins
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"net"
 	"os"
@@ -14,12 +12,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
-// Commented out by 2026111914334569: CheckJars went with plugin approval. Sums is still covered by TestSumsRehash.
+// Commented out by 2026111914334569: CheckJars went with plugin approval.
 // func TestCheckJars(t *testing.T) {
 // 	defer testid.Line(t, "1a3ek3r")
 // 	dir := t.TempDir()
@@ -128,7 +126,6 @@ func TestJarLinksNotOpened(t *testing.T) {
 		return err == nil && n > 0
 	}
 
-	var sums Sums
 	// Commented out by 2026111914334569: CheckJars went with plugin approval.
 	// Jars still lists them, and Sum and Describe below still refuse them.
 	// if c, err := CheckJars(dir, approved, &sums); err != nil || c.Jars != len(links) || len(c.Changed) != len(links) || len(c.New) != 0 {
@@ -139,10 +136,10 @@ func TestJarLinksNotOpened(t *testing.T) {
 	}
 	for name := range links {
 		file := filepath.Join(dir, name)
-		if _, err := sums.Sum(file); !errors.Is(err, ErrNotRegular) {
+		if _, err := Sum(file); !errors.Is(err, server.ErrNotRegular) {
 			t.Errorf("Sum(%s): %v", name, err)
 		}
-		if _, err := Describe(Jar{name, file}); !errors.Is(err, ErrNotRegular) {
+		if _, err := Describe(Jar{name, file}); !errors.Is(err, server.ErrNotRegular) {
 			t.Errorf("Describe(%s): %v", name, err)
 		}
 	}
@@ -214,38 +211,40 @@ func TestJarsOutsideCleaned(t *testing.T) {
 	}
 }
 
-// A jar swapped for another is hashed again, whether its size or only its
-// time changed.
-func TestSumsRehash(t *testing.T) {
-	defer testid.Line(t, "1a4j16c")
-	file := filepath.Join(t.TempDir(), "a.jar")
-	hash := func(text string) string {
-		s := sha256.Sum256([]byte(text))
-		return hex.EncodeToString(s[:])
-	}
-	var sums Sums
-	check := func(text, when string) {
-		t.Helper()
-		if got, err := sums.Sum(file); err != nil || got != hash(text) {
-			t.Errorf("%s: Sum = %s, %v; want the hash of %q", when, got, err, text)
-		}
-	}
-	put := func(text string) {
-		t.Helper()
-		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	put("a")
-	check("a", "first")
-	put("evil a")
-	check("evil a", "new size")
-	put("z")
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(file, old, old); err != nil {
-		t.Fatal(err)
-	}
-	check("z", "older time")
-	put("y")
-	check("y", "same size, new time")
-}
+// Commented out: the Sums cache went once update was its only caller,
+// with a fresh cache each run. Sum hashes every time.
+// // A jar swapped for another is hashed again, whether its size or only its
+// // time changed.
+// func TestSumsRehash(t *testing.T) {
+// 	defer testid.Line(t, "1a4j16c")
+// 	file := filepath.Join(t.TempDir(), "a.jar")
+// 	hash := func(text string) string {
+// 		s := sha256.Sum256([]byte(text))
+// 		return hex.EncodeToString(s[:])
+// 	}
+// 	var sums Sums
+// 	check := func(text, when string) {
+// 		t.Helper()
+// 		if got, err := sums.Sum(file); err != nil || got != hash(text) {
+// 			t.Errorf("%s: Sum = %s, %v; want the hash of %q", when, got, err, text)
+// 		}
+// 	}
+// 	put := func(text string) {
+// 		t.Helper()
+// 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 	}
+// 	put("a")
+// 	check("a", "first")
+// 	put("evil a")
+// 	check("evil a", "new size")
+// 	put("z")
+// 	old := time.Now().Add(-time.Hour)
+// 	if err := os.Chtimes(file, old, old); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	check("z", "older time")
+// 	put("y")
+// 	check("y", "same size, new time")
+// }

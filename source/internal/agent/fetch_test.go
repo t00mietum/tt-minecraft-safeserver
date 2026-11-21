@@ -128,7 +128,7 @@ func TestFetchOnlyReachesPublicAddresses(t *testing.T) {
 	}
 }
 
-// The forms that carry an IPv4 address are judged by it, the reserved ranges
+// The forms with an IPv4 address inside are judged by it, the reserved ranges
 // are refused, and the agent isn't told which address a name led to.
 func TestFetchRefusesLANForms(t *testing.T) {
 	defer testid.Line(t, "1a3k0t4")

@@ -73,9 +73,11 @@ func realTree(t string) (string, error) {
 			return "", fmt.Errorf("%s links to %s: %w", t, path, err)
 		}
 	}
-	if fi, err := os.Stat(path); err != nil {
+	fi, err := os.Stat(path)
+	if err != nil {
 		return "", err
-	} else if !fi.IsDir() {
+	}
+	if !fi.IsDir() {
 		return "", fmt.Errorf("tree %s isn't a folder", t)
 	}
 	return path, nil

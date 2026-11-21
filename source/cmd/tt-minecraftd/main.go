@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,7 +56,7 @@ const (
 	exitError = 1
 	exitUsage = 2
 
-	// Most whole seconds a time.Duration holds.
+	// Most whole seconds that fit in a time.Duration.
 	maxWatchInterval = math.MaxInt64 / int64(time.Second)
 )
 
@@ -257,7 +258,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 var serverMode = func(ctx context.Context, c *config.Config) string {
 	runner := host.NewExec(false)
 	runner.QuietErr = true
-	mode, _ := status.NewProbe(runner, c).Mode(ctx)
+	mode, _ := status.NewProbe(runner, c).Mode(ctx) // can't tell: follow keeps runMode
 	return mode
 }
 
@@ -279,8 +280,8 @@ var bootServes = func(ctx context.Context, configPath string) (bool, error) {
 
 // follow points stop, console, and cmd at a server that runs natively when
 // runMode names a container, or the other way round, as after start
-// --native. Without it, stop says it isn't running and hands the trees back
-// under it. Boxed already follows a container to the other runtime.
+// --native. Without it, stop says the server isn't running and hands the
+// trees back while it runs. Boxed already follows a container to the other runtime.
 func follow(ctx context.Context, c *config.Config, w io.Writer) {
 	mode := serverMode(ctx, c)
 	if mode == "" || (mode == "native") == (c.RunMode == "native") {
@@ -597,17 +598,10 @@ func repairPlugins(inv invocation, w io.Writer, report func(state, text string))
 	for _, warn := range warns {
 		fmt.Fprintf(w, "warning: %s\n", server.Clean(warn.String()))
 	}
-	all, err := plugins.Unsourced(inv.cfg.ServerDir, file)
+	jars, err := repairpkg.GeyserSources(inv.cfg.ServerDir, file, geyserAPI.Source)
 	if err != nil {
 		report("FAILED", "plugins: "+err.Error())
 		return
-	}
-	var jars []plugins.Info
-	for _, info := range all {
-		if p := geyser.Project(info.Name, info.About); p != "" {
-			info.Source = geyserAPI.Source(p)
-			jars = append(jars, info)
-		}
 	}
 	switch {
 	case len(jars) == 0:
@@ -757,10 +751,7 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 	}
 	inv.opts = o
 	inv.args = args
-	inv.configPath = o.configPath
-	if inv.configPath == "" {
-		inv.configPath = defaultConfig
-	}
+	inv.configPath = cmp.Or(o.configPath, defaultConfig)
 
 	cfg, warns, err := loadConfig(o, name == "setup", stderr)
 	var pathErr *fs.PathError
@@ -785,10 +776,7 @@ func loadConfig(o options, setup bool, stderr io.Writer) (config.Config, []confi
 	if o.configPath != "" && !setup {
 		return config.Load(o.configPath, o.sets)
 	}
-	path := o.configPath
-	if path == "" {
-		path = defaultConfig
-	}
+	path := cmp.Or(o.configPath, defaultConfig)
 	cfg, warns, err := config.Load(path, o.sets)
 	if errors.Is(err, fs.ErrNotExist) {
 		// setup writes it, and reads it again itself on an existing install.

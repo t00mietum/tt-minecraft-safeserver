@@ -465,7 +465,7 @@ func checkAgentURL(s string) (string, error) {
 		return "", fmt.Errorf("%q isn't a web address", s)
 	}
 	if u.User != nil {
-		return "", errors.New("can't hold a user or key, since everyone can read the config")
+		return "", errors.New("can't have a user name or key in it, since everyone can read the config")
 	}
 	switch u.Scheme {
 	case "https":

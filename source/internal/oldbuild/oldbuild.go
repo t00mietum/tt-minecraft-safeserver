@@ -62,6 +62,11 @@ func Where(path, dir string) (string, error) {
 // Same says whether the files at a and b have the same SHA-256. One that
 // can't be read isn't the same.
 func Same(a, b string) bool {
+	if fa, err := os.Stat(a); err == nil {
+		if fb, err := os.Stat(b); err == nil && fa.Size() != fb.Size() {
+			return false
+		}
+	}
 	sa, err := sum(a)
 	if err != nil {
 		return false
@@ -142,7 +147,7 @@ func freeName(want string, put func(name string) error) (string, error) {
 func ready(dir string) error {
 	fi, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		if err := os.MkdirAll(dir, 0o755); err != nil { // #nosec G301 -- /var/lib folders are 0755, and this one holds only root-written builds
+		if err := os.MkdirAll(dir, 0o755); err != nil { // #nosec G301 -- /var/lib folders are 0755, and this one has only root-written builds
 			return err
 		}
 		// Past the umask.
