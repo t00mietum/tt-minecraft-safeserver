@@ -250,7 +250,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - start and stop waits run past their timeouts
 	- ID: 2026112017592582
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175925
@@ -259,11 +259,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Each wait ends at a deadline set once, from the clock.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/launch/kit.go.
+		- 20261120: Verified: 1a4q5y8 fails on the old loops (start waited 8s on a 5s timeout, stop 3.9s on 3s, with 300 ms looks) and passes with the fix. The quick gate passed, and race tests of launch.
+		- Swept: the countdown's pauses and cmd's answer wait count passes too, but they send or read a local file between pauses, not sudo looks, so they're left. Native foreground polls every 5 s with no deadline.
+	- Closed reason: Done
+	- Actual cause [Bug]: waitLoaded and waitStopped counted passes, one per second of the timeout, so each pass's sudo looks added to the wait.
+	- Actual fix [Bug]: each wait sets a deadline once and polls until it passes, and the last pause is cut to what's left. Under the tests' clock, the time asked of Sleep is the clock.
+	- Actual effort: Low
+	- Test case: 1a4q5y8
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: 1a4q5y8 fails on the old loops and passes now.
+	- Closed: 20261120-184803
+	- Decisions:
+		- 20261120: the end-of-wait message and the last check are as before. The last pass can run past the deadline by one look, no more.
 
 - A YAML alias to a safe value reads as a section
 	- ID: 2026112017592452
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175924
@@ -272,11 +285,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: The copy's value is the alias target, as SnakeYAML reads it. Whether it can be edited in place is still judged on the alias node.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/settings/yaml.go, the level == len(path)-1 case.
+		- 20261120: Verified: 1a3jtbw's alias to false row fails on the old reader (check found settings.bungeecord, fix said to set it by hand) and passes now. The quick gate passed.
+		- Swept: yamlCopies is the only place a copy's value is taken. yamlLast and yamlChild already deref, and the Geyser reader goes through the same scan.
+	- Closed reason: Done
+	- Actual cause [Bug]: yamlCopies kept the alias node as the copy's value, and only a scalar counts as safe.
+	- Actual fix [Bug]: the copy's value is the alias target. Whether it can be edited in place is still judged on the node on the key's line, so an alias to a bad value is still left to set by hand.
+	- Actual effort: Low
+	- Test case: 1a3jtbw (alias to false row)
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: the new 1a3jtbw row fails on the old reader and passes now.
+	- Closed: 20261120-184803
 
 - repair's ufw check misses a DENY rule above the ALLOW
 	- ID: 2026112017592322
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175923
@@ -285,6 +309,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Rules are read in order, first match wins, as ufw does, so a DENY IN or REJECT IN that covers the port first leaves it missing.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. source/internal/repair/hostfw.go. It only reports, so it's low.
+		- 20261120: Verified: 1a3eptg's 7 new rule sets: the 4 with a deny first fail on the old check (nothing reported) and pass now. The quick gate passed.
+		- Swept: ufwMissing is the only ufw reader. firewalld's --list-ports has no deny rules, so it keeps uncovered.
+	- Closed reason: Done
+	- Actual cause [Bug]: ufwMissing gathered every ALLOW IN and LIMIT IN port and ignored the rest, so a deny above them never counted.
+	- Actual fix [Bug]: rules are read in order and the first that matches a port wins. A DENY IN or REJECT IN from Anywhere blocks it. When that rule names only the port, the report keeps sudo ufw allow, which replaces it; otherwise it names the rule. design.md's repair check 10 says so.
+	- Actual effort: Low
+	- Test case: 1a3eptg
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: 1a3eptg's new rule sets fail on the old check and pass now.
+	- Closed: 20261120-184803
+	- Decisions:
+		- 20261120: a deny counts only from Anywhere, since an allow's From column isn't read either. A deny from one address would otherwise report a port players can reach.
+		- 20261120: the IPv6 rules come after the IPv4 ones in ufw's list, so they decide only a port no IPv4 rule names. A rule only for IPv6 still counts, as before.
+		- 20261120: ufw allow replaces a rule that differs only in its action, so it's still the advice for a deny that names only the port. For a wider deny it would add a rule below it, so the report names the rule instead.
 
 - Remove plugins.Refuse and RefusedDir, which nothing calls now
 	- ID: 2026111918161429

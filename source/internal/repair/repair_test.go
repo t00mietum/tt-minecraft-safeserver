@@ -777,6 +777,26 @@ func TestHostFirewallCheck(t *testing.T) {
 	if got := look(t, h, hostFirewallCheck); !reflect.DeepEqual(got, want) {
 		t.Errorf("ufw other ports: %q", got)
 	}
+	// First match wins: a deny from Anywhere ahead of the allow blocks the port.
+	open := "25565/tcp                  ALLOW IN    Anywhere\n19132/udp                  ALLOW IN    Anywhere\n"
+	blocked := func(rule, p string) string {
+		return fmt.Sprintf("ufw is active and its rule %q blocks players on %s, ahead of any rule that lets them in", rule, p)
+	}
+	for _, c := range []struct{ rules, want string }{
+		{"19132/tcp                  DENY IN     Anywhere\n19000:19200/tcp            ALLOW IN    Anywhere\n" + open, "ufw is active and doesn't let players in on 19132/tcp; sudo ufw allow 19132/tcp adds it"},
+		{"19000:19200/tcp            DENY IN     Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, blocked("19000:19200/tcp DENY IN Anywhere", "19132/tcp")},
+		{"Anywhere/udp               REJECT IN   Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, blocked("Anywhere/udp REJECT IN Anywhere", "19132/udp")},
+		{"19132,25565/tcp            DENY IN     Anywhere\n19132/tcp (v6)             ALLOW IN    Anywhere (v6)\n" + open, blocked("19132,25565/tcp DENY IN Anywhere", "25565/tcp")},
+		{"19132/tcp                  ALLOW IN    Anywhere\n19132/tcp                  DENY IN     Anywhere\n" + open, ""},
+		{"19132/tcp                  DENY IN     10.0.0.0/8\n19132/tcp                  ALLOW IN    Anywhere\n" + open, ""},
+		{"19132/tcp                  DENY OUT    Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, ""},
+	} {
+		ufw = head + c.rules
+		got := look(t, h, hostFirewallCheck)
+		if c.want == "" && len(got) != 0 || c.want != "" && !slices.Contains(got, c.want) {
+			t.Errorf("ufw %q: %q", c.rules, got)
+		}
+	}
 
 	units["ufw"], units["firewalld"] = false, true
 	firewalld = "22/tcp 25565/tcp 19132/udp 19130-19140/tcp\n"

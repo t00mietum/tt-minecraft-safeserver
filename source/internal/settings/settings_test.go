@@ -591,6 +591,7 @@ func TestYAMLEveryCopy(t *testing.T) {
 		{"flow in block", paper, "proxies:\n  velocity: {enabled: false}\n  velocity: {enabled: true}\n", "", []string{"proxies.velocity.enabled"}},
 		{"merge", paper, "on: &on\n  enabled: true\nproxies:\n  velocity:\n    <<: *on\n", "", []string{"proxies.velocity.enabled"}},
 		{"alias", spigot, "yes: &t true\nsettings:\n  bungeecord: *t\n", "", []string{"settings.bungeecord"}},
+		{"alias to false", spigot, "off: &f false\nsettings:\n  bungeecord: *f\n", "off: &f false\nsettings:\n  bungeecord: *f\n", nil},
 		{"anchored value", spigot, "settings:\n  bungeecord: &t true\n", "", []string{"settings.bungeecord"}},
 		{"section", spigot, "settings:\n  bungeecord:\n    x: 1\n", "", []string{"settings.bungeecord"}},
 		{"lone CR", spigot, "settings:\r  bungeecord: true\n", "", []string{"settings.bungeecord"}},

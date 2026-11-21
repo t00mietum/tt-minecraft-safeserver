@@ -34,6 +34,8 @@ type Kit struct {
 	// Sleep stands in for the clock in tests. Nil is the real one, which
 	// Ctrl-C cuts short.
 	Sleep func(time.Duration)
+	// slept is the clock under Sleep: what it has been asked to wait so far.
+	slept time.Duration
 	// Now named the start and stop snapshots, which are gone.
 	// Now func() time.Time
 	// Boot is set when the boot unit is enabled for this config, so start and
@@ -61,6 +63,7 @@ func (k *Kit) pause(ctx context.Context, d time.Duration) error {
 	}
 	if k.Sleep != nil {
 		k.Sleep(d)
+		k.slept += d
 	} else {
 		t := time.NewTimer(d)
 		defer t.Stop()
@@ -73,6 +76,18 @@ func (k *Kit) pause(ctx context.Context, d time.Duration) error {
 		return ErrInterrupted
 	}
 	return nil
+}
+
+func (k *Kit) now() time.Time {
+	if k.Sleep != nil {
+		return time.Time{}.Add(k.slept)
+	}
+	return time.Now()
+}
+
+// tick is the next poll's pause: a second, or what's left before the deadline.
+func (k *Kit) tick(deadline time.Time) time.Duration {
+	return max(0, min(time.Second, deadline.Sub(k.now())))
 }
 
 // Running says whether the server runs in the configured mode.
@@ -222,7 +237,8 @@ func (k *Kit) checkFirewall(ctx context.Context) error {
 
 func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 	k.say("Waiting for the server to load, up to %s.", k.Cfg.StartTimeout)
-	for range int(k.Cfg.StartTimeout / time.Second) {
+	deadline := k.now().Add(k.Cfg.StartTimeout)
+	for k.now().Before(deadline) {
 		log, err := e.log(ctx)
 		if err != nil {
 			return err
@@ -243,7 +259,7 @@ func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 			k.say("%s", tail)
 			return errors.New("the server exited while loading")
 		}
-		if err := k.pause(ctx, time.Second); err != nil {
+		if err := k.pause(ctx, k.tick(deadline)); err != nil {
 			return fmt.Errorf("%w while the server loads; it's still running, so see status or %s", err, e.logHint())
 		}
 	}
@@ -382,7 +398,8 @@ func (k *Kit) callOff(ctx context.Context) error {
 
 func (k *Kit) waitStopped(ctx context.Context, e engine) error {
 	k.say("Waiting for the server to save and stop, up to %s.", k.Cfg.StopTimeout)
-	for range int(k.Cfg.StopTimeout / time.Second) {
+	deadline := k.now().Add(k.Cfg.StopTimeout)
+	for k.now().Before(deadline) {
 		up, err := e.running(ctx)
 		if err != nil {
 			return err
@@ -391,7 +408,7 @@ func (k *Kit) waitStopped(ctx context.Context, e engine) error {
 			k.say("The server stopped.")
 			return nil
 		}
-		if err := k.pause(ctx, time.Second); err != nil {
+		if err := k.pause(ctx, k.tick(deadline)); err != nil {
 			return fmt.Errorf("%w while the server saves; it's still stopping, and stop again hands the trees back once it's down", err)
 		}
 	}
