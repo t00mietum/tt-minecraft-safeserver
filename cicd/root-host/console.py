@@ -43,7 +43,13 @@ os.write(fd, line.encode() + b"\r")
 pump(3)
 os.write(fd, b"\x03")
 pump(5)
+# pump stops at the pty's EIO, which comes when the child closes its fds, a
+# moment before it can be reaped.
+end = time.time() + 2
 done, status = os.waitpid(pid, os.WNOHANG)
+while done == 0 and time.time() < end:
+    time.sleep(0.05)
+    done, status = os.waitpid(pid, os.WNOHANG)
 print(seen.decode(errors="replace")[-400:])
 if done == 0:
     print("console didn't leave on Ctrl-C")

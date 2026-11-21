@@ -65,7 +65,21 @@ statusHas() {
 # The tool's own lines from the boot unit. The unit's journal also has the
 # container's output, since Podman leaves conmon in the unit's cgroup.
 toolJournal() { sudo journalctl --no-pager _SYSTEMD_UNIT=tt-minecraftd.service _COMM=tt-minecraftd | tail -20; }
-counter() { sudo nft -j list counter inet tt_minecraftd "${1}" | python3 -c 'import json,sys; print([c["counter"]["packets"] for c in json.load(sys.stdin)["nftables"] if "counter" in c][0])'; }
+# A failed nft or python step prints nothing, which -eq reads as 0, so both
+# of these fail unless they have a number.
+counter() {
+	local n
+	n="$(sudo nft -j list counter inet tt_minecraftd "${1}" | python3 -c 'import json,sys; print([c["counter"]["packets"] for c in json.load(sys.stdin)["nftables"] if "counter" in c][0])')"
+	[[ "${n}" =~ ^(0|[1-9][0-9]*)$ ]] || { say "no packet count for counter ${1}: '${n}'" >&2; return 1; }
+	say "${n}"
+}
+# True when the first line with ${1} comes before the first with ${2}.
+before() {
+	local a b
+	a="$(grep -n -m 1 -- "${1}" "${3}" | cut -d: -f1)" b="$(grep -n -m 1 -- "${2}" "${3}" | cut -d: -f1)"
+	[[ "${a}" =~ ^[0-9]+$ && "${b}" =~ ^[0-9]+$ ]] || { say "no '${1}' or no '${2}' in ${3}"; return 1; }
+	((a < b)) || { say "'${1}' is after '${2}' in ${3}"; return 1; }
+}
 gateway() { ip -4 route show default | awk '{print $3; exit}'; }
 # If cmd misses its answer, show what the log had.
 answered() { has 'players online' cmd.out || { say "log:"; sudo tail -15 "${log}"; return 1; }; }
@@ -118,18 +132,20 @@ fConsole() {
 
 fStun() {
 	# Geyser's STUN lookup gets an answer, and nothing of the server's own hit the loopback drop.
-	local i
+	local i n
 	for ((i = 0; i < 40; i++)); do grep -q 'STUN discovery through .* maps this host' "${log}" && break; sleep 1; done
 	has 'maps this host' "${log}" || return 1
-	[[ "$(counter out_local)" -eq 0 ]] || { say "out_local $(counter out_local)"; return 1; }
+	n="$(counter out_local)" || return 1
+	((n == 0)) || { say "out_local ${n}"; return 1; }
 }
 
 fFirewallOut() {
-	local t was
+	local t was now
 	for t in out_local:127.0.0.1:80 out_lan:"$(gateway)":80 out_web:1.1.1.1:22; do
-		was="$(counter "${t%%:*}")"
+		was="$(counter "${t%%:*}")" || return 1
 		! sudo -u minecraftd curl -s -m 3 "http://${t#*:}/" > /dev/null || { say "reached ${t#*:}"; return 1; }
-		[[ "$(counter "${t%%:*}")" -gt "${was}" ]] || { say "${t%%:*} didn't count"; return 1; }
+		now="$(counter "${t%%:*}")" || return 1
+		((now > was)) || { say "${t%%:*} didn't count"; return 1; }
 	done
 	sudo -u minecraftd curl -s -m 10 -o /dev/null https://fill.papermc.io/v3/projects/paper
 }
@@ -254,7 +270,7 @@ fAdopt() {
 	has 'serverDir: /srv/mc/adopted' /etc/tt-minecraftd/config.shcl || return 1
 	[[ "$(stat -c %U:%G /srv/mc/adopted/world)" == op:minecraftd ]] || return 1
 	# The jars that get a source are listed before the question. They were listed with hashes until 2026111914334569.
-	[[ "$(grep -n '  source: ' adopt.out | head -1 | cut -d: -f1)" -lt "$(grep -n 'Go ahead' adopt.out | cut -d: -f1)" ]] || return 1
+	before '  source: ' 'Go ahead' adopt.out || return 1
 	# The adopted Geyser and Floodgate keep following GeyserMC.
 	for p in geyser floodgate; do
 		has "source: \"\\?https://download.geysermc.org/v2/projects/${p}/" /etc/tt-minecraftd/plugins.shcl || { say "no GeyserMC source for ${p}"; return 1; }
@@ -465,3 +481,4 @@ exit "${failed}"
 ##		- 2026-11-18: Refuses a ZFS_POOL that isn't a ttmcss-test-* name, before anything runs and again before the destroy.
 ##		- 2026-11-18: Waits for Paper to log the stop-off line. Long output goes to a file before its grep. A failed boot check stops the server and turns the unit off.
 ##		- 2026-11-19: A replaced build is kept in /var/lib/tt-minecraftd/old-builds.
+##		- 2026-11-20: A firewall counter or line number that isn't a number fails its check.

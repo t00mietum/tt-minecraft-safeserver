@@ -76,7 +76,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Root host checks pass on an empty counter or line number
 	- ID: 2026112017592969
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting for testing
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261120-175929
@@ -85,6 +85,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: counter and the line lookups fail unless they get a number.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/root-host/checks.bash, fStun and the adopt check.
+		- Verified: 1a4q3sg runs counter, fStun and before from checks.bash with a stub nft. Its nft-fails STUN case and no-source-lines adopt case fail on the old checks.bash and pass on the new one. The quick gate passed.
+		- Swept: every [[ -eq|-ne|-lt|-gt|-le|-ge ]] on a command substitution in cicd/root-host. fFirewallOut's 2 counter reads had the same gap and are fixed. The other 2 live ones read grep -c and wc -l, which always print a number.
+	- Decisions: counter checks for a whole number before any arithmetic, which also keeps a stray value out of bash arithmetic.
+	- Needs external testing: one root-host.bash run, not --zfs, for 1a3fhnw, 1a3fhs0 and 1a3fjbr against real nft output and a real adopt.out.
+	- Reproduced [Bug]: 20261120, by 1a4q3sg: on the old checks.bash, fStun passed with nft failing, and the old adopt compare passed with no source lines.
+	- Origin: c076344 (counter) and 2b322c0 (the adopt compare). Not seen before. Confirmed.
+	- Actual cause [Bug]: A failed command substitution prints nothing, and [[ -eq ]] and [[ -lt ]] read an empty side as 0.
+	- Actual fix [Bug]: counter fails unless nft and python give a whole number, and its callers in fStun and fFirewallOut stop on that. The adopt check goes through a new before helper, which fails unless both lines are found.
+	- Actual effort: Low
+	- Branch: nov20b-2026112017592969
+	- Commit: fe0fb5e
+	- Test case: 1a4q3sg
 
 - repair fails its tree check when Paper renames a file mid-walk
 	- ID: 2026112017592200
@@ -102,7 +114,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - console.py can call a clean Ctrl-C detach a failure
 	- ID: 2026112017593367
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting for testing
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261120-175933
@@ -111,6 +123,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: waitpid is polled for about 2 s before it counts as a failure.
 	- Progress log:
 		- 2026-11-20: Found in a code tidy pass. cicd/root-host/console.py.
+		- Verified: 1a4q3wm's late-exit case fails on the old console.py and passes on the new one. Its control, a console that never exits, still fails with "console didn't leave on Ctrl-C" after 2 s. The quick gate passed.
+		- Swept: console.py is the only pty driver under cicd. Its other waits are the fixed pumps.
+	- Needs external testing: one root-host.bash run, not --zfs, for 1a3fhjr with the real console. The same run as 2026112017592969.
+	- Reproduced [Bug]: 20261120, by 1a4q3wm: a stand-in console that closes the pty and exits half a second later fails on the old console.py.
+	- Origin: c076344 root host checks. Not seen before. Confirmed.
+	- Actual cause [Bug]: The pty's EIO comes when the child closes its fds, before it can be reaped, and console.py tried waitpid only once.
+	- Actual fix [Bug]: After the last pump, console.py polls waitpid every 50 ms for up to 2 s.
+	- Actual effort: Low
+	- Branch: nov20b-2026112017592969
+	- Commit: fe0fb5e
+	- Test case: 1a4q3wm
 
 - pre-push reads a new branch's first push by the working tree
 	- ID: 2026112017593230
