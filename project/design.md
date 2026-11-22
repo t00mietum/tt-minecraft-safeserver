@@ -239,7 +239,7 @@ Common:  --config PATH, --set KEY=VALUE
 	2. Creates the service account and its group, and adds the operator to the group.
 	3. Creates the server tree, or with `--adopt PATH` uses an existing server folder as it is.
 		- A new tree belongs to the operator, the same as a stopped server's. An adopted one is handed to the operator too.
-		- A `serverDir` that has files in it already is refused without `--adopt`.
+		- A `serverDir` that has files in it already is refused without `--adopt`, unless setup made it. A new tree gets a `.tt-minecraftd-setup` file, taken away when the config is written, so a setup that stopped partway goes on in it.
 	4. Downloads and checks Paper on a new tree, the same way `update` does.
 		- It takes the newest Minecraft release that has a stable build, from PaperMC's download API at `fill.papermc.io`, and checks the jar's size and SHA-256 against it.
 		- A tree that has a `paper.jar` already keeps it.

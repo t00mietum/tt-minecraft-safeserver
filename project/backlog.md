@@ -268,7 +268,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A new install that stops partway can't be run again as setup says
 	- ID: 2026112110300091
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -279,6 +279,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 7.
 	- Origin: b21d65f, the first setup. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: A new install's tree looked the same as anyone's server folder with files in it, so the refusal that sends those to `--adopt` caught setup's own tree too.
+	- Actual fix [Bug]: A new tree gets a `.tt-minecraftd-setup` file right after it's made. A later new install goes on in a tree that has it, without `--adopt`, and keeps what's there. Setup takes the file away once the config is written.
+	- Test case: 1a4z2nr
+	- Verified: 1a4z2nr fails on the old code, where the second run is refused, after a failed firewall step and after a failed image pull. It passes with the fix. Taking out the mark's removal fails it too. The quick gate passes.
+	- Swept: `checkTree` is the one refusal of a tree with files in it. An adopted tree keeps needing `--adopt` on a second run, as before. The dry run writes and removes no mark.
+	- Branch: nov22-2026112110300091
+	- Commit: 8bda998
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and it does what design.md's setup already said.
+	- Closed: 20261122-135347
+	- Decisions: A mark in the tree rather than a new message, since design.md already said a setup that stops partway runs again as a new install.
+		- The mark is a plain file in the tree rather than beside the config, so a tree that's removed or replaced takes it along. A link there doesn't count.
+		- A resumed tree doesn't get the Floodgate key step an adopted one gets, since a tree setup made has no key until the server runs.
 
 - Geyser and Floodgate add-ons are taken for Geyser or Floodgate
 	- ID: 2026112110300104

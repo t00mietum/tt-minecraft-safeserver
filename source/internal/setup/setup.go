@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
@@ -28,6 +29,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
@@ -72,7 +74,16 @@ type Setup struct {
 	Update func(ctx context.Context, c *config.Config) error
 	Paper  PaperSource
 	Geyser GeyserSource
+	// resume is a new install going on in a tree an earlier one made.
+	resume bool
 }
+
+// partialMark is the file a new install leaves in the tree it made, until it
+// writes the config, so a setup that stopped partway can go on there without
+// --adopt.
+const partialMark = ".tt-minecraftd-setup"
+
+const partialText = "# tt-minecraftd setup made this folder and hasn't finished. Run setup again to go on; it removes this file when it writes the config.\n"
 
 // PaperSource is where Paper builds come from: paper.API, or a test's.
 type PaperSource interface {
@@ -200,6 +211,7 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.writeConfig(opts); err != nil {
 		return err
 	}
+	s.clearMark(cfg.ServerDir)
 	if s.DryRun {
 		report("PLAN", "repair --check runs last")
 		return nil
@@ -376,7 +388,8 @@ func (s *Setup) install(ctx context.Context, c config.Config) error {
 }
 
 // checkTree refuses a new install over a folder that has files in it, since
-// --adopt is how to take one over.
+// --adopt is how to take one over. A tree an earlier setup made and didn't
+// finish is gone on with.
 func (s *Setup) checkTree(c config.Config) error {
 	entries, err := os.ReadDir(c.ServerDir)
 	switch {
@@ -388,10 +401,17 @@ func (s *Setup) checkTree(c config.Config) error {
 		return nil
 	case err != nil:
 		return err
+	case len(entries) > 0 && madeHere(c.ServerDir):
+		s.resume = true
 	case len(entries) > 0:
 		return fmt.Errorf("%s has files in it already; give --adopt %[1]s to take it over as it is", c.ServerDir)
 	}
 	return nil
+}
+
+func madeHere(dir string) bool {
+	fi, err := os.Lstat(filepath.Join(dir, partialMark))
+	return err == nil && fi.Mode().IsRegular()
 }
 
 // unsourced are the Geyser and Floodgate jars in plugins/ that plugins.shcl
@@ -465,9 +485,12 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Install %s through apt.\n", strings.Join(pkgs, " and "))
 	}
 	fmt.Fprintf(w, "  - Make account %s and group %s where they're missing, and put %s in the group.\n", c.RunUser, c.RunGroup, c.OwnerAfterStop)
-	if s.Adopt != "" {
+	switch {
+	case s.Adopt != "":
 		fmt.Fprintf(w, "  - Take over %s as it is, and hand it to %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
-	} else {
+	case s.resume:
+		fmt.Fprintf(w, "  - Go on in %s, which an earlier setup made and didn't finish, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
+	default:
 		fmt.Fprintf(w, "  - Make %s, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
 	}
 	if build != nil {
@@ -813,14 +836,44 @@ func (s *Setup) accounts(ctx context.Context, c *config.Config, report repair.Re
 // which is how a stopped server's tree is. See design.md's Tree ownership.
 func (s *Setup) makeTree(ctx context.Context, c *config.Config) error {
 	if s.Adopt == "" {
-		_, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-d", "-o", c.OwnerAfterStop, "-g", c.RunGroup, "-m", "0770", c.ServerDir}})
-		return err
+		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-d", "-o", c.OwnerAfterStop, "-g", c.RunGroup, "-m", "0770", c.ServerDir}}); err != nil || s.DryRun {
+			return err
+		}
+		return s.mark(c.ServerDir)
 	}
 	warns, err := tree.ToOperator(ctx, s.Run, c)
 	for _, w := range warns {
 		fmt.Fprintf(s.Out, "warning: %s\n", w)
 	}
 	return err
+}
+
+// mark leaves partialMark in a tree setup made, through a handle, since the
+// operator owns the folder by then.
+func (s *Setup) mark(dir string) error {
+	d, err := linksafe.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Write(partialMark, []byte(partialText), nil)
+}
+
+// clearMark takes partialMark away once the config is written. A setup after
+// that is an existing install, and a leftover mark would let one that finds
+// the config moved aside go on over a tree the server has used since.
+func (s *Setup) clearMark(dir string) {
+	if s.DryRun {
+		return
+	}
+	d, err := linksafe.Open(dir)
+	if err == nil {
+		err = syscall.Unlinkat(d.Fd(), partialMark)
+		d.Close()
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(s.Out, "warning: can't remove %s: %v\n", filepath.Join(dir, partialMark), err)
+	}
 }
 
 func (s *Setup) eula(c config.Config) error {

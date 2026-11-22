@@ -1124,3 +1124,101 @@ func TestConfigAgentHint(t *testing.T) {
 		t.Fatalf("got %q %q", c.Agent, c.AgentCommand)
 	}
 }
+
+// A new install that stops partway leaves its tree marked, and setup run
+// again goes on there without --adopt, keeping what it got. Once the config
+// is written the mark is gone, so a folder that only looks like setup's is
+// still refused.
+func TestResumeAfterStop(t *testing.T) {
+	defer testid.Line(t, "1a4z2nr")
+	mark := func(r *rig) string { return filepath.Join(r.server, partialMark) }
+	again := func(t *testing.T, r *rig) {
+		t.Helper()
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("second run: %v\n%s", err, r.out)
+		}
+		if _, err := os.Stat(r.s.ConfigPath); err != nil {
+			t.Errorf("no config after the second run: %v", err)
+		}
+		if _, err := os.Lstat(mark(r)); err == nil {
+			t.Error("mark left after the config was written")
+		}
+		if len(r.paper.installed) != 1 || len(r.geyser.installed) != 2 {
+			t.Errorf("downloaded again: Paper %q, Geyser %q", r.paper.installed, r.geyser.installed)
+		}
+		hasAll(t, "output", strings.Split(r.out.String(), "\n"), "Go on in "+r.server+", which an earlier setup made")
+	}
+	stopped := func(t *testing.T, r *rig, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("first run didn't stop:\n%s", r.out)
+		}
+		if _, err := os.Stat(r.s.ConfigPath); err == nil {
+			t.Fatal("config written by a run that stopped")
+		}
+		if _, err := os.Lstat(filepath.Join(r.server, "paper.jar")); err != nil {
+			t.Fatalf("first run made no paper.jar: %v", err)
+		}
+		if fi, err := os.Lstat(mark(r)); err != nil || !fi.Mode().IsRegular() {
+			t.Fatalf("mark: %v", err)
+		}
+	}
+
+	t.Run("firewall", func(t *testing.T) {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.nft = false
+		r.s.Yes, r.s.AcceptEULA = true, true
+		stopped(t, r, r.s.Do(context.Background()))
+		r.nft = true
+		r.s.DryRun = true
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("dry run: %v\n%s", err, r.out)
+		}
+		if _, err := os.Lstat(mark(r)); err != nil {
+			t.Fatalf("dry run took the mark away: %v", err)
+		}
+		r.s.DryRun = false
+		r.out.Reset()
+		again(t, r)
+	})
+
+	t.Run("pull", func(t *testing.T) {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.s.Yes, r.s.AcceptEULA = true, true
+		reply, fail := r.f.Reply, true
+		r.f.Reply = func(c host.Cmd) ([]byte, error) {
+			if fail && len(c.Args) > 1 && c.Args[1] == "pull" {
+				return nil, errors.New("pull failed")
+			}
+			return reply(c)
+		}
+		stopped(t, r, r.s.Do(context.Background()))
+		fail = false
+		r.out.Reset()
+		again(t, r)
+
+		// Moved aside, the config no longer makes it an install, and the
+		// tree is refused as anyone's would be.
+		if err := os.Rename(r.s.ConfigPath, r.s.ConfigPath+".old"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "--adopt "+r.server) {
+			t.Errorf("after the mark was cleared: %v", err)
+		}
+	})
+
+	// Only a plain file counts.
+	t.Run("link", func(t *testing.T) {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.s.Yes, r.s.AcceptEULA = true, true
+		if err := os.MkdirAll(r.server, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(r.dir, "elsewhere"), mark(r)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "--adopt "+r.server) {
+			t.Errorf("tree with a linked mark: %v", err)
+		}
+	})
+}
