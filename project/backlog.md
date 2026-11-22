@@ -22,6 +22,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- repair and setup can rewrite plugins.shcl in canonical form when adding sources
+	- ID: 2026112214545321
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-145437
+	- Opened by:
+	- Related IDs: 2026112110300260
+	- Incorrect behavior [Bug]: plugins.SetSources ignores SaveFileKeepLines' kept result, like update --image did. In a plugins.shcl where shcl merges a repeated key, adding Geyser's or Floodgate's source rewrites the whole file in shcl's own form, though its comment says the other lines stay byte for byte.
+	- Expected behavior [Bug]: SetSources checks ToTextKeepLines first, as pinImage now does, and refuses or says the file would be rewritten. repair reports it as FAILED, and setup's writeSources fails setup, so pick which.
+	- Estimated effort: Low
+	- Origin: Found while sweeping for 2026112110300260. Plausible, read only.
+
 - setup's copy to /usr/local/bin leaves no binary if it stops between the move and the install
 	- ID: 2026112214220945
 	- Type: Bug
@@ -664,7 +678,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - update's library removal checks for a running server long before it removes
 	- ID: 2026112110300247
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -674,11 +688,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 19.
 	- Origin: 2b322c0 (2026111914293176). Not seen before. Plausible, read only.
+	- Closed reason: Done
+	- Actual cause [Bug]: update asked Running once, in lookup, before the plan and the prompt, and clearLibraries removed the jars later with no second look.
+	- Actual fix [Bug]: The look is now Update.mayRun, called in lookup so the plan leaves out a removal it would skip, and again in clearLibraries right before the rm. A server up by then gets the same SKIPPED line, and the update goes on. design.md's update says so.
+	- Test case: 1a4j2rc (new case: Running says no at lookup and yes at the removal)
+	- Swept: clearLibraries is update's only removal Running guards. paper.Prune keeps the build the server runs, so it needs no look. Running has one setter, main.go.
+	- Verified: 1a4j2rc fails with the second look taken out and passes with it. The whole quick gate passes.
+	- Branch: nov22-2026112110300247
+	- Commit: f00c6e4
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-145437
 
 - update --image can rewrite the whole config in canonical form
 	- ID: 2026112110300260
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -689,6 +714,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 20. shcl friction: the fallback to canonical form is shcl's documented behavior.
 	- Origin: bf1ab06. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: pinImage ignored the kept result. shcl's keep-lines save falls back to canonical form after a merge, by design.
+	- Actual fix [Bug]: pinImage asks ToTextKeepLines before saving. When the lines can't be kept in a file that already exists, it leaves the file as it was and fails with the image line to set by hand, quoted. A new config is still written. design.md's update says so.
+	- Test case: 1a4z8mc
+	- Swept: plugins.SetSources has the same unchecked save, filed as 2026112214545321, since a refusal there changes what setup and repair do. Approve, the old third caller, is gone.
+	- Verified: 1a4z8mc fails with the check taken out (keys lower-cased, a line dropped) and passes with it. 1a3fg3w still passes, and so does the whole quick gate.
+	- Decisions: Refuse rather than write and warn, since the canonical form drops lines and comments the operator wrote, and the error gives the one line to set.
+	- Branch: nov22-2026112110300247
+	- Commit: b4ac6cc
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-145437
 
 - Negated root host checks pass when the command they look with can't run
 	- ID: 2026112110300273

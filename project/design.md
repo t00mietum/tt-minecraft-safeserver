@@ -302,7 +302,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- GeyserMC's sources are the ones known so far. A jar with another source is listed as skipped.
 		- Modrinth and Hangar sources wait until the agent work is done. Until then the agent covers their jars.
 	- With `agent` set, it also asks an AI agent about each jar in the tree that has no known source, or whose source's lookup failed. Each jar the agent finds needs its own yes, even with `--yes`. See [Update agent](#update-agent).
-	- Then it removes the plugins' libraries from Paper's cache, as the service account, so Paper downloads fresh ones at the next start. Paper's own are left. While the server runs, the cache is left alone, since Paper can still open a library it hasn't read yet. See [Plugin jars](#plugin-jars).
+	- Then it removes the plugins' libraries from Paper's cache, as the service account, so Paper downloads fresh ones at the next start. Paper's own are left. While the server runs, the cache is left alone, since Paper can still open a library it hasn't read yet. It looks again right before the removal, since the prompt can wait any length of time. See [Plugin jars](#plugin-jars).
 	- `plugins.shcl` isn't written to. A new jar takes the old one's file name, so its source still applies.
 
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
@@ -312,6 +312,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- The pull waits for the go-ahead, since that's what finds the new digest. So a dry run shows the pull but not the digest.
 	- The pin is the tag's own digest, the one for every arch, so the config works on another machine too. `java -version` runs in a container with no network, locked down like the server's.
 	- A Java that's too old leaves the config as it was, and names a newer tag to use. Only the `image` line in the config changes; the other lines stay as written.
+	- A config that shcl can't save with its other lines kept, such as one with a key given twice, is left as it was too, and the error gives the `image` line to set by hand.
 	- The old image stays, since a running server may still use it. Native mode has no image, so the part is skipped there.
 
 - A running server is left alone. It uses the new files on its next start.

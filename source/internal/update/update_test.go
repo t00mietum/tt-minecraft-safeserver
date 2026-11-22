@@ -520,6 +520,14 @@ func TestUpdateClearsLibraries(t *testing.T) {
 	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || len(g.installed) != 1 || !strings.Contains(r.out.String(), "SKIPPED plugin libraries: the server may be running") {
 		t.Errorf("running: %v, ran %+v\n%s", err, fake.Ran, r.out)
 	}
+	// A server started while the prompt waits keeps its cache too
+	// (2026112110300247).
+	r, g, fake, _ = setUp("y\n")
+	looks := 0
+	r.u.Running = func(context.Context) (bool, error) { looks++; return looks > 1, nil }
+	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || len(g.installed) != 1 || looks != 2 || !strings.Contains(r.out.String(), "SKIPPED plugin libraries: the server may be running") {
+		t.Errorf("started at the prompt: %v, ran %+v, %d looks\n%s", err, fake.Ran, looks, r.out)
+	}
 	r, _, fake, _ = setUp("y\n")
 	r.u.Parts = Parts{Paper: true}
 	r.p.newest = 249
