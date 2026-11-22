@@ -80,17 +80,20 @@ func propertyRules(c *config.Config) []rule {
 }
 
 // yamlSetting is a dotted path in a Paper YAML file. A missing file or key is
-// fine, since each one defaults to off.
+// fine, since each one defaults to off. dotted says the file's reader splits
+// a key on dots: Bukkit's for spigot.yml does, and Configurate for Paper's own
+// files doesn't.
 type yamlSetting struct {
 	dir, file string
 	path      []string
+	dotted    bool
 }
 
 var yamlSettings = []yamlSetting{
-	{"", "spigot.yml", []string{"settings", "bungeecord"}},
-	{"config", "paper-global.yml", []string{"proxies", "velocity", "enabled"}},
+	{"", "spigot.yml", []string{"settings", "bungeecord"}, true},
+	{"config", "paper-global.yml", []string{"proxies", "velocity", "enabled"}, false},
 	// A client could send its own PROXY header and claim any address.
-	{"config", "paper-global.yml", []string{"proxies", "proxy-protocol"}},
+	{"config", "paper-global.yml", []string{"proxies", "proxy-protocol"}, false},
 }
 
 // Check lists the settings that aren't safe. It changes nothing.
@@ -199,7 +202,7 @@ func scanYAML(top dir, list []yamlSetting, fix bool) ([]Problem, error) {
 	keysFor := func(*yaml.Node) []yamlKey {
 		keys := make([]yamlKey, 0, len(list))
 		for _, s := range list {
-			keys = append(keys, yamlKey{path: s.path, want: "false", missingOK: true, ok: isFalse})
+			keys = append(keys, yamlKey{path: s.path, want: "false", missingOK: true, dotted: s.dotted, ok: isFalse})
 		}
 		return keys
 	}

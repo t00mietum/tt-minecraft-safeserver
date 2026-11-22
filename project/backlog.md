@@ -107,7 +107,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A dotted key in spigot.yml turns BungeeCord on past the safe settings check
 	- ID: 2026112110300026
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261121-103000
@@ -117,13 +117,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a settings test (`settings_unsafe_reads_safe_zz_review_test.go`), where `Check` returns nothing for that line. The Spigot side is from Bukkit's `MemorySection.set` source, not a live start.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 2. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: 4 new 1a3jtbw rows (a dotted key, one after a safe section, one past the setting, one in flow style) fail on the old reader and pass now. 2 rows that should pass, a key beside the setting and dotted keys in paper-global.yml, pass on both. The quick gate passed.
+		- 2026-11-22: Verified on Paper 26.3-258: with `settings: bungeecord: false` and then `settings.bungeecord: true` in spigot.yml, Paper warned about BungeeCord and saved `bungeecord: true` under `settings:`.
 	- Origin: efca0a2, the fix for 2026111715274861 (Code review 20261117 item 4). A sibling that fix missed. Confirmed on the tool's side.
 	- Sweep: every key checked in spigot.yml. paper-global.yml and Geyser's config.yml use Configurate, which doesn't split keys.
+	- Closed reason: Done
+	- Actual cause [Bug]: `yamlCopies` matched one key name per level. Bukkit's YAML reader splits a key on its dots, so a top-level `settings.bungeecord` is a copy of the checked key.
+	- Actual fix [Bug]: In spigot.yml, a key with dots matches as many levels of the path as it has parts, and a fix edits that line in place. One that runs past the path makes the checked key a section, which counts as wrong, as a nested section already did. paper-global.yml and Geyser's file still match whole keys.
+	- Actual effort: Low
+	- Test case: 1a3jtbw (dotted key rows)
+	- Branch: nov22-2026112110300026
+	- Commit: 2128bb1
+	- Acceptance signoff: Self-closed: the new 1a3jtbw rows fail on the old reader and pass now, and Paper itself read the dotted key as on.
+	- Swept: settings.bungeecord is the only key checked in spigot.yml. yamlLast, yamlFind and yamlInsert serve only Geyser's keys. paper-global.yml and Geyser's config.yml are read by Configurate, which doesn't split keys.
+	- Closed: 20261122-125518
+	- Decisions:
+		- A dotted key that runs past the checked key, such as `settings.bungeecord.x`, counts as wrong, since Bukkit makes `bungeecord` a section, and a section already counts as wrong.
+		- Every copy has to be right, as before, so a dotted copy counts even when a later `settings:` section would replace it.
 
 - The safe settings check reads some server.properties lines differently from Java
 	- ID: 2026112110300039
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261121-103000
@@ -133,8 +148,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `white-list=true\nmotd=hi\rwhite-list=false\n` and `white-list=true\n# old \\\nwhite-list=false\n` both pass the check, and JDK 25 reads `false` for both. A differential of 4000 generated files against `Properties.load` found only these 2 cases.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 3. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: the new 1a3eksm part and a new 1a3jp2c seed fail on the old reader and pass now. A differential of 20000 generated files against JDK 25's `Properties.load` found no difference in keys or values, and after white-list and server-ip were set in each, Java read the values set. FuzzProperties ran 90 s and FuzzFix 40 s, both clean. The quick gate passed.
+		- 2026-11-22: The first fuzz run found a regression in this fix: a blank guard line after a lone CR wrote as part of a CRLF. Fixed, and its input is a seed.
+		- 2026-11-22: FuzzProperties (1a3jp2c) expected a line end added to any file that doesn't end in LF. Now a file that ends in a lone CR is kept as it is too, since that CR is its last line end.
 	- Origin: 91ac8da, the first version. Not seen before. Confirmed.
 	- Sweep: `eula.go` uses the same parser. The file still has to write back byte for byte (FuzzProperties).
+	- Closed reason: Done
+	- Actual cause [Bug]: `parseProperties` split lines only on LF, and joined the next line onto any line that ended in an odd number of backslashes, comment lines included.
+	- Actual fix [Bug]: Lines end at LF, CR or CRLF, and each keeps its own line end, so the file still writes back byte for byte. A `#` or `!` starts a comment wherever the logical line is still empty, as Java reads it, and a comment never continues. A blank line put in after a last line ending in a backslash takes that line's own end.
+	- Actual effort: Low
+	- Test case: 1a3eksm (the Java line ends part), 1a3jp2c (2 new seeds)
+	- Branch: nov22-2026112110300026
+	- Commit: a6b45c1
+	- Acceptance signoff: Self-closed: the new 1a3eksm part fails on the old reader and passes now, and the reader matches JDK 25 over 20000 generated files.
+	- Swept: `eula.go` reads eula.txt through the same parser, so it reads it the same way now. Nothing else in the tree parses a properties file. FuzzProperties still checks the write-back byte for byte.
+	- Closed: 20261122-125542
+	- Decisions:
+		- The empty key isn't matched to Java for a last line of only a backslash, which Java reads one way or the other depending on its read buffer. No checked key is empty, and the differential leaves the empty key out.
+		- A malformed `\u` escape still reads here. Paper 26.3-258 refuses to start on such a file (checked 2026-11-22), so it can't run with the defaults.
 
 - The pre-push hook gates the main checkout's tree, not the commit being pushed
 	- ID: 2026112110300052
