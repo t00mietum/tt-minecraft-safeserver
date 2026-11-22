@@ -10,6 +10,8 @@
 ##		  where the new build keeps the old ones GFS-rotated, rather than written over.
 ##		- States its plan and asks first. Re-running it is safe: a current binary is left alone,
 ##		  and setup on an existing install runs repair and update.
+##		- Stops when the .deb or .rpm package is installed, since a copy in /usr/local/bin would hide
+##		  the package's from then on. That one is updated through the package manager.
 ##		- With --any-distro it runs on other distros, and first checks that what setup would
 ##		  install through apt is already there.
 ##	Syntax:
@@ -26,13 +28,15 @@
 
 set -Eeuo pipefail
 
-installerVersion="1.1.0"
+installerVersion="1.2.0"
 exeName="tt-minecraftd"
 repo="t00mietum/tt-minecraft-safeserver"
 apiUrl="https://api.github.com/repos/${repo}/releases?per_page=100"
 dlBase="https://github.com/${repo}/releases/download"
 ## setup and the boot unit both expect it here.
 destDir="/usr/local/bin"
+## Where the .deb and .rpm put it.
+pkgBin="/usr/bin/tt-minecraftd"
 ## For the plan only. The new build's retire-build owns the folder.
 oldDir="/var/lib/tt-minecraftd/old-builds"
 osRelease="/etc/os-release"
@@ -70,6 +74,7 @@ Notes:
 	- Debian and its derivatives, or another distro with --any-distro. The CPU is detected; builds
 	  exist for amd64 and arm64.
 	- With no stable release yet, stable takes the newest pre-release.
+	- Stops when the .deb or .rpm package is installed. Update that through the package manager.
 	- Needs systemd, curl or wget, and sha256sum.
 EOF
 echo
@@ -109,11 +114,20 @@ fNewest(){
 }
 
 ## fFetch URL [OUTFILE]. stdout with no OUTFILE.
+## https only, redirects too, since the sums come over the same channel as the build. curl refuses the
+## hop itself. wget's --https-only holds only for links in a recursive run, so its headers are read
+## after, and a redirect to anything else fails the download, which then isn't used.
 fFetch(){
 	local url="$1" out="${2:--}"
-	## https only, redirects too, since the sums come over the same channel as the build.
-	if [[ "${fetcher}" == curl ]]; then curl --proto '=https' --tlsv1.2 -fsSL -o "${out}" "${url}"
-	else wget --https-only -q -O "${out}" "${url}"; fi
+	if [[ "${fetcher}" == curl ]]; then curl --proto '=https' --tlsv1.2 -fsSL -o "${out}" "${url}"; return; fi
+	local heads rc=0
+	{ heads="$(wget --https-only -q -S -O "${out}" "${url}" 2>&1 1>&3 3>&-)"; } 3>&1 || rc=$?
+	## A relative Location keeps the scheme it came from.
+	if printf '%s\n' "${heads}" | awk '{ l = tolower($0) } l ~ /^[ \t]*location:[ \t]*[a-z][a-z0-9+.-]*:/ && l !~ /^[ \t]*location:[ \t]*https:/ { bad = 1 } END { exit !bad }'; then
+		fEcho "${url} redirected to somewhere that isn't https, so what came back isn't used" >&2
+		return 1
+	fi
+	return "${rc}"
 }
 
 ## Through sudo when fMain set useSudo.
@@ -152,6 +166,8 @@ fMain(){
 
 	## What this box is.
 	[[ "$(uname -s)" == Linux ]] || fDie "${exeName} runs on Linux only"
+	## A copy in destDir comes first on PATH, so it would hide every package upgrade, and setup's repair moves it away.
+	[[ ! -f "${pkgBin}" ]] || fDie "${exeName} is installed here from a package (${pkgBin}). Update it through the package manager, with the newer .deb or .rpm from the releases page. This script would put a second copy in ${destDir}, which would hide the package's."
 	local osId="" osLike=""
 	if [[ -r "${osRelease}" ]]; then
 		osId="$(awk -F= '$1 == "ID" { gsub(/"/, "", $2); print $2 }' "${osRelease}")"
@@ -284,7 +300,8 @@ fMain(){
 		fEcho "Installing ${destPath}"
 		## Staged beside it, so the new build can move the old one out of the way first, and the swap is one rename.
 		local stage="${destDir}/.${exeName}.new"
-		fAsRoot install -d -m 0755 "${destDir}" || fDie "couldn't make ${destDir}"
+		## Only when missing, since install -d sets the mode of one that's there too, such as Debian's old root:staff 2775.
+		if [[ ! -d "${destDir}" ]]; then fAsRoot install -d -m 0755 "${destDir}" || fDie "couldn't make ${destDir}"; fi
 		fAsRoot install -m 0755 -o root -g root "${work}/${asset}" "${stage}" || fDie "couldn't write ${stage}"
 		## A build that matches its sum can still fail to run here, such as on a noexec mount.
 		local rc=0
@@ -342,3 +359,6 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##		  portal is named as one. Option values take any case. Errors have a blank line either side, and
 ##		  with no terminal to ask on it says to add --yes.
 ##		- 2026-11-20: Downloads are https only, redirects included.
+##		- 2026-11-22: Stops when the .deb or .rpm package is installed, and says to update through the
+##		  package manager. /usr/local/bin is made only when it's missing, so an existing one keeps its mode.
+##		  With wget, a redirect away from https fails the download, as it does with curl.

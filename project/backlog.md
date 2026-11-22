@@ -22,6 +22,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- Paper and Geyser downloads follow a redirect from https to plain http
+	- ID: 2026112213470980
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-134709
+	- Opened by:
+	- Related IDs: 2026112110300169
+	- Incorrect behavior [Bug]: `download.Client` uses Go's default redirect rule, which follows https to http. Paper's and Geyser's API answers and jars come through it, and the hash that checks a jar comes over the same channel.
+	- Expected behavior [Bug]: A redirect away from https fails the download, as install.bash's do and as the agent's fetch does.
+	- Origin: download.Client, found while fixing 2026112110300169. Not seen before. Plausible, read only.
+	- Sweep: every `download.Client` with a nil or plain HTTP client: paper, geyser, selfupdate, and update's Fetch outside agent.HoldTo.
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -227,7 +241,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - install.bash on a box with the package moves its own copy away, or makes setup fail
 	- ID: 2026112110300078
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on signoff
+		- For the refusal's wording and the README line.
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -236,8 +251,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: With the package there, install.bash stops before its plan and says to upgrade through the package manager.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 6. Detail in detail_backlog.md.
+		- Verified: 1a3jrx0 passes, and its new case fails with the check taken out (code 0, it went on to the release lookup). The quick gate passes, CodeQL included.
 	- Origin: 9d7cb3e, install script. The clash came with 0c9de06 (2026111715275041) and check 15's move in f741e0d (2026111911125756). Not seen before. Plausible, read only.
 	- Sweep: only install.bash. setup already guards its copy with `boot.Bin`.
+	- Swept: install.bash is the only hand install that skipped the check. setup's copy uses boot.Bin, and dogfood and the root host checks run on boxes without the package.
+	- Decisions:
+		- 2026-11-22: It stops right after the Linux check, before the network, so nothing is fetched for a box it won't install on. Only a file counts, as with boot.Bin, and the help and --version still work.
+		- 2026-11-22: installerVersion goes to 1.2.0, since a box it used to install on is now refused.
+	- Actual cause [Bug]: install.bash never checked for the package's binary, which setup and repair treat as the one to run.
+	- Actual fix [Bug]: install.bash stops before it looks up a release when /usr/bin/tt-minecraftd is a file, as setup's boot.Bin decides, and says to update through the package manager. Its help, README's install script section and design.md's Boot say so.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a3jrx0, "the package's binary stops it before the plan"
+	- Actual effort: Low
+	- Commit: 8248dbf
 
 - A new install that stops partway can't be run again as setup says
 	- ID: 2026112110300091
@@ -320,7 +346,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - install.bash changes the mode of an existing /usr/local/bin
 	- ID: 2026112110300156
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -330,12 +356,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: in the installer rig, a 0775 folder came out 0755.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 12.
+		- Verified: 1a3jrx0 passes, and its new case fails with the check taken out. The quick gate passes, CodeQL included.
 	- Origin: 9d7cb3e. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `install -d` sets the mode of a folder that's already there, not only of one it makes.
+	- Actual fix [Bug]: install.bash runs it only when /usr/local/bin is missing.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a3jrx0, "an existing folder keeps its mode, and a missing one is made"
+	- Swept: the only other `install -d` is setup's makeTree, which runs only for a new server tree. oldbuild makes its folder with os.MkdirAll, which leaves an existing one alone.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (a 2775 folder came out 2755) and passes after.
+	- Closed: 20261122-134329
+	- Commit: f8bd966
 
 - install.bash with wget follows an https redirect to plain http
 	- ID: 2026112110300169
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -345,7 +382,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a local TLS server answering 302 to a plain http one. wget printed the body, curl refused.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 13.
+		- Verified: 1a4z1d4 passes with curl 8 and GNU Wget 1.25 here, and with Wget 1.21.3 in the quick gate's image, which has no curl, so that arm skips there. It fails with the header check taken out. 1a3jrx0 passes under Bash 3.2 with busybox tools. The quick gate passes, CodeQL included.
 	- Origin: 3b7576c, the second code tidy. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: wget's `--https-only` applies only to links in a recursive run, so a plain download follows any redirect.
+	- Actual fix [Bug]: With wget, install.bash reads the response headers (`-S`) after the download, and a Location that isn't https fails it, with a note saying why. Callers already stop on a failed download, so nothing from it is used.
+	- Decisions:
+		- 2026-11-22: wget refuses rather than the claim being dropped, since the sums come over the same channel as the build. wget has no option to refuse the hop, so its request to the http address still goes out, and what comes back is thrown away.
+		- 2026-11-22: curl's refusal stays silent, as its other failures are.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a4z1d4 (fFetch with the host's own curl and wget, against a local TLS server that redirects to plain http, to https, and to a relative path)
+	- Swept: install.bash's fFetch is the only wget download, and the only curl one in a script a user runs. install-dev.bash names them only in its usage. The Go download client follows any redirect, filed as 2026112213470980.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (wget exited 0 with the plain http body) and passes after.
+	- Closed: 20261122-134645
+	- Commit: 1aa8a36
 
 - One unreadable jar stops setup --adopt and fails repair's plugin sources step
 	- ID: 2026112110300182

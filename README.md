@@ -196,6 +196,8 @@ bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safese
 
 It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`. The build it replaces goes to `/var/lib/tt-minecraftd/old-builds/`, named for its date, in case you want it back. Only a few of those are kept, spread out over time.
 
+If the `.deb` or `.rpm` package is installed, the script stops before its plan and says to update through the package manager, since a second copy in `/usr/local/bin` would hide the package's.
+
 On another distro with systemd, add `--any-distro` to the end of the line. Then nothing gets installed through a package manager, so Podman and catatonit, or Docker, and nftables have to be installed already. NixOS isn't supported yet.
 
 ## Using the server

@@ -4,9 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,8 +172,8 @@ func (r *installRig) run(args ...string) (string, int) {
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	// catatonit and nft are looked for in r.sys only, so the host's don't count.
-	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; systemdDir="$5"; catatonitPaths="$6/catatonit"; nftPaths="$6/nft"; shift 6; fMain "$@"`,
+	// catatonit, nft and the package's binary are looked for in r.sys only, so the host's don't count.
+	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; systemdDir="$5"; catatonitPaths="$6/catatonit"; nftPaths="$6/nft"; pkgBin="$6/tt-minecraftd"; shift 6; fMain "$@"`,
 		"rig", script, r.dest, r.osRelease, r.tty, r.systemd, r.sys}, args...)
 	// #nosec G204 -- test runs the repo's own script
 	cmd := exec.Command(r.bashPath, all...)
@@ -193,7 +197,7 @@ func (r *installRig) run(args ...string) (string, int) {
 
 // have puts what setup would otherwise get through apt in place: podman
 // and docker on PATH, catatonit and nft where the script looks, or with
-// "bin/" on PATH.
+// "bin/" on PATH. "tt-minecraftd" is the package's binary.
 func (r *installRig) have(what ...string) {
 	r.t.Helper()
 	for _, w := range what {
@@ -506,6 +510,33 @@ func TestInstallScript(t *testing.T) {
 		}
 	})
 
+	// 2026-11-22: install -d ran on a folder that was there, and a 2775 one came out 2755 (2026112110300156).
+	t.Run("an existing folder keeps its mode, and a missing one is made", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		if err := os.Chmod(r.dest, 0o775|os.ModeSetgid); err != nil {
+			t.Fatal(err)
+		}
+		mode := func() os.FileMode {
+			fi, err := os.Stat(r.dest)
+			if err != nil {
+				return 0
+			}
+			return fi.Mode() & (os.ModePerm | os.ModeSetgid)
+		}
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" || mode() != 0o775|os.ModeSetgid {
+			t.Errorf("code %d, folder mode %v\n%s", code, mode(), out)
+		}
+		r = newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		if err := os.Remove(r.dest); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" || mode() != 0o755 {
+			t.Errorf("missing folder: code %d, folder mode %v\n%s", code, mode(), out)
+		}
+	})
+
 	t.Run("a folder the operator can't write to goes through sudo", func(t *testing.T) {
 		if os.Geteuid() == 0 {
 			t.Skip("root writes anywhere")
@@ -609,6 +640,36 @@ func TestInstallScript(t *testing.T) {
 		}
 	})
 
+	// 2026-11-22: it installed beside the package's binary, and setup's repair then moved that copy away (2026112110300078).
+	t.Run("the package's binary stops it before the plan", func(t *testing.T) {
+		for _, local := range []bool{false, true} {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			r.have("tt-minecraftd")
+			dest := filepath.Join(r.dest, "tt-minecraftd")
+			if local {
+				r.write(dest, "#!/bin/sh\n# hand build\n")
+			}
+			out, code := r.run("--yes")
+			got, _ := os.ReadFile(dest)
+			if code != 1 || !strings.Contains(out, "Update it through the package manager") || strings.Contains(out, "Plan") || r.logText() != "" || local != (string(got) == "#!/bin/sh\n# hand build\n") {
+				t.Errorf("with a local copy %t: code %d\n%s\n%s", local, code, out, r.logText())
+			}
+			if left, _ := os.ReadDir(r.dest); len(left) != map[bool]int{false: 0, true: 1}[local] {
+				t.Errorf("left %v", left)
+			}
+		}
+		// Only a file counts, as with setup's boot.Bin.
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		if err := os.Mkdir(filepath.Join(r.sys, "tt-minecraftd"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" {
+			t.Errorf("a folder at the package's path: code %d\n%s", code, out)
+		}
+	})
+
 	t.Run("no releases at all", func(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish()
@@ -616,4 +677,86 @@ func TestInstallScript(t *testing.T) {
 			t.Fatalf("code %d\n%s", code, out)
 		}
 	})
+}
+
+// 2026-11-22: wget's --https-only let a redirect to plain http through (2026112110300169).
+// This runs fFetch with the host's own curl and wget, against a local TLS server.
+func TestInstallFetchRedirects(t *testing.T) {
+	defer testid.Line(t, "1a4z1d4")
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "plain\n") }))
+	defer plain.Close()
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		to := map[string]string{"/to-plain": plain.URL + "/x", "/to-plain-caps": "HTTP://" + strings.TrimPrefix(plain.URL, "http://") + "/x",
+			"/relative": "/ok", "/to-https": srv.URL + "/ok"}[r.URL.Path]
+		if to != "" {
+			w.Header().Set("Location", to)
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		fmt.Fprint(w, "ok\n")
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	ca := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc := filepath.Join(dir, "wgetrc")
+	if err := os.WriteFile(rc, []byte("ca_certificate = "+ca+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "install.bash"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fetcher := range []string{"curl", "wget"} {
+		t.Run(fetcher, func(t *testing.T) {
+			p, err := exec.LookPath(fetcher)
+			if err != nil {
+				t.Skip("no " + fetcher)
+			}
+			// #nosec G204 -- the host's own tool, asked its version
+			if v, _ := exec.Command(p, "--version").CombinedOutput(); !bytes.Contains(v, []byte("GNU Wget")) && !bytes.Contains(v, []byte("curl ")) {
+				t.Skip(fetcher + " isn't GNU Wget or curl")
+			}
+			for _, c := range []struct {
+				path   string
+				toFile bool
+				ok     bool
+			}{
+				{"/ok", false, true}, {"/relative", false, true}, {"/to-https", true, true},
+				{"/to-plain", false, false}, {"/to-plain", true, false}, {"/to-plain-caps", false, false},
+			} {
+				out := ""
+				if c.toFile {
+					out = filepath.Join(t.TempDir(), "got")
+				}
+				// #nosec G204 -- test runs the repo's own script
+				cmd := exec.Command(bash, "-c", `source "$1"; fetcher="$2"; fFetch "$3" ${4:+"$4"}`, "rig", script, fetcher, srv.URL+c.path, out)
+				cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "WGETRC=" + rc, "CURL_CA_BUNDLE=" + ca, "SSL_CERT_FILE=" + ca}
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &stdout, &stderr
+				err := cmd.Run()
+				got := stdout.String()
+				if c.toFile {
+					b, _ := os.ReadFile(out)
+					got = string(b)
+				}
+				if c.ok && (err != nil || got != "ok\n") {
+					t.Errorf("%s: %v, got %q\n%s", c.path, err, got, stderr.String())
+				}
+				if !c.ok && err == nil {
+					t.Errorf("%s: followed the redirect to plain http and exited 0, got %q\n%s", c.path, got, stderr.String())
+				}
+				if !c.ok && fetcher == "wget" && !strings.Contains(stderr.String(), "isn't https") {
+					t.Errorf("%s: doesn't say why\n%s", c.path, stderr.String())
+				}
+			}
+		})
+	}
 }
