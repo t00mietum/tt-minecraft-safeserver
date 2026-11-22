@@ -249,12 +249,12 @@ Common:  --config PATH, --set KEY=VALUE
 	6. Writes the safe settings. See [Safe server settings](#safe-server-settings).
 	7. With `bedrock` on, downloads Geyser and Floodgate and sets them up. See [Bedrock players](#bedrock-players).
 		- It takes each one's newest build for Paper from GeyserMC's download API at `download.geysermc.org`, and checks the jar's SHA-256 against it. They go in `plugins/`, which setup makes when it's missing.
-		- Each jar's source goes in `plugins.shcl`, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 gives it the same source.
+		- Each jar's source goes in `plugins.shcl`, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 gives it the same source. An add-on such as GeyserExtras isn't one.
 		- Step 6 writes Geyser's `config.yml` with only the safe keys, before its first start. Geyser keeps them and adds the rest of its settings. Floodgate's config is left to its first start, and `repair` sets the Floodgate key's mode after that.
 		- On an adopted tree that has a Floodgate key already, setup takes other accounts' access to it away here, as `repair` does.
 		- The lookup happens before the plan is shown, along with Paper's.
 	8. Gives the Geyser and Floodgate jars that are there GeyserMC's source, when `plugins.shcl` has none for them. They're listed in the plan.
-		- That's a jar in `plugins/` whose file name and `plugin.yml` name both start with `geyser` or `floodgate`, the same as `repair` gives it. Other jars aren't listed, since nothing about them needs a yes.
+		- That's a jar in `plugins/` whose file name is `geyser` or `floodgate` and then anything but a letter or digit, and whose `plugin.yml` name is GeyserMC's own, `Geyser-Spigot` or `floodgate`, the same as `repair` gives it. Other jars aren't listed, since nothing about them needs a yes.
 	9. With `firewall` on, installs nftables through apt when `nft` is missing, writes the rules, and starts their unit. See [Firewall](#firewall).
 		- That's `repair`'s firewall check, with its fixes. When it fails, such as with no apt to get nftables from, setup stops before it writes the config.
 	10. Pulls the pinned container image in container mode.
@@ -752,7 +752,7 @@ cicd/                        build, test, and release scripts
 
 	- An entry with a path outside `serverDir` gets a warning and is left out. A source that isn't `https` is ignored.
 	- A list from before 2026-11-19 has a `sha256` per jar. It's read and not checked.
-	- `setup` and `repair` give a jar in `plugins/` whose file name and `plugin.yml` name both start with `geyser` or `floodgate`, ignoring case, GeyserMC's source when it has none. A jar with a source keeps it.
+	- `setup` and `repair` give a jar in `plugins/` GeyserMC's source when it has none, when its file name is `geyser` or `floodgate` and then anything but a letter or digit, and its `plugin.yml` name is `Geyser-Spigot` or `floodgate`, ignoring case. An add-on such as GeyserExtras or GeyserSkinManager-Spigot names its own plugin, so it doesn't count. A jar with a source keeps it.
 
 - Paper also loads code that it writes into the tree itself, and it doesn't check it again:
 	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256).

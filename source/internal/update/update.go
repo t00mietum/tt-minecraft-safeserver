@@ -214,6 +214,10 @@ func (u *Update) Do(ctx context.Context) error {
 	if len(plan) == 0 {
 		return nil
 	}
+	// Plan lines name jars from the tree, which the server account names.
+	for i := range plan {
+		plan[i] = server.Clean(plan[i])
+	}
 	fmt.Fprintf(u.Out, "\nupdate will:\n  - %s\n\n", strings.Join(plan, "\n  - "))
 	if len(report) > 0 {
 		showReport(u.Out, q.MoveTo, report)

@@ -296,7 +296,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Geyser and Floodgate add-ons are taken for Geyser or Floodgate
 	- ID: 2026112110300104
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -306,13 +306,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a geyser test over those names.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 8.
+		- 2026-11-22: Verified: 1a4z3bm fails on the old geyser.go (6 add-on names taken, and Installed counts add-ons) and passes with the fix. The geyser, setup, repair, update, plugins and cli tests pass, and so does the quick gate for geyser, setup and repair.
 	- Origin: 92e72ff and 9f30908. Not seen before. Confirmed.
 	- Against: design.md's rule that the file name and the `plugin.yml` name both start with the project's name.
+	- Closed reason: Done
+	- Actual cause [Bug]: `Project` and `Installed` matched any file name that starts with `geyser` or `floodgate`, and `Project` any claimed plugin name that does too. Add-ons are named that way.
+	- Actual fix [Bug]: A file name counts when it's the project's name and then anything but a letter or digit. `Project` wants the plugin name GeyserMC's own jar claims, `Geyser-Spigot` or `floodgate`, ignoring case. `Installed` drops a jar whose `plugin.yml` names another plugin, and still counts one with no readable `plugin.yml` by its name. `Latest` checks a download's name with the same rule. design.md's setup steps 7 and 8 and Plugin jars say so.
+	- Actual effort: Low
+	- Test case: 1a4z3bm (TestAddonsArentGeyser), with 1a3jgwr
+	- Branch: nov22-2026112110300104
+	- Closed: 20261122-140102
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, per the standing close policy.
+	- Swept: every caller of `Project` (`repair.GeyserSources`, which setup shares) and `Installed` (setup's `bedrockBuilds`, repair's `bedrockCheck`), and `Latest`'s own name check. update tells Geyser by its source, not its name.
+	- Decisions:
+		- The plugin name has to be GeyserMC's own, not only start with the project's name, since add-ons claim names like GeyserExtras. The data folders `plugins/Geyser-Spigot` and `plugins/floodgate` are named after it.
+		- `Installed` still counts a jar with no readable `plugin.yml` by its name, so setup keeps whatever jar a tree has, as before.
+		- An add-on given GeyserMC's source before this fix keeps it in `plugins.shcl`, and update still says to replace it by hand. The operator removes that source line.
+		- design.md's start-with rule, in the Against row, now says GeyserMC's own plugin names, since that rule is what let add-ons in.
+	- Commit: b6f6c15
 
 - Jar names from the server tree reach the terminal raw on the update agent path
 	- ID: 2026112110300117
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -322,8 +338,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: an update test with a jar named `Chunky\x1b]0;owned\x07.jar`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 9.
+		- 2026-11-22: Verified: 1a4z3r4 fails on the old agent.go (raw ESC, BEL and U+202E in the no-answer line) and passes with the fix, with and without --dry-run. The whole quick gate passes.
 	- Origin: cfd6be9. Reachable since 2b322c0 (2026111914293176), since the agent is now asked about every jar. Same class as 2026111715274877. Confirmed.
 	- Sweep: the other raw prints of the jar name in `update/agent.go`.
+	- Closed reason: Done
+	- Actual cause [Bug]: The agent path in `update/agent.go` printed tree jar names as read. The agent's own text is cleaned in `agent.Check`, so a jar it names with escape codes never matches the raw name, and that jar always gets the "no answer" line, which printed it raw.
+	- Actual fix [Bug]: Every jar name the agent path prints goes through `server.Clean`: the refused, nothing-newer and no-answer lines, the plan, the dry run line, the failed line and its error, the question, and the kept and downloaded lines. update's plan lines are cleaned where they're joined, so a new plan line is covered too.
+	- Actual effort: Low
+	- Test case: 1a4z3r4 (TestAgentJarNameCleaned)
+	- Branch: nov22-2026112110300104
+	- Closed: 20261122-140439
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and the Sweep sites are covered, per the standing close policy.
+	- Swept: every Fprintf, Sprintf and ask in `update/agent.go` that takes `r.Jar`, `s.Jar`, `j.Path` or `s.jar.Name`. Left alone: `newName` and the agent's fields, which `plugins.Claims` and `agent.Check` clean, and Paper build names, which `paper.Name` builds. In `update.go`, the skipped and Geyser lines already clean, and `pluginStep` names equal a checked GeyserMC build path.
+	- Decisions:
+		- Cleaned where printed, not in `plugins.Jars`, as 2026111715274877 decided, so names still match the files.
+		- A jar named with control characters can't be updated through the agent, since its cleaned answer never matches. That's left as is, since it only ever skips.
+	- Commit: 080f8fc
 
 - retire-build reports a failure after it moved the build, and install.bash then leaves no binary
 	- ID: 2026112110300130

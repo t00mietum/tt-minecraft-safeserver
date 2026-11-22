@@ -660,3 +660,31 @@ func TestAgentPaperDownImage(t *testing.T) {
 		t.Errorf("no agent: %v\n%s", err, a.out)
 	}
 }
+
+// A jar name from the tree with escape codes is cleaned in every line the
+// agent path prints about it, whether the agent names it or not.
+func TestAgentJarNameCleaned(t *testing.T) {
+	defer testid.Line(t, "1a4z3r4")
+	ctx := context.Background()
+	for _, dry := range []bool{false, true} {
+		a := newAgentRig(t, "y\n")
+		a.u.Yes, a.u.DryRun = true, dry
+		bad := "Chunky\x1b]0;owned\x07\u202e.jar"
+		if err := os.WriteFile(filepath.Join(a.dir, "plugins", bad), jarBytes(t, "Other", "1"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		a.answer.Jars = append(a.answer.Jars, agent.Suggestion{Jar: "plugins/" + bad, Version: "2", URL: "https://example.com/Other-2.jar"})
+		if err := a.u.Do(ctx); err != nil {
+			t.Fatalf("dry run %v: %v\n%s", dry, err, a.out)
+		}
+		out := a.out.String()
+		if strings.ContainsAny(out, "\x1b\x07\u202e") {
+			t.Errorf("dry run %v: raw escape codes in:\n%q", dry, out)
+		}
+		for _, want := range []string{"SKIPPED plugins/Chunky]0;owned.jar: no answer from the update agent", "SKIPPED plugins/Chunky]0;owned.jar: the update agent's build is refused"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("dry run %v: no %q in:\n%s", dry, want, out)
+			}
+		}
+	}
+}
