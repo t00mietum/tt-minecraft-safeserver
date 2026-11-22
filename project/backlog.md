@@ -170,7 +170,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - The pre-push hook gates the main checkout's tree, not the commit being pushed
 	- ID: 2026112110300052
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -180,8 +180,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: the real hook with stand-in gates. With the checkout on A, a push of a broken B ran the gate on A and exited 0. Repro: `cli_prepush-pushed-commit_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 4. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: 1a4yxpc failed on the old hook in 5 of its 7 cases and passes now. A real push to a local bare repo was refused from a checkout on another commit, and ran the stand-in gate from a linked worktree on the pushed one. The whole quick gate passed.
+		- 2026-11-22: 1a4q4vw's first case, a code commit with a docs edit left in the tree, now expects a refusal: was "merge", exit 0; now nothing, exit 1.
 	- Origin: bb4ab14, the first pipeline. A sibling of 2026112017593230, which fixed only the docs-only diff. Confirmed.
 	- Sweep: both gate calls in the hook.
+	- Closed reason: Done
+	- Actual cause [Bug]: The hook ran both gates on the checkout it lives in, whatever that held, and never compared it with the pushed commit.
+	- Actual fix [Bug]: A push to main is refused unless the worktree it runs from is on the pushed commit with a clean tree. The gates and the docs list come from that worktree, which may be a linked one. A commit a whole merge gate passed on still skips both gates.
+	- Branch: nov22-2026112110300052
+	- Commit: a46e364
+	- Test case: 1a4yxpc TestPrePushPushedCommit
+	- Swept: both gate calls sit behind the one tree check. The marker, the docs list and the diff read the push's worktree too.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261122-130323
+	- Decisions:
+		- Refused rather than running the gate in a throwaway checkout of the commit. The merge gate's container, root host and marker steps have never run from a fresh checkout, and a 14-minute run there would still idle the push.
+		- A clean tree is an empty `git status --porcelain`, untracked files included, the rule cicd.bash uses for the marker.
+		- The passed marker is read in the push's worktree and in the hook's own checkout, since a whole merge gate on a clean tree vouches for the commit wherever it ran.
 
 - A CICD step at the memory cap stops the whole run
 	- ID: 2026112110300065
@@ -477,7 +492,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A code file renamed to a docs path reads as a docs-only push
 	- ID: 2026112110300312
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -487,7 +502,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `cicd_prepush-rename_repro.bash`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 24.
+		- 2026-11-22: Verified: 1a4yxwm failed on the old hook, where code moved to notes.md ran the docs gate, and passes now. The whole quick gate passed.
 	- Origin: 532c922. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: git diff finds renames by default and lists only the new name.
+	- Actual fix [Bug]: The docs-only check diffs with `--no-renames`, which lists the old path as deleted and the new one as added.
+	- Branch: nov22-2026112110300052
+	- Commit: 22a75f4
+	- Test case: 1a4yxwm TestPrePushRename
+	- Swept: the hook's diff is the only name-only diff in the repo.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261122-130334
 
 - A release run builds and sums files that aren't committed
 	- ID: 2026112110300325

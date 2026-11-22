@@ -31,6 +31,7 @@ func cicdFile(t *testing.T, name string) string {
 type hookRig struct {
 	t                    *testing.T
 	dir, log, base, bash string
+	from                 string // where the push runs from, as git runs the hook there; dir when empty
 }
 
 func newHookRig(t *testing.T) *hookRig {
@@ -103,6 +104,10 @@ func (r *hookRig) push(ref, sha, gateRC string) (string, int) {
 	_ = os.Remove(r.log)
 	// #nosec G204 -- test runs the repo's own hook
 	cmd := exec.Command(r.bash, filepath.Join(r.dir, "cicd/hooks/pre-push"), "origin", "git@example.com:x.git")
+	cmd.Dir = r.dir
+	if r.from != "" {
+		cmd.Dir = r.from
+	}
 	cmd.Stdin = strings.NewReader(ref + " " + sha + " " + ref + " " + r.base + "\n")
 	cmd.Env = append(os.Environ(), "CICD_MERGE_GATE_CMD="+r.dir+"/gate.sh merge", "CICD_DOCS_GATE_CMD="+r.dir+"/gate.sh docs", "GATE_RC="+gateRC)
 	out, err := cmd.CombinedOutput()
@@ -154,7 +159,7 @@ func TestPrePushGates(t *testing.T) {
 }
 
 // A push that makes main has an all-zero remote sha. A docs edit left in the working tree must not
-// make a code commit read as docs-only.
+// make a code commit read as docs-only. Since 2026-11-22 a tree with any edit is refused outright.
 func TestPrePushNewBranch(t *testing.T) {
 	defer testid.Line(t, "1a4q4vw")
 	r := newHookRig(t)
@@ -162,14 +167,74 @@ func TestPrePushNewBranch(t *testing.T) {
 	sha := r.commit()
 	r.write("README.md", "# edited, not committed\n")
 	r.base = strings.Repeat("0", 40)
-	if ran, code := r.push("refs/heads/main", sha, "0"); ran != "merge" || code != 0 {
-		t.Errorf("code commit, docs edit in the tree: ran %q, exit %d; want \"merge\", exit 0", ran, code)
+	if ran, code := r.push("refs/heads/main", sha, "0"); ran != "" || code != 1 {
+		t.Errorf("code commit, docs edit in the tree: ran %q, exit %d; want nothing, exit 1", ran, code)
 	}
 	r.git("checkout", "-q", "--", "README.md")
 	r.write("README.md", "# docs only\n")
 	sha = r.commit()
 	if ran, code := r.push("refs/heads/main", sha, "0"); ran != "merge" || code != 0 {
 		t.Errorf("docs commit: ran %q, exit %d; want \"merge\", exit 0", ran, code)
+	}
+}
+
+// The gates check a working tree, so they run only on a tree that holds the pushed commit with
+// nothing changed, from wherever the push runs. Anything else is refused.
+func TestPrePushPushedCommit(t *testing.T) {
+	defer testid.Line(t, "1a4yxpc")
+	r := newHookRig(t)
+	r.write("source/main.go", "package main // good\n")
+	good := r.commit()
+	r.git("checkout", "-q", "--detach", r.base)
+	r.write("source/main.go", "package main // broken\n")
+	broken := r.commit()
+	r.git("checkout", "-q", "--detach", r.base)
+	r.write("README.md", "# docs\n")
+	docs := r.commit()
+	try := func(name, sha, wantRan string, wantCode int) {
+		t.Helper()
+		if ran, code := r.push("refs/heads/main", sha, "0"); ran != wantRan || code != wantCode {
+			t.Errorf("%s: ran %q, exit %d; want %q, exit %d", name, ran, code, wantRan, wantCode)
+		}
+	}
+	r.git("checkout", "-q", "--detach", good)
+	try("code commit, tree on another", broken, "", 1)
+	try("docs commit, tree on another", docs, "", 1)
+	r.git("checkout", "-q", "--detach", broken)
+	r.write("source/main.go", "package main // fixed, not committed\n")
+	try("uncommitted edit", broken, "", 1)
+	r.git("checkout", "-q", "--", "source/main.go")
+	r.write("source/fix.go", "package main\n")
+	try("untracked file", broken, "", 1)
+	if err := os.Remove(filepath.Join(r.dir, "source/fix.go")); err != nil {
+		t.Fatal(err)
+	}
+	try("clean tree on it", broken, "merge", 0)
+	// The hook lives in the main checkout, but the push's own worktree is the one checked.
+	wt := filepath.Join(t.TempDir(), "wt")
+	r.git("worktree", "add", "-q", "--detach", wt, broken)
+	r.git("checkout", "-q", "--detach", good)
+	r.from = wt
+	try("worktree on it, main checkout on another", broken, "merge", 0)
+	try("worktree on another", good, "", 1)
+}
+
+// A rename counts on both sides, so code moved to a docs path still gets the merge gate.
+func TestPrePushRename(t *testing.T) {
+	defer testid.Line(t, "1a4yxwm")
+	r := newHookRig(t)
+	cases := []struct{ name, from, to, wantRan string }{
+		{"code to docs", "source/main.go", "notes.md", "merge"},
+		{"docs to code", "README.md", "source/readme.go", "merge"},
+		{"docs to docs", "README.md", "project/readme.md", "docs"},
+	}
+	for _, c := range cases {
+		r.git("checkout", "-q", "--detach", r.base)
+		r.git("mv", c.from, c.to)
+		sha := r.commit()
+		if ran, code := r.push("refs/heads/main", sha, "0"); ran != c.wantRan || code != 0 {
+			t.Errorf("%s: ran %q, exit %d; want %q, exit 0", c.name, ran, code, c.wantRan)
+		}
 	}
 }
 
