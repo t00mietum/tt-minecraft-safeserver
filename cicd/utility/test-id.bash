@@ -13,10 +13,14 @@
 ##		  cicd/root-host/checks.bash, or of a function there that hands its arguments to `check`.
 ##	Syntax:
 ##		test-id.bash --check [-q] [--root DIR]
-##		test-id.bash --list [--root DIR]
+##		test-id.bash --list [--in PATH]... [--go-name REGEX] [--root DIR]
 ##		test-id.bash --new [--root DIR]
 ##		  --check     fail on a Go test with no ID, a malformed ID on any test, or an ID used twice
 ##		  --list      print "<id> <label>" for each test, once each
+##		  --in PATH   with --list, only tests in files under PATH, from the repo root; give it
+##		              again for more. cicd/root-host takes in the root host checks.
+##		  --go-name REGEX
+##		              with --list, only Go tests and fuzz targets whose name matches
 ##		  --new       print a free ID for a new test, from the clock
 ##		  -q          print findings only
 ##	Exit: 0 clean, 1 findings, 2 bad usage.
@@ -32,13 +36,15 @@ set -Eeuo pipefail
 
 meDir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd -- "${meDir}/../.." && pwd)"
-mode=""; quiet=0
+mode=""; quiet=0; inPaths=(); goName=.
 while (($#)); do case "$1" in
 	--check) mode=check; shift ;;
 	--list)  mode=list; shift ;;
 	--new)   mode=new; shift ;;
 	-q)      quiet=1; shift ;;
 	--root)  root="${2:?--root needs a folder}"; shift 2 ;;
+	--in)    p="${2:?--in needs a path}"; p="${p#./}"; inPaths+=("${p%/}"); shift 2 ;;
+	--go-name) goName="${2:?--go-name needs a regex}"; shift 2 ;;
 	*) printf 'test-id: unknown option: %s\n' "$1" >&2; exit 2 ;;
 esac; done
 [[ -n "${mode}" ]] || { printf 'test-id: give --check, --list or --new\n' >&2; exit 2; }
@@ -72,8 +78,21 @@ fRootChecks(){
 	sed -nE "s/^[[:space:]]*(${names})[[:space:]]+([0-9a-z]+)[[:space:]]+\"?([^\"]*)\"?[[:space:]].*\$/\2\t\3/p" "${f}"
 }
 
+## A file, from the repo root, under one of the --in paths, or any file without one.
+fIn(){
+	local p
+	((${#inPaths[@]})) || return 0
+	for p in "${inPaths[@]}"; do [[ "$1" != "${p}" && "$1" != "${p}"/* ]] || return 0; done
+	return 1
+}
+
 if [[ "${mode}" == list ]]; then
-	{ fGoTests | awk -F'\t' '$1 != "-" { printf "%s\t%s\n", $1, $3 }'; fRootChecks; } | sort -u | tr '\t' ' '
+	{
+		while IFS=$'\t' read -r id file name; do
+			if [[ "${id}" != - && "${name}" =~ ${goName} ]] && fIn "${file#"${root}"/}"; then printf '%s\t%s\n' "${id}" "${name}"; fi
+		done < <(fGoTests)
+		if fIn cicd/root-host/checks.bash; then fRootChecks; fi
+	} | sort -u | tr '\t' ' '
 	exit 0
 fi
 
@@ -119,3 +138,4 @@ exit "${bad}"
 ##		- 2026-11-19: The counter goes in at base 10, before the Crockford step: an ID is the minute
 ##		  times 100 plus the counter. Every existing ID was re-encoded the same way.
 ##		- 2026-11-20: --check reads the tests once.
+##		- 2026-11-22: --list takes --in and --go-name, so it can list only what a run would test.

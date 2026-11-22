@@ -201,7 +201,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A CICD step at the memory cap stops the whole run
 	- ID: 2026112110300065
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -211,8 +212,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a scope with `MemoryMax=60M`. The child exited 137, then the parent shell got SIGTERM and the scope exited 143.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 5.
+		- 2026-11-22: Verified: a real user scope at 60M with `OOMPolicy=continue`, through `fMemScope`, let the shell go on after its child exited 137, and the scope exited 0. Without it the shell got SIGTERM and the scope exited 143. 1a4yyfc fails on the unfixed `mem-cap.bash` and passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
 	- Origin: bb4ab14. Not seen before. Confirmed.
 	- Sweep: the sister projects' copies of mem-cap.bash, which this project can't change.
+	- Actual cause [Bug]: A user scope takes systemd's default OOM policy, which here is `stop`. One process killed at the cap then stops the whole scope, the run's shell included.
+	- Actual fix [Bug]: `fMemScope` starts the scope with `-p OOMPolicy=continue`.
+	- Swept: `systemd-run` is called only in `mem-cap.bash` and in native mode's `runArgs`. Native mode's unit runs the server alone, so stopping it when its process is killed is right there. No copy of `mem-cap.bash` was found in the sister folders this session can read. Other sister projects with a copy need the same line.
+	- Branch: nov22-2026112110300065
+	- Commit: 21c4a70
+	- Test case: 1a4yyfc TestMemScopeOOMPolicy (the scope's systemd-run args, on a stand-in systemd-run)
+	- Closed: 20261122-130944
 
 - install.bash on a box with the package moves its own copy away, or makes setup fail
 	- ID: 2026112110300078
@@ -477,7 +487,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - The startup lint check reports CLEAN for a failed or aborted run
 	- ID: 2026112110300299
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -487,7 +498,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a stand-in log.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 23.
+		- 2026-11-22: Verified: 1a4yynm fails on the unfixed `lint-report.bash` (a died, an aborted, and a test-failed log each read as CLEAN with exit 0, and an unfinished one was marked seen) and passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
 	- Origin: before 36903d7; 463c99d touched the line. Not seen before. Confirmed.
+	- Actual cause [Bug]: The report looked only for warning lines, and never at how the run ended. A failure line matches none of the warning forms.
+	- Actual fix [Bug]: `lint-report.bash` reports a log with `[ FAILED:`, `[ CICD ABORTED` or a step's FAIL line as FAILED, with those lines and any `--- FAIL:` test lines, and exits 1. A log with no closing `CI/CD: done.` line is UNFINISHED, and `--check` leaves it unmarked. `cicd.bash --help` says so.
+	- Decisions:
+		- `--- FAIL:` lines are shown with a failure but don't count as one alone, since a passing run's output could quote one.
+		- An unfinished log isn't marked seen, so a look taken while a run is going still reports how it ended. Its exit stays 0, since it may still pass.
+	- Swept: `lint-report.bash` is the only reader of the run logs (`grep -rn lint-report`). `cicd.bash --lint-check` execs it with `--check`. All 18 run logs on this box end with the closing line, and none has a `--- FAIL:` line.
+	- Branch: nov22-2026112110300065
+	- Commit: ef0faaa
+	- Test case: 1a4yynm TestLintReportRunResult (clean, warning, died, aborted, test-failed and unfinished stand-in logs)
+	- Closed: 20261122-131035
 
 - A code file renamed to a docs path reads as a docs-only push
 	- ID: 2026112110300312
@@ -517,7 +540,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - A release run builds and sums files that aren't committed
 	- ID: 2026112110300325
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -526,12 +550,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: A release build refuses a tree with changes under `source`, `go.mod` or `go.sum`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 25.
-	- Origin: cicd.bash release steps. Not seen before. Plausible, read only.
+		- 2026-11-22: Reproduced: 1a4yz24 fails on the unfixed `cicd.bash`, where a release build took an untracked `.go` file, an ignored one, and a changed `go.mod` and `config.bash`. It passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Origin: cicd.bash release steps. Not seen before. Confirmed by 1a4yz24.
+	- Actual cause [Bug]: The build step builds the working tree, and nothing compared it with the tagged commit.
+	- Actual fix [Bug]: On a release, the build step refuses when `git status`, untracked and ignored files included, shows anything under `source`, `go.mod`, `go.sum` or `cicd/config.bash`, and names what differs.
+	- Decisions:
+		- `cicd/config.bash` is checked too, beyond the item's wording, since it holds the build flags `verify-release.bash` reads from the tag.
+		- Ignored files count, since go build takes every `.go` file in a folder whether git sees it or not. A wholly ignored folder is named as the folder.
+		- The check is in the build step rather than at the start of the run, since only the build reads those files, and a dev run never trips it.
+	- Swept: `fIsRelease` is read by the build step and the demo step. The demo records from the build step's binary, so the check in the build step covers both. The second build copies the same tree, so it's covered too.
+	- Branch: nov22-2026112110300065
+	- Commit: 4b80726
+	- Test case: 1a4yz24 TestReleaseRefusesDirtyTree (clean, untracked, ignored, `go.mod`, `config.bash`, a file elsewhere, and a dev build)
+	- Closed: 20261122-131421
 
 - cicd.bash --list prints every test ID whatever the run
 	- ID: 2026112110300338
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -541,7 +579,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: both runs.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 26.
+		- 2026-11-22: Verified: 1a4yzbg fails on the unfixed scripts (the cli area listed tests from other packages and the root host checks) and passes after. 1a3jz1w and 1a4hwpm still pass. Quick gate passed. Counts now: 40 for the cli area, 301 for a whole quick gate, 323 for a merge gate, 0 for a gate with `--no-test`.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
 	- Origin: 3b7576c. Not seen before. Confirmed.
+	- Actual cause [Bug]: The list step called `test-id.bash --list`, which had no way to narrow the list, and passed it nothing about the run.
+	- Actual fix [Bug]: `test-id.bash --list` takes `--in PATH` and `--go-name REGEX`. `cicd.bash --list` passes the areas' folders, a name filter for a run with only the fuzz or soak step, and `cicd/root-host` when either root host step runs.
+	- Decisions:
+		- The list follows the run, rather than the help saying it's every ID, since the help already promised that.
+		- Both root host steps list every root host check. The ZFS checks share `checks.bash` with the main ones, and nothing there marks which is which.
+		- The arm64 and race steps list every Go test, as they run every package.
+	- Swept: `test-id.bash --list` is called only by `cicd.bash --list` and 1a3jz1w, which still passes. The step list it reads is the one the run prints as Steps, after every `--no-<step>` flag.
+	- Branch: nov22-2026112110300065
+	- Commit: 408a7c2
+	- Test case: 1a4yzbg TestCicdListFollowsRun (cli area, merge gate, gate with no tests, fuzz and soak alone, root host checks alone)
+	- Closed: 20261122-131742
 
 - README's uninstall steps leave the minecraftd group and name a key a new config lacks
 	- ID: 2026112110300351

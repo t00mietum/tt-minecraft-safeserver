@@ -60,7 +60,9 @@ fMemCtrArgs(){
 ## A docker container is dockerd's child, not this scope's, so fMemCtrArgs
 ## caps those. A hosted runner, or a box with no user systemd (macOS, FreeBSD,
 ## Windows, a container), runs as before. systemd takes K, M and G upper-cased
-## only. Call fMemCap first.
+## only. OOMPolicy=continue, since the default of stop ends the whole scope
+## once one step is killed at the cap, and the run never sees its 137 or
+## cleans up. Call fMemCap first.
 fMemScope(){
 	local sdRun="${CICD_SYSTEMD_RUN:-systemd-run}"
 	[[ -z "${CICD_MEM_SCOPED:-}" ]] || return 0
@@ -69,9 +71,11 @@ fMemScope(){
 	if ! command -v "${sdRun}" >/dev/null 2>&1 || ! command -v choom >/dev/null 2>&1; then return 0; fi
 	"${sdRun}" --user --scope --quiet true >/dev/null 2>&1 || return 0
 	CICD_MEM_SCOPED="${memCap}"
-	exec "${sdRun}" --user --scope --quiet -p "MemoryMax=${memCap^^}" -p MemorySwapMax=0 choom -n 1000 -- bash "$@"
+	exec "${sdRun}" --user --scope --quiet -p "MemoryMax=${memCap^^}" -p MemorySwapMax=0 -p OOMPolicy=continue choom -n 1000 -- bash "$@"
 }
 
 ##	History:
 ##		- 2026-11-09: Created, for a memory cap with no swap on the run and on
 ##		  each container it starts.
+##		- 2026-11-22: OOMPolicy=continue on the scope, so a step killed at the
+##		  cap exits 137 and the run goes on.

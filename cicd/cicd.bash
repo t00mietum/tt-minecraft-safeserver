@@ -46,7 +46,8 @@
 ##	   --keep-temp         keep the run's temp folder and containers, and say where they are
 ##	   --list              print the steps and test IDs the other options would run, and run nothing
 ##	   --lint-check        print only run output that wasn't seen before, then mark it seen. For the
-##	                       startup ritual. Exit 2 when there is no log yet.
+##	                       startup ritual. A failed run is FAILED with exit 1, and one still running
+##	                       or killed is UNFINISHED and stays unseen. Exit 2 when there is no log yet.
 ##	   -h, --help          show this help
 ##	- If neither -q nor -m is given, the run prompts once for a commit message (Ctrl+C aborts the
 ##	  whole run), then finishes unattended.
@@ -349,6 +350,9 @@ goVersion="$(fReadVersion)"
 [[ -n "${goVersion}" ]] || fDie "no version in ${VERSION_FILE}"
 fCommitEpoch(){ git log -1 --format=%ct 2>/dev/null || echo 0 ;}
 fIsRelease(){ [[ "$(git branch --show-current 2>/dev/null)" == main && "$(git describe --exact-match --tags HEAD 2>/dev/null || true)" == "${goVersion}" ]] && echo 1 || echo 0 ;}
+## What a release build reads that isn't committed: untracked and ignored files too, since go build
+## takes every .go file in a folder. config.bash has the flags verify-release.bash reads from the tag.
+fReleaseDirty(){ git status --porcelain --untracked-files=all --ignored=matching -- source go.mod go.sum cicd/config.bash 2>/dev/null || echo "?? (git status failed)" ;}
 
 ## A host tool by name: on PATH, or where go install puts it.
 fHostTool(){ local f="" d
@@ -690,8 +694,12 @@ fStepCodeql(){
 
 relDir=""
 fStepBuild(){
-	local t os arch out epoch rel sum1 sum2 built=()
+	local t os arch out epoch rel dirty sum1 sum2 built=()
 	epoch="$(fCommitEpoch)"; rel="$(fIsRelease)"
+	if [[ "${rel}" == 1 ]]; then
+		dirty="$(fReleaseDirty)"
+		[[ -z "${dirty}" ]] || fDie "a release builds only what the tag has, and these differ from it: ${dirty//$'\n'/; }"
+	fi
 	relDir="${root}/${RELEASE_DIR}/${goVersion}"
 	mkdir -p -- "${relDir}"
 	for t in "${RELEASE_TARGETS[@]}"; do
@@ -944,10 +952,27 @@ for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || offNote+="${s} ($
 [[ -z "${offNote}" ]] || fEcho_Clean "Turned off ..........: ${offNote%, }"
 fEcho_Clean
 
+## The test IDs of this run's steps: every Go test where the tests run, only the Fuzz targets or
+## TestSoak where just those steps do, in the areas named, and the root host checks where either
+## root host step runs.
 if ((listOnly)); then
-	ids="$(bash "${here}/utility/test-id.bash" --list)"
-	fEcho_Clean "$(grep -c . <<< "${ids}") test(s) with IDs:"
-	while IFS= read -r l; do printf '  %s\n' "${l}"; done <<< "${ids}"
+	listArgs=(); goName=""; ids=""
+	for s in test race arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || goName=.; done
+	if [[ -z "${goName}" ]]; then
+		[[ " ${stepList[*]} " != *" fuzz "* ]] || goName+="|^Fuzz"
+		[[ " ${stepList[*]} " != *" soak "* ]] || goName+="|^TestSoak\$"
+		goName="${goName#|}"
+	fi
+	if [[ -n "${goName}" ]]; then
+		if ((${#areaDirs[@]})); then for d in "${areaDirs[@]}"; do listArgs+=(--in "${d%/...}"); done
+		else listArgs+=(--in source); fi
+		listArgs+=(--go-name "${goName}")
+	fi
+	[[ " ${stepList[*]} " != *" roothost "* && " ${stepList[*]} " != *" rootzfs "* ]] || listArgs+=(--in cicd/root-host)
+	((! ${#listArgs[@]})) || ids="$(bash "${here}/utility/test-id.bash" --list "${listArgs[@]}")"
+	n=0; [[ -z "${ids}" ]] || n="$(grep -c . <<< "${ids}")"
+	fEcho_Clean "${n} test(s) with IDs:"
+	[[ -z "${ids}" ]] || while IFS= read -r l; do printf '  %s\n' "${l}"; done <<< "${ids}"
 	fEcho_Clean
 	exit 0
 fi
@@ -1032,3 +1057,5 @@ fEcho_Clean
 ##		- 2026-11-19: CodeQL checks the vendored modules too, with known results in CODEQL_KNOWN. The soak keeps its
 ##		  heap profiles. The root host steps check the run's release build. The demo is drawn by gen-demo-gif.py.
 ##		- 2026-11-20: the run log's tee ignores Ctrl-C, so the exit trap's cleanup still runs.
+##		- 2026-11-22: a release build refuses files under source, go.mod, go.sum or config.bash that the tag doesn't have.
+##		- 2026-11-22: --list prints only the test IDs of the steps and areas the run has.

@@ -19,7 +19,11 @@
 ##		  --no-mark   with --check, do not update the marker
 ##		  --dir DIR   log directory (default: cicd/artifacts/lint next to this script)
 ##		  --file LOG  report on this log instead of the newest in DIR
-##	Exit: 0 normal, 2 skip (no dir / no logs).
+##	A run that failed or aborted is FAILED, with its failure lines, ahead of any
+##	warnings. A log with no closing "CI/CD: done." line and no failure is
+##	UNFINISHED: still running, or killed. --check doesn't mark that one seen, so
+##	the next look reports how it ended.
+##	Exit: 0 normal, 1 the run failed, 2 skip (no dir / no logs).
 ##	History: At bottom of script.
 
 ##	Copyright (c) 2026 Bubbles
@@ -71,6 +75,14 @@ else
 	ts="${nb%%$'\t'*}"; log="${nb#*$'\t'}"
 fi
 
+##	fDie's FAILED, the ERR trap's CICD ABORTED, or a step's FAIL line. The go test
+##	lines that name what failed go with them, but don't count by themselves.
+fails=""
+if grep -qE '^\[ (FAILED: |CICD ABORTED )|; FAIL [^]]*\]$' "${log}" 2>/dev/null; then
+	fails="$(grep -nE '^\[ (FAILED: |CICD ABORTED )|; FAIL [^]]*\]$|^[[:space:]]*--- FAIL: ' "${log}" || true)"
+fi
+finished=0; grep -qE '^\[ .*CI/CD: done\. \]$' "${log}" 2>/dev/null && finished=1
+
 marker="${dir}/.lint-seen"
 if ((check)) && ((! force)); then
 	seen=""; [[ -f "${marker}" ]] && seen="$(tr -d '[:space:]' < "${marker}" 2>/dev/null)"
@@ -81,7 +93,7 @@ fi
 
 ##	Record the marker now (before printing the body) so a caller that pipes stdout
 ##	to head/less and closes it early still records the look.
-if ((check)) && ((! noMark)) && [[ -n "${ts}" ]]; then
+if ((check)) && ((! noMark)) && [[ -n "${ts}" ]] && { [[ -n "${fails}" ]] || ((finished)); }; then
 	printf '%s\n' "${ts}" > "${marker}" 2>/dev/null || echo "lint-report: could not write marker: ${marker}" >&2
 fi
 
@@ -99,6 +111,19 @@ warns="$(grep -nE 'WARNING:|\bSC[0-9]{4}\b|\bMD[0-9]{3}/[a-z]|\.go:[0-9]+(:[0-9]
 	| grep -vE '^[0-9]+:[[:space:]]*((PASS|FAIL|SKIP)[: ]|ok:|soak_test\.go:[0-9]+: rounds [0-9]+ and [0-9]+: )' || true)"
 if [[ -n "${warns}" ]]; then n=$(printf '%s\n' "${warns}" | grep -c .); else n=0; fi
 
+if [[ -n "${fails}" ]]; then
+	echo "FAILED $(basename "${log}")"
+	echo
+	printf '%s\n' "${fails}"
+	if ((n)); then echo; echo "${n} warning line(s):"; echo; printf '%s\n' "${warns}"; fi
+	exit 1
+fi
+if ((! finished)); then
+	echo "UNFINISHED $(basename "${log}")  (still running, or killed; ${n} warning line(s) so far)"
+	if ((n)); then echo; printf '%s\n' "${warns}"; fi
+	exit 0
+fi
+
 tag="FLAG"; ((check)) && tag="NEW"
 if ((n)); then
 	echo "${tag} $(basename "${log}")  (${n} warning line(s))"
@@ -115,3 +140,4 @@ fi
 ##		- 20261004 JC: Every expansion braced, and shellcheck enforces it.
 ##		- 20261026 JC: Drops the suites' PASS, FAIL and SKIP lines.
 ##		- 20261119: Drops the soak's own report lines.
+##		- 20261122: A failed or aborted run is FAILED, exit 1, and a run with no closing line is UNFINISHED.
