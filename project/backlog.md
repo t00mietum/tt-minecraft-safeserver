@@ -35,6 +35,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: SetSources checks ToTextKeepLines first, as pinImage now does, and refuses or says the file would be rewritten. repair reports it as FAILED, and setup's writeSources fails setup, so pick which.
 	- Estimated effort: Low
 	- Origin: Found while sweeping for 2026112110300260. Plausible, read only.
+	- Decisions: Leave plugins.shcl as it was and print a warning that names the source line to add by hand. Sources are optional and only feed update --plugins, so neither setup nor repair fails over it. repair reports it as a warning, through repair.Warning, not FAILED.
 
 - setup's copy to /usr/local/bin leaves no binary if it stops between the move and the install
 	- ID: 2026112214220945
