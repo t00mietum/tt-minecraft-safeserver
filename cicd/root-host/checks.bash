@@ -309,19 +309,21 @@ fFirewallOff() {
 	lacks -x 'table inet tt_minecraftd' tables.out && ! systemctl is-enabled tt-minecraftd-firewall.service
 }
 
-# What install.bash runs through sudo before it swaps a build in: the old one
-# goes to a root-owned old-builds folder. A second one from the same second
-# gets a suffix, and the folder is taken as it is.
+# What install.bash runs through sudo before it swaps a build in: a copy of
+# the old one goes to a root-owned old-builds folder, and the build is left in
+# place for the rename. A second one from the same second gets a suffix, and
+# the folder is taken as it is.
 fOldBuild() {
 	local bin=/usr/local/bin/tt-minecraftd kept=/var/lib/tt-minecraftd/old-builds
 	sudo cp -p "${bin}" "${HOME}/keep.bin" || return 1
 	sudo "${bin}" retire-build "${bin}" | tee retire.out || return 1
-	[[ ! -e "${bin}" ]] && has "${kept}/tt-minecraftd\.2" retire.out || return 1
+	has "^Kept a copy of ${bin} as ${kept}/tt-minecraftd\.[0-9]\{8\}-[0-9]\{6\}\.$" retire.out || return 1
+	cmp -s "${bin}" "${HOME}/keep.bin" || { say "the build isn't left in place"; return 1; }
 	[[ "$(stat -c '%U:%G %a' "${kept}" "${kept}/..")" == $'root:root 755\nroot:root 755' ]] || { stat -c '%n %U:%G %a' "${kept}" "${kept}/.."; return 1; }
-	sudo install -m 0755 -o root -g root "${HOME}/keep.bin" "${bin}" || return 1
+	# The same mtime as the copy just kept, so the next one needs the suffix.
 	sudo touch -r "${HOME}/keep.bin" "${bin}" || return 1
 	sudo "${bin}" retire-build "${bin}" | tee retire.out || return 1
-	sudo install -m 0755 -o root -g root "${HOME}/keep.bin" "${bin}" || return 1
+	cmp -s "${bin}" "${HOME}/keep.bin" || { say "the build isn't left in place"; return 1; }
 	ls -l "${kept}"
 	[[ "$(find "${kept}" -name 'tt-minecraftd.*' | wc -l)" -eq 2 ]] && has '\.2\.$' retire.out
 }
@@ -514,3 +516,4 @@ exit "${failed}"
 ##		- 2026-11-20: A firewall counter or line number that isn't a number fails its check.
 ##		- 2026-11-22: A check that expects a refusal, or no match, fails unless the look itself
 ##		  worked: the container or server process is there, zfs list and nft ran, the file was read.
+##		- 2026-11-22: retire-build keeps a copy and leaves the build in place.
