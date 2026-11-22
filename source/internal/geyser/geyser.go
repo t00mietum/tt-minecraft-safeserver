@@ -147,6 +147,20 @@ func named(file, p string) bool {
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
+// Named says whether a jar in plugins/, by its path under serverDir, has a
+// GeyserMC project's file name, as Project needs.
+func Named(name string) bool {
+	if path.Dir(name) != "plugins" {
+		return false
+	}
+	for _, p := range Projects {
+		if named(path.Base(name), p) {
+			return true
+		}
+	}
+	return false
+}
+
 // Project is the GeyserMC project a jar in plugins/ is, when its file name
 // is the project's and the plugin name it claims is GeyserMC's own, or "".
 // claim is the jar's About, the plugin name and then its version. setup and

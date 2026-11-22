@@ -29,9 +29,12 @@ type Cmd struct {
 	Look bool
 	// Tty hands it the terminal, for sudo's password prompt or a console.
 	Tty bool
-	// ErrCopy also gets a Tty command's stderr, for a caller that tells its
+	// ErrCopy also gets the command's stderr, for a caller that tells its
 	// exits apart by what it says.
 	ErrCopy io.Writer
+	// Env is added to the command's environment, such as LC_ALL=C for a
+	// caller that reads its messages.
+	Env []string
 	// Stdin is fed to it, such as a file for install to put in place.
 	Stdin []byte
 	// Quiet keeps its stderr off the terminal, for a try that has a fallback.
@@ -94,6 +97,9 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 		return nil, nil
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- every caller builds argv from checked config
+	if len(c.Env) > 0 {
+		cmd.Env = append(os.Environ(), c.Env...)
+	}
 	cmd.Stderr = e.Err
 	if c.Tty {
 		cmd.Stdin, cmd.Stdout = os.Stdin, os.Stdout
@@ -113,6 +119,12 @@ func (e *Exec) Run(ctx context.Context, c Cmd) ([]byte, error) {
 	quiet := e.QuietErr || c.Quiet
 	if quiet || noAsk {
 		cmd.Stderr = &errText
+	}
+	switch {
+	case c.ErrCopy != nil && cmd.Stderr == nil:
+		cmd.Stderr = c.ErrCopy
+	case c.ErrCopy != nil:
+		cmd.Stderr = io.MultiWriter(cmd.Stderr, c.ErrCopy)
 	}
 	out, err := cmd.Output()
 	first, _, _ := strings.Cut(strings.TrimSpace(errText.String()), "\n")

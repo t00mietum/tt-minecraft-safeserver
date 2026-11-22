@@ -200,10 +200,7 @@ func (s *Setup) Do(ctx context.Context) error {
 		}
 	}
 	if exe != "" {
-		if err := s.retire(); err != nil {
-			return err
-		}
-		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", "-o", "root", "-g", "root", exe, s.binPath()}}); err != nil {
+		if err := s.copySelf(ctx, exe); err != nil {
 			return err
 		}
 	}
@@ -451,8 +448,8 @@ func (s *Setup) oldBuilds() string {
 	return cmp.Or(s.OldBuilds, oldbuild.Dir)
 }
 
-// replaced is where the other build in BinPath goes before the copy, or
-// empty when there's no plain file there to keep.
+// replaced is where a copy of the other build in BinPath goes before the
+// copy, or empty when there's no plain file there to keep.
 func (s *Setup) replaced() string {
 	if fi, err := os.Lstat(s.binPath()); err != nil || !fi.Mode().IsRegular() {
 		return ""
@@ -464,19 +461,27 @@ func (s *Setup) replaced() string {
 	return filepath.Join(oldbuild.Dir, filepath.Base(to))
 }
 
-// retire moves the other build in BinPath out of the way, as repair's
-// check 15 does, rather than write over it.
-func (s *Setup) retire() error {
-	if s.DryRun || s.replaced() == "" {
-		return nil
+// copySelf puts exe in BinPath as install.bash does: it keeps a copy of the
+// other build there, as repair's check 15 would, stages exe beside it, and
+// renames it into place, so there's always a build in BinPath.
+func (s *Setup) copySelf(ctx context.Context, exe string) error {
+	if !s.DryRun && s.replaced() != "" {
+		to, warn, err := oldbuild.Keep(s.binPath(), s.oldBuilds(), time.Now())
+		if err != nil {
+			return fmt.Errorf("keeping a copy of the other build: %w", err)
+		}
+		fmt.Fprintf(s.Out, "Kept a copy of %s as %s.\n", BinPath, filepath.Join(oldbuild.Dir, filepath.Base(to)))
+		if warn != nil {
+			fmt.Fprintf(s.Out, "warning: %s\n", warn)
+		}
 	}
-	to, warn, err := oldbuild.Retire(s.binPath(), s.oldBuilds(), time.Now())
-	if err != nil {
-		return fmt.Errorf("moving the other build out of the way: %w", err)
+	stage := filepath.Join(filepath.Dir(s.binPath()), "."+filepath.Base(s.binPath())+".new")
+	if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", "-o", "root", "-g", "root", exe, stage}}); err != nil {
+		return err
 	}
-	fmt.Fprintf(s.Out, "Moved %s to %s.\n", BinPath, filepath.Join(oldbuild.Dir, filepath.Base(to)))
-	if warn != nil {
-		fmt.Fprintf(s.Out, "warning: %s\n", warn)
+	if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"mv", "-f", "-T", stage, s.binPath()}}); err != nil {
+		_, _ = s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"rm", "-f", stage}}) // the move's error says more
+		return err
 	}
 	return nil
 }
@@ -518,7 +523,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 	}
 	if exe != "" {
 		if to := s.replaced(); to != "" {
-			fmt.Fprintf(w, "  - Move the other build in %s to %s, where old builds are kept.\n", BinPath, to)
+			fmt.Fprintf(w, "  - Keep a copy of the other build in %s as %s, where old builds are kept.\n", BinPath, to)
 		}
 		fmt.Fprintf(w, "  - Copy %s to %s.\n", exe, BinPath)
 	}

@@ -104,7 +104,7 @@ func Retire(path, dir string, now time.Time) (to string, warn, err error) {
 
 // Keep is Retire that copies, and leaves the build at path in place, so the
 // build replacing it goes in with one rename and there's always one there.
-// install.bash's retire-build uses it.
+// install.bash's retire-build and setup's copy use it.
 func Keep(path, dir string, now time.Time) (to string, warn, err error) {
 	return retire(path, dir, now, false)
 }

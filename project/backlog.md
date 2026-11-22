@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup's copy to /usr/local/bin leaves no binary if it stops between the move and the install
 	- ID: 2026112214220945
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261122-142209
@@ -35,6 +35,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: Keep a copy of the old build (oldbuild.Keep) and put the new one in place in one step, as install.bash now does.
 	- Estimated effort: Low
 	- Origin: f741e0d (2026111911125756), seen while fixing 2026112110300130. Plausible, read only.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-22: 1a3jzmm, 1a3f8wm and 1a4z5d8 fail on the old code, which ran the install straight onto /usr/local/bin after the move.
+	- Actual cause [Bug]: setup's copy moved the other build out with Retire and then ran install onto the path, so the path was empty between the two.
+	- Actual fix [Bug]: setup's copy keeps a copy of the other build with Keep, installs its own as .tt-minecraftd.new beside it, and renames that into place with mv -f -T, as install.bash does. A failed rename removes the staged file. The plan and output say "Keep a copy" and "Kept a copy". design.md's setup and Boot say so.
+	- Test case: 1a3jzmm, 1a3f8wm, 1a3jxs8, 1a4z5d8
+	- Swept: the 3 callers of Retire and Keep: retire-build (Keep since 11da1a9), setup's copy (now Keep), and repair check 15, which still moves, since there the build is in the way and nothing replaces it.
+	- Verified: 1a3jzmm, 1a3f8wm and 1a4z5d8 fail on the old code and pass with the fix. The quick gate's format, lint and tests pass for the touched areas, and CodeQL passes.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261122-143400
+	- Progress log:
+		- 2026-11-22: asserts updated for the change. 1a3f8wm, 1a3jxs8, 1a3jzmm and 1a4z5d8 expected install onto LocalBin, and now expect install to the staged name and then mv -f -T onto LocalBin. 1a3jzmm's plan line went from "Move the other build in ... to ..." to "Keep a copy of the other build in ... as ...", and it checks the old build is still in place rather than gone.
+	- Decisions:
+		- The staged name is the one install.bash uses, `.tt-minecraftd.new` beside the binary, so the rename stays on one filesystem.
+		- repair check 15 still moves the build, since there it's in the way of the package's and nothing takes its place.
+	- Commit: ce12629
 
 - Paper and Geyser downloads follow a redirect from https to plain http
 	- ID: 2026112213470980
@@ -498,7 +515,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - One unreadable jar stops setup --adopt and fails repair's plugin sources step
 	- ID: 2026112110300182
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -508,12 +526,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a dangling `plugins/Gone.jar` in a plugins test and in the setup rig.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 14.
+		- 2026-11-22: Since 371d384 (2026112110300013), `Within` already skips a dangling link and a folder named `*.jar`. A jar of another plugin that can't be read, such as one with mode 0000 under repair --check, still failed: 1a4z668 fails on the old code with "permission denied" and passes now.
 	- Origin: 2b322c0, now in 3b7576c. Not seen before. Confirmed.
+	- Actual cause [Bug]: `Unsourced` opened every jar in plugins/ to read its `plugin.yml`, and gave the first read error as its own.
+	- Actual fix [Bug]: `GeyserSources` has `Unsourced` read only jars with a Geyser or Floodgate file name, through the new `geyser.Named`, so another plugin's jar is never opened. A jar that's gone by the time it's read is skipped. design.md's Plugin jars says so.
+	- Decisions:
+		- Of the 2 fixes the item gives, the name filter, since it opens fewer files as root and needs no new warning path. A Geyser or Floodgate jar that can't be read still fails the step, since its source can't be judged and update --plugins then never updates it.
+	- Test case: 1a4z668 (dangling link, folder, unreadable jar beside a Geyser jar), 1a4ytyx
+	- Swept: `Unsourced` callers: `repair.GeyserSources`, which setup and repair's plugin sources step share, and the plugins tests. Other readers of every jar: `update.treeJars` already skips a jar it can't hash and says why, and `geyser.Installed` counts a jar whose `plugin.yml` can't be read by its name.
+	- Verified: 1a4z668 fails on the old code and passes with the fix. The folder and link cases passed on both. The unreadable case runs only as non-root, and ran that way.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-143900
+	- Commit: 23ae0ae
 
 - repair's ownership fix fails while Paper renames files, and skips the mode fix
 	- ID: 2026112110300195
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -523,7 +555,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: with a rename loop, coreutils 9.7 `chown -R` failed 46 of 60 runs. A root host run of repair under the same loop said the fix failed.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 15.
+		- 2026-11-22: 1a4z6cg runs the real `chown -R` and `chmod -R` on the test's own account while a loop renames files. On the old code it failed on its first runs with "No such file or directory", and it passes 100 runs now.
 	- Origin: 1099186. The other half of 2026112017592200, whose sweep covered the walks but not these commands. Confirmed.
+	- Actual cause [Bug]: coreutils exits 1 when a file it listed is gone before it gets to it, and `handOver` took that exit as the fix failing and returned before `chmod -R`.
+	- Actual fix [Bug]: `handOver` reads each command's messages in the C locale, and a run whose only errors are "No such file or directory" counts as done. `chmod -R` runs even when `chown -R` fails, and every tree is tried, with the errors joined. `host.Cmd` gets `Env`, and `ErrCopy` now gets stderr for every command, not only a Tty one. design.md's Tree ownership says so.
+	- Decisions:
+		- The messages are read rather than the tree walked again in Go, since the commands run through sudo and the caller may not be able to read the tree.
+		- A message in another language, as when sudo drops `LC_ALL`, counts as a failure, as before.
+		- A real failure's error keeps the runner's error and adds up to 3 of the other lines.
+	- Test case: 1a4z6cg
+	- Swept: `chown -R` and `chmod -R` in the source: only `handOver`, which `ToServer` and `ToOperator` share for start in both modes, stop, setup and repair's ownership check. Other recursive walks were covered by 2026112017592200.
+	- Verified: 1a4z6cg fails on the old code and passes 3 runs in a row with the fix. The launch, repair and tree tests pass. Only the non-root path ran, with no sudo between, so `LC_ALL` going through sudo wasn't run.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-144000
+	- Commit: 264d080
 
 - status, watch and cmd as root print any file that latest.log links to
 	- ID: 2026112110300208

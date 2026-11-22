@@ -335,7 +335,7 @@ func TestWithinTrees(t *testing.T) {
 	}
 
 	// The outside Geyser jar would get a source if it were read.
-	got, err := Unsourced(dir, []string{other}, filepath.Join(base, "plugins.shcl"))
+	got, err := Unsourced(dir, []string{other}, filepath.Join(base, "plugins.shcl"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestWithinTrees(t *testing.T) {
 	if err := os.Rename(filepath.Join(outside, "Geyser-Spigot.jar"), filepath.Join(dir, "plugins", "Geyser-Spigot.jar")); err != nil {
 		t.Fatal(err)
 	}
-	if got, err = Unsourced(dir, nil, filepath.Join(base, "plugins.shcl")); err != nil || len(got) == 0 {
+	if got, err = Unsourced(dir, nil, filepath.Join(base, "plugins.shcl"), nil); err != nil || len(got) == 0 {
 		t.Errorf("Unsourced with the jar inside = %+v, %v", got, err)
 	}
 }

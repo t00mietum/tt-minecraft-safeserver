@@ -295,9 +295,11 @@ func closeKey(serverDir string) error {
 }
 
 // GeyserSources are the Geyser and Floodgate jars in plugins/ that file gives
-// no source, as on an adopted tree, each with source's for its project.
+// no source, as on an adopted tree, each with source's for its project. Only
+// jars named as GeyserMC's are read, so one other jar that can't be read
+// doesn't stop setup or this step.
 func GeyserSources(serverDir string, trees []string, file string, source func(project string) string) ([]plugins.Info, error) {
-	all, err := plugins.Unsourced(serverDir, trees, file)
+	all, err := plugins.Unsourced(serverDir, trees, file, geyser.Named)
 	if err != nil {
 		return nil, err
 	}

@@ -206,7 +206,9 @@ func TestNewInstall(t *testing.T) {
 		"sudo install -d -o alice -g minecraftd -m 0770 "+r.server,
 		"sudo podman pull docker.io/library/eclipse-temurin:",
 		// 2026-11-19: was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd" (2026111911125756, 2026111715275548).
-		"sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin,
+		// 2026-11-22: was "... <exe> <LocalBin>", now staged and renamed (2026112214220945).
+		"sudo install -m 0755 -o root -g root "+r.s.Exe+" "+filepath.Join(r.dir, ".usr-local-bin-tt-minecraftd.new"),
+		"sudo mv -f -T "+filepath.Join(r.dir, ".usr-local-bin-tt-minecraftd.new")+" "+r.s.LocalBin,
 	)
 	if slices.ContainsFunc(r.ran(), func(s string) bool { return strings.Contains(s, "apt-get") }) {
 		t.Errorf("apt-get ran with podman and catatonit there:\n%s", strings.Join(r.ran(), "\n"))
@@ -1036,7 +1038,8 @@ func TestPackageInstall(t *testing.T) {
 			}
 		}
 		// 2026-11-19: was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd" (2026111911125756, 2026111715275548).
-		copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
+		// 2026-11-22: was the install straight to LocalBin, now staged and renamed (2026112214220945).
+		copied := copiedIn(r)
 		said := strings.Contains(r.out.String(), "Copy "+r.s.Exe+" to "+BinPath)
 		bin := map[bool]string{false: "/usr/local/bin/tt-minecraftd", true: "/usr/bin/tt-minecraftd"}[pkg]
 		if copied == pkg || said == pkg || !strings.Contains(unit, "\nExecStart="+bin+" start --foreground\n") {
@@ -1045,9 +1048,10 @@ func TestPackageInstall(t *testing.T) {
 	}
 }
 
-// Another build in /usr/local/bin is moved to the old-builds folder before
-// the copy, rather than written over. The same build, by SHA-256, is left
-// alone, and a dry run only says what it would do.
+// A copy of another build in /usr/local/bin is kept in the old-builds folder
+// before the copy, and the build stays in place until the new one is renamed
+// over it. The same build, by SHA-256, is left alone, and a dry run only says
+// what it would do.
 func TestCopyKeepsOldBuild(t *testing.T) {
 	defer testid.Line(t, "1a3jzmm")
 	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
@@ -1083,16 +1087,13 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 		}
 		b, err := os.ReadFile(filepath.Join(r.s.OldBuilds, kept))
 		moved := err == nil && string(b) == c.old
-		copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
-		planMoved := strings.Contains(r.out.String(), "Move the other build in "+BinPath+" to /var/lib/tt-minecraftd/old-builds/"+kept+", where old builds are kept.")
+		copied := copiedIn(r)
+		planMoved := strings.Contains(r.out.String(), "Keep a copy of the other build in "+BinPath+" as /var/lib/tt-minecraftd/old-builds/"+kept+", where old builds are kept.")
 		if moved != c.moved || copied != c.copied || planMoved != c.planMoved {
 			t.Errorf("%s: moved %v, copied %v, in the plan %v\n%s\n%s", c.name, moved, copied, planMoved, strings.Join(r.ran(), "\n"), r.out)
 		}
-		if c.moved {
-			if _, err := os.Lstat(r.s.LocalBin); !os.IsNotExist(err) {
-				t.Errorf("%s: still in place: %v", c.name, err)
-			}
-		} else if c.old != "" {
+		// The fake runner doesn't rename, so the old build is what's left.
+		if c.old != "" {
 			if b, _ := os.ReadFile(r.s.LocalBin); string(b) != c.old {
 				t.Errorf("%s: changed to %q", c.name, b)
 			}
@@ -1100,7 +1101,16 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 	}
 }
 
-// A move whose rotation then fails is a warning, and setup goes on to its
+// copiedIn says whether setup staged its build beside LocalBin and renamed it
+// into place, with nothing run on LocalBin in between.
+func copiedIn(r *rig) bool {
+	stage := filepath.Join(filepath.Dir(r.s.LocalBin), "."+filepath.Base(r.s.LocalBin)+".new")
+	ran := r.ran()
+	i := slices.Index(ran, "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+stage)
+	return i >= 0 && i+1 < len(ran) && ran[i+1] == "sudo mv -f -T "+stage+" "+r.s.LocalBin
+}
+
+// A copy whose rotation then fails is a warning, and setup goes on to its
 // copy, since the other build was kept.
 func TestCopyRotateFails(t *testing.T) {
 	defer testid.Line(t, "1a4z5d8")
@@ -1117,7 +1127,7 @@ func TestCopyRotateFails(t *testing.T) {
 	if err := r.s.Do(context.Background()); err != nil {
 		t.Fatalf("%v\n%s", err, r.out)
 	}
-	copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
+	copied := copiedIn(r)
 	if !copied || !strings.Contains(r.out.String(), "warning: couldn't prune the old builds in "+r.s.OldBuilds+": operation not permitted") {
 		t.Errorf("copied %v\n%s", copied, r.out)
 	}

@@ -260,7 +260,7 @@ Common:  --config PATH, --set KEY=VALUE
 	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else, unless the `.deb` or `.rpm` package has put it in `/usr/bin`. See [Boot](#boot).
-		- The copy is owned by root. A different build already there is moved to the old-builds folder first, the same as `repair` does in check 15. The same build, by SHA-256, is left alone, and no copy is made.
+		- The copy is owned by root. A copy of a different build already there is kept in the old-builds folder first, the one `repair` uses in check 15. The new build is then staged beside it and renamed over it, as the install script does, so there is always a build there. The same build, by SHA-256, is left alone, and no copy is made.
 	13. Ends with `repair --check`.
 
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
@@ -683,6 +683,7 @@ cicd/                        build, test, and release scripts
 		- Container `start` reads the tree before it changes hands. After a crash the tree is still the server's, so when that read is refused, `start` gives the same reason.
 
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
+	- A file that's gone by the time `chown -R` or `chmod -R` gets to it, as when the running server renames one during `repair`, doesn't fail the change. The mode change still runs when the ownership change fails.
 
 - In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in container mode.
 
@@ -752,7 +753,7 @@ cicd/                        build, test, and release scripts
 
 	- An entry with a path outside `serverDir` gets a warning and is left out. A source that isn't `https` is ignored.
 	- A list from before 2026-11-19 has a `sha256` per jar. It's read and not checked.
-	- `setup` and `repair` give a jar in `plugins/` GeyserMC's source when it has none, when its file name is `geyser` or `floodgate` and then anything but a letter or digit, and its `plugin.yml` name is `Geyser-Spigot` or `floodgate`, ignoring case. An add-on such as GeyserExtras or GeyserSkinManager-Spigot names its own plugin, so it doesn't count. A jar with a source keeps it.
+	- `setup` and `repair` give a jar in `plugins/` GeyserMC's source when it has none, when its file name is `geyser` or `floodgate` and then anything but a letter or digit, and its `plugin.yml` name is `Geyser-Spigot` or `floodgate`, ignoring case. An add-on such as GeyserExtras or GeyserSkinManager-Spigot names its own plugin, so it doesn't count. A jar with a source keeps it. Only jars with those file names are opened, so another jar that can't be read doesn't stop `setup` or `repair`.
 
 - Paper also loads code that it writes into the tree itself, and it doesn't check it again:
 	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256).
@@ -910,7 +911,7 @@ cicd/                        build, test, and release scripts
 		- The packages follow the FHS and Debian policy, which give a package `/usr/bin` and leave `/usr/local/bin` to hand installs. A package upgrade then changes what the unit runs. `start` and `stop` take a unit that runs either path as this config's.
 		- `setup` and the install script always install it owned by root, even where the folder lets the operator write, since `setup`'s sudo run and the boot unit run it.
 		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` moves one it finds to the old-builds folder. The install script stops before its plan when the package's is there, and says to update through the package manager.
-	- A hand-installed build that's replaced or in the way is kept, not deleted. `repair`, `setup`'s copy and the install script move it to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, with the mtime as `YYYYmmDD-HHMMSS`. Someone who put it there on purpose can copy it back.
+	- A hand-installed build that's replaced or in the way is kept, not deleted. `repair` moves it, and `setup`'s copy and the install script keep a copy of it, in `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, with the mtime as `YYYYmmDD-HHMMSS`. Someone who put it there on purpose can copy it back.
 		- The folder is off PATH, and it's the same on every distro. It's made root-owned, mode 0755, when it's missing. `/var` can be on another filesystem, so the move falls back to a copy and then a remove.
 		- After each move the folder is GFS-rotated, as cicd keeps its demo renders: the newest build in each of the last few finished hours, days, weeks, months, and years, plus the newest 10 and the very first. The build just moved is always kept, even when its mtime is older than those.
 		- The install script has the build it's about to install keep the old one, through a command left out of the help, so the rules live in one place. That command copies rather than moves, so renaming the new build over the old one is the only change to the path, and a build is always there.
