@@ -413,7 +413,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 10. Detail in detail_backlog.md.
 		- Verified: 1a4z53w, 1a3jzqr, 1a4z5a4 and 1a4z5d8 fail with the rotation's error returned as the error, and pass now. 1a3jrx0 passes with the rig's retire-build copying. The quick gate passes, CodeQL included.
-		- 2026-11-22: 1a3jzqr expected "Moved <bin> to <kept>." and now expects "Kept a copy of <bin> as <kept>.", with the build left in place. Its other checks are unchanged. The install rig's retire-build copies rather than moves.
+		- 2026-11-22: 1a3jzqr expected `Moved <bin> to <kept>.` and now expects `Kept a copy of <bin> as <kept>.`, with the build left in place. Its other checks are unchanged. The install rig's retire-build copies rather than moves.
 	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed for install.bash, Plausible for the trigger.
 	- Sweep: the 3 callers of `Retire`.
 	- Closed reason: Done
