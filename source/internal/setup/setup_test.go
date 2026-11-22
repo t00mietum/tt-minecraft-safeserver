@@ -153,6 +153,10 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 			return nil
 		},
 	}
+	// No root here, so a build the test owns counts as root's.
+	wasUID := oldbuild.RootUID
+	oldbuild.RootUID = os.Getuid()
+	t.Cleanup(func() { oldbuild.RootUID = wasUID })
 	was, wasCat, wasNft := launch.Installed, hasCatatonit, hasNft
 	launch.Installed = func(name string) bool { return slices.Contains(tools, name) }
 	hasCatatonit = func() bool { return slices.Contains(tools, "catatonit") }
@@ -1050,8 +1054,9 @@ func TestPackageInstall(t *testing.T) {
 
 // A copy of another build in /usr/local/bin is kept in the old-builds folder
 // before the copy, and the build stays in place until the new one is renamed
-// over it. The same build, by SHA-256, is left alone, and a dry run only says
-// what it would do.
+// over it. The same build, by SHA-256, is left alone when it's a regular file
+// that only root can change. Otherwise it's replaced, with no copy kept. A
+// dry run only says what it would do.
 func TestCopyKeepsOldBuild(t *testing.T) {
 	defer testid.Line(t, "1a3jzmm")
 	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
@@ -1059,23 +1064,40 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 	for _, c := range []struct {
 		name      string
 		old       string
+		mode      os.FileMode
+		link      bool
+		notRoot   bool
 		dry       bool
 		moved     bool
 		copied    bool
 		planMoved bool
 	}{
-		{"another build", "old build", false, true, true, true},
-		{"the same build", "this build", false, false, false, false},
-		{"dry run", "old build", true, false, true, true},
-		{"none there", "", false, false, true, false},
+		{"another build", "old build", 0o755, false, false, false, true, true, true},
+		{"the same build", "this build", 0o755, false, false, false, false, false, false},
+		{"the same build, group-writable", "this build", 0o775, false, false, false, false, true, false},
+		{"the same build, not root's", "this build", 0o755, false, true, false, false, true, false},
+		{"a link to the same build", "this build", 0, true, false, false, false, true, false},
+		{"dry run", "old build", 0o755, false, false, true, false, true, true},
+		{"none there", "", 0, false, false, false, false, true, false},
 	} {
 		r := newRig(t, []string{"podman", "catatonit"}, "")
 		r.s.Yes, r.s.AcceptEULA, r.s.DryRun = true, true, c.dry
+		if c.notRoot {
+			oldbuild.RootUID = os.Getuid() + 1
+		}
 		if err := os.WriteFile(r.s.Exe, []byte("this build"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if c.old != "" {
-			if err := os.WriteFile(r.s.LocalBin, []byte(c.old), 0o755); err != nil {
+		switch {
+		case c.link:
+			if err := os.Symlink(r.s.Exe, r.s.LocalBin); err != nil {
+				t.Fatal(err)
+			}
+		case c.old != "":
+			if err := os.WriteFile(r.s.LocalBin, []byte(c.old), c.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(r.s.LocalBin, c.mode); err != nil { // past the umask
 				t.Fatal(err)
 			}
 			if err := os.Chtimes(r.s.LocalBin, mtime, mtime); err != nil {

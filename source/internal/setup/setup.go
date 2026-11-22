@@ -420,9 +420,10 @@ func (s *Setup) unsourced(c config.Config) ([]plugins.Info, error) {
 	return repair.GeyserSources(c.ServerDir, c.OwnerTrees, s.PluginsFile, s.Geyser.Source)
 }
 
-// copyTarget is the binary to copy to BinPath, or empty when it runs from
-// there already. A package's binary leaves the copy out, since one in
-// BinPath would come first on PATH and outlast the next package upgrade.
+// copyTarget is the binary to copy to BinPath, or empty when BinPath holds
+// it already, by oldbuild.Current. A package's binary leaves the copy out,
+// since one in BinPath would come first on PATH and outlast the next package
+// upgrade.
 func (s *Setup) copyTarget() string {
 	if s.Exe == "" || boot.Bin(s.PkgBin) == boot.PkgBin {
 		return ""
@@ -431,10 +432,9 @@ func (s *Setup) copyTarget() string {
 	if err != nil {
 		exe = s.Exe
 	}
-	if bin, err := filepath.EvalSymlinks(s.binPath()); err == nil && bin == exe {
-		return ""
-	}
-	if oldbuild.Same(exe, s.binPath()) {
+	// Even when it runs from BinPath: a link there, or a file the operator
+	// can change, gets a root-owned copy in its place.
+	if oldbuild.Current(exe, s.binPath()) {
 		return ""
 	}
 	return exe
@@ -449,9 +449,10 @@ func (s *Setup) oldBuilds() string {
 }
 
 // replaced is where a copy of the other build in BinPath goes before the
-// copy, or empty when there's no plain file there to keep.
-func (s *Setup) replaced() string {
-	if fi, err := os.Lstat(s.binPath()); err != nil || !fi.Mode().IsRegular() {
+// copy, or empty when there's no plain file there to keep, or it's exe's
+// bytes and only its owner or mode is wrong.
+func (s *Setup) replaced(exe string) string {
+	if fi, err := os.Lstat(s.binPath()); err != nil || !fi.Mode().IsRegular() || oldbuild.Same(exe, s.binPath()) {
 		return ""
 	}
 	to, err := oldbuild.Where(s.binPath(), s.oldBuilds())
@@ -465,7 +466,7 @@ func (s *Setup) replaced() string {
 // other build there, as repair's check 15 would, stages exe beside it, and
 // renames it into place, so there's always a build in BinPath.
 func (s *Setup) copySelf(ctx context.Context, exe string) error {
-	if !s.DryRun && s.replaced() != "" {
+	if !s.DryRun && s.replaced(exe) != "" {
 		to, warn, err := oldbuild.Keep(s.binPath(), s.oldBuilds(), time.Now())
 		if err != nil {
 			return fmt.Errorf("keeping a copy of the other build: %w", err)
@@ -522,7 +523,7 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Install and enable %s, which starts the server at boot.\n", boot.UnitName)
 	}
 	if exe != "" {
-		if to := s.replaced(); to != "" {
+		if to := s.replaced(exe); to != "" {
 			fmt.Fprintf(w, "  - Keep a copy of the other build in %s as %s, where old builds are kept.\n", BinPath, to)
 		}
 		fmt.Fprintf(w, "  - Copy %s to %s.\n", exe, BinPath)

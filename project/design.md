@@ -261,7 +261,7 @@ Common:  --config PATH, --set KEY=VALUE
 	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else, unless the `.deb` or `.rpm` package has put it in `/usr/bin`. See [Boot](#boot).
-		- The copy is owned by root. A copy of a different build already there is kept in the old-builds folder first, the one `repair` uses in check 15. The new build is then staged beside it and renamed over it, as the install script does, so there is always a build there. The same build, by SHA-256, is left alone, and no copy is made.
+		- The copy is owned by root. A copy of a different build already there is kept in the old-builds folder first, the one `repair` uses in check 15. The new build is then staged beside it and renamed over it, as the install script does, so there is always a build there. The same build, by SHA-256, is left alone, and no copy is made, but only in a regular file owned by root with no group or other write. A link to it, or a file someone else could change, is written over the same way, with no copy kept, since nothing is lost.
 	13. Ends with `repair --check`.
 
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
@@ -912,7 +912,7 @@ cicd/                        build, test, and release scripts
 	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
 	- The unit runs the tool from `/usr/bin` when the `.deb` or `.rpm` package put it there, and otherwise from `/usr/local/bin`, where `setup` and the install script put it. It adds `--config` when the config isn't the default one.
 		- The packages follow the FHS and Debian policy, which give a package `/usr/bin` and leave `/usr/local/bin` to hand installs. A package upgrade then changes what the unit runs. `start` and `stop` take a unit that runs either path as this config's.
-		- `setup` and the install script always install it owned by root, even where the folder lets the operator write, since `setup`'s sudo run and the boot unit run it.
+		- `setup` and the install script always install it owned by root, even where the folder lets the operator write, since `setup`'s sudo run and the boot unit run it. A build already there counts as current only when it's the same by SHA-256, in a regular file owned by root with no group or other write.
 		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` moves one it finds to the old-builds folder. The install script stops before its plan when the package's is there, and says to update through the package manager.
 	- A hand-installed build that's replaced or in the way is kept, not deleted. `repair` moves it, and `setup`'s copy and the install script keep a copy of it, in `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, with the mtime as `YYYYmmDD-HHMMSS`. Someone who put it there on purpose can copy it back.
 		- The folder is off PATH, and it's the same on every distro. It's made root-owned, mode 0755, when it's missing. `/var` can be on another filesystem, so the move falls back to a copy and then a remove.

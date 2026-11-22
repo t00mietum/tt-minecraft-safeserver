@@ -958,7 +958,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Accept a same-bytes build in /usr/local/bin only when root owns it and nobody else can write it
 	- ID: 2026112110300377
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -967,6 +968,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- install.bash and setup's copy count a build as current by SHA-256 alone, a link to one included. Also require a regular file owned by root with no group or other write, since root runs it.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 29. Dogfood's `cp -f` makes such a file where `/usr/local/bin` is writable.
+		- Done: install.bash and setup's copy leave the build in place only when it has the same SHA-256 and is a regular file owned by root with no group or other write (`oldbuild.Current`, install.bash's `fRootOnly`). Otherwise they put the build back as root's. The release's own bytes aren't kept in the old-builds folder, since nothing is lost. design.md's setup and Boot, and README's install section, say so. installerVersion goes to 1.2.1.
+		- Verified: 1a4za6c passes. The 4 new 1a3jrx0 cases fail with install.bash's SHA-256-only check put back, and pass now, under Bash 3.2 with busybox tools too. 1a3jzmm's 3 new cases fail with setup's SHA-256-only check put back, and 2 fail when a same-bytes file is kept. The quick gate passes, CodeQL included.
+		- Not verified: a real root-owned file. The tests have no root, so their own uid stands in for root's (`oldbuild.RootUID`, install.bash's `rootUid`).
+	- Decisions:
+		- 2026-11-22: A file with the release's bytes but the wrong owner, mode or a link is written over with no copy kept, since a copy would only hold the same bytes.
+		- 2026-11-22: Running setup from `/usr/local/bin` itself no longer skips the copy on its own. It goes by the same rule, so a link or an operator-owned file there is replaced too.
+	- Swept: every same-build check on `/usr/local/bin`: setup's `copyTarget`, which also had a link-follow skip, and install.bash's `current`. repair check 15 compares against the package's binary and moves a different build, so it's left as is. `oldbuild.Same` has no other caller.
+	- Test case: 1a4za6c, 1a3jzmm, 1a3jrx0
+	- Branch: nov22-2026112110300377
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: the new cases fail on the old checks and pass now.
+	- Closed: 20261122-151149
 
 - Remove the code that plugin approval left with no caller
 	- ID: 2026112110300390

@@ -59,6 +59,25 @@ func Where(path, dir string) (string, error) {
 	return filepath.Join(dir, Name(fi.ModTime())), nil
 }
 
+// RootUID is for tests, which have no root. It's who must own a build for
+// Current.
+var RootUID = 0
+
+// Current says whether the build at path is exe's and can be left in place:
+// the same SHA-256, in a regular file rather than a link, owned by RootUID,
+// and with no group or other write, since root runs it.
+func Current(exe, path string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o022 != 0 {
+		return false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || int64(st.Uid) != int64(RootUID) {
+		return false
+	}
+	return Same(exe, path)
+}
+
 // Same says whether the files at a and b have the same SHA-256. One that
 // can't be read isn't the same.
 func Same(a, b string) bool {

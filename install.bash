@@ -28,7 +28,7 @@
 
 set -Eeuo pipefail
 
-installerVersion="1.2.0"
+installerVersion="1.2.1"
 exeName="tt-minecraftd"
 repo="t00mietum/tt-minecraft-safeserver"
 apiUrl="https://api.github.com/repos/${repo}/releases?per_page=100"
@@ -37,6 +37,8 @@ dlBase="https://github.com/${repo}/releases/download"
 destDir="/usr/local/bin"
 ## Where the .deb and .rpm put it.
 pkgBin="/usr/bin/tt-minecraftd"
+## Who has to own a current build. The test has no root, so it gives its own uid.
+rootUid=0
 ## For the plan only. The new build's retire-build owns the folder.
 oldDir="/var/lib/tt-minecraftd/old-builds"
 osRelease="/etc/os-release"
@@ -194,6 +196,7 @@ fMain(){
 	elif command -v wget > /dev/null; then fetcher=wget
 	else fDie "curl or wget is needed"; fi
 	command -v sha256sum > /dev/null || fDie "sha256sum is needed"
+	command -v stat > /dev/null || fDie "stat is needed"
 
 	## What setup would get through apt. It takes Podman over Docker when both are there.
 	if ((anyDistro)); then
@@ -245,7 +248,8 @@ fMain(){
 		## "tt-minecraftd v1.0.0-alpha.1 build df7q6 (2026-11-12)", then the copyright.
 		haveVer="$("${destPath}" --version 2> /dev/null || true)"; haveVer="${haveVer%%$'\n'*}"; haveVer="${haveVer#"${exeName} "}"; haveVer="${haveVer%% *}"
 		if [[ -r "${destPath}" ]]; then haveSum="$(sha256sum < "${destPath}" || true)"; haveSum="${haveSum%% *}"; fi
-		[[ "${haveSum}" != "${want}" ]] || current=1
+		## The release's bytes count only in a plain file that only root can change, since root runs it.
+		if [[ "${haveSum}" == "${want}" ]] && fRootOnly "${destPath}"; then current=1; fi
 	fi
 	## Always root's, even where the folder lets the operator write, since setup's sudo run and the boot unit run it.
 	if ((! current)) && [[ "$(id -u)" != 0 ]]; then
@@ -253,7 +257,8 @@ fMain(){
 		command -v sudo > /dev/null || fDie "the binary is installed as root, and there's no sudo. Run this as root."
 	fi
 	local retire=0
-	if ((! current)) && [[ -f "${destPath}" && ! -L "${destPath}" ]]; then retire=1; fi
+	## The release's own bytes lose nothing when written over, so only another build is kept.
+	if ((! current)) && [[ -f "${destPath}" && ! -L "${destPath}" && "${haveSum}" != "${want}" ]]; then retire=1; fi
 
 	## The plan.
 	fEcho "Plan"
@@ -267,6 +272,7 @@ fMain(){
 		local how="" was="${haveVer:+ (replacing ${haveVer})}"
 		if ((useSudo)); then how=", through sudo"; fi
 		if [[ "${haveVer}" == "${tag}" ]]; then was=" (replacing a ${tag} build that isn't the release's)"; fi
+		if [[ "${haveSum}" == "${want}" ]]; then was=" (the release's build, put back as root's, since someone else could change it)"; fi
 		fEcho_Clean "    Install ....: ${destPath}${was}${how}"
 		if ((retire)); then fEcho_Clean "    Old build ..: moves to ${oldDir}, where old builds are kept"; fi
 	fi
@@ -330,6 +336,18 @@ fMain(){
 	echo
 }
 
+## True when the path is a regular file, not a link, owned by rootUid, with no group or other write.
+fRootOnly(){
+	local path="$1" st uid mode
+	[[ -f "${path}" && ! -L "${path}" ]] || return 1
+	st="$(stat -c '%u %a' -- "${path}" 2> /dev/null)" || return 1
+	uid="${st%% *}"; mode="${st#* }"
+	## Checked as text first, since an arithmetic test would run what's in it.
+	[[ "${uid}" =~ ^[0-9]+$ && "${mode}" =~ ^[0-7]+$ ]] || return 1
+	[[ "${uid}" == "${rootUid}" ]] || return 1
+	(( (8#${mode} & 8#022) == 0 ))
+}
+
 ## Takes out only the file it fetched and the folder it made, under the temp folder it named.
 ## A failed cleanup doesn't change how the run ended.
 fWorkGone(){
@@ -364,3 +382,5 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##		  With wget, a redirect away from https fails the download, as it does with curl.
 ##		  retire-build keeps a copy of the old build and leaves it in place, so the rename of the new one
 ##		  is the only change to /usr/local/bin/tt-minecraftd, and there's always a binary there.
+##		- 2026-11-22: The release's build already there counts as current only in a plain file owned by
+##		  root with no group or other write. Otherwise it's put back as root's, with no copy kept.

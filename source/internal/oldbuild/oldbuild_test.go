@@ -279,3 +279,46 @@ func TestRotate(t *testing.T) {
 		t.Errorf("a second run pruned %v %v", again, err)
 	}
 }
+
+// A build counts as current only in a regular file with exe's bytes, owned
+// by root and with no group or other write. The test has no root, so its own
+// uid stands in.
+func TestCurrent(t *testing.T) {
+	defer testid.Line(t, "1a4za6c")
+	was := RootUID
+	t.Cleanup(func() { RootUID = was })
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "exe")
+	put(t, exe, "this build", 0o755, time.Now())
+	me := os.Getuid()
+	for _, c := range []struct {
+		name string
+		text string // empty is a link to exe
+		mode os.FileMode
+		uid  int
+		want bool
+	}{
+		{"root's, 0755", "this build", 0o755, me, true},
+		{"another build", "old build", 0o755, me, false},
+		{"group write", "this build", 0o775, me, false},
+		{"other write", "this build", 0o757, me, false},
+		{"not root's", "this build", 0o755, me + 1, false},
+		{"a link to it", "", 0, me, false},
+	} {
+		path := filepath.Join(t.TempDir(), "tt-minecraftd")
+		if c.text == "" {
+			if err := os.Symlink(exe, path); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			put(t, path, c.text, c.mode, time.Now())
+		}
+		RootUID = c.uid
+		if got := Current(exe, path); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	if Current(exe, filepath.Join(dir, "missing")) {
+		t.Error("a missing build is current")
+	}
+}

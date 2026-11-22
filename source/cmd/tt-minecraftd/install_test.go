@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -27,6 +28,7 @@ type installRig struct {
 	bin, rel, dest, log, tty  string
 	old                       string
 	noRetire                  bool
+	rootUID                   int // who counts as root; the rig's own uid by default
 	osRelease, arch, bashPath string
 	systemd, sys              string
 	releases                  []rigRelease
@@ -83,7 +85,7 @@ func newInstallRig(t *testing.T, fetcher string) *installRig {
 	dir := t.TempDir()
 	r := &installRig{t: t, bin: filepath.Join(dir, "bin"), rel: filepath.Join(dir, "rel"), dest: filepath.Join(dir, "usr-local-bin"),
 		log: filepath.Join(dir, "log"), old: filepath.Join(dir, "old-builds"), tty: filepath.Join(dir, "tty"), osRelease: filepath.Join(dir, "os-release"), arch: "x86_64",
-		systemd: filepath.Join(dir, "run-systemd-system"), sys: filepath.Join(dir, "sys")}
+		systemd: filepath.Join(dir, "run-systemd-system"), sys: filepath.Join(dir, "sys"), rootUID: os.Getuid()}
 	var err error
 	if r.bashPath, err = exec.LookPath("bash"); err != nil {
 		t.Skip("no bash")
@@ -93,7 +95,7 @@ func newInstallRig(t *testing.T, fetcher string) *installRig {
 			t.Fatal(err)
 		}
 	}
-	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat", "mv", "tr"} {
+	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat", "mv", "tr", "stat"} {
 		p, err := exec.LookPath(tool)
 		if err != nil {
 			t.Fatalf("%s: %v", tool, err)
@@ -173,8 +175,8 @@ func (r *installRig) run(args ...string) (string, int) {
 		r.t.Fatal(err)
 	}
 	// catatonit, nft and the package's binary are looked for in r.sys only, so the host's don't count.
-	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; systemdDir="$5"; catatonitPaths="$6/catatonit"; nftPaths="$6/nft"; pkgBin="$6/tt-minecraftd"; shift 6; fMain "$@"`,
-		"rig", script, r.dest, r.osRelease, r.tty, r.systemd, r.sys}, args...)
+	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; systemdDir="$5"; catatonitPaths="$6/catatonit"; nftPaths="$6/nft"; pkgBin="$6/tt-minecraftd"; rootUid="$7"; shift 7; fMain "$@"`,
+		"rig", script, r.dest, r.osRelease, r.tty, r.systemd, r.sys, strconv.Itoa(r.rootUID)}, args...)
 	// #nosec G204 -- test runs the repo's own script
 	cmd := exec.Command(r.bashPath, all...)
 	tmp := r.t.TempDir()
@@ -299,6 +301,60 @@ func TestInstallScript(t *testing.T) {
 			t.Errorf("plan doesn't say it's current:\n%s", out)
 		}
 	})
+
+	// root runs it, so the release's bytes count only in a plain file only root can change.
+	for _, c := range []struct {
+		name string
+		make func(r *installRig, dest, release string) error
+	}{
+		{"group-writable", func(_ *installRig, dest, release string) error {
+			if err := os.WriteFile(dest, []byte(release), 0o775); err != nil {
+				return err
+			}
+			return os.Chmod(dest, 0o775)
+		}},
+		{"other-writable", func(_ *installRig, dest, release string) error {
+			if err := os.WriteFile(dest, []byte(release), 0o757); err != nil {
+				return err
+			}
+			return os.Chmod(dest, 0o757)
+		}},
+		{"not root's", func(r *installRig, dest, release string) error {
+			r.rootUID = os.Getuid() + 1
+			return os.WriteFile(dest, []byte(release), 0o755)
+		}},
+		{"a link to it", func(r *installRig, dest, release string) error {
+			own := filepath.Join(r.t.TempDir(), "mine")
+			if err := os.WriteFile(own, []byte(release), 0o755); err != nil {
+				return err
+			}
+			return os.Symlink(own, dest)
+		}},
+	} {
+		t.Run("the release's build "+c.name+" is put back as root's, with no copy kept", func(t *testing.T) {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			dest := filepath.Join(r.dest, "tt-minecraftd")
+			release, err := os.ReadFile(filepath.Join(r.rel, "v1.0.0", "tt-minecraftd-linux-amd64"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.make(r, dest, string(release)); err != nil {
+				t.Fatal(err)
+			}
+			out, code := r.run("--yes")
+			fi, err := os.Lstat(dest)
+			if code != 0 || err != nil || !fi.Mode().IsRegular() || r.installed() != "v1.0.0" || !strings.Contains(r.logText(), "/tt-minecraftd-linux-amd64") {
+				t.Fatalf("code %d, %v\n%s\n%s", code, err, out, r.logText())
+			}
+			if !strings.Contains(r.logText(), "sudo install -m 0755 -o root -g root") || strings.Contains(r.logText(), "retire-build") || strings.Contains(out, "already v1.0.0") {
+				t.Errorf("not put back through sudo, or a copy was kept:\n%s\n%s", out, r.logText())
+			}
+			if !strings.Contains(out, "the release's build, put back as root's") {
+				t.Errorf("the plan doesn't say why:\n%s", out)
+			}
+		})
+	}
 
 	t.Run("an older install is replaced", func(t *testing.T) {
 		r := newInstallRig(t, "curl")
