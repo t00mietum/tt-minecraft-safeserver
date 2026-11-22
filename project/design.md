@@ -589,7 +589,7 @@ cicd/                        build, test, and release scripts
 
 ### Saves and persistence
 
-- The tool doesn't store any state of its own, apart from the plugins' sources and the builds it kept in `/var/lib/tt-minecraftd/old-builds/`. See [Boot](#boot). Whether the server runs comes from the container runtime or systemd. Ownership comes from the the files.
+- The tool doesn't store any state of its own, apart from the plugins' sources and the builds it kept in `/var/lib/tt-minecraftd/old-builds/`. See [Boot](#boot). Whether the server runs comes from the container runtime or systemd. Ownership comes from the files.
 
 - Server tree layout, as Paper makes it:
 
@@ -689,7 +689,7 @@ cicd/                        build, test, and release scripts
 
 - In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in container mode.
 
-- Root's own changes inside a tree go through folder handles that don't follow links, since the server account can put a link anywhere it writes. That covers the safe settings, a refused jar, and the Floodgate key's mode. A link on the way is refused.
+- Root's own changes inside a tree go through folder handles that don't follow links, since the server account can put a link anywhere it writes. That covers the safe settings, Geyser's plugins folder, and the Floodgate key's mode. A link on the way is refused.
 
 - A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
 
@@ -990,7 +990,7 @@ cicd/                        build, test, and release scripts
 
 ### Testing
 
-- Unit tests run with the fake command runner. They check the exact command lists for each mode, the config errors, the safe settings checks and fixes on sample server files, and the plugin check against changed and new jars. They also check the rendered `firewall.nft` for each mix of `allowFrom`, `egress`, and `bedrock`.
+- Unit tests run with the fake command runner. They check the exact command lists for each mode, the config errors, the safe settings checks and fixes on sample server files, and the plugin jar list and the sources set for Geyser and Floodgate. They also check the rendered `firewall.nft` for each mix of `allowFrom`, `egress`, and `bedrock`.
 
 - A smoke test starts a real Paper server in the container on a throwaway tree with a tiny world. It checks the hardening flags, that the server finishes loading, that `cmd` works, that the jars can't be written, and a clean exit on `stop`.
 

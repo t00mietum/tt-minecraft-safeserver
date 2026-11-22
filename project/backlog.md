@@ -911,7 +911,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - README's uninstall steps leave the minecraftd group and name a key a new config lacks
 	- ID: 2026112110300351
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -922,11 +922,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 27.
 	- Origin: 4afd000 and ae42a4f. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The uninstall steps never removed the group, and named a key that only an update pins.
+	- Actual fix [Bug]: Step 5 adds groupdel with a note, step 4 says to list images and that config.shcl has the name after an update, and the package line names the license file.
+	- Branch: nov22-2026112110300351
+	- Commit: cc97d28
+	- Test case: none, README text only.
+	- Actual effort: Low
+	- Closed: 20261122-150507
+	- Acceptance signoff: Self-closed: mechanical doc fix.
 
 - design.md still describes the removed plugin check in places
 	- ID: 2026112110300364
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -936,6 +945,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 28.
 	- Origin: Left by 2b322c0 and by the 2026111918161429 change. Not seen before. Confirmed by reading.
+	- Closed reason: Done
+	- Actual cause [Bug]: 2b322c0 and the 2026111918161429 change left the plugin check in the Testing section and the folder-handle rule.
+	- Actual fix [Bug]: Testing names the plugin jar list and the Geyser and Floodgate sources, the folder-handle rule names Geyser's plugins folder, and the doubled word is gone.
+	- Branch: nov22-2026112110300351
+	- Commit: 0390da3
+	- Test case: none, design.md text only.
+	- Actual effort: Low
+	- Closed: 20261122-150507
+	- Acceptance signoff: Self-closed: mechanical doc fix.
 
 - Accept a same-bytes build in /usr/local/bin only when root owns it and nobody else can write it
 	- ID: 2026112110300377

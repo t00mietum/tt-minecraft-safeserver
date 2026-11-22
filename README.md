@@ -171,7 +171,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 ### Packages
 
-The `.deb` and `.rpm` packages for amd64 and arm64 are on the [releases page](https://github.com/t00mietum/tt-minecraft-safeserver/releases). A package puts `tt-minecraftd` in `/usr/bin` and nothing else, so run setup after it:
+The `.deb` and `.rpm` packages for amd64 and arm64 are on the [releases page](https://github.com/t00mietum/tt-minecraft-safeserver/releases). A package puts `tt-minecraftd` in `/usr/bin` and its license under `/usr/share/doc/tt-minecraftd/`, and nothing else, so run setup after it:
 
 ~~~bash
 sudo apt install ./tt-minecraftd_<version>_amd64.deb
@@ -240,14 +240,17 @@ There's no uninstall command yet. This takes everything out, and it deletes the 
 
 3. Remove the program. A package install is `sudo apt remove tt-minecraftd` or `sudo rpm -e tt-minecraftd`. Otherwise it's `sudo rm /usr/local/bin/tt-minecraftd`.
 
-4. In Podman or Docker mode, remove the container image with `sudo podman rmi` or `sudo docker rmi`, using the name from `image` in `config.shcl`.
+4. In Podman or Docker mode, remove the container image with `sudo podman rmi` or `sudo docker rmi`, using the name `sudo podman images` or `sudo docker images` lists for the Temurin image. `image` in `config.shcl` has the same name once an `update` has pinned it.
 
 5. Remove the files and the account:
 
 	~~~bash
 	sudo rm -r /etc/tt-minecraftd /var/lib/tt-minecraftd /srv/tt-minecraftd
 	sudo userdel minecraftd
+	sudo groupdel minecraftd
 	~~~
+
+	`userdel` leaves the group when you're in it. If `groupdel` says the group doesn't exist, `userdel` already took it.
 
 ## Developing
 
