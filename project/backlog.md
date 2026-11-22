@@ -25,7 +25,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - repair and setup can rewrite plugins.shcl in canonical form when adding sources
 	- ID: 2026112214545321
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261122-145437
@@ -36,6 +36,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Low
 	- Origin: Found while sweeping for 2026112110300260. Plausible, read only.
 	- Decisions: Leave plugins.shcl as it was and print a warning that names the source line to add by hand. Sources are optional and only feed update --plugins, so neither setup nor repair fails over it. repair reports it as a warning, through repair.Warning, not FAILED.
+		- repair prints a plain warning line rather than going through repair.Warning, since repairPlugins isn't a repair.Run check, and Warning reports FIXED, which would be wrong when nothing was written. repair still exits 0 for it.
+	- Closed reason: Done
+	- Actual cause [Bug]: SetSources ignored whether shcl could keep the file's lines. shcl's keep-lines save falls back to its own form after a merge, by design.
+	- Actual fix [Bug]: SetSources asks ToTextKeepLines before saving. When an existing file's lines can't be kept, it leaves the file as it was and returns plugins.NotKept, which names each source line to add by hand. setup and repair print that as a warning line and go on. design.md's Plugin jars says so.
+	- Test case: 1a4z974 (SetSourcesKeepsLines), 1a4z975 (repair), 1a4z976 (setup's writeSources)
+	- Verified: 1a4z974, 1a4z975 and 1a4z976 fail with the check taken out (file rewritten) and pass with it. 1a4j2j4, 1a4j1s4 and 1a3jgzw still pass, and so does the whole quick gate.
+	- Swept: SetSources' 2 callers, setup's writeSources (adopt, Bedrock download and sources steps) and main's repairPlugins. pinImage already checks. No other SaveFileKeepLines caller in source.
+	- Branch: nov22-2026112214545321
+	- Commit: 3659c8e
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261122-150047
 
 - setup's copy to /usr/local/bin leaves no binary if it stops between the move and the install
 	- ID: 2026112214220945
@@ -941,7 +953,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Remove the code that plugin approval left with no caller
 	- ID: 2026112110300390
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -951,6 +963,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Rename `pinnedDirs` and `ReadApproved`, which keep the approval-era names.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 30. Found by coverage (0%) and a scan for exported names with no outside caller.
+		- 2026-11-22: IsBuild, Info.Size and Info.Mod commented out with the reason. 1a3emz4 (TestDescribe) checked Size and Mod, and now checks only About and SHA256; its date setup is commented out.
+	- Closed reason: Done
+	- Test case: none new, since nothing changes behavior. The build and the plugins, paper, update, setup and cli tests cover the renamed callers.
+	- Verified: go vet and every package's tests pass, and so does the whole quick gate.
+	- Swept: every caller of ReadApproved and pinnedDirs in source, cicd and the docs. Only the commented-out tests and the backlog still name ReadApproved. paper.IsBuild had no caller and no test.
+	- Decisions: ReadApproved is now ReadSources and pinnedDirs is jarDirs. The test names TestReadApprovedList and FuzzReadApproved stay, since closed items name them by test ID and name. The Approved type keeps its name, since the item names only the two.
+	- Branch: nov22-2026112214545321
+	- Commit: 143d5de
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical.
+	- Closed: 20261122-150329
 
 - Refuse a config value that an unquoted # cuts short
 	- ID: 2026112110300403

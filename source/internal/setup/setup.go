@@ -655,7 +655,13 @@ func (s *Setup) writeSources(jars []plugins.Info) error {
 	if _, err := s.configDir(); err != nil {
 		return err
 	}
-	if err := plugins.SetSources(s.PluginsFile, jars); err != nil {
+	// Sources only feed update --plugins, so a file shcl can't keep isn't
+	// worth failing setup over.
+	var nk *plugins.NotKept
+	if err := plugins.SetSources(s.PluginsFile, jars); errors.As(err, &nk) {
+		fmt.Fprintf(s.Out, "warning: %s\n", server.Clean(nk.Error()))
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("can't write %s: %w", s.PluginsFile, err)
 	}
 	for _, j := range jars {

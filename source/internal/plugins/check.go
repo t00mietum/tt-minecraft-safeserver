@@ -66,7 +66,7 @@ func Within(file, serverDir string, trees []string) (string, error) {
 
 // Folders whose jars run as plugins, besides paper.jar. Geyser extensions run
 // with the same access as plugins.
-var pinnedDirs = []string{"plugins", "plugins/Geyser-Spigot/extensions"}
+var jarDirs = []string{"plugins", "plugins/Geyser-Spigot/extensions"}
 
 // Jar is one jar the server loads: its path under serverDir, and its file.
 type Jar struct {
@@ -74,12 +74,12 @@ type Jar struct {
 	File string
 }
 
-// Jars lists what the server loads: the jars in pinnedDirs, and the build
+// Jars lists what the server loads: the jars in jarDirs, and the build
 // paper.jar points to, named by its path under serverDir. Container start
 // mounts each one read-only. A missing paper.jar is left to start's own check.
 func Jars(serverDir string) ([]Jar, error) {
 	var jars []Jar
-	for _, dir := range pinnedDirs {
+	for _, dir := range jarDirs {
 		// Not filepath.Glob, whose stat and then plain open of the folder
 		// leave a gap to swap in a link to a device. os.ReadDir opens with
 		// O_DIRECTORY, which no device passes. Like Glob, a folder that's

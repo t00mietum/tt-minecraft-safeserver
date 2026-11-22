@@ -363,7 +363,7 @@ func (u *Update) treeJars() (jars []plugins.Approved, skipped []string) {
 	if err != nil {
 		return nil, []string{err.Error()}
 	}
-	listed, _, _ := plugins.ReadApproved(u.PluginsFile) // only the sources matter here; pluginLookup shows a bad list's warnings
+	listed, _, _ := plugins.ReadSources(u.PluginsFile) // only the sources matter here; pluginLookup shows a bad list's warnings
 	source := make(map[string]string, len(listed))
 	for _, a := range listed {
 		source[a.Name] = a.Source
@@ -575,7 +575,7 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 // their source. Only GeyserMC's sources are known so far. asks are the jars
 // for the update agent: ones with no known source, or whose lookup failed.
 func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []plugins.Approved, err error) {
-	_, warns, err := plugins.ReadApproved(u.PluginsFile)
+	_, warns, err := plugins.ReadSources(u.PluginsFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, err
 	}

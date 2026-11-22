@@ -218,7 +218,7 @@ func TestNewInstall(t *testing.T) {
 	}
 	// 2026111914334569: was 3 entries with the Paper build first, approved
 	// by hash. Now only the sources go in.
-	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	approved, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil || len(approved) != 2 || approved[0].Name != "plugins/Geyser-Spigot.jar" || approved[0].SHA256 != "" || approved[0].Source == "" {
 		t.Errorf("approved list: %v %v", approved, err)
 	}
@@ -407,7 +407,7 @@ func TestAdopt(t *testing.T) {
 	}
 	// 2026111914334569: the plugin and paper.jar were approved here, and
 	// aren't now. Only Geyser's and Floodgate's sources are written.
-	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	approved, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil || len(approved) != 2 || slices.ContainsFunc(approved, func(a plugins.Approved) bool { return a.Name == "paper.jar" || a.Name == "plugins/Thing.jar" }) {
 		t.Errorf("list, which should have only Geyser and Floodgate: %v %v", approved, err)
 	}
@@ -452,7 +452,7 @@ func TestAdoptGeyserSource(t *testing.T) {
 	if len(r.geyser.installed) > 0 {
 		t.Errorf("downloaded over the adopted jars: %q", r.geyser.installed)
 	}
-	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	approved, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,7 +706,7 @@ func TestDryRun(t *testing.T) {
 func TestBedrock(t *testing.T) {
 	defer testid.Line(t, "1a3famw")
 	approved := func(r *rig) map[string]plugins.Approved {
-		list, _, err := plugins.ReadApproved(r.s.PluginsFile)
+		list, _, err := plugins.ReadSources(r.s.PluginsFile)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -806,7 +806,7 @@ func TestExistingBedrock(t *testing.T) {
 	if !strings.Contains(r.out.String(), "Download Floodgate 2.0 build 7") {
 		t.Errorf("no plan:\n%s", r.out)
 	}
-	list, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	list, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil || len(list) != 1 || list[0].Name != "plugins/floodgate-spigot.jar" || list[0].Source == "" {
 		t.Errorf("approved %+v %v", list, err)
 	}
@@ -1255,4 +1255,29 @@ func TestResumeAfterStop(t *testing.T) {
 			t.Errorf("tree with a linked mark: %v", err)
 		}
 	})
+}
+
+// setup warns about a plugins.shcl it can't save with its lines kept, and
+// goes on, leaving the file as it was (2026112214545321).
+func TestWriteSourcesNotKept(t *testing.T) {
+	defer testid.Line(t, "1a4z976")
+	r := newRig(t, []string{"docker"}, "")
+	merged := "# mine\njar: plugins/Thing.jar  # by hand\n\n# pasted again\njar: plugins/Thing.jar\n"
+	if err := os.MkdirAll(filepath.Dir(r.s.PluginsFile), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.s.PluginsFile, []byte(merged), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	src := r.geyser.Source("floodgate")
+	if err := r.s.writeSources([]plugins.Info{{Jar: plugins.Jar{Name: "plugins/floodgate-spigot.jar"}, Source: src}}); err != nil {
+		t.Fatal(err)
+	}
+	if out := r.out.String(); !strings.Contains(out, "warning: "+r.s.PluginsFile+": saving would rewrite every line") ||
+		!strings.Contains(out, `Add source: "`+src+`" under jar: "plugins/floodgate-spigot.jar" there by hand`) || strings.Contains(out, "FIXED") {
+		t.Errorf("out:\n%s", out)
+	}
+	if got, _ := os.ReadFile(r.s.PluginsFile); string(got) != merged {
+		t.Errorf("file changed:\n%s", got)
+	}
 }

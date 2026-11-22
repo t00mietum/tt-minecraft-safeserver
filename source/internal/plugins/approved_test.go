@@ -37,7 +37,7 @@ func TestReadApprovedList(t *testing.T) {
 		"\tsource: https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot\n" +
 		"jar: paper-26.3-244.jar\n" +
 		"\tsha256: " + sumB + "\n"
-	jars, warns, err := ReadApproved(writeList(t, text))
+	jars, warns, err := ReadSources(writeList(t, text))
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("err %v, warnings %v", err, warns)
 	}
@@ -64,7 +64,7 @@ func TestBadEntriesAreLeftOut(t *testing.T) {
 		"jars: plugins/typo.jar\n" + // 21
 		"jar: plugins/same.jar\n\tsha256: " + sumB + "\n" + // 22
 		"jar: plugins/same.jar\n\tsha256: " + sumB + "\n" // 24
-	jars, warns, err := ReadApproved(writeList(t, text))
+	jars, warns, err := ReadSources(writeList(t, text))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestBadEntriesAreLeftOut(t *testing.T) {
 
 func TestUnreadableListIsAnError(t *testing.T) {
 	defer testid.Line(t, "1a3ef3m")
-	_, _, err := ReadApproved(filepath.Join(t.TempDir(), "plugins.shcl"))
+	_, _, err := ReadSources(filepath.Join(t.TempDir(), "plugins.shcl"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("got %v", err)
 	}

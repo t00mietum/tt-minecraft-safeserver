@@ -8,12 +8,12 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -103,13 +103,14 @@ func TestDescribe(t *testing.T) {
 		"plugin.yml":       "main: org.geysermc.Thing\nname: Geyser-Spigot\nversion: '2.12.1'\n",
 		"paper-plugin.yml": "name: \"Geyser\x1b[2J\"\nversion: 2.12.1-b1\napi-version: '1.21'\n",
 	})
-	mod := time.Date(2026, 11, 1, 10, 0, 0, 0, time.Local)
-	if err := os.Chtimes(geyser, mod, mod); err != nil {
-		t.Fatal(err)
-	}
+	// 2026112110300390: Size and Mod went, so the date set here isn't checked.
+	// mod := time.Date(2026, 11, 1, 10, 0, 0, 0, time.Local)
+	// if err := os.Chtimes(geyser, mod, mod); err != nil {
+	// 	t.Fatal(err)
+	// }
 	raw, _ := os.ReadFile(geyser)
 	info, err := Describe(Jar{"plugins/Geyser-Spigot.jar", geyser})
-	if err != nil || info.About != "Geyser[2J 2.12.1-b1" || info.SHA256 != sum(string(raw)) || info.Size != int64(len(raw)) || !info.Mod.Equal(mod) {
+	if err != nil || info.About != "Geyser[2J 2.12.1-b1" || info.SHA256 != sum(string(raw)) {
 		t.Errorf("Describe = %+v, %v", info, err)
 	}
 
@@ -181,7 +182,7 @@ func TestSetSources(t *testing.T) {
 	if fi, err := os.Stat(list); err != nil || fi.Mode().Perm() != 0o644 {
 		t.Errorf("new list: %v, %v", fi, err)
 	}
-	jars, warns, err := ReadApproved(list)
+	jars, warns, err := ReadSources(list)
 	want := []Approved{{Name: "plugins/a.jar", Source: "https://example.com/a", Line: 1}, {Name: odd, Source: "https://example.com/f", Line: 4}}
 	if err != nil || len(warns) != 0 || !reflect.DeepEqual(jars, want) {
 		t.Errorf("new list reads %+v, %v, %v", jars, warns, err)
@@ -207,6 +208,28 @@ func TestSetSources(t *testing.T) {
 
 	if err := SetSources(list, []Info{{Jar: Jar{Name: "../evil.jar"}, Source: "https://example.com/x"}}); err == nil {
 		t.Error("wrote a path outside the tree")
+	}
+}
+
+// A list shcl can't save with its lines kept, such as one with a jar given
+// twice, is left as it was, and the error gives the line to add by hand
+// (2026112214545321).
+func TestSetSourcesKeepsLines(t *testing.T) {
+	defer testid.Line(t, "1a4z974")
+	list := filepath.Join(t.TempDir(), "plugins.shcl")
+	merged := "# mine\njar: plugins/Thing.jar  # by hand\n\tsource: https://example.com/thing\n\n# pasted again\njar: plugins/Thing.jar\n"
+	if err := os.WriteFile(list, []byte(merged), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	src := "https://download.geysermc.org/x"
+	err := SetSources(list, []Info{{Jar: Jar{Name: "plugins/Geyser-Spigot.jar"}, Source: src}})
+	if b, _ := os.ReadFile(list); string(b) != merged {
+		t.Errorf("file changed:\n%s", b)
+	}
+	var nk *NotKept
+	if !errors.As(err, &nk) || len(nk.Jars) != 1 || !strings.Contains(err.Error(), "rewrite every line") ||
+		!strings.Contains(err.Error(), `Add source: "`+src+`" under jar: "plugins/Geyser-Spigot.jar" there by hand`) {
+		t.Errorf("err %v", err)
 	}
 }
 

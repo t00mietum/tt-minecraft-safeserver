@@ -127,7 +127,7 @@ func TestPaper(t *testing.T) {
 		}
 	}
 	// The new build went on the list until 2026111914334585.
-	if list, _, err := plugins.ReadApproved(r.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
+	if list, _, err := plugins.ReadSources(r.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("list written: %+v %v", list, err)
 	}
 
@@ -304,7 +304,7 @@ func TestPlugins(t *testing.T) {
 			t.Errorf("no %q:\n%s", want, r.out)
 		}
 	}
-	list, _, err := plugins.ReadApproved(r.u.PluginsFile)
+	list, _, err := plugins.ReadSources(r.u.PluginsFile)
 	if err != nil || len(list) != 3 {
 		t.Fatalf("approved %+v %v", list, err)
 	}

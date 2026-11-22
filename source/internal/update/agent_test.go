@@ -163,7 +163,7 @@ func TestAgentJars(t *testing.T) {
 		t.Error("the new jar isn't in place")
 	}
 	// Since 2026111914334585 nothing is written to the list; it had the new hash.
-	if list, _, err := plugins.ReadApproved(a.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
+	if list, _, err := plugins.ReadSources(a.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("list written: %+v %v", list, err)
 	}
 	a.noTemps(t)
@@ -425,7 +425,7 @@ func TestAgentPaper(t *testing.T) {
 		t.Errorf("paper.jar links to %q: %v", a.linked(t), err)
 	}
 	// The build went on the list with its hash until 2026111914334585.
-	if list, _, err := plugins.ReadApproved(a.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
+	if list, _, err := plugins.ReadSources(a.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("list written: %+v %v", list, err)
 	}
 

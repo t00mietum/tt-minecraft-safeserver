@@ -594,7 +594,7 @@ func repair(ctx context.Context, inv invocation, w io.Writer, root bool) error {
 // Nothing else about a jar is checked since 2026111914293176.
 func repairPlugins(inv invocation, w io.Writer, report func(state, text string)) {
 	file := inv.pluginsFile()
-	_, warns, err := plugins.ReadApproved(file)
+	_, warns, err := plugins.ReadSources(file)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		report("FAILED", "plugins: "+err.Error())
 		return
@@ -617,7 +617,12 @@ func repairPlugins(inv invocation, w io.Writer, report func(state, text string))
 		}
 		return
 	}
-	if err := plugins.SetSources(file, jars); err != nil {
+	// A warning, not FAILED: sources only feed update --plugins.
+	var nk *plugins.NotKept
+	if err := plugins.SetSources(file, jars); errors.As(err, &nk) {
+		fmt.Fprintf(w, "warning: %s\n", server.Clean(nk.Error()))
+		return
+	} else if err != nil {
 		report("FAILED", "plugins: can't write "+file+": "+err.Error())
 		return
 	}

@@ -12,8 +12,8 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/yottacore/shcl/source/go/v3"
@@ -23,8 +23,10 @@ import (
 type Info struct {
 	Jar
 	SHA256 string
-	Size   int64
-	Mod    time.Time
+	// Size and Mod are commented out by 2026112110300390: set, and never read
+	// since plugin approval went.
+	// Size   int64
+	// Mod    time.Time
 	// About is the name and version from the jar's own plugin.yml,
 	// paper-plugin.yml, or Geyser's extension.yml, or empty.
 	About string
@@ -32,7 +34,7 @@ type Info struct {
 	Source string
 }
 
-// Describe gives the jar's hash, size, date, and what it says it is, all
+// Describe gives the jar's hash and what it says it is, both
 // from one open, so the hash is of the jar the rest describes. Anything but
 // a regular file is refused before it's opened.
 func Describe(j Jar) (Info, error) {
@@ -49,7 +51,7 @@ func Describe(j Jar) (Info, error) {
 	if info.SHA256, err = hashOf(f); err != nil {
 		return info, err
 	}
-	info.Size, info.Mod = fi.Size(), fi.ModTime()
+	// info.Size, info.Mod = fi.Size(), fi.ModTime()
 	info.About = about(f, fi.Size())
 	return info, nil
 }
@@ -139,10 +141,25 @@ func clean(s string) string {
 	return server.Cut(server.Clean(s), 80)
 }
 
+// NotKept is SetSources' error when plugins.shcl can't be saved with its
+// lines kept, so it's left as it was. Jars are the sources to add by hand.
+type NotKept struct {
+	File string
+	Jars []Info
+}
+
+func (e *NotKept) Error() string {
+	adds := make([]string, 0, len(e.Jars))
+	for _, j := range e.Jars {
+		adds = append(adds, "source: "+strconv.Quote(j.Source)+" under jar: "+strconv.Quote(j.Name))
+	}
+	return fmt.Sprintf("%s: saving would rewrite every line in shcl's own form, such as when a key is given more than once, so it's left as it was. Add %s there by hand", e.File, strings.Join(adds, ", and "))
+}
+
 // SetSources writes each jar's source into plugins.shcl, adding the jars it
 // doesn't have. Other entries, comments, and the operator's own lines stay
-// byte for byte. A new file is made readable by all, so status works
-// without sudo.
+// byte for byte, or the file isn't written and the error is a *NotKept. A
+// new file is made readable by all, so status works without sudo.
 func SetSources(file string, jars []Info) error {
 	doc, st, err := shcl.LoadFileKeepLines(file, shcl.Standard)
 	fresh := st == shcl.FileNotFound
@@ -152,6 +169,7 @@ func SetSources(file string, jars []Info) error {
 	case st == shcl.FileUnreadable:
 		return fmt.Errorf("can't read %s", file)
 	}
+	var set []Info
 	for _, j := range jars {
 		if !insideServer(j.Name) {
 			return fmt.Errorf("%q isn't a path under the server folder", j.Name)
@@ -163,6 +181,15 @@ func SetSources(file string, jars []Info) error {
 		if s := doc.SetString(key, j.Source); s != shcl.SetOk {
 			return fmt.Errorf("%s: can't add %s's source: %s", file, j.Name, s)
 		}
+		set = append(set, j)
+	}
+	if len(set) == 0 && !fresh {
+		return nil
+	}
+	// shcl falls back to its own form after it merged a repeated key, which
+	// would drop the operator's comments and lines (2026112214545321).
+	if _, kept := doc.ToTextKeepLines(); !kept && !fresh {
+		return &NotKept{File: file, Jars: set}
 	}
 	if _, err := doc.SaveFileKeepLines(file); err != nil {
 		return err
@@ -179,7 +206,7 @@ func SetSources(file string, jars []Info) error {
 // one. A jar that leads out of serverDir and trees isn't read, since this
 // runs as root; start refuses it. Nor is one that's gone by then.
 func Unsourced(serverDir string, trees []string, file string, want func(name string) bool) ([]Info, error) {
-	listed, _, err := ReadApproved(file)
+	listed, _, err := ReadSources(file)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}

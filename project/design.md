@@ -756,6 +756,7 @@ cicd/                        build, test, and release scripts
 	- An entry with a path outside `serverDir` gets a warning and is left out. A source that isn't `https` is ignored.
 	- A list from before 2026-11-19 has a `sha256` per jar. It's read and not checked.
 	- `setup` and `repair` give a jar in `plugins/` GeyserMC's source when it has none, when its file name is `geyser` or `floodgate` and then anything but a letter or digit, and its `plugin.yml` name is `Geyser-Spigot` or `floodgate`, ignoring case. An add-on such as GeyserExtras or GeyserSkinManager-Spigot names its own plugin, so it doesn't count. A jar with a source keeps it. Only jars with those file names are opened, so another jar that can't be read doesn't stop `setup` or `repair`.
+	- A `plugins.shcl` that shcl can't save with its other lines kept, such as one with a jar given twice, is left as it was. `setup` and `repair` warn with the `source` line to add by hand, and go on, since a source only feeds `update --plugins`.
 
 - Paper also loads code that it writes into the tree itself, and it doesn't check it again:
 	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256).
