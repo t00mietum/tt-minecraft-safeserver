@@ -17,6 +17,12 @@ import (
 // test-id.bash run against a throwaway tree with one Go test and the given checks.bash.
 func runTestID(t *testing.T, checks, goID, mode string) (string, int) {
 	t.Helper()
+	return runTestIDBody(t, checks, "\tdefer testid.Line(t, \""+goID+"\")\n", mode)
+}
+
+// The same, with the Go test's body as given.
+func runTestIDBody(t *testing.T, checks, goBody, mode string) (string, int) {
+	t.Helper()
 	bashPath, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash")
@@ -24,7 +30,7 @@ func runTestID(t *testing.T, checks, goID, mode string) (string, int) {
 	tool := cicdFile(t, filepath.Join("utility", "test-id.bash"))
 	root := t.TempDir()
 	files := map[string]string{
-		filepath.Join("source", "x", "x_test.go"):         "package x\n\nfunc TestX(t *testing.T) {\n\tdefer testid.Line(t, \"" + goID + "\")\n}\n",
+		filepath.Join("source", "x", "x_test.go"):         "package x\n\nfunc TestX(t *testing.T) {\n" + goBody + "}\n",
 		filepath.Join("cicd", "root-host", "checks.bash"): checks,
 	}
 	for name, text := range files {
@@ -87,6 +93,66 @@ func TestTestIDRootChecks(t *testing.T) {
 		out, code := runTestID(t, string(checks), "zzzzz00", "--check")
 		if code != 0 {
 			t.Errorf("code %d, want clean\n%s", code, out)
+		}
+	})
+}
+
+// Every call of check or a wrapper counts, wherever it is on the line and however its ID is
+// written, and only a live testid.Line counts on the Go side.
+func TestTestIDCallForms(t *testing.T) {
+	defer testid.Line(t, "1a4z04g")
+	const first = "check() { \"${@}\"; }\ncheck aaaaa00 \"one\" true\n"
+
+	// An ID it can't read is refused, rather than left out of the count.
+	t.Run("a quoted or uppercase ID fails", func(t *testing.T) {
+		for _, second := range []string{"check \"aaaaa00\" \"two\" true\n", "check AAAAA00 \"two\" true\n"} {
+			out, code := runTestID(t, first+second, "zzzzz00", "--check")
+			id := strings.Fields(second)[1]
+			if code != 1 || !strings.Contains(out, "bad ID \""+id+"\"") {
+				t.Errorf("%scode %d, want %s refused\n%s", second, code, id, out)
+			}
+		}
+	})
+
+	t.Run("a repeat in any call form fails", func(t *testing.T) {
+		for _, second := range []string{
+			"true && check aaaaa00 \"two\" true\n",
+			"true; check aaaaa00 \"two\" true\n",
+			"if true; then check aaaaa00 \"two\" true; fi\n",
+			"native () {\n\tcheck \"${@}\"\n}\nnative aaaaa00 \"two\" true\n",
+			"function native {\n\tcheck \"$@\"\n}\nnative aaaaa00 \"two\" true\n",
+			"native() {\n\tif true; then { check \"${@}\"; }; fi\n\tsay \"${1}\"\n}\nnative aaaaa00 \"two\" true\n",
+			"native() { check \"${@}\"; }\nboth() { native \"${@}\"; }\nboth aaaaa00 \"two\" true\n",
+		} {
+			out, code := runTestID(t, first+second, "zzzzz00", "--check")
+			if code != 1 || !strings.Contains(out, "ID used twice: aaaaa00") {
+				t.Errorf("%scode %d, want aaaaa00 as a repeat\n%s", second, code, out)
+			}
+		}
+	})
+
+	// The control: the same ID in a comment, a string, or as an option isn't a call.
+	t.Run("a call in a comment or a string doesn't count", func(t *testing.T) {
+		second := "# check aaaaa00 \"two\" true\nsay \"then check aaaaa00 x\"  # check aaaaa00\nsay 'native aaaaa00 x' && tt repair --check aaaaa00\n"
+		out, code := runTestID(t, first+second, "zzzzz00", "--check")
+		if code != 0 {
+			t.Errorf("code %d, want clean\n%s", code, out)
+		}
+	})
+
+	t.Run("a commented-out testid.Line doesn't count", func(t *testing.T) {
+		for _, body := range []string{
+			"\t// defer testid.Line(t, \"zzzzz00\")\n",
+			"\t/*\n\tdefer testid.Line(t, \"zzzzz00\")\n\t*/\n",
+		} {
+			out, code := runTestIDBody(t, "", body, "--check")
+			if code != 1 || !strings.Contains(out, "no ID: source/x/x_test.go TestX") {
+				t.Errorf("%qcode %d, want no ID\n%s", body, code, out)
+			}
+		}
+		out, code := runTestIDBody(t, "", "\tdefer testid.Line(t, \"zzzzz00\") // live\n", "--check")
+		if code != 0 {
+			t.Errorf("live line: code %d, want clean\n%s", code, out)
 		}
 	})
 }

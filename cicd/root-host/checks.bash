@@ -45,6 +45,21 @@ native() {
 # check on the writer's SIGPIPE.
 say() { printf '%s\n' "${*}"; }
 has() { grep -q -- "${1}" "${2}" || { say "no '${1}' in ${2}"; return 1; }; }
+# A grep that can't read the file exits 2, which a bare ! reads as a pass.
+lacks() {
+	local rc=0
+	grep -q "${@}" || rc=$?
+	((rc == 1)) && return 0
+	if ((rc == 0)); then say "'${*: -2:1}' in ${*: -1}"; else say "can't read ${*: -1}"; fi
+	return 1
+}
+# The command ran and was refused. Podman exec's own failures are 125 to 127,
+# so a missing container or command isn't a refusal.
+refused() {
+	local rc=0
+	"${@}" || rc=$?
+	((rc > 0 && rc < 125)) || { say "not refused, exit ${rc}: ${*}"; return 1; }
+}
 # Paper logs a console line on its next tick, tens of ms after the tool typed
 # it and exited, so the log is read until it shows up.
 logged() {
@@ -88,13 +103,13 @@ fNewInstall() {
 	# Install Podman, go ahead, accept the EULA.
 	printf 'y\ny\ny\n' | ./tt-minecraftd setup --set heapMax=1GB | tee setup.out | grep -E '^(FIXED|FAILED|OK)' || true
 	has 'repair --check does' setup.out || return 1
-	! grep -q '^FAILED' setup.out || return 1
+	lacks '^FAILED' setup.out || return 1
 	id minecraftd && id -nG op | grep -qw minecraftd || return 1
 	[[ "$(stat -c %U:%G "${dir}")" == op:minecraftd ]] || return 1
 	[[ "$(readlink "${dir}/paper.jar")" == paper-*.jar ]] || return 1
 	has 'eula=true' "${dir}/eula.txt" && has 'white-list=true' "${dir}/server.properties" || return 1
 	# Only Geyser's and Floodgate's sources; nothing is pinned by hash (2026111914293176).
-	[[ "$(grep -c 'source:' /etc/tt-minecraftd/plugins.shcl)" -eq 2 ]] && ! grep -q 'sha256:' /etc/tt-minecraftd/plugins.shcl || return 1
+	[[ "$(grep -c 'source:' /etc/tt-minecraftd/plugins.shcl)" -eq 2 ]] && lacks 'sha256:' /etc/tt-minecraftd/plugins.shcl || return 1
 	has 'runMode: podman' /etc/tt-minecraftd/config.shcl || return 1
 	[[ -x /usr/local/bin/tt-minecraftd ]] && sudo podman image ls | grep -q eclipse-temurin || return 1
 	command -v catatonit || [[ -x /usr/libexec/podman/catatonit ]]
@@ -110,14 +125,16 @@ fPodmanStart() {
 	! getent group docker || return 1
 	# No terminal, as from the boot unit. Podman's run warned then.
 	tt-minecraftd start < /dev/null 2>&1 | tee start.out || return 1
-	! grep -q 'not a TTY' start.out || return 1
+	lacks 'not a TTY' start.out || return 1
 	sudo podman ps --format '{{.Names}}' | grep -qx tt-minecraftd
 }
 
 fJarsInContainer() {
+	# A refusal means nothing unless the container is there to refuse it.
+	sudo podman exec tt-minecraftd test -f "${dir}/paper.jar" -a -f "${dir}/plugins/Geyser-Spigot.jar" || { say "no jars to look at in the container"; return 1; }
 	# Each must fail.
-	! sudo podman exec tt-minecraftd sh -c "echo x >> ${dir}/paper.jar" || return 1
-	! sudo podman exec tt-minecraftd mv "${dir}/plugins/Geyser-Spigot.jar" "${dir}/plugins/x.jar"
+	refused sudo podman exec tt-minecraftd sh -c "echo x >> ${dir}/paper.jar" || return 1
+	refused sudo podman exec tt-minecraftd mv "${dir}/plugins/Geyser-Spigot.jar" "${dir}/plugins/x.jar"
 }
 
 fStatusPodman() { statusHas 'running in podman mode, as minecraftd'; }
@@ -164,7 +181,9 @@ fStopCancel() {
 	cat cancel.out
 	((rc == 1)) || { say "stop exited ${rc}"; return 1; }
 	logged 'The stop is off' "${log}" && has 'interrupted' cancel.out || return 1
-	! grep -q 'Saving worlds' "${log}" || { say "it saved"; return 1; }
+	# The server still runs, so its log takes sudo to read, as in logged.
+	sudo cat "${log}" | tee cancel-log.out > /dev/null || { say "can't read ${log}"; return 1; }
+	lacks 'Saving worlds' cancel-log.out || return 1
 	sudo podman ps --format '{{.Names}}' | grep -qx tt-minecraftd
 }
 
@@ -198,10 +217,14 @@ fNativeStart() {
 	has 'ReadOnlyPaths=.*Geyser-Spigot.jar' unit.out || return 1
 	[[ "$(stat -c %U "$(readlink -f "${dir}/paper.jar")")" == root ]] || return 1
 	# As the server, in its own mount view.
-	local as
-	as=(sudo nsenter -t "$(pgrep -u minecraftd -f 'paper.*\.jar' | head -1)" -m -S "$(id -u minecraftd)" -G "$(id -g minecraftd)")
-	! "${as[@]}" sh -c "echo x >> ${dir}/paper.jar" || return 1
-	! "${as[@]}" mv "${dir}/plugins/Geyser-Spigot.jar" "${dir}/plugins/x.jar"
+	local pid as
+	pid="$(pgrep -u minecraftd -f 'paper.*\.jar' | head -1)"
+	[[ "${pid}" =~ ^[1-9][0-9]*$ ]] || { say "no server process"; return 1; }
+	as=(sudo nsenter -t "${pid}" -m -S "$(id -u minecraftd)" -G "$(id -g minecraftd)")
+	# nsenter fails with 1 too, so it has to be seen working first.
+	"${as[@]}" test -f "${dir}/paper.jar" -a -f "${dir}/plugins/Geyser-Spigot.jar" || { say "can't look as the server"; return 1; }
+	refused "${as[@]}" sh -c "echo x >> ${dir}/paper.jar" || return 1
+	refused "${as[@]}" mv "${dir}/plugins/Geyser-Spigot.jar" "${dir}/plugins/x.jar"
 }
 
 fNativeFollow() {
@@ -282,7 +305,8 @@ fFirewallOff() {
 	echo 'firewall: off' | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
 	tt-minecraftd repair | tee repair.out | grep -E '^(FIXED|FAILED)'
 	has 'its table removed' repair.out || return 1
-	! sudo nft list table inet tt_minecraftd > /dev/null 2>&1 && ! systemctl is-enabled tt-minecraftd-firewall.service
+	sudo nft list tables | tee tables.out > /dev/null || { say "nft can't list tables"; return 1; }
+	lacks -x 'table inet tt_minecraftd' tables.out && ! systemctl is-enabled tt-minecraftd-firewall.service
 }
 
 # What install.bash runs through sudo before it swaps a build in: the old one
@@ -316,9 +340,9 @@ fAgentHandOff() {
 	tt-minecraftd update --plugins --yes < /dev/null | tee agent.out || return 1
 	has 'Asking the update agent about' agent.out && has 'plugins/Thing.jar: no answer from the update agent' agent.out || return 1
 	# Paper's builds are --paper's.
-	! grep -q 'paper-.*update agent' agent.out || return 1
+	lacks 'paper-.*update agent' agent.out || return 1
 	# So are Geyser's and Floodgate's, through their GeyserMC source.
-	! grep -qi 'geyser-spigot.jar: no answer\|floodgate-spigot.jar: no answer' agent.out || return 1
+	lacks -i 'geyser-spigot.jar: no answer\|floodgate-spigot.jar: no answer' agent.out || return 1
 	! compgen -G '/tmp/tt-minecraftd-agent-*' || { say "the answer file is left over"; return 1; }
 	sudo tt-minecraftd update --plugins --dry-run < /dev/null | tee agent-root.out
 	has "isn't asked when update starts as root" agent-root.out
@@ -333,6 +357,12 @@ ds="${pool}/mc"
 fZfsOurs() { [[ "${pool}" == ttmcss-test-* ]] || { say "refused: pool '${pool}' isn't a ttmcss-test-* one"; return 1; }; }
 [[ -z "${pool}" ]] || fZfsOurs || exit 2
 snaps() { sudo zfs list -H -o name -t snapshot -d 1 "${ds}" | sed 's/.*@//'; }
+# No snapshots, from a zfs list that worked. A failed one prints nothing too.
+none() {
+	local s
+	s="$(snaps)" || { say "zfs list failed"; return 1; }
+	[[ -z "${s}" ]] || { say "snapshots:"; say "${s}"; return 1; }
+}
 # The pool's history lines for one zfs subcommand, with who ran it.
 hist() { sudo zpool history -l "${pool}" | grep -E "^[^ ]+ zfs ${1} " || true; }
 newest() { snaps | grep -E "_${1}\$" | tail -1; }
@@ -354,14 +384,14 @@ fZfsPool() {
 	sudo mv "${dir}" "${dir}.pre-zfs" && sudo zfs create -o mountpoint="${dir}" "${ds}" || return 1
 	sudo cp -a "${dir}.pre-zfs/." "${dir}/" && sudo chown --reference="${dir}.pre-zfs" "${dir}" && sudo chmod --reference="${dir}.pre-zfs" "${dir}" || return 1
 	printf 'zfsDataset: %s\n' "${ds}" | sudo tee -a /etc/tt-minecraftd/config.shcl > /dev/null
-	[[ -z "$(snaps)" ]]
+	none
 }
 
 # Only update --mc-version snapshots now, which needs a real Paper move.
 fZfsNone() {
 	tt-minecraftd start < /dev/null > start.out 2>&1 || { cat start.out; return 1; }
 	tt-minecraftd stop > stop.out 2>&1 || { cat stop.out; return 1; }
-	[[ -z "$(snaps)" ]] || { say "snapshots:"; snaps; return 1; }
+	none
 }
 
 # Start and stop snapshots went (backlog 2026111318002875).
@@ -482,3 +512,5 @@ exit "${failed}"
 ##		- 2026-11-18: Waits for Paper to log the stop-off line. Long output goes to a file before its grep. A failed boot check stops the server and turns the unit off.
 ##		- 2026-11-19: A replaced build is kept in /var/lib/tt-minecraftd/old-builds.
 ##		- 2026-11-20: A firewall counter or line number that isn't a number fails its check.
+##		- 2026-11-22: A check that expects a refusal, or no match, fails unless the look itself
+##		  worked: the container or server process is there, zfs list and nft ran, the file was read.

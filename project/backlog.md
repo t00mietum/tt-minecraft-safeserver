@@ -457,7 +457,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Negated root host checks pass when the command they look with can't run
 	- ID: 2026112110300273
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: No
+	- Needs external testing: `cicd/root-host/root-host.bash` for 1a3fh00, 1a3fh68, 1a3fh9c, 1a3jwt0, 1a3fjew and 1a3jgsm, and `root-host.bash --zfs` for 1a3jn00 and 1a3jqxr, to see each still pass on a real host. fNativeStart (1a3fj2c) skips there while native mode is off.
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -467,12 +469,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: with a stand-in sudo, 1a3jqxr and 1a3fh9c printed PASS. Repro: `roothost_negated-checks_repro.bash`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 21.
+		- 2026-11-22: Verified: 1a4z0h0 runs the changed checks from checks.bash with stub sudo, pgrep and systemctl. Its no-container, zfs-list-fails (both checks), no-server-process and nft-fails cases fail on the old checks and pass on the new ones. Its firewall-off table-gone case also fails on the old check, but only because the stub nft lists any table it's asked for. The review's repro now prints FAIL for 1a3jqxr and 1a3fh9c. 1a4q3sg still passes. Quick gate passed.
 	- Origin: c076344, 684bd24 and 85d60ca. Same class as 2026112017592969, which fixed only `counter` and `before`. Confirmed.
+	- Actual cause [Bug]: These checks pass on a command failing or printing nothing, and a failure of the command they look with reads the same way.
+	- Actual fix [Bug]: Each one first sees its look work. fJarsInContainer and fNativeStart run a `test -f` in the container, or as the server, before the refusals, and fNativeStart needs a process ID from pgrep. A refusal goes through a new `refused`, which fails on podman exec's own exit codes, 125 to 127. fZfsPool and fZfsNone go through a new `none`, which fails when zfs list does. fFirewallOff reads `nft list tables` and fails when nft does.
+	- Decisions:
+		- A negated grep on a file goes through a new `lacks`, which fails when grep can't read the file, since grep exits 2 then. That covers the same gap in fNewInstall, fPodmanStart, fStopCancel and fAgentHandOff.
+		- fStopCancel reads the log through sudo, as `logged` does, since the server still runs then and a log op can't read would now fail the check.
+	- Swept: every `!` in checks.bash, and every `[[ -z "$(...)" ]]`. Left as they are: the `systemctl is-active` and `is-enabled` ones in fNativeStop, fBoot and fFirewallOff, since the checks before them need a working systemctl, `! getent group docker`, `! compgen`, fSameLogin's start, which has a `has` after it, and fFirewallOut's curl, whose counter must go up after it. `hist` and `newest` are used only by the commented-out ZFS checks.
+	- Branch: nov22-2026112110300286
+	- Commit: 7279d7c, a70748f
+	- Test case: 1a4z0h0 TestRootHostLooks
+	- Actual effort: Low
 
 - test-id.bash --check misses some call forms and counts a commented-out ID
 	- ID: 2026112110300286
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -482,7 +496,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `--root` on a stand-in tree.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 22.
+		- 2026-11-22: Verified: 1a4z04g fails 10 of its 13 cases on the old test-id.bash and passes all on the new one. The 3 that pass on both are a wrapper whose forward sits in a `{ }` group and 2 controls: a call in a comment or string, and a live line with a trailing comment. 1a3jz1w and 1a4hwpm still pass, also with mawk as awk. `--list` on the real tree is the same as before. Quick gate passed.
 	- Origin: 259938d and c03326e. Not seen before. Confirmed.
+	- Actual cause [Bug]: The root host reader matched only a name at the start of a line, an ID of bare lowercase letters and digits, and a wrapper written `name()`, and skipped any line it couldn't read. The Go reader matched `defer testid.Line` anywhere on a line, a `//` one included.
+	- Actual fix [Bug]: The root host reader finds `check` and its wrappers in command position anywhere on a line, outside comments and quoted strings, and takes the first word after as the ID as written, so the form check refuses one it can't read. It finds wrappers in any function form, and wrappers of wrappers. The Go reader counts only a line that starts with `defer testid.Line`, outside a `/* */` block.
+	- Decisions:
+		- A quoted ID is refused rather than read, so there is one way to write it, as on the Go side.
+		- A wrapper of a wrapper is followed now, which reverses that call on 2026111715275346, since "any call it can't parse fails" covers it.
+		- The commented-out Go IDs, such as 1a3enbm, no longer count toward a repeat or `--new`. A new ID comes from the clock, so it can't meet an old one.
+	- Swept: test-id.bash is the only reader of test IDs in source, and cicd.bash calls it for `--check` and `--list`. The 8 commented-out Go tests have their `func` line commented out too, so none shows as having no ID.
+	- Branch: nov22-2026112110300286
+	- Commit: 8b29816
+	- Test case: 1a4z04g TestTestIDCallForms
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Actual effort: Low
+	- Closed: 20261122-132700
 
 - The startup lint check reports CLEAN for a failed or aborted run
 	- ID: 2026112110300299
