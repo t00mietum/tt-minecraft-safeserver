@@ -150,7 +150,7 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 	if err := k.groupProblem("the server's log"); err != nil {
 		return err
 	}
-	log := &logFollow{file: server.LogFile(k.Cfg.ServerDir)}
+	log := &logFollow{serverDir: k.Cfg.ServerDir}
 	defer log.close()
 	if err := log.skip(); err != nil {
 		return err
@@ -197,7 +197,7 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 // logFollow reads what's added to a log. A new or shorter file, as Paper
 // starts each day, is read from its start.
 type logFollow struct {
-	file string
+	serverDir string
 	// last is the file read last time, held open so its inode can't go to
 	// the next new file, as ext4 does once a removed file is closed.
 	last *os.File
@@ -210,7 +210,7 @@ type logFollow struct {
 
 // skip moves to the end of the file, so only what comes next is read.
 func (f *logFollow) skip() error {
-	fh, err := server.OpenRegular(f.file)
+	fh, err := server.OpenLog(f.serverDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -234,7 +234,7 @@ func (f *logFollow) skip() error {
 }
 
 func (f *logFollow) next() ([]string, error) {
-	fh, err := server.OpenRegular(f.file)
+	fh, err := server.OpenLog(f.serverDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

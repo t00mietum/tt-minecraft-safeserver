@@ -386,7 +386,7 @@ func (p *Probe) boot(ctx context.Context) Line {
 // server tree is mounted in the container.
 func (p *Probe) log() []Line {
 	file := server.LogFile(p.Cfg.ServerDir)
-	tail, err := tailFile(file, logLines)
+	tail, err := tailLog(p.Cfg.ServerDir, logLines)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return []Line{{"Log", "no " + file + " yet"}}
@@ -400,9 +400,9 @@ func (p *Probe) log() []Line {
 	return lines
 }
 
-// tailFile reads only the end of a file, since a log can be large.
-func tailFile(file string, n int) ([]string, error) {
-	f, err := server.OpenRegular(file)
+// tailLog reads only the end of latest.log, since it can be large.
+func tailLog(serverDir string, n int) ([]string, error) {
+	f, err := server.OpenLog(serverDir)
 	if err != nil {
 		return nil, err
 	}

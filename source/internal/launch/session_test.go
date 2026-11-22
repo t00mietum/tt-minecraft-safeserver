@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -265,11 +266,15 @@ func TestSendCmdOtherThreads(t *testing.T) {
 // even where the new file gets the old one's inode, as on ext4.
 func TestLogFollowNewFile(t *testing.T) {
 	defer testid.Line(t, "1a3eq0r")
-	path := filepath.Join(t.TempDir(), "latest.log")
+	dir := t.TempDir()
+	path := server.LogFile(dir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte("old line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := &logFollow{file: path}
+	f := &logFollow{serverDir: dir}
 	defer f.close()
 	if err := f.skip(); err != nil {
 		t.Fatal(err)

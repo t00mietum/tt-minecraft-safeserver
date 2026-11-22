@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 )
 
 // LogFile is latest.log. It's the same file in both modes, since the server
@@ -24,7 +26,7 @@ func LogFile(serverDir string) string {
 }
 
 // ErrNotRegular is a file in the server tree that's a pipe, a device, a
-// socket, or a folder.
+// socket, or a folder, or for OpenLog a link.
 var ErrNotRegular = errors.New("not a regular file")
 
 // OpenRegular opens a file in the server tree for reading, after links. The
@@ -41,6 +43,35 @@ func OpenRegular(file string) (*os.File, error) {
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: file, Err: err}
 	}
+	return reopen(pfd, file)
+}
+
+// OpenLog opens latest.log the way OpenRegular does, but follows no link
+// below serverDir. status is run with sudo, and a link the server account
+// put in place of the log or its folder would show root's files.
+func OpenLog(serverDir string) (*os.File, error) {
+	top, err := linksafe.Open(serverDir)
+	if err != nil {
+		return nil, err
+	}
+	defer top.Close()
+	logs, err := top.Sub("logs")
+	if err != nil {
+		return nil, err
+	}
+	defer logs.Close()
+	file := LogFile(serverDir)
+	// With O_NOFOLLOW, O_PATH opens a link itself, which then isn't regular.
+	pfd, err := syscall.Openat(logs.Fd(), "latest.log", oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: file, Err: err}
+	}
+	return reopen(pfd, file)
+}
+
+// reopen opens an O_PATH handle to read, if it's a regular file, and closes
+// the handle.
+func reopen(pfd int, file string) (*os.File, error) {
 	defer syscall.Close(pfd)
 	var want syscall.Stat_t
 	if err := syscall.Fstat(pfd, &want); err != nil {

@@ -101,7 +101,7 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.lockJars(ctx, jars); err != nil {
 		return n.failedStart(ctx, n, err)
 	}
-	n.oldLog, _ = server.OpenRegular(n.latestLog()) // none yet is fine
+	n.oldLog, _ = server.OpenLog(n.Cfg.ServerDir) // none yet is fine
 	defer n.dropOldLog()
 	if _, err := n.Run.Run(ctx, host.Cmd{Args: args, Sudo: true}); err != nil {
 		return n.failedStart(ctx, n, err)
@@ -253,7 +253,7 @@ func (n *Native) latestLog() string {
 // log is this run's latest.log. Paper moves the last run's aside as it
 // starts, so until then there's nothing.
 func (n *Native) log(context.Context) ([]byte, error) {
-	f, err := server.OpenRegular(n.latestLog())
+	f, err := server.OpenLog(n.Cfg.ServerDir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil

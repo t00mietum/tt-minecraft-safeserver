@@ -279,6 +279,29 @@ func TestWatch(t *testing.T) {
 	}
 }
 
+// Ctrl-C during a reading leaves the screen as it was: watch draws nothing
+// more and exits 0, and status prints nothing and says it was interrupted.
+func TestStatusCtrlC(t *testing.T) {
+	defer testid.Line(t, "1a4z7n7")
+	cfg := config.Defaults()
+	cfg.ServerDir, cfg.OwnerTrees = t.TempDir(), nil
+	r := host.NewExec(false)
+	r.QuietErr = true
+	probe := status.NewProbe(r, &cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out bytes.Buffer
+	if err := watch(ctx, probe, &out, time.Second); err != nil || out.Len() != 0 {
+		t.Errorf("watch: err %v, drew:\n%s", err, out.String())
+	}
+	if err := showStatus(ctx, probe, &out); !errors.Is(err, launch.ErrInterrupted) || out.Len() != 0 {
+		t.Errorf("status: err %v, printed:\n%s", err, out.String())
+	}
+	if err := showStatus(context.Background(), status.NewProbe(&host.Fake{}, &cfg), &out); err != nil || !strings.Contains(out.String(), "Server:     not running in podman mode\n") {
+		t.Errorf("status: err %v, printed:\n%s", err, out.String())
+	}
+}
+
 // repair fixes the safe settings as root, running itself through sudo when
 // it isn't, and --check or --dry-run only reports, without root. Either one
 // exits 1 while something is wrong.

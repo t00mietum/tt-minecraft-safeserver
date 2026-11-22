@@ -575,7 +575,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - status, watch and cmd as root print any file that latest.log links to
 	- ID: 2026112110300208
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -585,13 +585,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a root host run, where `sudo tt-minecraftd status` printed a 0600 file in `/root` through the link.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 16.
+		- 20261122: Verified: 1a4z7n4 and 1a4z7n5 fail with OpenLog following links as before, and pass with the fix. The whole quick gate passed.
+		- Swept: settings.ReadPlayers already reads through linksafe. The log follower and native start's two reads now use OpenLog. Container start reads the log through the runtime's logs, not the file. The other OpenRegular callers read jars, where paper.jar links to its build by design. Plugin jar links are 2026112110300013.
 	- Origin: ba0f959 and 80c5e6f. Same class as 2026111709090967. Confirmed.
 	- Sweep: `settings.ReadPlayers` for the whitelist and ops, the log follower in `launch/session.go`, and native `log()`.
+	- Closed reason: Done
+	- Actual cause [Bug]: status, the cmd answer wait and native start read latest.log through server.OpenRegular, which follows links, so a link in place of the log or the logs folder showed whatever it named.
+	- Actual fix [Bug]: new server.OpenLog opens serverDir, then logs and latest.log with no link followed, and refuses anything but a regular file. status, the log follower and native start's log reads use it. design.md's status section says so.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: 1bdbbfa
+	- Test case: 1a4z7n4, 1a4z7n5
+	- Acceptance signoff: Self-closed: 1a4z7n4 and 1a4z7n5 fail on the unfixed code and pass now.
+	- Closed: 20261122-144844
+	- Decisions:
+		- 20261122: no link is followed below serverDir in any mode, not only as root, so status shows the same with and without sudo. serverDir itself may still be a link, as config allows.
+		- 20261122: the regression tests run as a plain account, since the check doesn't depend on root. The root host repro zzrv001 isn't in checks.bash.
 
 - start and stop waits skip a last look at the deadline
 	- ID: 2026112110300221
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -601,13 +615,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: launch rig tests in `launch_jarlinks-waits_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 17.
+		- 20261122: Verified: 1a4z7n6 fails on the unfixed code (start says it didn't load, stop sends SIGTERM) and passes with the fix. 1a4q5y8 still passes. The whole quick gate passed.
+		- Swept: both waits are in Kit and shared by container and native modes. The countdown and cmd's answer wait don't end at a deadline with an error or a kill.
+		- 20261122: 1a3ej4g's slow foreground case feeds one more `active` unit state, 7 in place of 6, for the extra look. Its asserts are as before.
 	- Origin: 3a04d86. 2026112017592582 (nov20b) rewrote the loop and kept the gap. Confirmed.
 	- Sweep: `waitLoaded` and `waitStopped`, both modes.
+	- Decisions:
+		- 20261122: with a timeout of 0 each wait still looks once.
+	- Closed reason: Done
+	- Actual cause [Bug]: waitLoaded and waitStopped tested the deadline before each look, so the look after the last pause never ran.
+	- Actual fix [Bug]: each wait looks first and tests the deadline after, so the last pause, cut to end at the deadline, is followed by one more look of the log and the process.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: f691689
+	- Test case: 1a4z7n6
+	- Acceptance signoff: Self-closed: 1a4z7n6 fails on the unfixed code and passes now.
+	- Closed: 20261122-144844
 
 - Ctrl-C during a watch reading draws a screen of errors
 	- ID: 2026112110300234
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -617,8 +645,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `cmd_watch-ctrlc_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 18.
+		- 20261122: Verified: 1a4z7n7 fails on the unfixed code (watch and status both draw the broken reading) and passes with the fix. 1a3eka0 still passes. The whole quick gate passed.
+		- Swept: status and watch are the only callers of Probe.Take.
 	- Origin: ba0f959. Not seen before. Confirmed.
 	- Sweep: a one-shot `status`.
+	- Decisions:
+		- 20261122: status cut short exits 1, as design.md's Commands has Ctrl-C end a wait with exit 1. watch keeps exit 0, since Ctrl-C is how it ends.
+	- Closed reason: Done
+	- Actual cause [Bug]: watch drew the reading even when Ctrl-C had ended its context partway, so every look that was cut short showed as an error.
+	- Actual fix [Bug]: watch checks the context after each reading and exits 0 without drawing one Ctrl-C cut short. A one-shot status cut short prints nothing and exits 1, saying it was interrupted. design.md's status and watch section says so.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: d39d187
+	- Test case: 1a4z7n7
+	- Acceptance signoff: Self-closed: 1a4z7n7 fails on the unfixed code and passes now.
+	- Closed: 20261122-144844
 
 - update's library removal checks for a running server long before it removes
 	- ID: 2026112110300247

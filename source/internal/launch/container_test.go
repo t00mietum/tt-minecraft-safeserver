@@ -330,6 +330,45 @@ func TestWaitDeadline(t *testing.T) {
 	}
 }
 
+// A Done line or an exit just before the deadline still counts, since each
+// wait looks once more after its last pause.
+func TestWaitsLookAtDeadline(t *testing.T) {
+	defer testid.Line(t, "1a4z7n6")
+	g := newRig(t)
+	g.states = []string{"", "running"}
+	reply := g.r.Reply
+	g.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if len(c.Args) > 2 && c.Args[1] == "logs" && g.d.slept >= g.d.Cfg.StartTimeout-500*time.Millisecond {
+			return []byte(`[12:00:00] [Server thread/INFO]: Done (4.5s)! For help, type "help"` + "\n"), nil
+		}
+		return reply(c)
+	}
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Errorf("start: %v\n%s", err, g.out.String())
+	}
+
+	g = newRig(t)
+	reply = g.r.Reply
+	g.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if len(c.Args) > 2 && c.Args[1] == "ps" {
+			if g.d.slept >= g.d.Cfg.StopTimeout-500*time.Millisecond {
+				return []byte("exited\n"), nil
+			}
+			return []byte("running\n"), nil
+		}
+		return reply(c)
+	}
+	if err := g.d.Stop(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if out := g.out.String(); strings.Contains(out, "SIGTERM") || !strings.Contains(out, "The server stopped.") {
+		t.Errorf("stop sent SIGTERM to a server that had stopped:\n%s", out)
+	}
+	if ran := strings.Join(g.changes(), "\n"); strings.Contains(ran, " stop --time") {
+		t.Errorf("stop ran a kill:\n%s", ran)
+	}
+}
+
 // A start that fails after the hand-off, with the server down, hands the
 // trees back. One that leaves the server up, or can't tell, says how to get
 // them back. Inside the boot unit, ExecStop's stop does it.

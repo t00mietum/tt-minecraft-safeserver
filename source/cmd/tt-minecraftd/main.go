@@ -199,8 +199,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 		runner.QuietErr = true
 		probe := status.NewProbe(runner, &inv.cfg)
 		if name == "status" {
-			width, _ := terminal(stdout)
-			return probe.Take(ctx).Write(stdout, width)
+			return showStatus(ctx, probe, stdout)
 		}
 		return watch(ctx, probe, stdout, time.Duration(inv.opts.interval)*time.Second)
 	}
@@ -627,8 +626,20 @@ func repairPlugins(inv invocation, w io.Writer, report func(state, text string))
 	}
 }
 
+// showStatus prints one reading. One cut short by Ctrl-C is all errors, so
+// it isn't shown.
+func showStatus(ctx context.Context, probe *status.Probe, w io.Writer) error {
+	width, _ := terminal(w)
+	rep := probe.Take(ctx)
+	if ctx.Err() != nil {
+		return fmt.Errorf("status: %w before the reading was done", launch.ErrInterrupted)
+	}
+	return rep.Write(w, width)
+}
+
 // watch redraws status until Ctrl-C. On a terminal each redraw replaces the
-// last one; elsewhere they follow one another.
+// last one; elsewhere they follow one another. A reading cut short by Ctrl-C
+// isn't drawn, so the last whole one stays on the screen.
 func watch(ctx context.Context, probe *status.Probe, w io.Writer, every time.Duration) error {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
@@ -639,7 +650,11 @@ func watch(ctx context.Context, probe *status.Probe, w io.Writer, every time.Dur
 			b.WriteString("\x1b[H\x1b[2J")
 		}
 		fmt.Fprintf(&b, "\nEvery %s, until Ctrl-C. %s\n", every, time.Now().Format("15:04:05"))
-		if err := probe.Take(ctx).Write(&b, width); err != nil {
+		rep := probe.Take(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := rep.Write(&b, width); err != nil {
 			return err
 		}
 		if _, err := w.Write(b.Bytes()); err != nil {

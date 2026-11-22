@@ -235,7 +235,9 @@ func TestNativeStartModes(t *testing.T) {
 	// A slow load in --foreground is only a warning, as in container mode.
 	g = newNativeRig(t)
 	g.n.Root = true
-	g.states = []string{"inactive", "active", "active", "active", "active", "active", "active", "inactive"}
+	// One look a second for 5 s, a last one at the deadline, then one by the
+	// foreground wait. One more "active" since 2026112110300221.
+	g.states = []string{"inactive", "active", "active", "active", "active", "active", "active", "active", "inactive"}
 	if err := g.n.Start(context.Background(), StartMode{Foreground: true}); err != nil || !strings.Contains(g.out.String(), "warning: the server didn't finish loading") {
 		t.Errorf("foreground, slow: err %v, output %q", err, g.out.String())
 	}

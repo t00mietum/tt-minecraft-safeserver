@@ -238,7 +238,9 @@ func (k *Kit) checkFirewall(ctx context.Context) error {
 func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 	k.say("Waiting for the server to load, up to %s.", k.Cfg.StartTimeout)
 	deadline := k.now().Add(k.Cfg.StartTimeout)
-	for k.now().Before(deadline) {
+	// The look comes before the deadline test, so the last pause, cut to
+	// end at the deadline, is followed by one more look.
+	for {
 		log, err := e.log(ctx)
 		if err != nil {
 			return err
@@ -258,6 +260,9 @@ func (k *Kit) waitLoaded(ctx context.Context, e engine) error {
 			}
 			k.say("%s", tail)
 			return errors.New("the server exited while loading")
+		}
+		if !k.now().Before(deadline) {
+			break
 		}
 		if err := k.pause(ctx, k.tick(deadline)); err != nil {
 			return fmt.Errorf("%w while the server loads; it's still running, so see status or %s", err, e.logHint())
@@ -399,7 +404,8 @@ func (k *Kit) callOff(ctx context.Context) error {
 func (k *Kit) waitStopped(ctx context.Context, e engine) error {
 	k.say("Waiting for the server to save and stop, up to %s.", k.Cfg.StopTimeout)
 	deadline := k.now().Add(k.Cfg.StopTimeout)
-	for k.now().Before(deadline) {
+	// As in waitLoaded, the deadline passing still gets one last look.
+	for {
 		up, err := e.running(ctx)
 		if err != nil {
 			return err
@@ -407,6 +413,9 @@ func (k *Kit) waitStopped(ctx context.Context, e engine) error {
 		if !up {
 			k.say("The server stopped.")
 			return nil
+		}
+		if !k.now().Before(deadline) {
+			break
 		}
 		if err := k.pause(ctx, k.tick(deadline)); err != nil {
 			return fmt.Errorf("%w while the server saves; it's still stopping, and stop again hands the trees back once it's down", err)

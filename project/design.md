@@ -203,9 +203,10 @@ Common:  --config PATH, --set KEY=VALUE
 - A part that can't be read, such as a file the operator's group can't see, says why, and the rest still shows.
 	- When a read of the tree is refused and the login doesn't have `runGroup` yet, the trees line says so, as `start` does.
 
-- The log is `logs/latest.log` in both modes, since the container sees the same tree. Files in the tree that aren't plain files, such as a pipe the server left there, aren't read.
+- The log is `logs/latest.log` in both modes, since the container sees the same tree. Files in the tree that aren't plain files, such as a pipe the server left there, aren't read. Nor is a `latest.log` or `logs` folder that's a link, since `status` may run with sudo, and `cmd` and native `start` read the log the same way.
 
 - `watch` redraws `status` every few seconds until Ctrl-C.
+	- A reading that Ctrl-C cuts short isn't shown, so the last whole one stays on the screen and `watch` exits 0. `status` cut short that way shows nothing and exits 1.
 
 ### console and cmd
 

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -125,5 +126,80 @@ func TestOpenRegularChecksFirst(t *testing.T) {
 	_ = f.Close()
 	if !opened() {
 		t.Error("inotify missed an open of the pipe")
+	}
+}
+
+// OpenLog follows no link below serverDir, since status runs as root and the
+// server account can put one in place of the log or its folder. serverDir
+// itself may be a link, as config allows.
+func TestOpenLogNoLinks(t *testing.T) {
+	defer testid.Line(t, "1a4z7n4")
+	base := t.TempDir()
+	secret := filepath.Join(base, "secret")
+	if err := os.WriteFile(secret, []byte("root only"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := filepath.Join(base, "srv")
+	if err := os.MkdirAll(filepath.Join(srv, "logs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenLog(srv); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("no log yet: %v, want not found", err)
+	}
+	if err := os.Symlink(secret, LogFile(srv)); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := OpenLog(srv); !errors.Is(err, ErrNotRegular) {
+		if err == nil {
+			_ = f.Close()
+		}
+		t.Errorf("latest.log a link: %v, want ErrNotRegular", err)
+	}
+	if err := os.Remove(LogFile(srv)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(srv, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(base, "other")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(other, "latest.log")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, filepath.Join(srv, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := OpenLog(srv); !errors.Is(err, linksafe.ErrLink) {
+		if err == nil {
+			_ = f.Close()
+		}
+		t.Errorf("logs a link: %v, want ErrLink", err)
+	}
+	if err := os.Remove(filepath.Join(srv, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(srv, "logs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LogFile(srv), []byte("a line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	top := filepath.Join(base, "top")
+	if err := os.Symlink(srv, top); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{srv, top} {
+		f, err := OpenLog(dir)
+		if err != nil {
+			t.Errorf("%s: %v", dir, err)
+			continue
+		}
+		got, err := io.ReadAll(f)
+		_ = f.Close()
+		if err != nil || string(got) != "a line\n" {
+			t.Errorf("%s read %q, %v", dir, got, err)
+		}
 	}
 }
