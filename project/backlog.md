@@ -1036,7 +1036,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Cover status readings in a soak
 	- ID: 2026112110300416
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -1045,6 +1046,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Neither soak covers `status.Probe.Take`, the one loop that runs with no end, in `watch`. Add it, so a small leak per reading shows.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 32.
+		- 2026-11-22: New soak in the status package: one Probe takes reading after reading of a running server, with the process table, cgroup memory, a real ping to a loopback stand-in, sockets, drop counters, player lists, jars, and a log that grows each round.
+		- Verified: 1a4zbf0 passed at 100 and 1000 rounds a half (heap and goroutines flat). A planted 12 kB kept per `Take` and a planted goroutine per ping each turned it red. The soak step ran it in the container with `--leakcheck --backlog-run-quick status`, and the whole quick gate passed.
+	- Decisions:
+		- The command's soak already took a reading each round, but of a stopped server with an empty stand-in host, so the ping, memory, counters and log parts never ran. The new soak covers the running path rather than widening that one.
+		- It soaks `Take` rather than `watch` itself, since watch's own loop only adds a buffer and a ticker per pass.
+	- Test case: 1a4zbf0 TestSoak in status
+	- Swept: `Take` has 2 callers, `showStatus` and `watch` in main.go. Both go through the same Probe.
+	- Branch: nov22-2026112110300416
+	- Commit: 2e8ebd0
+	- Acceptance signoff: Self-closed: clear intent, and the soak was watched to fail on a planted heap and goroutine leak.
+	- Closed: 20261122-152400
 
 - Publish v1.0.0-beta.1 with or before the install.bash that needs retire-build
 	- ID: 2026112110300429
