@@ -1009,7 +1009,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Refuse a config value that an unquoted # cuts short
 	- ID: 2026112110300403
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -1019,6 +1019,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `Set` refuses a value whose read-back differs from what was typed. A comment glued to a value in the file gets a warning.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 31. shcl friction: a `#` with no space before it starts a comment.
+		- 2026-11-22: Set refuses a value a comment would cut, glued or spaced, and names what it would read as. A comment right against a value in config.shcl or plugins.shcl gets a warning with its line, from shcl's own hint. design.md's Configuration model says so.
+		- Verified: 1a4zb2g and 1a4zb2h fail on the old code and pass with the change. The whole quick gate passes.
+	- Closed reason: Done
+	- Branch: nov22-2026112110300403
+	- Test case: 1a4zb2g, 1a4zb2h
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Swept: Config.Set is the one place an option is parsed, and config.LoadFile reads both config.shcl and plugins.shcl, so a glued comment warns in both.
+	- Closed: 20261122-151836
+	- Decisions:
+		- Set compares the line as typed against SetLiteral's form of the value, which drops a comment, so any cut is caught without a scan of shcl's quoting here.
+		- In the file only a glued comment warns, as the item asks. A spaced comment after a value is the usual form and stays quiet.
+	- Commit: 88d47a3
 
 - Cover status readings in a soak
 	- ID: 2026112110300416

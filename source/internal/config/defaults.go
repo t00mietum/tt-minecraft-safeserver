@@ -124,10 +124,23 @@ func (c *Config) Set(key, value string) error {
 	if len(tops) != 1 {
 		return fmt.Errorf("%s: takes one value or one list", key)
 	}
+	if cut(tops[0].Path, value, doc) {
+		return fmt.Errorf("%s: a '#' outside quotes starts a comment, so %q reads as %q; quote the value if the '#' is part of it", key, value, doc.ReadString(tops[0].Path).Value)
+	}
 	if err := set(doc, tops[0].Path); err != nil {
 		return fmt.Errorf("%s: %w", key, err)
 	}
 	return nil
+}
+
+// cut is true when value, parsed as the line in doc, lost text to a comment.
+// SetLiteral drops a comment, so the two forms differ only when there was one.
+func cut(path, value string, doc *shcl.Document) bool {
+	bare := shcl.Parse("")
+	if bare.SetLiteral(path, value) != shcl.SetOk {
+		return false
+	}
+	return bare.ToCanonical() != doc.ToCanonical()
 }
 
 // derive fills the keys whose defaults come from others, and settles keys

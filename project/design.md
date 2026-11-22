@@ -545,6 +545,8 @@ cicd/                        build, test, and release scripts
 	- A list with one bad item is a bad value, so none of it is used.
 	- A `heapMin` over `heapMax` gets a warning, and `heapMax` is used for both. A `memCap` that isn't over `heapMax` gets a warning, and its default.
 
+- A `#` outside quotes starts a comment, so `serverDir: /srv/games#2` reads as `/srv/games`. A comment right against a value gets a warning, and `--set` refuses a value a comment would cut. Quote a value that holds a `#`.
+
 - Key names and the words such as `podman` and `lan` don't care about case.
 
 - Sizes take Java's form, such as `4G`, or shcl's, such as `4 GiB`. Either way a G is 1024 M, the same as Java. Timeouts take seconds, or a time such as `5m`.
