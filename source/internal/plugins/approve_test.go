@@ -294,3 +294,63 @@ func TestSetSources(t *testing.T) {
 // 		t.Errorf("%s: %v %v", RefusedDir, fi.Mode(), err)
 // 	}
 // }
+
+// Within takes only a regular file in serverDir or a tree, and Unsourced
+// doesn't read a jar that leads anywhere else, since it runs as root
+// (backlog 2026112110300013).
+func TestWithinTrees(t *testing.T) {
+	defer testid.Line(t, "1a4ytyx")
+	base := t.TempDir()
+	dir := filepath.Join(base, "server")
+	other := filepath.Join(base, "world")
+	outside := filepath.Join(base, "home")
+	put(t, filepath.Join(dir, "plugins", "a.jar"), "a")
+	put(t, filepath.Join(other, "b.jar"), "b")
+	makeJar(t, filepath.Join(outside, "Geyser-Spigot.jar"), map[string]string{"plugin.yml": "name: Geyser-Spigot\nversion: 1\n"})
+	link := func(to, name string) string {
+		file := filepath.Join(dir, "plugins", name)
+		if err := os.Symlink(to, file); err != nil {
+			t.Fatal(err)
+		}
+		return file
+	}
+	for _, c := range []struct {
+		file  string
+		trees []string
+		ok    bool
+	}{
+		{filepath.Join(dir, "plugins", "a.jar"), nil, true},
+		{link("a.jar", "same.jar"), nil, true},
+		{link(filepath.Join(other, "b.jar"), "b.jar"), []string{other}, true},
+		{filepath.Join(dir, "plugins", "b.jar"), nil, false},
+		{link(filepath.Join(outside, "Geyser-Spigot.jar"), "Geyser-Spigot.jar"), []string{other}, false},
+		{link(outside, "dir.jar"), []string{other}, false},
+		{link(base, "up.jar"), nil, false},
+		{link("nowhere", "gone.jar"), nil, false},
+	} {
+		real, err := Within(c.file, dir, c.trees)
+		if (err == nil) != c.ok {
+			t.Errorf("Within(%s, %q) = %q, %v", c.file, c.trees, real, err)
+		}
+	}
+
+	// The outside Geyser jar would get a source if it were read.
+	got, err := Unsourced(dir, []string{other}, filepath.Join(base, "plugins.shcl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, info := range got {
+		if info.Name == "plugins/Geyser-Spigot.jar" {
+			t.Errorf("Unsourced read %s: %+v", info.Name, info)
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, "plugins", "Geyser-Spigot.jar")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(outside, "Geyser-Spigot.jar"), filepath.Join(dir, "plugins", "Geyser-Spigot.jar")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = Unsourced(dir, nil, filepath.Join(base, "plugins.shcl")); err != nil || len(got) == 0 {
+		t.Errorf("Unsourced with the jar inside = %+v, %v", got, err)
+	}
+}

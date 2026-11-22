@@ -103,7 +103,7 @@ var ownershipCheck = Check{
 		// Native mode gives the jars to root while it runs.
 		skip := map[string]bool{}
 		if up && c.RunMode == "native" {
-			jars, _ := launch.LockedJars(c.ServerDir) // missing ones are the server folder check's to report
+			jars, _ := launch.LockedJars(c.ServerDir, c.OwnerTrees) // missing ones are the server folder check's to report
 			for _, j := range jars {
 				skip[j] = true
 			}
@@ -296,8 +296,8 @@ func closeKey(serverDir string) error {
 
 // GeyserSources are the Geyser and Floodgate jars in plugins/ that file gives
 // no source, as on an adopted tree, each with source's for its project.
-func GeyserSources(serverDir, file string, source func(project string) string) ([]plugins.Info, error) {
-	all, err := plugins.Unsourced(serverDir, file)
+func GeyserSources(serverDir string, trees []string, file string, source func(project string) string) ([]plugins.Info, error) {
+	all, err := plugins.Unsourced(serverDir, trees, file)
 	if err != nil {
 		return nil, err
 	}

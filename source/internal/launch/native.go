@@ -67,7 +67,7 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if err := n.preflight(ctx); err != nil {
 		return err
 	}
-	jars, err := LockedJars(n.Cfg.ServerDir)
+	jars, err := LockedJars(n.Cfg.ServerDir, n.Cfg.OwnerTrees)
 	if err != nil {
 		return err
 	}

@@ -76,7 +76,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Container start mounts any host path that a plugin jar link points to
 	- ID: 2026112110300013
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261121-103000
@@ -88,6 +88,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-21: Code review 20261121 item 1. Detail in detail_backlog.md.
 	- Origin: `LockedJars` from 9058841, plugin pinning. Before 2b322c0 (2026111914293176) a new jar was refused until approved, so a planted link was never mounted. A regression of that removal. Not seen before. Confirmed.
 	- Sweep: every `LockedJars` caller, native `lockJars`, the Geyser extensions folder read as root, `update.treeJars` hashing through `plugins.Sum`, and `Unsourced` reading `plugin.yml` as root.
+	- Closed reason: Done
+	- Actual cause [Bug]: `LockedJars` took any `*.jar` entry after links, with no check of what it led to, so start mounted it and native start would chown it. `update` hashed it and `setup` and `repair` read it, all as root.
+	- Actual fix [Bug]: New `plugins.Within` takes a jar only when its real path is a regular file in `serverDir` or a tree in `ownerTrees`. `LockedJars` refuses any other, so both modes stop the start before anything runs. `update` skips such a jar and says why, and `Unsourced` skips it. design.md's Plugin jars says so.
+	- Test case: 1a4ytyw, 1a4ytyx, 1a4ytyy
+	- Verified: 1a4ytyw, 1a4ytyx and 1a4ytyy fail with `Within` taking any path, and with update's check taken out, and pass with the fix. 1a4ytyw covers links to a host file, a host folder, a linked extensions folder and a pipe, and a jar in a second tree still mounted. The quick gate passes.
+	- Swept: `LockedJars` callers: container `runArgs`, native `Start` (and so `lockJars`), repair's skip map. `plugins.Jars` callers: `update.treeJars` (now checked), `Unsourced` through `repair.GeyserSources` for setup and repair (now checked), status (lists names only, without sudo). The extensions folder: a link in its place is listed, and its jars are refused by `Within`.
+	- Branch: nov22-2026112110300013
+	- Commit: 371d384
+	- Acceptance signoff: Self-closed: reproduced, and the tests fail before the fix and pass after.
+	- Closed: 20261122-123613
+	- Decisions:
+		- A jar may lead into any tree in `ownerTrees`, not only `serverDir`, per the item's wording. Such a jar is already mounted with its tree, so the read-only mount over it changes nothing else. `paper.jar` still has to stay in `serverDir`.
+		- The kind is checked with `Lstat` on the resolved path, which opens nothing. A link to a folder or a pipe reports "not a regular file", one to a host file names where it leads.
+		- `update` and `Unsourced` skip such a jar rather than fail, so one planted link doesn't stop repair or setup. On the old code a link to a folder made repair's plugin sources step fail.
+		- Left alone: native `lockJars` still runs `chown` and `chmod` on the path rather than through a linksafe handle. The paths are now real paths of regular files in the trees, native mode is off, and swapping one between the check and the chown needs a process of the server account while the server is stopped.
 
 - A dotted key in spigot.yml turns BungeeCord on past the safe settings check
 	- ID: 2026112110300026

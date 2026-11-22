@@ -527,3 +527,33 @@ func TestUpdateClearsLibraries(t *testing.T) {
 		t.Errorf("--paper: %v, ran %+v\n%s", err, fake.Ran, r.out)
 	}
 }
+
+// A plugin jar link that leads out of the trees isn't hashed as root, nor
+// put to the agent, and the skip says why (backlog 2026112110300013).
+func TestTreeJarsOutOfTrees(t *testing.T) {
+	defer testid.Line(t, "1a4ytyy")
+	base := t.TempDir()
+	dir := filepath.Join(base, "server")
+	outside := filepath.Join(base, "home")
+	for _, d := range []string{filepath.Join(dir, "plugins"), outside} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{filepath.Join(dir, "plugins", "a.jar"), filepath.Join(outside, "secret.txt")} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(dir, "plugins", "zz-host.jar")); err != nil {
+		t.Fatal(err)
+	}
+	u := &Update{Cfg: &config.Config{ServerDir: dir, OwnerTrees: []string{dir}}, PluginsFile: filepath.Join(base, "plugins.shcl")}
+	jars, skipped := u.treeJars()
+	if len(jars) != 1 || jars[0].Name != "plugins/a.jar" {
+		t.Errorf("jars %+v", jars)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "zz-host.jar leads to ") {
+		t.Errorf("skipped %q", skipped)
+	}
+}

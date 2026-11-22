@@ -371,6 +371,12 @@ func (u *Update) treeJars() (jars []plugins.Approved, skipped []string) {
 		if !strings.HasPrefix(j.Name, "plugins/") {
 			continue
 		}
+		// Root shouldn't hash, or tell the agent about, a host file a
+		// planted link names.
+		if _, err := plugins.Within(j.File, u.Cfg.ServerDir, u.Cfg.OwnerTrees); err != nil {
+			skipped = append(skipped, err.Error())
+			continue
+		}
 		sum, err := plugins.Sum(j.File)
 		if err != nil {
 			skipped = append(skipped, fmt.Sprintf("%s: can't read it: %v", j.Name, err))

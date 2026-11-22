@@ -739,6 +739,7 @@ cicd/                        build, test, and release scripts
 
 - In container mode, every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and the build `paper.jar` links to are mounted read-only, so the server can't change them while it runs. Native mode lists the same jars in the unit's read-only paths.
 	- A `paper.jar` that links outside `serverDir` stops the start.
+	- So does a jar in either folder that isn't a regular file in `serverDir` or a tree in `ownerTrees`, after links. The server account can plant such a link, and start would mount whatever it names, or chown it in native mode. `update` and `repair` don't read such a jar either.
 
 - `/etc/tt-minecraftd/plugins.shcl` gives an optional source per jar, for `update --plugins`. The name is the jar's path under `serverDir`, so a jar in `plugins/` and an extension with the same name stay apart:
 

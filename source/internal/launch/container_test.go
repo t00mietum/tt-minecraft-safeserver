@@ -14,12 +14,14 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
@@ -1046,11 +1048,98 @@ func TestStartJarLinksOneMount(t *testing.T) {
 		t.Errorf("%d mounts of %s in %q", n, g.dir, create)
 	}
 	// Native mode takes the same list for its read-only paths.
-	jars, err := LockedJars(g.dir)
+	jars, err := LockedJars(g.dir, []string{g.dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{filepath.Join(g.dir, "paper-26.3-244.jar"), real}; !slices.Equal(jars, want) {
 		t.Errorf("LockedJars gave %q, want %q", jars, want)
+	}
+}
+
+// A jar link the server account plants in plugins/ that leads out of the
+// trees stops start before anything runs, so it can't have a host file or
+// folder mounted into the container (backlog 2026112110300013).
+func TestStartJarLinkOutOfTrees(t *testing.T) {
+	defer testid.Line(t, "1a4ytyw")
+	plant := map[string]func(g *rig, outside string) error{
+		"file": func(g *rig, outside string) error {
+			return os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(g.dir, "plugins", "zz-host.jar"))
+		},
+		"folder": func(g *rig, outside string) error {
+			return os.Symlink(outside, filepath.Join(g.dir, "plugins", "zz-host.jar"))
+		},
+		"extensions folder": func(g *rig, outside string) error {
+			if err := os.MkdirAll(filepath.Join(g.dir, "plugins", "Geyser-Spigot"), 0o700); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(outside, "x.jar"), nil, 0o600); err != nil {
+				return err
+			}
+			return os.Symlink(outside, filepath.Join(g.dir, "plugins", "Geyser-Spigot", "extensions"))
+		},
+		"paper.jar": func(g *rig, outside string) error {
+			if err := os.Remove(filepath.Join(g.dir, "paper.jar")); err != nil {
+				return err
+			}
+			return os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(g.dir, "paper.jar"))
+		},
+	}
+	for name, how := range plant {
+		t.Run(name, func(t *testing.T) {
+			g := newRig(t)
+			g.d.DryRun = true
+			outside := filepath.Join(filepath.Dir(filepath.Dir(g.dir)), "home", "alice")
+			if err := os.MkdirAll(outside, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := how(g, outside); err != nil {
+				t.Fatal(err)
+			}
+			err := g.d.Start(context.Background(), StartMode{})
+			if err == nil || !strings.Contains(err.Error(), "outside serverDir and ownerTrees") && !errors.Is(err, server.ErrNotRegular) {
+				t.Errorf("err %v", err)
+			}
+			if lines := strings.Join(g.r.Lines(), "\n"); strings.Contains(lines, "alice") {
+				t.Errorf("the outside path reached a command:\n%s", lines)
+			}
+			if _, err := LockedJars(g.dir, []string{g.dir}); err == nil {
+				t.Error("LockedJars took it, so native start would chown it")
+			}
+		})
+	}
+
+	// A pipe in the tree isn't a jar either.
+	g := newRig(t)
+	g.d.DryRun = true
+	if err := syscall.Mkfifo(filepath.Join(g.dir, "plugins", "pipe.jar"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.d.Start(context.Background(), StartMode{}); !errors.Is(err, server.ErrNotRegular) {
+		t.Errorf("pipe: err %v", err)
+	}
+
+	// A link to a jar in another tree is fine, and that jar is mounted.
+	g = newRig(t)
+	g.d.DryRun = true
+	other := filepath.Join(filepath.Dir(g.dir), "shared")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "lib.jar"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(other, "lib.jar"), filepath.Join(g.dir, "plugins", "lib.jar")); err != nil {
+		t.Fatal(err)
+	}
+	g.d.Cfg.OwnerTrees = []string{g.dir, other}
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Join(g.r.Lines(), "\n"); !strings.Contains(lines, "dst="+filepath.Join(other, "lib.jar")+",readonly") {
+		t.Errorf("no read-only mount of the other tree's jar in:\n%s", lines)
 	}
 }

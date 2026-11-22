@@ -175,8 +175,9 @@ func SetSources(file string, jars []Info) error {
 
 // Unsourced lists the jars in plugins/ that plugins.shcl gives no source,
 // each with About, so setup and repair can give Geyser and Floodgate
-// theirs. No list yet means none has one.
-func Unsourced(serverDir, file string) ([]Info, error) {
+// theirs. No list yet means none has one. A jar that leads out of serverDir
+// and trees isn't read, since this runs as root; start refuses it.
+func Unsourced(serverDir string, trees []string, file string) ([]Info, error) {
 	listed, _, err := ReadApproved(file)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
@@ -192,6 +193,9 @@ func Unsourced(serverDir, file string) ([]Info, error) {
 	var out []Info
 	for _, j := range jars {
 		if path.Dir(j.Name) != "plugins" || has[j.Name] {
+			continue
+		}
+		if _, err := Within(j.File, serverDir, trees); err != nil {
 			continue
 		}
 		about, err := aboutFile(j.File)

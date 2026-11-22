@@ -598,7 +598,7 @@ func repairPlugins(inv invocation, w io.Writer, report func(state, text string))
 	for _, warn := range warns {
 		fmt.Fprintf(w, "warning: %s\n", server.Clean(warn.String()))
 	}
-	jars, err := repairpkg.GeyserSources(inv.cfg.ServerDir, file, geyserAPI.Source)
+	jars, err := repairpkg.GeyserSources(inv.cfg.ServerDir, inv.cfg.OwnerTrees, file, geyserAPI.Source)
 	if err != nil {
 		report("FAILED", "plugins: "+err.Error())
 		return

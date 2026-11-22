@@ -35,6 +35,35 @@ func hashOf(r io.Reader) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// Within gives file's real path, after links, when that's a regular file in
+// serverDir or one of trees. Root mounts, chowns and reads what a jar leads
+// to, and the server account can plant a link in plugins/, so one that leads
+// anywhere else is refused (backlog 2026112110300013).
+func Within(file, serverDir string, trees []string) (string, error) {
+	real, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		return "", err
+	}
+	// Lstat opens nothing, and real has no link left in it.
+	fi, err := os.Lstat(real)
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s: %w", server.Clean(file), server.ErrNotRegular)
+	}
+	for _, t := range append([]string{serverDir}, trees...) {
+		base, err := filepath.EvalSymlinks(t)
+		if err != nil {
+			continue
+		}
+		if rel, err := filepath.Rel(base, real); err == nil && insideServer(filepath.ToSlash(rel)) {
+			return real, nil
+		}
+	}
+	return "", fmt.Errorf("%s leads to %s, outside serverDir and ownerTrees", server.Clean(file), server.Clean(real))
+}
+
 // Folders whose jars run as plugins, besides paper.jar. Geyser extensions run
 // with the same access as plugins.
 var pinnedDirs = []string{"plugins", "plugins/Geyser-Spigot/extensions"}

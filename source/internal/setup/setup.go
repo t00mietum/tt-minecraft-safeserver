@@ -400,7 +400,7 @@ func (s *Setup) unsourced(c config.Config) ([]plugins.Info, error) {
 	if _, err := os.Stat(c.ServerDir); errors.Is(err, fs.ErrNotExist) || s.Geyser == nil {
 		return nil, nil
 	}
-	return repair.GeyserSources(c.ServerDir, s.PluginsFile, s.Geyser.Source)
+	return repair.GeyserSources(c.ServerDir, c.OwnerTrees, s.PluginsFile, s.Geyser.Source)
 }
 
 // copyTarget is the binary to copy to BinPath, or empty when it runs from
