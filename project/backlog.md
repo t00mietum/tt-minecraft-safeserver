@@ -312,7 +312,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - install.bash on a box with the package moves its own copy away, or makes setup fail
 	- ID: 2026112110300078
 	- Type: Bug
-	- Status: Waiting on signoff
+	- Status: Closed
 		- For the refusal's wording and the README line.
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
@@ -323,6 +323,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 6. Detail in detail_backlog.md.
 		- Verified: 1a3jrx0 passes, and its new case fails with the check taken out (code 0, it went on to the release lookup). The quick gate passes, CodeQL included.
+		- 2026-11-22: Closed without a separate signoff, per the standing policy. The refusal names the package manager and the newer .deb or .rpm, and README says the same, which matches design.md's Boot section.
 	- Origin: 9d7cb3e, install script. The clash came with 0c9de06 (2026111715275041) and check 15's move in f741e0d (2026111911125756). Not seen before. Plausible, read only.
 	- Sweep: only install.bash. setup already guards its copy with `boot.Bin`.
 	- Swept: install.bash is the only hand install that skipped the check. setup's copy uses boot.Bin, and dogfood and the root host checks run on boxes without the package.
@@ -335,6 +336,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Test case: 1a3jrx0, "the package's binary stops it before the plan"
 	- Actual effort: Low
 	- Commit: 8248dbf
+	- Closed reason: Done
+	- Closed: 20261122
 
 - A new install that stops partway can't be run again as setup says
 	- ID: 2026112110300091
@@ -744,9 +747,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Negated root host checks pass when the command they look with can't run
 	- ID: 2026112110300273
 	- Type: Bug
-	- Status: Waiting for testing
+	- Status: Closed
 	- Needs local test suite run?: No
-	- Needs external testing: `cicd/root-host/root-host.bash` for 1a3fh00, 1a3fh68, 1a3fh9c, 1a3jwt0, 1a3fjew and 1a3jgsm, and `root-host.bash --zfs` for 1a3jn00 and 1a3jqxr, to see each still pass on a real host. fNativeStart (1a3fj2c) skips there while native mode is off.
+	- Needs external testing: No
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -757,6 +760,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 21.
 		- 2026-11-22: Verified: 1a4z0h0 runs the changed checks from checks.bash with stub sudo, pgrep and systemctl. Its no-container, zfs-list-fails (both checks), no-server-process and nft-fails cases fail on the old checks and pass on the new ones. Its firewall-off table-gone case also fails on the old check, but only because the stub nft lists any table it's asked for. The review's repro now prints FAIL for 1a3jqxr and 1a3fh9c. 1a4q3sg still passes. Quick gate passed.
+		- Verified: 2026-11-22, root-host.bash passed 1a3fh00, 1a3fh68, 1a3fh9c, 1a3jwt0, 1a3fjew and 1a3jgsm, and root-host.bash --zfs passed 1a3jn00 and 1a3jqxr, on round branch nov22. 1a3fj2c skipped, since native mode is off.
 	- Origin: c076344, 684bd24 and 85d60ca. Same class as 2026112017592969, which fixed only `counter` and `before`. Confirmed.
 	- Actual cause [Bug]: These checks pass on a command failing or printing nothing, and a failure of the command they look with reads the same way.
 	- Actual fix [Bug]: Each one first sees its look work. fJarsInContainer and fNativeStart run a `test -f` in the container, or as the server, before the refusals, and fNativeStart needs a process ID from pgrep. A refusal goes through a new `refused`, which fails on podman exec's own exit codes, 125 to 127. fZfsPool and fZfsNone go through a new `none`, which fails when zfs list does. fFirewallOff reads `nft list tables` and fails when nft does.
@@ -768,6 +772,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Commit: 7279d7c, a70748f
 	- Test case: 1a4z0h0 TestRootHostLooks
 	- Actual effort: Low
+	- Closed reason: Done
+	- Closed: 20261122
 
 - test-id.bash --check misses some call forms and counts a commented-out ID
 	- ID: 2026112110300286
