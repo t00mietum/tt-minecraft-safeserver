@@ -23,9 +23,9 @@ type Approved struct {
 	Line   int
 }
 
-// ReadApproved reads plugins.shcl. A bad entry gets a warning and is left
+// ReadSources reads plugins.shcl. A bad entry gets a warning and is left
 // out. Only a file that can't be read is an error.
-func ReadApproved(file string) ([]Approved, []config.Warning, error) {
+func ReadSources(file string) ([]Approved, []config.Warning, error) {
 	doc, warns, err := config.LoadFile(file)
 	if err != nil {
 		return nil, nil, err

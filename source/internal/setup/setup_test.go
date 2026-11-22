@@ -22,6 +22,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
@@ -152,6 +153,10 @@ func newRig(t *testing.T, tools []string, answers string, sets ...string) *rig {
 			return nil
 		},
 	}
+	// No root here, so a build the test owns counts as root's.
+	wasUID := oldbuild.RootUID
+	oldbuild.RootUID = os.Getuid()
+	t.Cleanup(func() { oldbuild.RootUID = wasUID })
 	was, wasCat, wasNft := launch.Installed, hasCatatonit, hasNft
 	launch.Installed = func(name string) bool { return slices.Contains(tools, name) }
 	hasCatatonit = func() bool { return slices.Contains(tools, "catatonit") }
@@ -205,7 +210,9 @@ func TestNewInstall(t *testing.T) {
 		"sudo install -d -o alice -g minecraftd -m 0770 "+r.server,
 		"sudo podman pull docker.io/library/eclipse-temurin:",
 		// 2026-11-19: was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd" (2026111911125756, 2026111715275548).
-		"sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin,
+		// 2026-11-22: was "... <exe> <LocalBin>", now staged and renamed (2026112214220945).
+		"sudo install -m 0755 -o root -g root "+r.s.Exe+" "+filepath.Join(r.dir, ".usr-local-bin-tt-minecraftd.new"),
+		"sudo mv -f -T "+filepath.Join(r.dir, ".usr-local-bin-tt-minecraftd.new")+" "+r.s.LocalBin,
 	)
 	if slices.ContainsFunc(r.ran(), func(s string) bool { return strings.Contains(s, "apt-get") }) {
 		t.Errorf("apt-get ran with podman and catatonit there:\n%s", strings.Join(r.ran(), "\n"))
@@ -215,7 +222,7 @@ func TestNewInstall(t *testing.T) {
 	}
 	// 2026111914334569: was 3 entries with the Paper build first, approved
 	// by hash. Now only the sources go in.
-	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	approved, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil || len(approved) != 2 || approved[0].Name != "plugins/Geyser-Spigot.jar" || approved[0].SHA256 != "" || approved[0].Source == "" {
 		t.Errorf("approved list: %v %v", approved, err)
 	}
@@ -404,7 +411,7 @@ func TestAdopt(t *testing.T) {
 	}
 	// 2026111914334569: the plugin and paper.jar were approved here, and
 	// aren't now. Only Geyser's and Floodgate's sources are written.
-	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	approved, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil || len(approved) != 2 || slices.ContainsFunc(approved, func(a plugins.Approved) bool { return a.Name == "paper.jar" || a.Name == "plugins/Thing.jar" }) {
 		t.Errorf("list, which should have only Geyser and Floodgate: %v %v", approved, err)
 	}
@@ -449,7 +456,7 @@ func TestAdoptGeyserSource(t *testing.T) {
 	if len(r.geyser.installed) > 0 {
 		t.Errorf("downloaded over the adopted jars: %q", r.geyser.installed)
 	}
-	approved, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	approved, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +710,7 @@ func TestDryRun(t *testing.T) {
 func TestBedrock(t *testing.T) {
 	defer testid.Line(t, "1a3famw")
 	approved := func(r *rig) map[string]plugins.Approved {
-		list, _, err := plugins.ReadApproved(r.s.PluginsFile)
+		list, _, err := plugins.ReadSources(r.s.PluginsFile)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -803,7 +810,7 @@ func TestExistingBedrock(t *testing.T) {
 	if !strings.Contains(r.out.String(), "Download Floodgate 2.0 build 7") {
 		t.Errorf("no plan:\n%s", r.out)
 	}
-	list, _, err := plugins.ReadApproved(r.s.PluginsFile)
+	list, _, err := plugins.ReadSources(r.s.PluginsFile)
 	if err != nil || len(list) != 1 || list[0].Name != "plugins/floodgate-spigot.jar" || list[0].Source == "" {
 		t.Errorf("approved %+v %v", list, err)
 	}
@@ -1035,7 +1042,8 @@ func TestPackageInstall(t *testing.T) {
 			}
 		}
 		// 2026-11-19: was "sudo install -m 0755 <exe> /usr/local/bin/tt-minecraftd" (2026111911125756, 2026111715275548).
-		copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
+		// 2026-11-22: was the install straight to LocalBin, now staged and renamed (2026112214220945).
+		copied := copiedIn(r)
 		said := strings.Contains(r.out.String(), "Copy "+r.s.Exe+" to "+BinPath)
 		bin := map[bool]string{false: "/usr/local/bin/tt-minecraftd", true: "/usr/bin/tt-minecraftd"}[pkg]
 		if copied == pkg || said == pkg || !strings.Contains(unit, "\nExecStart="+bin+" start --foreground\n") {
@@ -1044,9 +1052,11 @@ func TestPackageInstall(t *testing.T) {
 	}
 }
 
-// Another build in /usr/local/bin is moved to the old-builds folder before
-// the copy, rather than written over. The same build, by SHA-256, is left
-// alone, and a dry run only says what it would do.
+// A copy of another build in /usr/local/bin is kept in the old-builds folder
+// before the copy, and the build stays in place until the new one is renamed
+// over it. The same build, by SHA-256, is left alone when it's a regular file
+// that only root can change. Otherwise it's replaced, with no copy kept. A
+// dry run only says what it would do.
 func TestCopyKeepsOldBuild(t *testing.T) {
 	defer testid.Line(t, "1a3jzmm")
 	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
@@ -1054,23 +1064,40 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 	for _, c := range []struct {
 		name      string
 		old       string
+		mode      os.FileMode
+		link      bool
+		notRoot   bool
 		dry       bool
 		moved     bool
 		copied    bool
 		planMoved bool
 	}{
-		{"another build", "old build", false, true, true, true},
-		{"the same build", "this build", false, false, false, false},
-		{"dry run", "old build", true, false, true, true},
-		{"none there", "", false, false, true, false},
+		{"another build", "old build", 0o755, false, false, false, true, true, true},
+		{"the same build", "this build", 0o755, false, false, false, false, false, false},
+		{"the same build, group-writable", "this build", 0o775, false, false, false, false, true, false},
+		{"the same build, not root's", "this build", 0o755, false, true, false, false, true, false},
+		{"a link to the same build", "this build", 0, true, false, false, false, true, false},
+		{"dry run", "old build", 0o755, false, false, true, false, true, true},
+		{"none there", "", 0, false, false, false, false, true, false},
 	} {
 		r := newRig(t, []string{"podman", "catatonit"}, "")
 		r.s.Yes, r.s.AcceptEULA, r.s.DryRun = true, true, c.dry
+		if c.notRoot {
+			oldbuild.RootUID = os.Getuid() + 1
+		}
 		if err := os.WriteFile(r.s.Exe, []byte("this build"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if c.old != "" {
-			if err := os.WriteFile(r.s.LocalBin, []byte(c.old), 0o755); err != nil {
+		switch {
+		case c.link:
+			if err := os.Symlink(r.s.Exe, r.s.LocalBin); err != nil {
+				t.Fatal(err)
+			}
+		case c.old != "":
+			if err := os.WriteFile(r.s.LocalBin, []byte(c.old), c.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(r.s.LocalBin, c.mode); err != nil { // past the umask
 				t.Fatal(err)
 			}
 			if err := os.Chtimes(r.s.LocalBin, mtime, mtime); err != nil {
@@ -1082,20 +1109,49 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 		}
 		b, err := os.ReadFile(filepath.Join(r.s.OldBuilds, kept))
 		moved := err == nil && string(b) == c.old
-		copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
-		planMoved := strings.Contains(r.out.String(), "Move the other build in "+BinPath+" to /var/lib/tt-minecraftd/old-builds/"+kept+", where old builds are kept.")
+		copied := copiedIn(r)
+		planMoved := strings.Contains(r.out.String(), "Keep a copy of the other build in "+BinPath+" as /var/lib/tt-minecraftd/old-builds/"+kept+", where old builds are kept.")
 		if moved != c.moved || copied != c.copied || planMoved != c.planMoved {
 			t.Errorf("%s: moved %v, copied %v, in the plan %v\n%s\n%s", c.name, moved, copied, planMoved, strings.Join(r.ran(), "\n"), r.out)
 		}
-		if c.moved {
-			if _, err := os.Lstat(r.s.LocalBin); !os.IsNotExist(err) {
-				t.Errorf("%s: still in place: %v", c.name, err)
-			}
-		} else if c.old != "" {
+		// The fake runner doesn't rename, so the old build is what's left.
+		if c.old != "" {
 			if b, _ := os.ReadFile(r.s.LocalBin); string(b) != c.old {
 				t.Errorf("%s: changed to %q", c.name, b)
 			}
 		}
+	}
+}
+
+// copiedIn says whether setup staged its build beside LocalBin and renamed it
+// into place, with nothing run on LocalBin in between.
+func copiedIn(r *rig) bool {
+	stage := filepath.Join(filepath.Dir(r.s.LocalBin), "."+filepath.Base(r.s.LocalBin)+".new")
+	ran := r.ran()
+	i := slices.Index(ran, "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+stage)
+	return i >= 0 && i+1 < len(ran) && ran[i+1] == "sudo mv -f -T "+stage+" "+r.s.LocalBin
+}
+
+// A copy whose rotation then fails is a warning, and setup goes on to its
+// copy, since the other build was kept.
+func TestCopyRotateFails(t *testing.T) {
+	defer testid.Line(t, "1a4z5d8")
+	r := newRig(t, []string{"podman", "catatonit"}, "")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := os.WriteFile(r.s.Exe, []byte("this build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.s.LocalBin, []byte("old build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldbuild.FailRotate = errors.New("operation not permitted")
+	t.Cleanup(func() { oldbuild.FailRotate = nil })
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	copied := copiedIn(r)
+	if !copied || !strings.Contains(r.out.String(), "warning: couldn't prune the old builds in "+r.s.OldBuilds+": operation not permitted") {
+		t.Errorf("copied %v\n%s", copied, r.out)
 	}
 }
 
@@ -1122,5 +1178,128 @@ func TestConfigAgentHint(t *testing.T) {
 	}
 	if c.Agent != "command" || len(c.AgentCommand) != 8 || c.AgentCommand[0] != "codex" || c.AgentCommand[7] != "-" {
 		t.Fatalf("got %q %q", c.Agent, c.AgentCommand)
+	}
+}
+
+// A new install that stops partway leaves its tree marked, and setup run
+// again goes on there without --adopt, keeping what it got. Once the config
+// is written the mark is gone, so a folder that only looks like setup's is
+// still refused.
+func TestResumeAfterStop(t *testing.T) {
+	defer testid.Line(t, "1a4z2nr")
+	mark := func(r *rig) string { return filepath.Join(r.server, partialMark) }
+	again := func(t *testing.T, r *rig) {
+		t.Helper()
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("second run: %v\n%s", err, r.out)
+		}
+		if _, err := os.Stat(r.s.ConfigPath); err != nil {
+			t.Errorf("no config after the second run: %v", err)
+		}
+		if _, err := os.Lstat(mark(r)); err == nil {
+			t.Error("mark left after the config was written")
+		}
+		if len(r.paper.installed) != 1 || len(r.geyser.installed) != 2 {
+			t.Errorf("downloaded again: Paper %q, Geyser %q", r.paper.installed, r.geyser.installed)
+		}
+		hasAll(t, "output", strings.Split(r.out.String(), "\n"), "Go on in "+r.server+", which an earlier setup made")
+	}
+	stopped := func(t *testing.T, r *rig, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("first run didn't stop:\n%s", r.out)
+		}
+		if _, err := os.Stat(r.s.ConfigPath); err == nil {
+			t.Fatal("config written by a run that stopped")
+		}
+		if _, err := os.Lstat(filepath.Join(r.server, "paper.jar")); err != nil {
+			t.Fatalf("first run made no paper.jar: %v", err)
+		}
+		if fi, err := os.Lstat(mark(r)); err != nil || !fi.Mode().IsRegular() {
+			t.Fatalf("mark: %v", err)
+		}
+	}
+
+	t.Run("firewall", func(t *testing.T) {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.nft = false
+		r.s.Yes, r.s.AcceptEULA = true, true
+		stopped(t, r, r.s.Do(context.Background()))
+		r.nft = true
+		r.s.DryRun = true
+		if err := r.s.Do(context.Background()); err != nil {
+			t.Fatalf("dry run: %v\n%s", err, r.out)
+		}
+		if _, err := os.Lstat(mark(r)); err != nil {
+			t.Fatalf("dry run took the mark away: %v", err)
+		}
+		r.s.DryRun = false
+		r.out.Reset()
+		again(t, r)
+	})
+
+	t.Run("pull", func(t *testing.T) {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.s.Yes, r.s.AcceptEULA = true, true
+		reply, fail := r.f.Reply, true
+		r.f.Reply = func(c host.Cmd) ([]byte, error) {
+			if fail && len(c.Args) > 1 && c.Args[1] == "pull" {
+				return nil, errors.New("pull failed")
+			}
+			return reply(c)
+		}
+		stopped(t, r, r.s.Do(context.Background()))
+		fail = false
+		r.out.Reset()
+		again(t, r)
+
+		// Moved aside, the config no longer makes it an install, and the
+		// tree is refused as anyone's would be.
+		if err := os.Rename(r.s.ConfigPath, r.s.ConfigPath+".old"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "--adopt "+r.server) {
+			t.Errorf("after the mark was cleared: %v", err)
+		}
+	})
+
+	// Only a plain file counts.
+	t.Run("link", func(t *testing.T) {
+		r := newRig(t, []string{"podman", "catatonit"}, "")
+		r.s.Yes, r.s.AcceptEULA = true, true
+		if err := os.MkdirAll(r.server, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(r.dir, "elsewhere"), mark(r)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.s.Do(context.Background()); err == nil || !strings.Contains(err.Error(), "--adopt "+r.server) {
+			t.Errorf("tree with a linked mark: %v", err)
+		}
+	})
+}
+
+// setup warns about a plugins.shcl it can't save with its lines kept, and
+// goes on, leaving the file as it was (2026112214545321).
+func TestWriteSourcesNotKept(t *testing.T) {
+	defer testid.Line(t, "1a4z976")
+	r := newRig(t, []string{"docker"}, "")
+	merged := "# mine\njar: plugins/Thing.jar  # by hand\n\n# pasted again\njar: plugins/Thing.jar\n"
+	if err := os.MkdirAll(filepath.Dir(r.s.PluginsFile), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.s.PluginsFile, []byte(merged), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	src := r.geyser.Source("floodgate")
+	if err := r.s.writeSources([]plugins.Info{{Jar: plugins.Jar{Name: "plugins/floodgate-spigot.jar"}, Source: src}}); err != nil {
+		t.Fatal(err)
+	}
+	if out := r.out.String(); !strings.Contains(out, "warning: "+r.s.PluginsFile+": saving would rewrite every line") ||
+		!strings.Contains(out, `Add source: "`+src+`" under jar: "plugins/floodgate-spigot.jar" there by hand`) || strings.Contains(out, "FIXED") {
+		t.Errorf("out:\n%s", out)
+	}
+	if got, _ := os.ReadFile(r.s.PluginsFile); string(got) != merged {
+		t.Errorf("file changed:\n%s", got)
 	}
 }

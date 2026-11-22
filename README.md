@@ -171,7 +171,7 @@ Players on Java and Bedrock, on the LAN or over the internet, can follow [how-to
 
 ### Packages
 
-The `.deb` and `.rpm` packages for amd64 and arm64 are on the [releases page](https://github.com/t00mietum/tt-minecraft-safeserver/releases). A package puts `tt-minecraftd` in `/usr/bin` and nothing else, so run setup after it:
+The `.deb` and `.rpm` packages for amd64 and arm64 are on the [releases page](https://github.com/t00mietum/tt-minecraft-safeserver/releases). A package puts `tt-minecraftd` in `/usr/bin` and its license under `/usr/share/doc/tt-minecraftd/`, and nothing else, so run setup after it:
 
 ~~~bash
 sudo apt install ./tt-minecraftd_<version>_amd64.deb
@@ -194,7 +194,9 @@ Or with wget:
 bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install.bash)
 ~~~
 
-It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, and setup on an existing install runs `repair` and `update`. The build it replaces goes to `/var/lib/tt-minecraftd/old-builds/`, named for its date, in case you want it back. Only a few of those are kept, spread out over time.
+It uses sane defaults, shows its plan, and asks before it changes anything. Add `--help` to the end of the line for its options. Run it again later to update: it replaces a binary that doesn't match the newest release's `SHA256SUMS`, or that someone other than root could change, and setup on an existing install runs `repair` and `update`. The build it replaces goes to `/var/lib/tt-minecraftd/old-builds/`, named for its date, in case you want it back. Only a few of those are kept, spread out over time.
+
+If the `.deb` or `.rpm` package is installed, the script stops before its plan and says to update through the package manager, since a second copy in `/usr/local/bin` would hide the package's.
 
 On another distro with systemd, add `--any-distro` to the end of the line. Then nothing gets installed through a package manager, so Podman and catatonit, or Docker, and nftables have to be installed already. NixOS isn't supported yet.
 
@@ -238,14 +240,17 @@ There's no uninstall command yet. This takes everything out, and it deletes the 
 
 3. Remove the program. A package install is `sudo apt remove tt-minecraftd` or `sudo rpm -e tt-minecraftd`. Otherwise it's `sudo rm /usr/local/bin/tt-minecraftd`.
 
-4. In Podman or Docker mode, remove the container image with `sudo podman rmi` or `sudo docker rmi`, using the name from `image` in `config.shcl`.
+4. In Podman or Docker mode, remove the container image with `sudo podman rmi` or `sudo docker rmi`, using the name `sudo podman images` or `sudo docker images` lists for the Temurin image. `image` in `config.shcl` has the same name once an `update` has pinned it.
 
 5. Remove the files and the account:
 
 	~~~bash
 	sudo rm -r /etc/tt-minecraftd /var/lib/tt-minecraftd /srv/tt-minecraftd
 	sudo userdel minecraftd
+	sudo groupdel minecraftd
 	~~~
+
+	`userdel` leaves the group when you're in it. If `groupdel` says the group doesn't exist, `userdel` already took it.
 
 ## Developing
 

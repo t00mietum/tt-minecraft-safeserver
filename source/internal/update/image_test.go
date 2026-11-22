@@ -141,6 +141,39 @@ func TestImage(t *testing.T) {
 	}
 }
 
+// A config shcl can't save with its lines kept, such as one with a repeated
+// key it merges, is left as it was, and the error gives the line to set by
+// hand (2026112110300260). One in shcl's own form is still pinned.
+func TestPinImageKeepsLines(t *testing.T) {
+	defer testid.Line(t, "1a4z8mc")
+	pin := "docker.io/library/eclipse-temurin:25-jre@" + index
+	dir := t.TempDir()
+
+	merged := "# mine\nrunMode: docker  # by hand\nfirewall: true\nimage: " + oldPin + "\n\n# pasted again\nfirewall: true\nallowFrom: [lan, 203.0.113.9]  # Bob\n"
+	f := filepath.Join(dir, "merged.shcl")
+	if err := os.WriteFile(f, []byte(merged), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	err := pinImage(f, pin)
+	if b, _ := os.ReadFile(f); string(b) != merged {
+		t.Errorf("file changed:\n%s", b)
+	}
+	if err == nil || !strings.Contains(err.Error(), "rewrite every line") || !strings.Contains(err.Error(), `Set image: "`+pin+`" there by hand`) {
+		t.Errorf("err %v", err)
+	}
+
+	plain := filepath.Join(dir, "plain.shcl")
+	if err := os.WriteFile(plain, []byte("image: "+oldPin+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := pinImage(plain, pin); err != nil {
+		t.Fatal(err)
+	}
+	if c, _, err := config.Load(plain, nil); err != nil || c.Image != pin {
+		t.Errorf("reads back as %q, %v", c.Image, err)
+	}
+}
+
 func TestPickDigest(t *testing.T) {
 	defer testid.Line(t, "1a3fg70")
 	for _, c := range []struct {

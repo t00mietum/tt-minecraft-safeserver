@@ -411,17 +411,55 @@ func TestStatusTreeDenied(t *testing.T) {
 	}
 }
 
+// status runs with sudo, so a log link the server account planted mustn't
+// show what it points to, nor a logs folder that's a link.
+func TestStatusLogLink(t *testing.T) {
+	defer testid.Line(t, "1a4z7n5")
+	g := newRig(t)
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
+	secret := filepath.Join(t.TempDir(), "secret")
+	write(t, secret, "root only\n")
+	logs := filepath.Join(g.dir, "logs")
+	if err := os.RemoveAll(logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(logs, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, server.LogFile(g.dir)); err != nil {
+		t.Fatal(err)
+	}
+	out := g.text(t, 0)
+	if strings.Contains(out, "root only") || !strings.Contains(out, "Log:        can't read it: ") {
+		t.Errorf("latest.log a link:\n%s", out)
+	}
+	if err := os.RemoveAll(logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(secret), logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(secret, filepath.Join(filepath.Dir(secret), "latest.log")); err != nil {
+		t.Fatal(err)
+	}
+	out = g.text(t, 0)
+	if strings.Contains(out, "root only") || !strings.Contains(out, "Log:        can't read it: ") {
+		t.Errorf("logs a link:\n%s", out)
+	}
+}
+
 func TestTailFile(t *testing.T) {
 	defer testid.Line(t, "1a3ejtc")
-	file := filepath.Join(t.TempDir(), "latest.log")
+	dir := t.TempDir()
+	file := server.LogFile(dir)
 	big := strings.Repeat("x", 100<<10) + "\nnext to last\nlast\r\n\n"
 	write(t, file, big)
-	got, err := tailFile(file, 3)
+	got, err := tailLog(dir, 3)
 	if err != nil || len(got) != 2 || got[0] != "next to last" || got[1] != "last" {
 		t.Errorf("tail = %q, %v; want the 2 short lines", got, err)
 	}
 	write(t, file, "")
-	if got, err := tailFile(file, 3); err != nil || len(got) != 0 {
+	if got, err := tailLog(dir, 3); err != nil || len(got) != 0 {
 		t.Errorf("empty log: %q, %v", got, err)
 	}
 }

@@ -323,7 +323,7 @@ func (d *Boxed) runArgs() ([]string, error) {
 		}
 		trees = append(trees, real)
 	}
-	jars, err := LockedJars(c.ServerDir)
+	jars, err := LockedJars(c.ServerDir, c.OwnerTrees)
 	if err != nil {
 		return nil, err
 	}
@@ -354,11 +354,16 @@ func appendMount(args []string, path string, readOnly bool) ([]string, error) {
 }
 
 // LockedJars gives paper.jar and the jars plugins.Jars lists, after links, so
-// each can be mounted read-only over itself.
-func LockedJars(serverDir string) ([]string, error) {
+// each can be mounted read-only over itself. Each must be a regular file in
+// serverDir or one of trees (plugins.Within), or start would mount, or in
+// native mode chown, whatever host path a planted link names.
+func LockedJars(serverDir string, trees []string) ([]string, error) {
 	paper, err := filepath.EvalSymlinks(filepath.Join(serverDir, "paper.jar"))
 	if err != nil {
 		return nil, fmt.Errorf("no paper.jar in %s: %w", serverDir, err)
+	}
+	if paper, err = plugins.Within(paper, serverDir, trees); err != nil {
+		return nil, err
 	}
 	found, err := plugins.Jars(serverDir)
 	if err != nil {
@@ -370,7 +375,7 @@ func LockedJars(serverDir string) ([]string, error) {
 	// mount destination given twice.
 	seen := map[string]bool{paper: true}
 	for _, j := range found {
-		real, err := filepath.EvalSymlinks(j.File)
+		real, err := plugins.Within(j.File, serverDir, trees)
 		if err != nil {
 			return nil, err
 		}

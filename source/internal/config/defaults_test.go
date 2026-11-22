@@ -273,3 +273,34 @@ func TestBedrockPortClash(t *testing.T) {
 		}
 	}
 }
+
+// A '#' outside quotes starts a comment, so /srv/games#2 would read as
+// /srv/games, and setup and repair would chown that other tree.
+func TestSetRefusesValueCutByComment(t *testing.T) {
+	defer testid.Line(t, "1a4zb2g")
+	for _, v := range []string{"/srv/games#2", "/srv/games #2", "#2"} {
+		c := Defaults()
+		err := c.Set("serverDir", v)
+		if err == nil || !strings.Contains(err.Error(), "starts a comment") || !reflect.DeepEqual(c, Defaults()) {
+			t.Errorf("serverDir=%q: got %v, serverDir %q", v, err, c.ServerDir)
+		}
+	}
+	c := Defaults()
+	if err := c.Set("allowFrom", "[lan, 203.0.113.7] #x"); err == nil {
+		t.Errorf("allowFrom with a comment: got %v", c.AllowFrom)
+	}
+	for _, kv := range [][2]string{
+		{"serverDir", `"/srv/games#2"`},
+		{"heapMax", "6G"},
+		{"heapMax", "4 GiB"},
+		{"allowFrom", "[lan, 203.0.113.7]"},
+		{"extraArgs", `["-Dx=#1"]`},
+	} {
+		if err := c.Set(kv[0], kv[1]); err != nil {
+			t.Errorf("%s=%s: %v", kv[0], kv[1], err)
+		}
+	}
+	if c.ServerDir != "/srv/games#2" {
+		t.Errorf("quoted serverDir: got %q", c.ServerDir)
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -278,6 +279,29 @@ func TestWatch(t *testing.T) {
 	}
 }
 
+// Ctrl-C during a reading leaves the screen as it was: watch draws nothing
+// more and exits 0, and status prints nothing and says it was interrupted.
+func TestStatusCtrlC(t *testing.T) {
+	defer testid.Line(t, "1a4z7n7")
+	cfg := config.Defaults()
+	cfg.ServerDir, cfg.OwnerTrees = t.TempDir(), nil
+	r := host.NewExec(false)
+	r.QuietErr = true
+	probe := status.NewProbe(r, &cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out bytes.Buffer
+	if err := watch(ctx, probe, &out, time.Second); err != nil || out.Len() != 0 {
+		t.Errorf("watch: err %v, drew:\n%s", err, out.String())
+	}
+	if err := showStatus(ctx, probe, &out); !errors.Is(err, launch.ErrInterrupted) || out.Len() != 0 {
+		t.Errorf("status: err %v, printed:\n%s", err, out.String())
+	}
+	if err := showStatus(context.Background(), status.NewProbe(&host.Fake{}, &cfg), &out); err != nil || !strings.Contains(out.String(), "Server:     not running in podman mode\n") {
+		t.Errorf("status: err %v, printed:\n%s", err, out.String())
+	}
+}
+
 // repair fixes the safe settings as root, running itself through sudo when
 // it isn't, and --check or --dry-run only reports, without root. Either one
 // exits 1 while something is wrong.
@@ -523,12 +547,61 @@ func TestRepairGeyserSource(t *testing.T) {
 	if !strings.Contains(b.String(), "FIXED   plugins/Geyser-Spigot.jar gets its updates from "+src+"\n") || strings.Contains(b.String(), "[y/n]") {
 		t.Errorf("repair:\n%s", b.String())
 	}
-	listed, _, err := plugins.ReadApproved(inv.pluginsFile())
+	listed, _, err := plugins.ReadSources(inv.pluginsFile())
 	if err != nil || len(listed) != 1 || listed[0].Name != "plugins/Geyser-Spigot.jar" || listed[0].Source != src || listed[0].SHA256 != "" {
 		t.Errorf("list %v, %v; want only the source %s", listed, err, src)
 	}
 	if code, out, _ := runArgs("repair", "--check", set); !strings.Contains(out, "OK      plugin sources\n") {
 		t.Errorf("after: exit %d, stdout %q", code, out)
+	}
+}
+
+// repair leaves a plugins.shcl it can't save with its lines kept as it was,
+// and warns with the line to add, rather than failing (2026112214545321).
+func TestRepairGeyserSourceNotKept(t *testing.T) {
+	defer testid.Line(t, "1a4z975")
+	noDefaultConfig(t)
+	noHostChecks(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	w, err := z.Create("plugin.yml")
+	if err == nil {
+		_, err = w.Write([]byte("name: Geyser-Spigot\nversion: 2.12.1\n"))
+	}
+	if err == nil {
+		err = z.Close()
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "plugins", "Geyser-Spigot.jar"), b.Bytes(), 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, _, done := prepare([]string{"repair", "--set=serverDir=" + dir}, &bytes.Buffer{}, &bytes.Buffer{})
+	if done {
+		t.Fatal("prepare stopped")
+	}
+	merged := "# mine\njar: plugins/Thing.jar  # by hand\n\n# pasted again\njar: plugins/Thing.jar\n"
+	if err := os.MkdirAll(filepath.Dir(inv.pluginsFile()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inv.pluginsFile(), []byte(merged), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	_ = repair(context.Background(), inv, &out, true) // paper.jar is missing, which isn't this test's
+	src := geyserAPI.Source("geyser")
+	if !strings.Contains(out.String(), "warning: "+inv.pluginsFile()+": saving would rewrite every line") ||
+		!strings.Contains(out.String(), `Add source: "`+src+`" under jar: "plugins/Geyser-Spigot.jar" there by hand`) ||
+		strings.Contains(out.String(), "FAILED  plugins") || strings.Contains(out.String(), "FIXED   plugins/Geyser-Spigot.jar") {
+		t.Errorf("repair:\n%s", out.String())
+	}
+	if got, _ := os.ReadFile(inv.pluginsFile()); string(got) != merged {
+		t.Errorf("file changed:\n%s", got)
 	}
 }
 
@@ -1004,12 +1077,25 @@ func TestRetireBuild(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	kept := filepath.Join(oldBuilds, "tt-minecraftd.20261119-111257")
-	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || out.String() != "Moved "+bin+" to "+kept+".\n" {
+	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || out.String() != "Kept a copy of "+bin+" as "+kept+".\n" {
 		t.Fatalf("code %d\n%s%s", code, out.String(), errOut.String())
 	}
 	if b, err := os.ReadFile(kept); err != nil || string(b) != "old" {
 		t.Errorf("kept %q %v", b, err)
 	}
+	// Left in place, so install.bash's rename is the only change there.
+	if b, err := os.ReadFile(bin); err != nil || string(b) != "old" {
+		t.Errorf("the build isn't in place: %q %v", b, err)
+	}
+	// A failed prune is a warning, since the build is kept.
+	oldbuild.FailRotate = errors.New("operation not permitted")
+	t.Cleanup(func() { oldbuild.FailRotate = nil })
+	out.Reset()
+	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || !strings.HasPrefix(out.String(), "Kept a copy of "+bin+" as "+kept+".2.") ||
+		!strings.Contains(errOut.String(), "warning: couldn't prune the old builds in "+oldBuilds+": operation not permitted") {
+		t.Errorf("failed prune: code %d\n%s%s", code, out.String(), errOut.String())
+	}
+	oldbuild.FailRotate = nil
 	for _, args := range [][]string{{"retire-build"}, {"retire-build", "tt-minecraftd"}, {"retire-build", "/etc/passwd"}, {"retire-build", bin, bin}} {
 		out.Reset()
 		errOut.Reset()

@@ -278,3 +278,138 @@ func TestRootHostConsoleReap(t *testing.T) {
 		}
 	})
 }
+
+// sudo for the look checks: zfs list, nft list, podman exec and nsenter act
+// as the env says, and a command run in the container or as the server is refused with
+// WRITE_RC, except a test, which works.
+const looksRigSudo = `#!@BASH@
+look() { case "$1" in test) exit 0 ;; *) exit "${WRITE_RC:-1}" ;; esac; }
+case "$1 $2" in
+"zfs list")
+	[[ -z "${ZFS_FAIL:-}" ]] || { echo "cannot open 'x/mc': dataset does not exist" >&2; exit 1; }
+	printf '%s' "${ZFS_OUT:-}"; exit 0 ;;
+"nft list")
+	printf '%s' "${NFT_TABLES:-}"; exit "${NFT_RC:-0}" ;;
+"podman exec")
+	[[ -z "${NO_CONTAINER:-}" ]] || { echo 'Error: no container with name or ID "tt-minecraftd" found' >&2; exit 125; }
+	shift 3; look "$@" ;;
+"nsenter -t")
+	[[ "$3" =~ ^[0-9]+$ ]] || { echo "nsenter: failed to parse pid: '$3'" >&2; exit 1; }
+	shift 8; look "$@" ;;
+esac
+exit 0
+`
+
+// Functions from checks.bash run with the look stubs, in a folder whose
+// paper.jar links to a root-owned file.
+func runLooks(t *testing.T, env []string, args ...string) (string, int) {
+	t.Helper()
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	sh, err := filepath.EvalSymlinks("/bin/sh")
+	if err != nil {
+		t.Skip("no /bin/sh")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	server := filepath.Join(dir, "server")
+	for _, d := range []string{bin, server} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(sh, filepath.Join(server, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	stubs := map[string]string{
+		"sudo":          looksRigSudo,
+		"tt-minecraftd": "#!@BASH@\nprintf '%s' \"${TT_OUT:-}\"\n",
+		"pgrep":         "#!@BASH@\n[[ -n \"${PGREP_OUT:-}\" ]] || exit 1\necho \"${PGREP_OUT}\"\n",
+		"id":            "#!@BASH@\necho 1000\n",
+		"systemctl":     "#!@BASH@\n[[ \"$1\" != is-enabled ]] || exit 1\nprintf '%s\\n' ProtectSystem=strict NoNewPrivileges=yes PrivateDevices=yes 'ReadOnlyPaths=/srv/plugins/Geyser-Spigot.jar'\n",
+	}
+	for name, text := range stubs {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(strings.ReplaceAll(text, "@BASH@", bashPath)), 0o755); err != nil { // #nosec G306 -- a test stub
+			t.Fatal(err)
+		}
+	}
+	script := filepath.Join(dir, "run.bash")
+	text := "set -uo pipefail\n" + checksFuncs(t, "say", "has", "lacks", "refused", "fZfsOurs", "snaps", "none",
+		"fJarsInContainer", "fZfsPool", "fZfsNone", "fNativeStart", "fFirewallOff") +
+		"dir=\"${RIG_DIR}\" pool=ttmcss-test-x ds=ttmcss-test-x/mc\n\"$@\"\n"
+	if err := os.WriteFile(script, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// #nosec G204 -- test runs the repo's own script
+	cmd := exec.Command(bashPath, append([]string{script}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = append([]string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "RIG_DIR=" + server,
+		"ZFS_FILE=" + filepath.Join(dir, "tmp", "x", "zpool.img")}, env...)
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return string(out), code
+}
+
+// A check that passes on a refusal or on no match fails when the look itself
+// couldn't run.
+func TestRootHostLooks(t *testing.T) {
+	defer testid.Line(t, "1a4z0h0")
+	cases := []struct {
+		name string
+		env  []string
+		args []string
+		ok   bool
+	}{
+		{"jars: refused in the container", nil, []string{"fJarsInContainer"}, true},
+		{"jars: no container", []string{"NO_CONTAINER=1"}, []string{"fJarsInContainer"}, false},
+		{"jars: writable", []string{"WRITE_RC=0"}, []string{"fJarsInContainer"}, false},
+		{"zfs none: no snapshots", nil, []string{"fZfsNone"}, true},
+		{"zfs none: zfs list fails", []string{"ZFS_FAIL=1"}, []string{"fZfsNone"}, false},
+		{"zfs none: a snapshot", []string{"ZFS_OUT=ttmcss-test-x/mc@s\n"}, []string{"fZfsNone"}, false},
+		{"zfs pool: no snapshots", nil, []string{"fZfsPool"}, true},
+		{"zfs pool: zfs list fails", []string{"ZFS_FAIL=1"}, []string{"fZfsPool"}, false},
+		{"native: refused as the server", []string{"PGREP_OUT=123"}, []string{"fNativeStart"}, true},
+		{"native: no server process", nil, []string{"fNativeStart"}, false},
+		{"native: writable", []string{"PGREP_OUT=123", "WRITE_RC=0"}, []string{"fNativeStart"}, false},
+		{"firewall off: table gone", []string{"TT_OUT=its table removed\n", "NFT_TABLES=table inet other\n"}, []string{"fFirewallOff"}, true},
+		{"firewall off: nft fails", []string{"TT_OUT=its table removed\n", "NFT_RC=1"}, []string{"fFirewallOff"}, false},
+		{"firewall off: table there", []string{"TT_OUT=its table removed\n", "NFT_TABLES=table inet tt_minecraftd\n"}, []string{"fFirewallOff"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, code := runLooks(t, c.env, c.args...)
+			if (code == 0) != c.ok {
+				t.Errorf("exit %d, want ok=%v\n%s", code, c.ok, out)
+			}
+		})
+	}
+
+	f := filepath.Join(t.TempDir(), "x.out")
+	if err := os.WriteFile(f, []byte("one\nsha256: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		args []string
+		ok   bool
+	}{
+		{"lacks: no match", []string{"lacks", "two", f}, true},
+		{"lacks: a match", []string{"lacks", "sha256:", f}, false},
+		{"lacks: a match with a flag", []string{"lacks", "-i", "SHA256:", f}, false},
+		{"lacks: no file", []string{"lacks", "two", f + ".gone"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out, code := runLooks(t, nil, c.args...)
+			if (code == 0) != c.ok {
+				t.Errorf("exit %d, want ok=%v\n%s", code, c.ok, out)
+			}
+		})
+	}
+}

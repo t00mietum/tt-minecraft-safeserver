@@ -214,6 +214,10 @@ func (u *Update) Do(ctx context.Context) error {
 	if len(plan) == 0 {
 		return nil
 	}
+	// Plan lines name jars from the tree, which the server account names.
+	for i := range plan {
+		plan[i] = server.Clean(plan[i])
+	}
 	fmt.Fprintf(u.Out, "\nupdate will:\n  - %s\n\n", strings.Join(plan, "\n  - "))
 	if len(report) > 0 {
 		showReport(u.Out, q.MoveTo, report)
@@ -332,12 +336,9 @@ func (u *Update) lookup(ctx context.Context, parts Parts, quiet bool) (*lookups,
 		if l.libs, err = plugins.Libraries(u.Cfg.ServerDir); err != nil && !quiet {
 			return nil, fmt.Errorf("can't list Paper's library cache: %w", err)
 		}
-		// A running Paper can still open a library jar it hasn't read yet.
-		if len(l.libs) > 0 && u.Running != nil {
-			if on, err := u.Running(ctx); on || err != nil {
-				fmt.Fprintf(u.Out, "%-7s plugin libraries: the server may be running, so Paper's cache is left until an update while it's stopped\n", "SKIPPED")
-				l.libs = nil
-			}
+		// So the plan doesn't offer what clearLibraries would skip.
+		if len(l.libs) > 0 && u.mayRun(ctx) {
+			l.libs = nil
 		}
 	}
 	if l.moveTo != "" && u.agentOn() {
@@ -362,13 +363,19 @@ func (u *Update) treeJars() (jars []plugins.Approved, skipped []string) {
 	if err != nil {
 		return nil, []string{err.Error()}
 	}
-	listed, _, _ := plugins.ReadApproved(u.PluginsFile) // only the sources matter here; pluginLookup shows a bad list's warnings
+	listed, _, _ := plugins.ReadSources(u.PluginsFile) // only the sources matter here; pluginLookup shows a bad list's warnings
 	source := make(map[string]string, len(listed))
 	for _, a := range listed {
 		source[a.Name] = a.Source
 	}
 	for _, j := range found {
 		if !strings.HasPrefix(j.Name, "plugins/") {
+			continue
+		}
+		// Root shouldn't hash, or tell the agent about, a host file a
+		// planted link names.
+		if _, err := plugins.Within(j.File, u.Cfg.ServerDir, u.Cfg.OwnerTrees); err != nil {
+			skipped = append(skipped, err.Error())
 			continue
 		}
 		sum, err := plugins.Sum(j.File)
@@ -568,7 +575,7 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 // their source. Only GeyserMC's sources are known so far. asks are the jars
 // for the update agent: ones with no known source, or whose lookup failed.
 func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []plugins.Approved, err error) {
-	_, warns, err := plugins.ReadApproved(u.PluginsFile)
+	_, warns, err := plugins.ReadSources(u.PluginsFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, err
 	}
@@ -676,7 +683,9 @@ func (u *Update) ask(prompt string) bool {
 // Paper downloads them again at the next start, so code written there lasts
 // until the next update, not for good. See design.md, Plugin jars.
 func (u *Update) clearLibraries(ctx context.Context, libs []plugins.Jar) error {
-	if len(libs) == 0 {
+	// Asked again here, since the "Go ahead?" prompt can wait any length of
+	// time, and a server started meanwhile hasn't opened all its libraries.
+	if len(libs) == 0 || u.mayRun(ctx) {
 		return nil
 	}
 	args := []string{"rm", "-f", "--"}
@@ -690,6 +699,20 @@ func (u *Update) clearLibraries(ctx context.Context, libs []plugins.Jar) error {
 		fmt.Fprintf(u.Out, "%-7s %s removed from Paper's cache; it downloads them again at the next start\n", "FIXED", libraries(len(libs), "plugin "))
 	}
 	return nil
+}
+
+// mayRun says the server may be running, and says so, since a running Paper
+// can still open a library jar it hasn't read yet. A failed look counts as
+// running.
+func (u *Update) mayRun(ctx context.Context) bool {
+	if u.Running == nil {
+		return false
+	}
+	if on, err := u.Running(ctx); !on && err == nil {
+		return false
+	}
+	fmt.Fprintf(u.Out, "%-7s plugin libraries: the server may be running, so Paper's cache is left until an update while it's stopped\n", "SKIPPED")
+	return true
 }
 
 func libraries(n int, kind string) string {

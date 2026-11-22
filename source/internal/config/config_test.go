@@ -343,3 +343,20 @@ func TestMappedAddressesReadAsIPv4(t *testing.T) {
 		t.Errorf("allowFrom = %q, want %q", c.AllowFrom, want)
 	}
 }
+
+// A comment against a value cuts it with no error from shcl, so it warns.
+func TestGluedCommentWarns(t *testing.T) {
+	defer testid.Line(t, "1a4zb2h")
+	c := before()
+	warns := mustRead(t, "serverDir: /srv/games#2\nrunUser: mc  # the account\n", &c)
+	if len(warns) != 1 || warns[0].Line != 1 || !strings.Contains(warns[0].Text, "starts a comment") {
+		t.Errorf("got %v", warns)
+	}
+	if c.ServerDir != "/srv/games" || c.RunUser != "mc" {
+		t.Errorf("got serverDir %q, runUser %q", c.ServerDir, c.RunUser)
+	}
+	c = before()
+	if warns := mustRead(t, "serverDir: \"/srv/games#2\"\n", &c); len(warns) != 0 || c.ServerDir != "/srv/games#2" {
+		t.Errorf("quoted: got %v, %q", warns, c.ServerDir)
+	}
+}

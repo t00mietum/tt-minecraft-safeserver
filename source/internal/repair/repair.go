@@ -7,6 +7,7 @@ package repair
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 
@@ -64,6 +65,12 @@ type Check struct {
 	Look    func(ctx context.Context, h *Host) ([]Finding, error)
 }
 
+// Warning is a Fix's error when the fix worked but has something to say,
+// so the outcome is still FIXED.
+type Warning struct{ Err error }
+
+func (w Warning) Error() string { return w.Err.Error() }
+
 // Report shows one outcome: OK, FIXED, or FAILED.
 type Report func(state, text string)
 
@@ -93,6 +100,11 @@ func Run(ctx context.Context, h *Host, checks []Check, checkOnly bool, report Re
 				continue
 			}
 			if err := f.Fix(ctx); err != nil {
+				var w Warning
+				if errors.As(err, &w) {
+					report("FIXED", f.Fixed+"; warning: "+w.Err.Error())
+					continue
+				}
 				report("FAILED", f.Problem+"; the fix failed: "+err.Error())
 				continue
 			}

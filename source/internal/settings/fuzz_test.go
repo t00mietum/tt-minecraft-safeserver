@@ -22,10 +22,12 @@ func FuzzProperties(f *testing.F) {
 	f.Add([]byte("motd=A \\\n    long one\\\\\nkey\\ with\\:colon = v\\u00e9\n! bang\n"), " lead\tand\\trail\\")
 	f.Add([]byte("server-ip\\\n"), "\f\u00e9\n=")
 	f.Add([]byte("a\\u12"), "#!:")
+	f.Add([]byte("motd=hi\rserver-ip=x\r\n# c \\\nserver-ip=y\\\r"), "z")
+	f.Add([]byte("0\\\r"), "0")
 	f.Fuzz(func(t *testing.T, text []byte, value string) {
 		p := parseProperties(text)
 		want := text
-		if len(text) > 0 && text[len(text)-1] != '\n' {
+		if len(text) > 0 && text[len(text)-1] != '\n' && text[len(text)-1] != '\r' {
 			want = append(append([]byte(nil), text...), '\n')
 		}
 		if got := p.bytes(); !bytes.Equal(got, want) {
@@ -52,6 +54,7 @@ func FuzzFix(f *testing.F) {
 	f.Add("", "java:\n  auth-type: online\n# c\n", "")
 	f.Add("", "bedrock: {port: 1}\njava:\n  auth-type: online\n  auth-type: floodgate\n", "settings:\n  bungeecord: false\n  bungeecord: true\n")
 	f.Add("", "a: &a\n  port: 2\nbedrock:\n  <<: *a\n", "s: &s\n  bungeecord: on\nsettings: *s\n")
+	f.Add("", "", "settings:\n  bungeecord: false\nsettings.bungeecord: true\n")
 	f.Fuzz(func(t *testing.T, props, geyser, spigot string) {
 		cfg, dir := newServer(t)
 		files := map[string]string{"plugins/Geyser-Spigot/config.yml": geyser, "spigot.yml": spigot}

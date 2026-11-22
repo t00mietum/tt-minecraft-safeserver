@@ -412,11 +412,12 @@ func parseName(name string) (Linked, bool) {
 	return Linked{Version: rest[:i], ID: id}, true
 }
 
-// IsBuild tells whether name, under serverDir, is named like a Paper build.
-func IsBuild(name string) bool {
-	_, build := parseName(name)
-	return build && !strings.Contains(name, "/")
-}
+// Commented out by 2026112110300390: nothing calls it since plugin approval went.
+// // IsBuild tells whether name, under serverDir, is named like a Paper build.
+// func IsBuild(name string) bool {
+// 	_, build := parseName(name)
+// 	return build && !strings.Contains(name, "/")
+// }
 
 // Prune removes the Paper builds in serverDir besides the ones named in keep,
 // and gives the names it removed. Only plain files named like a build go.

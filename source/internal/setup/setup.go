@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
@@ -28,6 +29,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
@@ -72,7 +74,16 @@ type Setup struct {
 	Update func(ctx context.Context, c *config.Config) error
 	Paper  PaperSource
 	Geyser GeyserSource
+	// resume is a new install going on in a tree an earlier one made.
+	resume bool
 }
+
+// partialMark is the file a new install leaves in the tree it made, until it
+// writes the config, so a setup that stopped partway can go on there without
+// --adopt.
+const partialMark = ".tt-minecraftd-setup"
+
+const partialText = "# tt-minecraftd setup made this folder and hasn't finished. Run setup again to go on; it removes this file when it writes the config.\n"
 
 // PaperSource is where Paper builds come from: paper.API, or a test's.
 type PaperSource interface {
@@ -189,10 +200,7 @@ func (s *Setup) Do(ctx context.Context) error {
 		}
 	}
 	if exe != "" {
-		if err := s.retire(); err != nil {
-			return err
-		}
-		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", "-o", "root", "-g", "root", exe, s.binPath()}}); err != nil {
+		if err := s.copySelf(ctx, exe); err != nil {
 			return err
 		}
 	}
@@ -200,6 +208,7 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.writeConfig(opts); err != nil {
 		return err
 	}
+	s.clearMark(cfg.ServerDir)
 	if s.DryRun {
 		report("PLAN", "repair --check runs last")
 		return nil
@@ -376,7 +385,8 @@ func (s *Setup) install(ctx context.Context, c config.Config) error {
 }
 
 // checkTree refuses a new install over a folder that has files in it, since
-// --adopt is how to take one over.
+// --adopt is how to take one over. A tree an earlier setup made and didn't
+// finish is gone on with.
 func (s *Setup) checkTree(c config.Config) error {
 	entries, err := os.ReadDir(c.ServerDir)
 	switch {
@@ -388,10 +398,17 @@ func (s *Setup) checkTree(c config.Config) error {
 		return nil
 	case err != nil:
 		return err
+	case len(entries) > 0 && madeHere(c.ServerDir):
+		s.resume = true
 	case len(entries) > 0:
 		return fmt.Errorf("%s has files in it already; give --adopt %[1]s to take it over as it is", c.ServerDir)
 	}
 	return nil
+}
+
+func madeHere(dir string) bool {
+	fi, err := os.Lstat(filepath.Join(dir, partialMark))
+	return err == nil && fi.Mode().IsRegular()
 }
 
 // unsourced are the Geyser and Floodgate jars in plugins/ that plugins.shcl
@@ -400,12 +417,13 @@ func (s *Setup) unsourced(c config.Config) ([]plugins.Info, error) {
 	if _, err := os.Stat(c.ServerDir); errors.Is(err, fs.ErrNotExist) || s.Geyser == nil {
 		return nil, nil
 	}
-	return repair.GeyserSources(c.ServerDir, s.PluginsFile, s.Geyser.Source)
+	return repair.GeyserSources(c.ServerDir, c.OwnerTrees, s.PluginsFile, s.Geyser.Source)
 }
 
-// copyTarget is the binary to copy to BinPath, or empty when it runs from
-// there already. A package's binary leaves the copy out, since one in
-// BinPath would come first on PATH and outlast the next package upgrade.
+// copyTarget is the binary to copy to BinPath, or empty when BinPath holds
+// it already, by oldbuild.Current. A package's binary leaves the copy out,
+// since one in BinPath would come first on PATH and outlast the next package
+// upgrade.
 func (s *Setup) copyTarget() string {
 	if s.Exe == "" || boot.Bin(s.PkgBin) == boot.PkgBin {
 		return ""
@@ -414,10 +432,9 @@ func (s *Setup) copyTarget() string {
 	if err != nil {
 		exe = s.Exe
 	}
-	if bin, err := filepath.EvalSymlinks(s.binPath()); err == nil && bin == exe {
-		return ""
-	}
-	if oldbuild.Same(exe, s.binPath()) {
+	// Even when it runs from BinPath: a link there, or a file the operator
+	// can change, gets a root-owned copy in its place.
+	if oldbuild.Current(exe, s.binPath()) {
 		return ""
 	}
 	return exe
@@ -431,10 +448,11 @@ func (s *Setup) oldBuilds() string {
 	return cmp.Or(s.OldBuilds, oldbuild.Dir)
 }
 
-// replaced is where the other build in BinPath goes before the copy, or
-// empty when there's no plain file there to keep.
-func (s *Setup) replaced() string {
-	if fi, err := os.Lstat(s.binPath()); err != nil || !fi.Mode().IsRegular() {
+// replaced is where a copy of the other build in BinPath goes before the
+// copy, or empty when there's no plain file there to keep, or it's exe's
+// bytes and only its owner or mode is wrong.
+func (s *Setup) replaced(exe string) string {
+	if fi, err := os.Lstat(s.binPath()); err != nil || !fi.Mode().IsRegular() || oldbuild.Same(exe, s.binPath()) {
 		return ""
 	}
 	to, err := oldbuild.Where(s.binPath(), s.oldBuilds())
@@ -444,17 +462,28 @@ func (s *Setup) replaced() string {
 	return filepath.Join(oldbuild.Dir, filepath.Base(to))
 }
 
-// retire moves the other build in BinPath out of the way, as repair's
-// check 15 does, rather than write over it.
-func (s *Setup) retire() error {
-	if s.DryRun || s.replaced() == "" {
-		return nil
+// copySelf puts exe in BinPath as install.bash does: it keeps a copy of the
+// other build there, as repair's check 15 would, stages exe beside it, and
+// renames it into place, so there's always a build in BinPath.
+func (s *Setup) copySelf(ctx context.Context, exe string) error {
+	if !s.DryRun && s.replaced(exe) != "" {
+		to, warn, err := oldbuild.Keep(s.binPath(), s.oldBuilds(), time.Now())
+		if err != nil {
+			return fmt.Errorf("keeping a copy of the other build: %w", err)
+		}
+		fmt.Fprintf(s.Out, "Kept a copy of %s as %s.\n", BinPath, filepath.Join(oldbuild.Dir, filepath.Base(to)))
+		if warn != nil {
+			fmt.Fprintf(s.Out, "warning: %s\n", warn)
+		}
 	}
-	to, err := oldbuild.Retire(s.binPath(), s.oldBuilds(), time.Now())
-	if err != nil {
-		return fmt.Errorf("moving the other build out of the way: %w", err)
+	stage := filepath.Join(filepath.Dir(s.binPath()), "."+filepath.Base(s.binPath())+".new")
+	if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", "-o", "root", "-g", "root", exe, stage}}); err != nil {
+		return err
 	}
-	fmt.Fprintf(s.Out, "Moved %s to %s.\n", BinPath, filepath.Join(oldbuild.Dir, filepath.Base(to)))
+	if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"mv", "-f", "-T", stage, s.binPath()}}); err != nil {
+		_, _ = s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"rm", "-f", stage}}) // the move's error says more
+		return err
+	}
 	return nil
 }
 
@@ -465,9 +494,12 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Install %s through apt.\n", strings.Join(pkgs, " and "))
 	}
 	fmt.Fprintf(w, "  - Make account %s and group %s where they're missing, and put %s in the group.\n", c.RunUser, c.RunGroup, c.OwnerAfterStop)
-	if s.Adopt != "" {
+	switch {
+	case s.Adopt != "":
 		fmt.Fprintf(w, "  - Take over %s as it is, and hand it to %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
-	} else {
+	case s.resume:
+		fmt.Fprintf(w, "  - Go on in %s, which an earlier setup made and didn't finish, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
+	default:
 		fmt.Fprintf(w, "  - Make %s, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
 	}
 	if build != nil {
@@ -491,8 +523,8 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Install and enable %s, which starts the server at boot.\n", boot.UnitName)
 	}
 	if exe != "" {
-		if to := s.replaced(); to != "" {
-			fmt.Fprintf(w, "  - Move the other build in %s to %s, where old builds are kept.\n", BinPath, to)
+		if to := s.replaced(exe); to != "" {
+			fmt.Fprintf(w, "  - Keep a copy of the other build in %s as %s, where old builds are kept.\n", BinPath, to)
 		}
 		fmt.Fprintf(w, "  - Copy %s to %s.\n", exe, BinPath)
 	}
@@ -624,7 +656,13 @@ func (s *Setup) writeSources(jars []plugins.Info) error {
 	if _, err := s.configDir(); err != nil {
 		return err
 	}
-	if err := plugins.SetSources(s.PluginsFile, jars); err != nil {
+	// Sources only feed update --plugins, so a file shcl can't keep isn't
+	// worth failing setup over.
+	var nk *plugins.NotKept
+	if err := plugins.SetSources(s.PluginsFile, jars); errors.As(err, &nk) {
+		fmt.Fprintf(s.Out, "warning: %s\n", server.Clean(nk.Error()))
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("can't write %s: %w", s.PluginsFile, err)
 	}
 	for _, j := range jars {
@@ -813,14 +851,44 @@ func (s *Setup) accounts(ctx context.Context, c *config.Config, report repair.Re
 // which is how a stopped server's tree is. See design.md's Tree ownership.
 func (s *Setup) makeTree(ctx context.Context, c *config.Config) error {
 	if s.Adopt == "" {
-		_, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-d", "-o", c.OwnerAfterStop, "-g", c.RunGroup, "-m", "0770", c.ServerDir}})
-		return err
+		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-d", "-o", c.OwnerAfterStop, "-g", c.RunGroup, "-m", "0770", c.ServerDir}}); err != nil || s.DryRun {
+			return err
+		}
+		return s.mark(c.ServerDir)
 	}
 	warns, err := tree.ToOperator(ctx, s.Run, c)
 	for _, w := range warns {
 		fmt.Fprintf(s.Out, "warning: %s\n", w)
 	}
 	return err
+}
+
+// mark leaves partialMark in a tree setup made, through a handle, since the
+// operator owns the folder by then.
+func (s *Setup) mark(dir string) error {
+	d, err := linksafe.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Write(partialMark, []byte(partialText), nil)
+}
+
+// clearMark takes partialMark away once the config is written. A setup after
+// that is an existing install, and a leftover mark would let one that finds
+// the config moved aside go on over a tree the server has used since.
+func (s *Setup) clearMark(dir string) {
+	if s.DryRun {
+		return
+	}
+	d, err := linksafe.Open(dir)
+	if err == nil {
+		err = syscall.Unlinkat(d.Fd(), partialMark)
+		d.Close()
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(s.Out, "warning: can't remove %s: %v\n", filepath.Join(dir, partialMark), err)
+	}
 }
 
 func (s *Setup) eula(c config.Config) error {

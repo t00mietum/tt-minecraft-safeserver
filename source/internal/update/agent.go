@@ -24,6 +24,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // AgentAnswer is what the operator's run got from the agent, handed to the
@@ -183,11 +184,11 @@ func (u *Update) agentSteps(asks []plugins.Approved, q agent.Question, ans agent
 	answered := make(map[string]bool, len(q.Jars))
 	for _, r := range c.Refused {
 		answered[r.Jar] = true
-		fmt.Fprintf(u.Out, "%-7s %s: the update agent's build is refused, since %s\n", "SKIPPED", r.Jar, r.Why)
+		fmt.Fprintf(u.Out, "%-7s %s: the update agent's build is refused, since %s\n", "SKIPPED", server.Clean(r.Jar), r.Why)
 	}
 	for _, s := range c.Current {
 		answered[s.Jar] = true
-		fmt.Fprintf(u.Out, "%-7s %s: the update agent found nothing newer. %s\n", "OK", s.Jar, s.Notes)
+		fmt.Fprintf(u.Out, "%-7s %s: the update agent found nothing newer. %s\n", "OK", server.Clean(s.Jar), s.Notes)
 	}
 	var steps []agentStep
 	for _, s := range c.Updates {
@@ -198,7 +199,7 @@ func (u *Update) agentSteps(asks []plugins.Approved, q agent.Question, ans agent
 	}
 	for _, j := range q.Jars {
 		if !answered[j.Path] {
-			fmt.Fprintf(u.Out, "%-7s %s: no answer from the update agent\n", "SKIPPED", j.Path)
+			fmt.Fprintf(u.Out, "%-7s %s: no answer from the update agent\n", "SKIPPED", server.Clean(j.Path))
 		}
 	}
 	return steps
@@ -224,7 +225,7 @@ func hostOf(address string) string {
 func (s agentStep) plan(dryRun bool) string {
 	f := s.found
 	var b strings.Builder
-	fmt.Fprintf(&b, "Update %s from %s to %s, which the update agent found on %s: ", s.jar.Name, s.old, f.Version, hostOf(f.URL))
+	fmt.Fprintf(&b, "Update %s from %s to %s, which the update agent found on %s: ", server.Clean(s.jar.Name), s.old, f.Version, hostOf(f.URL))
 	if kind, sum := s.hash(); kind != "" {
 		fmt.Fprintf(&b, "check its %s %s is on %s, download it, check the hash and the plugin name, and ask before using it.", kind, sum, f.HashFrom)
 	} else {
@@ -379,11 +380,11 @@ func (u *Update) getAgentPaper(ctx context.Context, s paperStep) (size int64, us
 func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	f := s.found
 	if u.DryRun {
-		fmt.Fprintf(u.Out, "would check %s's hash page, download %s over it, check it, and ask before using it\n", s.jar.Name, f.Version)
+		fmt.Fprintf(u.Out, "would check %s's hash page, download %s over it, check it, and ask before using it\n", server.Clean(s.jar.Name), f.Version)
 		return nil
 	}
 	failed := func(err error) error {
-		fmt.Fprintf(u.Out, "%-7s %s: %v; not used\n", "FAILED", s.jar.Name, err)
+		fmt.Fprintf(u.Out, "%-7s %s: %s; not used\n", "FAILED", server.Clean(s.jar.Name), server.Clean(err.Error()))
 		return nil
 	}
 	kind, sum := s.hash()
@@ -424,9 +425,9 @@ func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	if kind == "" {
 		fmt.Fprintln(u.Out, "  warning: its source publishes no hash, so only the plugin name was checked")
 	}
-	if !u.ask(fmt.Sprintf("Use it in place of %s? [y/n] ", s.jar.Name)) {
+	if !u.ask(fmt.Sprintf("Use it in place of %s? [y/n] ", server.Clean(s.jar.Name))) {
 		got.Drop()
-		fmt.Fprintf(u.Out, "%-7s %s: kept as it was\n", "SKIPPED", s.jar.Name)
+		fmt.Fprintf(u.Out, "%-7s %s: kept as it was\n", "SKIPPED", server.Clean(s.jar.Name))
 		return nil
 	}
 	if err := got.Keep(); err != nil {
@@ -434,6 +435,6 @@ func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	}
 	// plugins.shcl isn't touched: the agent's address isn't a source update
 	// knows how to follow.
-	fmt.Fprintf(u.Out, "%-7s %s %s downloaded over %s\n", "FIXED", newName, f.Version, s.jar.Name)
+	fmt.Fprintf(u.Out, "%-7s %s %s downloaded over %s\n", "FIXED", newName, f.Version, server.Clean(s.jar.Name))
 	return nil
 }

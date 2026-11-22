@@ -203,9 +203,10 @@ Common:  --config PATH, --set KEY=VALUE
 - A part that can't be read, such as a file the operator's group can't see, says why, and the rest still shows.
 	- When a read of the tree is refused and the login doesn't have `runGroup` yet, the trees line says so, as `start` does.
 
-- The log is `logs/latest.log` in both modes, since the container sees the same tree. Files in the tree that aren't plain files, such as a pipe the server left there, aren't read.
+- The log is `logs/latest.log` in both modes, since the container sees the same tree. Files in the tree that aren't plain files, such as a pipe the server left there, aren't read. Nor is a `latest.log` or `logs` folder that's a link, since `status` may run with sudo, and `cmd` and native `start` read the log the same way.
 
 - `watch` redraws `status` every few seconds until Ctrl-C.
+	- A reading that Ctrl-C cuts short isn't shown, so the last whole one stays on the screen and `watch` exits 0. `status` cut short that way shows nothing and exits 1.
 
 ### console and cmd
 
@@ -239,7 +240,7 @@ Common:  --config PATH, --set KEY=VALUE
 	2. Creates the service account and its group, and adds the operator to the group.
 	3. Creates the server tree, or with `--adopt PATH` uses an existing server folder as it is.
 		- A new tree belongs to the operator, the same as a stopped server's. An adopted one is handed to the operator too.
-		- A `serverDir` that has files in it already is refused without `--adopt`.
+		- A `serverDir` that has files in it already is refused without `--adopt`, unless setup made it. A new tree gets a `.tt-minecraftd-setup` file, taken away when the config is written, so a setup that stopped partway goes on in it.
 	4. Downloads and checks Paper on a new tree, the same way `update` does.
 		- It takes the newest Minecraft release that has a stable build, from PaperMC's download API at `fill.papermc.io`, and checks the jar's size and SHA-256 against it.
 		- A tree that has a `paper.jar` already keeps it.
@@ -249,18 +250,18 @@ Common:  --config PATH, --set KEY=VALUE
 	6. Writes the safe settings. See [Safe server settings](#safe-server-settings).
 	7. With `bedrock` on, downloads Geyser and Floodgate and sets them up. See [Bedrock players](#bedrock-players).
 		- It takes each one's newest build for Paper from GeyserMC's download API at `download.geysermc.org`, and checks the jar's SHA-256 against it. They go in `plugins/`, which setup makes when it's missing.
-		- Each jar's source goes in `plugins.shcl`, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 gives it the same source.
+		- Each jar's source goes in `plugins.shcl`, so `update --plugins` can get the next one. A tree that has a Geyser or Floodgate jar already keeps it, and step 8 gives it the same source. An add-on such as GeyserExtras isn't one.
 		- Step 6 writes Geyser's `config.yml` with only the safe keys, before its first start. Geyser keeps them and adds the rest of its settings. Floodgate's config is left to its first start, and `repair` sets the Floodgate key's mode after that.
 		- On an adopted tree that has a Floodgate key already, setup takes other accounts' access to it away here, as `repair` does.
 		- The lookup happens before the plan is shown, along with Paper's.
 	8. Gives the Geyser and Floodgate jars that are there GeyserMC's source, when `plugins.shcl` has none for them. They're listed in the plan.
-		- That's a jar in `plugins/` whose file name and `plugin.yml` name both start with `geyser` or `floodgate`, the same as `repair` gives it. Other jars aren't listed, since nothing about them needs a yes.
+		- That's a jar in `plugins/` whose file name is `geyser` or `floodgate` and then anything but a letter or digit, and whose `plugin.yml` name is GeyserMC's own, `Geyser-Spigot` or `floodgate`, the same as `repair` gives it. Other jars aren't listed, since nothing about them needs a yes.
 	9. With `firewall` on, installs nftables through apt when `nft` is missing, writes the rules, and starts their unit. See [Firewall](#firewall).
 		- That's `repair`'s firewall check, with its fixes. When it fails, such as with no apt to get nftables from, setup stops before it writes the config.
 	10. Pulls the pinned container image in container mode.
 	11. Installs and enables the boot unit when `startAtBoot` is on.
 	12. Copies itself to `/usr/local/bin` when it runs from somewhere else, unless the `.deb` or `.rpm` package has put it in `/usr/bin`. See [Boot](#boot).
-		- The copy is owned by root. A different build already there is moved to the old-builds folder first, the same as `repair` does in check 15. The same build, by SHA-256, is left alone, and no copy is made.
+		- The copy is owned by root. A copy of a different build already there is kept in the old-builds folder first, the one `repair` uses in check 15. The new build is then staged beside it and renamed over it, as the install script does, so there is always a build there. The same build, by SHA-256, is left alone, and no copy is made, but only in a regular file owned by root with no group or other write. A link to it, or a file someone else could change, is written over the same way, with no copy kept, since nothing is lost.
 	13. Ends with `repair --check`.
 
 - When it finds an install already, it runs `repair` and then `update`. The config file being there is what counts as an install.
@@ -301,7 +302,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- GeyserMC's sources are the ones known so far. A jar with another source is listed as skipped.
 		- Modrinth and Hangar sources wait until the agent work is done. Until then the agent covers their jars.
 	- With `agent` set, it also asks an AI agent about each jar in the tree that has no known source, or whose source's lookup failed. Each jar the agent finds needs its own yes, even with `--yes`. See [Update agent](#update-agent).
-	- Then it removes the plugins' libraries from Paper's cache, as the service account, so Paper downloads fresh ones at the next start. Paper's own are left. While the server runs, the cache is left alone, since Paper can still open a library it hasn't read yet. See [Plugin jars](#plugin-jars).
+	- Then it removes the plugins' libraries from Paper's cache, as the service account, so Paper downloads fresh ones at the next start. Paper's own are left. While the server runs, the cache is left alone, since Paper can still open a library it hasn't read yet. It looks again right before the removal, since the prompt can wait any length of time. See [Plugin jars](#plugin-jars).
 	- `plugins.shcl` isn't written to. A new jar takes the old one's file name, so its source still applies.
 
 - `--image` pulls the newest container base image, checks that `java -version` in it is new enough for this Paper, and pins its digest in the config.
@@ -311,6 +312,7 @@ Common:  --config PATH, --set KEY=VALUE
 	- The pull waits for the go-ahead, since that's what finds the new digest. So a dry run shows the pull but not the digest.
 	- The pin is the tag's own digest, the one for every arch, so the config works on another machine too. `java -version` runs in a container with no network, locked down like the server's.
 	- A Java that's too old leaves the config as it was, and names a newer tag to use. Only the `image` line in the config changes; the other lines stay as written.
+	- A config that shcl can't save with its other lines kept, such as one with a key given twice, is left as it was too, and the error gives the `image` line to set by hand.
 	- The old image stays, since a running server may still use it. Native mode has no image, so the part is skipped there.
 
 - A running server is left alone. It uses the new files on its next start.
@@ -543,6 +545,8 @@ cicd/                        build, test, and release scripts
 	- A list with one bad item is a bad value, so none of it is used.
 	- A `heapMin` over `heapMax` gets a warning, and `heapMax` is used for both. A `memCap` that isn't over `heapMax` gets a warning, and its default.
 
+- A `#` outside quotes starts a comment, so `serverDir: /srv/games#2` reads as `/srv/games`. A comment right against a value gets a warning, and `--set` refuses a value a comment would cut. Quote a value that holds a `#`.
+
 - Key names and the words such as `podman` and `lan` don't care about case.
 
 - Sizes take Java's form, such as `4G`, or shcl's, such as `4 GiB`. Either way a G is 1024 M, the same as Java. Timeouts take seconds, or a time such as `5m`.
@@ -587,7 +591,7 @@ cicd/                        build, test, and release scripts
 
 ### Saves and persistence
 
-- The tool doesn't store any state of its own, apart from the plugins' sources and the builds it kept in `/var/lib/tt-minecraftd/old-builds/`. See [Boot](#boot). Whether the server runs comes from the container runtime or systemd. Ownership comes from the the files.
+- The tool doesn't store any state of its own, apart from the plugins' sources and the builds it kept in `/var/lib/tt-minecraftd/old-builds/`. See [Boot](#boot). Whether the server runs comes from the container runtime or systemd. Ownership comes from the files.
 
 - Server tree layout, as Paper makes it:
 
@@ -683,10 +687,11 @@ cicd/                        build, test, and release scripts
 		- Container `start` reads the tree before it changes hands. After a crash the tree is still the server's, so when that read is refused, `start` gives the same reason.
 
 - At start, modes become `ug+rwX,o-rwx`. The server runs with `umask 0007`, so new files follow the same rule.
+	- A file that's gone by the time `chown -R` or `chmod -R` gets to it, as when the running server renames one during `repair`, doesn't fail the change. The mode change still runs when the ownership change fails.
 
 - In native mode, `paper.jar` and the plugin and Geyser extension jars go to root, mode 0644, at start. That way the server can't change them, same as the read-only mounts in container mode.
 
-- Root's own changes inside a tree go through folder handles that don't follow links, since the server account can put a link anywhere it writes. That covers the safe settings, a refused jar, and the Floodgate key's mode. A link on the way is refused.
+- Root's own changes inside a tree go through folder handles that don't follow links, since the server account can put a link anywhere it writes. That covers the safe settings, Geyser's plugins folder, and the Floodgate key's mode. A link on the way is refused.
 
 - A tree that's `/` or less than 3 levels deep is refused. A tree given as a link is followed, and the same check applies to where it goes.
 
@@ -723,7 +728,9 @@ cicd/                        build, test, and release scripts
 
 - Geyser's `config.yml` is `plugins/Geyser-Spigot/config.yml`, checked only with `bedrock` on. A missing one is wrong, since Geyser's first start would write its own defaults and run with them, on port 19132 and with online mode logins. setup and `repair` write one with only the first 3 Geyser keys above, and make its folders when they're missing. Geyser keeps those keys and fills in the rest at its first start. A key that's missing from it is wrong, since Geyser's defaults don't follow the config, and `repair` adds it. The last 3 keys are the exception: Geyser's defaults for them are already right, so a missing one is fine. `auth-type` is looked for where the file's own layout keeps it: under `java:` from `config-version` 5 on, under `remote:` before that, and at the top level before `remote:`. Geyser moves an old file to the new layout when it loads it.
 
-- The YAML files are read the way Paper and Geyser read them, with flow style, anchors and merges. Every copy of a key has to be right, since Paper's YAML reader keeps the last copy of a key given twice. A file that isn't YAML, or holds more than one document, stops `start`. `repair` edits only a key's own line, to keep the comments, and checks the result again before writing it. It leaves a file it can't fix that way, such as one in flow style, and says to fix it by hand.
+- `server.properties` is read the way Java reads it: a line ends at LF, CR or CRLF, and a comment never runs onto the next line. `repair` keeps every other line as it was, line ends included.
+
+- The YAML files are read the way Paper and Geyser read them, with flow style, anchors and merges. Every copy of a key has to be right, since Paper's YAML reader keeps the last copy of a key given twice. Spigot splits a key in `spigot.yml` on its dots, so `settings.bungeecord: true` at the top level is a copy too. A file that isn't YAML, or holds more than one document, stops `start`. `repair` edits only a key's own line, to keep the comments, and checks the result again before writing it. It leaves a file it can't fix that way, such as one in flow style, and says to fix it by hand.
 
 - The server account can write the tree. So a settings file that's a link, or isn't a plain file, is refused, and `repair` puts a new file in place of the old one rather than writing into it.
 
@@ -739,6 +746,7 @@ cicd/                        build, test, and release scripts
 
 - In container mode, every jar in `plugins/`, every Geyser extension in `plugins/Geyser-Spigot/extensions/`, and the build `paper.jar` links to are mounted read-only, so the server can't change them while it runs. Native mode lists the same jars in the unit's read-only paths.
 	- A `paper.jar` that links outside `serverDir` stops the start.
+	- So does a jar in either folder that isn't a regular file in `serverDir` or a tree in `ownerTrees`, after links. The server account can plant such a link, and start would mount whatever it names, or chown it in native mode. `update` and `repair` don't read such a jar either.
 
 - `/etc/tt-minecraftd/plugins.shcl` gives an optional source per jar, for `update --plugins`. The name is the jar's path under `serverDir`, so a jar in `plugins/` and an extension with the same name stay apart:
 
@@ -749,7 +757,8 @@ cicd/                        build, test, and release scripts
 
 	- An entry with a path outside `serverDir` gets a warning and is left out. A source that isn't `https` is ignored.
 	- A list from before 2026-11-19 has a `sha256` per jar. It's read and not checked.
-	- `setup` and `repair` give a jar in `plugins/` whose file name and `plugin.yml` name both start with `geyser` or `floodgate`, ignoring case, GeyserMC's source when it has none. A jar with a source keeps it.
+	- `setup` and `repair` give a jar in `plugins/` GeyserMC's source when it has none, when its file name is `geyser` or `floodgate` and then anything but a letter or digit, and its `plugin.yml` name is `Geyser-Spigot` or `floodgate`, ignoring case. An add-on such as GeyserExtras or GeyserSkinManager-Spigot names its own plugin, so it doesn't count. A jar with a source keeps it. Only jars with those file names are opened, so another jar that can't be read doesn't stop `setup` or `repair`.
+	- A `plugins.shcl` that shcl can't save with its other lines kept, such as one with a jar given twice, is left as it was. `setup` and `repair` warn with the `source` line to add by hand, and go on, since a source only feeds `update --plugins`.
 
 - Paper also loads code that it writes into the tree itself, and it doesn't check it again:
 	- `libraries/` holds the libraries that plugins ask for, downloaded from Maven Central. Paper loads one that's already there without checking it (seen in 26.3 build 256).
@@ -905,12 +914,13 @@ cicd/                        build, test, and release scripts
 	- `TimeoutStopSec` is `stopTimeout` plus 45 seconds: the 30 from SIGTERM to SIGKILL, and some to spare.
 	- The unit runs the tool from `/usr/bin` when the `.deb` or `.rpm` package put it there, and otherwise from `/usr/local/bin`, where `setup` and the install script put it. It adds `--config` when the config isn't the default one.
 		- The packages follow the FHS and Debian policy, which give a package `/usr/bin` and leave `/usr/local/bin` to hand installs. A package upgrade then changes what the unit runs. `start` and `stop` take a unit that runs either path as this config's.
-		- `setup` and the install script always install it owned by root, even where the folder lets the operator write, since `setup`'s sudo run and the boot unit run it.
-		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` moves one it finds to the old-builds folder.
-	- A hand-installed build that's replaced or in the way is kept, not deleted. `repair`, `setup`'s copy and the install script move it to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, with the mtime as `YYYYmmDD-HHMMSS`. Someone who put it there on purpose can copy it back.
+		- `setup` and the install script always install it owned by root, even where the folder lets the operator write, since `setup`'s sudo run and the boot unit run it. A build already there counts as current only when it's the same by SHA-256, in a regular file owned by root with no group or other write.
+		- A copy in `/usr/local/bin` comes before the package's on PATH, so the operator would keep running it after an upgrade. `setup` doesn't make one when the package's is there, and `repair` moves one it finds to the old-builds folder. The install script stops before its plan when the package's is there, and says to update through the package manager.
+	- A hand-installed build that's replaced or in the way is kept, not deleted. `repair` moves it, and `setup`'s copy and the install script keep a copy of it, in `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>`, with the mtime as `YYYYmmDD-HHMMSS`. Someone who put it there on purpose can copy it back.
 		- The folder is off PATH, and it's the same on every distro. It's made root-owned, mode 0755, when it's missing. `/var` can be on another filesystem, so the move falls back to a copy and then a remove.
-		- After each move the folder is GFS-rotated, as cicd keeps its demo renders: the newest build in each of the last few finished hours, days, weeks, months, and years, plus the newest 10 and the very first.
-		- The install script has the build it's about to install do the move, through a command left out of the help, so the rules live in one place.
+		- After each move the folder is GFS-rotated, as cicd keeps its demo renders: the newest build in each of the last few finished hours, days, weeks, months, and years, plus the newest 10 and the very first. The build just moved is always kept, even when its mtime is older than those.
+		- The install script has the build it's about to install keep the old one, through a command left out of the help, so the rules live in one place. That command copies rather than moves, so renaming the new build over the old one is the only change to the path, and a build is always there.
+		- A rotation that fails after the build is kept is a warning, and the build counts as kept.
 		- `update --self` is deferred. When it comes back, it gets the same move.
 	- Inside the unit, `start --foreground` and `stop` do the work themselves. They tell by their cgroup.
 		- Only `ExecStop`'s `stop` hands the trees back. systemd runs it after every start, even when the server ended by itself, and sends SIGTERM to what's left once it's done, which would cut a second hand-back short and fail the unit. A SIGTERM that finds the server down is a clean stop.
@@ -982,7 +992,7 @@ cicd/                        build, test, and release scripts
 
 ### Testing
 
-- Unit tests run with the fake command runner. They check the exact command lists for each mode, the config errors, the safe settings checks and fixes on sample server files, and the plugin check against changed and new jars. They also check the rendered `firewall.nft` for each mix of `allowFrom`, `egress`, and `bedrock`.
+- Unit tests run with the fake command runner. They check the exact command lists for each mode, the config errors, the safe settings checks and fixes on sample server files, and the plugin jar list and the sources set for Geyser and Floodgate. They also check the rendered `firewall.nft` for each mix of `allowFrom`, `egress`, and `bedrock`.
 
 - A smoke test starts a real Paper server in the container on a throwaway tree with a tiny world. It checks the hardening flags, that the server finishes loading, that `cmd` works, that the jars can't be written, and a clean exit on `stop`.
 

@@ -127,7 +127,10 @@ var shadowCheck = Check{
 			Problem: problem + "; repair moves it to " + filepath.Join(oldbuild.Dir, filepath.Base(to)),
 			Fixed:   boot.LocalBin + " moved to " + oldbuild.Dir + ", so the package's runs",
 			Fix: func(context.Context) error {
-				_, err := oldbuild.Retire(local, kept, time.Now())
+				_, warn, err := oldbuild.Retire(local, kept, time.Now())
+				if err == nil && warn != nil {
+					return Warning{warn}
+				}
 				return err
 			},
 		}}, nil

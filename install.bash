@@ -10,6 +10,8 @@
 ##		  where the new build keeps the old ones GFS-rotated, rather than written over.
 ##		- States its plan and asks first. Re-running it is safe: a current binary is left alone,
 ##		  and setup on an existing install runs repair and update.
+##		- Stops when the .deb or .rpm package is installed, since a copy in /usr/local/bin would hide
+##		  the package's from then on. That one is updated through the package manager.
 ##		- With --any-distro it runs on other distros, and first checks that what setup would
 ##		  install through apt is already there.
 ##	Syntax:
@@ -26,13 +28,17 @@
 
 set -Eeuo pipefail
 
-installerVersion="1.1.0"
+installerVersion="1.2.1"
 exeName="tt-minecraftd"
 repo="t00mietum/tt-minecraft-safeserver"
 apiUrl="https://api.github.com/repos/${repo}/releases?per_page=100"
 dlBase="https://github.com/${repo}/releases/download"
 ## setup and the boot unit both expect it here.
 destDir="/usr/local/bin"
+## Where the .deb and .rpm put it.
+pkgBin="/usr/bin/tt-minecraftd"
+## Who has to own a current build. The test has no root, so it gives its own uid.
+rootUid=0
 ## For the plan only. The new build's retire-build owns the folder.
 oldDir="/var/lib/tt-minecraftd/old-builds"
 osRelease="/etc/os-release"
@@ -70,6 +76,7 @@ Notes:
 	- Debian and its derivatives, or another distro with --any-distro. The CPU is detected; builds
 	  exist for amd64 and arm64.
 	- With no stable release yet, stable takes the newest pre-release.
+	- Stops when the .deb or .rpm package is installed. Update that through the package manager.
 	- Needs systemd, curl or wget, and sha256sum.
 EOF
 echo
@@ -109,11 +116,20 @@ fNewest(){
 }
 
 ## fFetch URL [OUTFILE]. stdout with no OUTFILE.
+## https only, redirects too, since the sums come over the same channel as the build. curl refuses the
+## hop itself. wget's --https-only holds only for links in a recursive run, so its headers are read
+## after, and a redirect to anything else fails the download, which then isn't used.
 fFetch(){
 	local url="$1" out="${2:--}"
-	## https only, redirects too, since the sums come over the same channel as the build.
-	if [[ "${fetcher}" == curl ]]; then curl --proto '=https' --tlsv1.2 -fsSL -o "${out}" "${url}"
-	else wget --https-only -q -O "${out}" "${url}"; fi
+	if [[ "${fetcher}" == curl ]]; then curl --proto '=https' --tlsv1.2 -fsSL -o "${out}" "${url}"; return; fi
+	local heads rc=0
+	{ heads="$(wget --https-only -q -S -O "${out}" "${url}" 2>&1 1>&3 3>&-)"; } 3>&1 || rc=$?
+	## A relative Location keeps the scheme it came from.
+	if printf '%s\n' "${heads}" | awk '{ l = tolower($0) } l ~ /^[ \t]*location:[ \t]*[a-z][a-z0-9+.-]*:/ && l !~ /^[ \t]*location:[ \t]*https:/ { bad = 1 } END { exit !bad }'; then
+		fEcho "${url} redirected to somewhere that isn't https, so what came back isn't used" >&2
+		return 1
+	fi
+	return "${rc}"
 }
 
 ## Through sudo when fMain set useSudo.
@@ -152,6 +168,8 @@ fMain(){
 
 	## What this box is.
 	[[ "$(uname -s)" == Linux ]] || fDie "${exeName} runs on Linux only"
+	## A copy in destDir comes first on PATH, so it would hide every package upgrade, and setup's repair moves it away.
+	[[ ! -f "${pkgBin}" ]] || fDie "${exeName} is installed here from a package (${pkgBin}). Update it through the package manager, with the newer .deb or .rpm from the releases page. This script would put a second copy in ${destDir}, which would hide the package's."
 	local osId="" osLike=""
 	if [[ -r "${osRelease}" ]]; then
 		osId="$(awk -F= '$1 == "ID" { gsub(/"/, "", $2); print $2 }' "${osRelease}")"
@@ -178,6 +196,7 @@ fMain(){
 	elif command -v wget > /dev/null; then fetcher=wget
 	else fDie "curl or wget is needed"; fi
 	command -v sha256sum > /dev/null || fDie "sha256sum is needed"
+	command -v stat > /dev/null || fDie "stat is needed"
 
 	## What setup would get through apt. It takes Podman over Docker when both are there.
 	if ((anyDistro)); then
@@ -229,7 +248,8 @@ fMain(){
 		## "tt-minecraftd v1.0.0-alpha.1 build df7q6 (2026-11-12)", then the copyright.
 		haveVer="$("${destPath}" --version 2> /dev/null || true)"; haveVer="${haveVer%%$'\n'*}"; haveVer="${haveVer#"${exeName} "}"; haveVer="${haveVer%% *}"
 		if [[ -r "${destPath}" ]]; then haveSum="$(sha256sum < "${destPath}" || true)"; haveSum="${haveSum%% *}"; fi
-		[[ "${haveSum}" != "${want}" ]] || current=1
+		## The release's bytes count only in a plain file that only root can change, since root runs it.
+		if [[ "${haveSum}" == "${want}" ]] && fRootOnly "${destPath}"; then current=1; fi
 	fi
 	## Always root's, even where the folder lets the operator write, since setup's sudo run and the boot unit run it.
 	if ((! current)) && [[ "$(id -u)" != 0 ]]; then
@@ -237,7 +257,8 @@ fMain(){
 		command -v sudo > /dev/null || fDie "the binary is installed as root, and there's no sudo. Run this as root."
 	fi
 	local retire=0
-	if ((! current)) && [[ -f "${destPath}" && ! -L "${destPath}" ]]; then retire=1; fi
+	## The release's own bytes lose nothing when written over, so only another build is kept.
+	if ((! current)) && [[ -f "${destPath}" && ! -L "${destPath}" && "${haveSum}" != "${want}" ]]; then retire=1; fi
 
 	## The plan.
 	fEcho "Plan"
@@ -251,6 +272,7 @@ fMain(){
 		local how="" was="${haveVer:+ (replacing ${haveVer})}"
 		if ((useSudo)); then how=", through sudo"; fi
 		if [[ "${haveVer}" == "${tag}" ]]; then was=" (replacing a ${tag} build that isn't the release's)"; fi
+		if [[ "${haveSum}" == "${want}" ]]; then was=" (the release's build, put back as root's, since someone else could change it)"; fi
 		fEcho_Clean "    Install ....: ${destPath}${was}${how}"
 		if ((retire)); then fEcho_Clean "    Old build ..: moves to ${oldDir}, where old builds are kept"; fi
 	fi
@@ -282,9 +304,10 @@ fMain(){
 		fi
 
 		fEcho "Installing ${destPath}"
-		## Staged beside it, so the new build can move the old one out of the way first, and the swap is one rename.
+		## Staged beside it, so the new build can keep a copy of the old one first, and the swap is one rename.
 		local stage="${destDir}/.${exeName}.new"
-		fAsRoot install -d -m 0755 "${destDir}" || fDie "couldn't make ${destDir}"
+		## Only when missing, since install -d sets the mode of one that's there too, such as Debian's old root:staff 2775.
+		if [[ ! -d "${destDir}" ]]; then fAsRoot install -d -m 0755 "${destDir}" || fDie "couldn't make ${destDir}"; fi
 		fAsRoot install -m 0755 -o root -g root "${work}/${asset}" "${stage}" || fDie "couldn't write ${stage}"
 		## A build that matches its sum can still fail to run here, such as on a noexec mount.
 		local rc=0
@@ -311,6 +334,18 @@ fMain(){
 		"${destPath}" setup ${setupArgs[0]+"${setupArgs[@]}"} || fDie "setup didn't finish. Run '${exeName} setup' again once that's sorted."
 	fi
 	echo
+}
+
+## True when the path is a regular file, not a link, owned by rootUid, with no group or other write.
+fRootOnly(){
+	local path="$1" st uid mode
+	[[ -f "${path}" && ! -L "${path}" ]] || return 1
+	st="$(stat -c '%u %a' -- "${path}" 2> /dev/null)" || return 1
+	uid="${st%% *}"; mode="${st#* }"
+	## Checked as text first, since an arithmetic test would run what's in it.
+	[[ "${uid}" =~ ^[0-9]+$ && "${mode}" =~ ^[0-7]+$ ]] || return 1
+	[[ "${uid}" == "${rootUid}" ]] || return 1
+	(( (8#${mode} & 8#022) == 0 ))
 }
 
 ## Takes out only the file it fetched and the folder it made, under the temp folder it named.
@@ -342,3 +377,10 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##		  portal is named as one. Option values take any case. Errors have a blank line either side, and
 ##		  with no terminal to ask on it says to add --yes.
 ##		- 2026-11-20: Downloads are https only, redirects included.
+##		- 2026-11-22: Stops when the .deb or .rpm package is installed, and says to update through the
+##		  package manager. /usr/local/bin is made only when it's missing, so an existing one keeps its mode.
+##		  With wget, a redirect away from https fails the download, as it does with curl.
+##		  retire-build keeps a copy of the old build and leaves it in place, so the rename of the new one
+##		  is the only change to /usr/local/bin/tt-minecraftd, and there's always a binary there.
+##		- 2026-11-22: The release's build already there counts as current only in a plain file owned by
+##		  root with no group or other write. Otherwise it's put back as root's, with no copy kept.

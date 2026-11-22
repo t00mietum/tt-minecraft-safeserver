@@ -59,6 +59,25 @@ func Where(path, dir string) (string, error) {
 	return filepath.Join(dir, Name(fi.ModTime())), nil
 }
 
+// RootUID is for tests, which have no root. It's who must own a build for
+// Current.
+var RootUID = 0
+
+// Current says whether the build at path is exe's and can be left in place:
+// the same SHA-256, in a regular file rather than a link, owned by RootUID,
+// and with no group or other write, since root runs it.
+func Current(exe, path string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o022 != 0 {
+		return false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || int64(st.Uid) != int64(RootUID) {
+		return false
+	}
+	return Same(exe, path)
+}
+
 // Same says whether the files at a and b have the same SHA-256. One that
 // can't be read isn't the same.
 func Same(a, b string) bool {
@@ -88,45 +107,75 @@ func sum(path string) ([]byte, error) {
 	return h.Sum(nil), nil
 }
 
+// FailRotate is for tests. When set, the rotation after a move gives it as
+// its error, as a folder that refuses the prune would.
+var FailRotate error
+
 // Retire moves the build at path into dir, named for its mtime, and then
 // rotates dir. It gives where the build went. dir is made 0755 when it's
 // missing. A path on another filesystem is copied, then removed.
-func Retire(path, dir string, now time.Time) (string, error) {
+//
+// warn is a rotation that failed once the build was kept. The build counts
+// as kept then, and only the folder holds more than it should.
+func Retire(path, dir string, now time.Time) (to string, warn, err error) {
+	return retire(path, dir, now, true)
+}
+
+// Keep is Retire that copies, and leaves the build at path in place, so the
+// build replacing it goes in with one rename and there's always one there.
+// install.bash's retire-build and setup's copy use it.
+func Keep(path, dir string, now time.Time) (to string, warn, err error) {
+	return retire(path, dir, now, false)
+}
+
+func retire(path, dir string, now time.Time, move bool) (string, error, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("%s isn't a plain file, so it's left where it is", path)
+		return "", nil, fmt.Errorf("%s isn't a plain file, so it's left where it is", path)
 	}
 	if err := ready(dir); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	from, err := linksafe.Open(filepath.Dir(path))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer from.Close()
 	to, err := linksafe.Open(dir)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer to.Close()
 
 	base := filepath.Base(path)
 	want := Name(fi.ModTime())
-	name, err := freeName(want, func(n string) error { return from.Move(base, to, n) })
-	if errors.Is(err, syscall.EXDEV) {
-		name, err = copyOver(path, to, want)
-		if err == nil {
-			err = os.Remove(path)
+	var name string
+	if move {
+		name, err = freeName(want, func(n string) error { return from.Move(base, to, n) })
+		if errors.Is(err, syscall.EXDEV) {
+			name, err = copyOver(path, to, want)
+			if err == nil {
+				err = os.Remove(path)
+			}
 		}
+	} else {
+		name, err = copyOver(path, to, want)
 	}
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	_, err = Rotate(dir, now)
-	return filepath.Join(dir, name), err
+	kept := filepath.Join(dir, name)
+	err = FailRotate
+	if err == nil {
+		_, err = rotate(dir, now, name)
+	}
+	if err != nil {
+		return kept, fmt.Errorf("couldn't prune the old builds in %s: %w", dir, err), nil
+	}
+	return kept, nil, nil
 }
 
 // freeName tries put with want, then want.2 and so on while the name is
@@ -227,6 +276,12 @@ type kept struct {
 // and the very first. It gives the names it removed. Only plain files named
 // tt-minecraftd.* count; anything else in dir is left alone.
 func Rotate(dir string, now time.Time) ([]string, error) {
+	return rotate(dir, now, "")
+}
+
+// rotate is Rotate that also keeps the build named keep, such as the one
+// just retired, whose mtime can put it among the ones to prune.
+func rotate(dir string, now time.Time, keep string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -253,7 +308,12 @@ func Rotate(dir string, now time.Time) ([]string, error) {
 		return strings.Compare(a.name, b.name)
 	})
 
-	keep := map[int]bool{0: true, len(builds) - 1: true}
+	hold := map[int]bool{0: true, len(builds) - 1: true}
+	for i, b := range builds {
+		if b.name == keep {
+			hold[i] = true
+		}
+	}
 	// The period now is still open, so its newest isn't its last yet.
 	for _, p := range []struct {
 		key func(t time.Time) string
@@ -280,17 +340,17 @@ func Rotate(dir string, now time.Time) ([]string, error) {
 		}
 		slices.Sort(keys)
 		for _, k := range keys[max(0, len(keys)-p.n):] {
-			keep[last[k]] = true
+			hold[last[k]] = true
 		}
 	}
 	// The newest few that no period claimed, as gfs-rotate.bash counts them.
 	for i := max(0, len(builds)-keepFrequent); i < len(builds); i++ {
-		keep[i] = true
+		hold[i] = true
 	}
 
 	var pruned []string
 	for i, b := range builds {
-		if keep[i] {
+		if hold[i] {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, b.name)); err != nil && !errors.Is(err, fs.ErrNotExist) {

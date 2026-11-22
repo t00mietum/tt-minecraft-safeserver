@@ -25,7 +25,10 @@ type yamlKey struct {
 	path      []string
 	want      string
 	missingOK bool // the server's own default is the wanted value
-	ok        func(have string) bool
+	// Bukkit's YamlConfiguration, which reads spigot.yml, splits a key on
+	// dots, so settings.bungeecord: true at the top level sets it too.
+	dotted bool
+	ok     func(have string) bool
 }
 
 // yamlCopy is one copy of a key. inPlace says its value is a plain scalar on
@@ -85,7 +88,7 @@ func yamlMerged(v *yaml.Node) []*yaml.Node {
 
 // yamlCopies gives every copy of a nested key: under each copy of its
 // parents, and through anchors and merges.
-func yamlCopies(root *yaml.Node, path []string) []yamlCopy {
+func yamlCopies(root *yaml.Node, path []string, dotted bool) []yamlCopy {
 	var found []yamlCopy
 	type visit struct {
 		n     *yaml.Node
@@ -112,20 +115,47 @@ func yamlCopies(root *yaml.Node, path []string) []yamlCopy {
 				for _, m := range yamlMerged(v) {
 					walk(m, level, false)
 				}
-			case k.Kind != yaml.ScalarNode || k.Value != path[level]:
-			case level == len(path)-1:
-				// The value is what the alias points at, as SnakeYAML reads it.
-				// Editing in place goes by the node on the key's line.
-				target, _ := yamlDeref(v)
-				found = append(found, yamlCopy{k, target, direct && v.Kind == yaml.ScalarNode && v.Line == k.Line &&
-					(v.Style == 0 || v.Style == yaml.DoubleQuotedStyle || v.Style == yaml.SingleQuotedStyle)})
+			case k.Kind != yaml.ScalarNode:
 			default:
-				walk(v, level+1, direct)
+				next, ok := yamlMatch(k.Value, path, level, dotted)
+				switch {
+				case !ok:
+				case next == len(path):
+					// The value is what the alias points at, as SnakeYAML reads
+					// it. Editing in place goes by the node on the key's line.
+					target, _ := yamlDeref(v)
+					found = append(found, yamlCopy{k, target, direct && v.Kind == yaml.ScalarNode && v.Line == k.Line &&
+						(v.Style == 0 || v.Style == yaml.DoubleQuotedStyle || v.Style == yaml.SingleQuotedStyle)})
+				case next > len(path):
+					// A dotted key that runs past the path makes the key a
+					// section.
+					found = append(found, yamlCopy{k, &yaml.Node{Kind: yaml.MappingNode}, false})
+				default:
+					walk(v, next, direct)
+				}
 			}
 		}
 	}
 	walk(root, 0, true)
 	return found
+}
+
+// yamlMatch says whether key names path from level on, and gives the level
+// after it. A dotted key can name several levels at once, or go past the end.
+func yamlMatch(key string, path []string, level int, dotted bool) (int, bool) {
+	if !dotted {
+		return level + 1, key == path[level]
+	}
+	parts := strings.Split(key, ".")
+	for i, part := range parts {
+		if level+i == len(path) {
+			break
+		}
+		if part != path[level+i] {
+			return 0, false
+		}
+	}
+	return level + len(parts), true
 }
 
 // yamlLast gives the value SnakeYAML takes for a nested key: the last copy in
@@ -197,7 +227,7 @@ func yamlScan(name string, text []byte, keysFor func(root *yaml.Node) []yamlKey)
 	for _, k := range keysFor(root) {
 		key := strings.Join(k.path, ".")
 		var bad *yaml.Node
-		for _, c := range yamlCopies(root, k.path) {
+		for _, c := range yamlCopies(root, k.path, k.dotted) {
 			if c.value.Kind == yaml.ScalarNode && k.ok(c.value.Value) {
 				continue
 			}

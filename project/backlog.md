@@ -22,6 +22,91 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- repair and setup can rewrite plugins.shcl in canonical form when adding sources
+	- ID: 2026112214545321
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-145437
+	- Opened by:
+	- Related IDs: 2026112110300260
+	- Incorrect behavior [Bug]: plugins.SetSources ignores SaveFileKeepLines' kept result, like update --image did. In a plugins.shcl where shcl merges a repeated key, adding Geyser's or Floodgate's source rewrites the whole file in shcl's own form, though its comment says the other lines stay byte for byte.
+	- Expected behavior [Bug]: SetSources checks ToTextKeepLines first, as pinImage now does, and refuses or says the file would be rewritten. repair reports it as FAILED, and setup's writeSources fails setup, so pick which.
+	- Estimated effort: Low
+	- Origin: Found while sweeping for 2026112110300260. Plausible, read only.
+	- Decisions: Leave plugins.shcl as it was and print a warning that names the source line to add by hand. Sources are optional and only feed update --plugins, so neither setup nor repair fails over it. repair reports it as a warning, through repair.Warning, not FAILED.
+		- repair prints a plain warning line rather than going through repair.Warning, since repairPlugins isn't a repair.Run check, and Warning reports FIXED, which would be wrong when nothing was written. repair still exits 0 for it.
+	- Closed reason: Done
+	- Actual cause [Bug]: SetSources ignored whether shcl could keep the file's lines. shcl's keep-lines save falls back to its own form after a merge, by design.
+	- Actual fix [Bug]: SetSources asks ToTextKeepLines before saving. When an existing file's lines can't be kept, it leaves the file as it was and returns plugins.NotKept, which names each source line to add by hand. setup and repair print that as a warning line and go on. design.md's Plugin jars says so.
+	- Test case: 1a4z974 (SetSourcesKeepsLines), 1a4z975 (repair), 1a4z976 (setup's writeSources)
+	- Verified: 1a4z974, 1a4z975 and 1a4z976 fail with the check taken out (file rewritten) and pass with it. 1a4j2j4, 1a4j1s4 and 1a3jgzw still pass, and so does the whole quick gate.
+	- Swept: SetSources' 2 callers, setup's writeSources (adopt, Bedrock download and sources steps) and main's repairPlugins. pinImage already checks. No other SaveFileKeepLines caller in source.
+	- Branch: nov22-2026112214545321
+	- Commit: 3659c8e
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261122-150047
+
+- setup's copy to /usr/local/bin leaves no binary if it stops between the move and the install
+	- ID: 2026112214220945
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-142209
+	- Opened by:
+	- Related IDs: 2026112110300130
+	- Incorrect behavior [Bug]: setup moves a different build out of /usr/local/bin with oldbuild.Retire, then runs sudo install for its own. An interrupt or a failed install between the two leaves no tt-minecraftd there.
+	- Expected behavior [Bug]: Keep a copy of the old build (oldbuild.Keep) and put the new one in place in one step, as install.bash now does.
+	- Estimated effort: Low
+	- Origin: f741e0d (2026111911125756), seen while fixing 2026112110300130. Plausible, read only.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-22: 1a3jzmm, 1a3f8wm and 1a4z5d8 fail on the old code, which ran the install straight onto /usr/local/bin after the move.
+	- Actual cause [Bug]: setup's copy moved the other build out with Retire and then ran install onto the path, so the path was empty between the two.
+	- Actual fix [Bug]: setup's copy keeps a copy of the other build with Keep, installs its own as .tt-minecraftd.new beside it, and renames that into place with mv -f -T, as install.bash does. A failed rename removes the staged file. The plan and output say "Keep a copy" and "Kept a copy". design.md's setup and Boot say so.
+	- Test case: 1a3jzmm, 1a3f8wm, 1a3jxs8, 1a4z5d8
+	- Swept: the 3 callers of Retire and Keep: retire-build (Keep since 11da1a9), setup's copy (now Keep), and repair check 15, which still moves, since there the build is in the way and nothing replaces it.
+	- Verified: 1a3jzmm, 1a3f8wm and 1a4z5d8 fail on the old code and pass with the fix. The quick gate's format, lint and tests pass for the touched areas, and CodeQL passes.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261122-143400
+	- Progress log:
+		- 2026-11-22: asserts updated for the change. 1a3f8wm, 1a3jxs8, 1a3jzmm and 1a4z5d8 expected install onto LocalBin, and now expect install to the staged name and then mv -f -T onto LocalBin. 1a3jzmm's plan line went from "Move the other build in ... to ..." to "Keep a copy of the other build in ... as ...", and it checks the old build is still in place rather than gone.
+	- Decisions:
+		- The staged name is the one install.bash uses, `.tt-minecraftd.new` beside the binary, so the rename stays on one filesystem.
+		- repair check 15 still moves the build, since there it's in the way of the package's and nothing takes its place.
+	- Commit: ce12629
+
+- Paper and Geyser downloads follow a redirect from https to plain http
+	- ID: 2026112213470980
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-134709
+	- Opened by:
+	- Related IDs: 2026112110300169
+	- Incorrect behavior [Bug]: `download.Client` uses Go's default redirect rule, which follows https to http. Paper's and Geyser's API answers and jars come through it, and the hash that checks a jar comes over the same channel.
+	- Expected behavior [Bug]: A redirect away from https fails the download, as install.bash's do and as the agent's fetch does.
+	- Origin: download.Client, found while fixing 2026112110300169. Not seen before. Plausible, read only.
+	- Sweep: every `download.Client` with a nil or plain HTTP client: paper, geyser, selfupdate, and update's Fetch outside agent.HoldTo.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-22: 1a4z47r, a TLS server answering 302 to a plain http one. The download followed it on the old code.
+	- Actual cause [Bug]: download.Client left the redirect rule to Go's default, which only counts hops.
+	- Actual fix [Bug]: Every download.Client request runs on a copy of its client that refuses a hop from https to anything else, after the client's own rule. A plain http server redirecting to plain http, as the tests' fake APIs do, still works.
+	- Decisions: 2026-11-22: The client's own rule runs first, so the agent's hold keeps its own reason ("isn't https"), which 1a3k0x8 checks.
+	- Test case: 1a4z47r (https to http fails, with and without the client's own rule; https to https and http to http still follow)
+	- Swept: paper, geyser and selfupdate build a download.Client, and update's Fetch is one, so all reach the rule through Client.Get, which Stage, Into and JSON use. agent.API never follows a redirect, and agent's fetch uses PublicClient, which refuses a hop away from https already.
+	- Branch: nov22-2026112213470980
+	- Commit: 94e467e
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (both https to http cases followed) and passes after.
+	- Closed: 20261122-141218
+	- Verified: 1a4z47r fails on the old download.go and passes now. The quick gate passes, CodeQL included.
+
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
 	- Type: Task
@@ -76,7 +161,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Container start mounts any host path that a plugin jar link points to
 	- ID: 2026112110300013
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261121-103000
@@ -88,11 +173,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-21: Code review 20261121 item 1. Detail in detail_backlog.md.
 	- Origin: `LockedJars` from 9058841, plugin pinning. Before 2b322c0 (2026111914293176) a new jar was refused until approved, so a planted link was never mounted. A regression of that removal. Not seen before. Confirmed.
 	- Sweep: every `LockedJars` caller, native `lockJars`, the Geyser extensions folder read as root, `update.treeJars` hashing through `plugins.Sum`, and `Unsourced` reading `plugin.yml` as root.
+	- Closed reason: Done
+	- Actual cause [Bug]: `LockedJars` took any `*.jar` entry after links, with no check of what it led to, so start mounted it and native start would chown it. `update` hashed it and `setup` and `repair` read it, all as root.
+	- Actual fix [Bug]: New `plugins.Within` takes a jar only when its real path is a regular file in `serverDir` or a tree in `ownerTrees`. `LockedJars` refuses any other, so both modes stop the start before anything runs. `update` skips such a jar and says why, and `Unsourced` skips it. design.md's Plugin jars says so.
+	- Test case: 1a4ytyw, 1a4ytyx, 1a4ytyy
+	- Verified: 1a4ytyw, 1a4ytyx and 1a4ytyy fail with `Within` taking any path, and with update's check taken out, and pass with the fix. 1a4ytyw covers links to a host file, a host folder, a linked extensions folder and a pipe, and a jar in a second tree still mounted. The quick gate passes.
+	- Swept: `LockedJars` callers: container `runArgs`, native `Start` (and so `lockJars`), repair's skip map. `plugins.Jars` callers: `update.treeJars` (now checked), `Unsourced` through `repair.GeyserSources` for setup and repair (now checked), status (lists names only, without sudo). The extensions folder: a link in its place is listed, and its jars are refused by `Within`.
+	- Branch: nov22-2026112110300013
+	- Commit: 371d384
+	- Acceptance signoff: Self-closed: reproduced, and the tests fail before the fix and pass after.
+	- Closed: 20261122-123613
+	- Decisions:
+		- A jar may lead into any tree in `ownerTrees`, not only `serverDir`, per the item's wording. Such a jar is already mounted with its tree, so the read-only mount over it changes nothing else. `paper.jar` still has to stay in `serverDir`.
+		- The kind is checked with `Lstat` on the resolved path, which opens nothing. A link to a folder or a pipe reports "not a regular file", one to a host file names where it leads.
+		- `update` and `Unsourced` skip such a jar rather than fail, so one planted link doesn't stop repair or setup. On the old code a link to a folder made repair's plugin sources step fail.
+		- Left alone: native `lockJars` still runs `chown` and `chmod` on the path rather than through a linksafe handle. The paths are now real paths of regular files in the trees, native mode is off, and swapping one between the check and the chown needs a process of the server account while the server is stopped.
 
 - A dotted key in spigot.yml turns BungeeCord on past the safe settings check
 	- ID: 2026112110300026
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261121-103000
@@ -102,13 +202,28 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a settings test (`settings_unsafe_reads_safe_zz_review_test.go`), where `Check` returns nothing for that line. The Spigot side is from Bukkit's `MemorySection.set` source, not a live start.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 2. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: 4 new 1a3jtbw rows (a dotted key, one after a safe section, one past the setting, one in flow style) fail on the old reader and pass now. 2 rows that should pass, a key beside the setting and dotted keys in paper-global.yml, pass on both. The quick gate passed.
+		- 2026-11-22: Verified on Paper 26.3-258: with `settings: bungeecord: false` and then `settings.bungeecord: true` in spigot.yml, Paper warned about BungeeCord and saved `bungeecord: true` under `settings:`.
 	- Origin: efca0a2, the fix for 2026111715274861 (Code review 20261117 item 4). A sibling that fix missed. Confirmed on the tool's side.
 	- Sweep: every key checked in spigot.yml. paper-global.yml and Geyser's config.yml use Configurate, which doesn't split keys.
+	- Closed reason: Done
+	- Actual cause [Bug]: `yamlCopies` matched one key name per level. Bukkit's YAML reader splits a key on its dots, so a top-level `settings.bungeecord` is a copy of the checked key.
+	- Actual fix [Bug]: In spigot.yml, a key with dots matches as many levels of the path as it has parts, and a fix edits that line in place. One that runs past the path makes the checked key a section, which counts as wrong, as a nested section already did. paper-global.yml and Geyser's file still match whole keys.
+	- Actual effort: Low
+	- Test case: 1a3jtbw (dotted key rows)
+	- Branch: nov22-2026112110300026
+	- Commit: 2128bb1
+	- Acceptance signoff: Self-closed: the new 1a3jtbw rows fail on the old reader and pass now, and Paper itself read the dotted key as on.
+	- Swept: settings.bungeecord is the only key checked in spigot.yml. yamlLast, yamlFind and yamlInsert serve only Geyser's keys. paper-global.yml and Geyser's config.yml are read by Configurate, which doesn't split keys.
+	- Closed: 20261122-125518
+	- Decisions:
+		- A dotted key that runs past the checked key, such as `settings.bungeecord.x`, counts as wrong, since Bukkit makes `bungeecord` a section, and a section already counts as wrong.
+		- Every copy has to be right, as before, so a dotted copy counts even when a later `settings:` section would replace it.
 
 - The safe settings check reads some server.properties lines differently from Java
 	- ID: 2026112110300039
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: High
 	- Opened: 20261121-103000
@@ -118,13 +233,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `white-list=true\nmotd=hi\rwhite-list=false\n` and `white-list=true\n# old \\\nwhite-list=false\n` both pass the check, and JDK 25 reads `false` for both. A differential of 4000 generated files against `Properties.load` found only these 2 cases.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 3. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: the new 1a3eksm part and a new 1a3jp2c seed fail on the old reader and pass now. A differential of 20000 generated files against JDK 25's `Properties.load` found no difference in keys or values, and after white-list and server-ip were set in each, Java read the values set. FuzzProperties ran 90 s and FuzzFix 40 s, both clean. The quick gate passed.
+		- 2026-11-22: The first fuzz run found a regression in this fix: a blank guard line after a lone CR wrote as part of a CRLF. Fixed, and its input is a seed.
+		- 2026-11-22: FuzzProperties (1a3jp2c) expected a line end added to any file that doesn't end in LF. Now a file that ends in a lone CR is kept as it is too, since that CR is its last line end.
 	- Origin: 91ac8da, the first version. Not seen before. Confirmed.
 	- Sweep: `eula.go` uses the same parser. The file still has to write back byte for byte (FuzzProperties).
+	- Closed reason: Done
+	- Actual cause [Bug]: `parseProperties` split lines only on LF, and joined the next line onto any line that ended in an odd number of backslashes, comment lines included.
+	- Actual fix [Bug]: Lines end at LF, CR or CRLF, and each keeps its own line end, so the file still writes back byte for byte. A `#` or `!` starts a comment wherever the logical line is still empty, as Java reads it, and a comment never continues. A blank line put in after a last line ending in a backslash takes that line's own end.
+	- Actual effort: Low
+	- Test case: 1a3eksm (the Java line ends part), 1a3jp2c (2 new seeds)
+	- Branch: nov22-2026112110300026
+	- Commit: a6b45c1
+	- Acceptance signoff: Self-closed: the new 1a3eksm part fails on the old reader and passes now, and the reader matches JDK 25 over 20000 generated files.
+	- Swept: `eula.go` reads eula.txt through the same parser, so it reads it the same way now. Nothing else in the tree parses a properties file. FuzzProperties still checks the write-back byte for byte.
+	- Closed: 20261122-125542
+	- Decisions:
+		- The empty key isn't matched to Java for a last line of only a backslash, which Java reads one way or the other depending on its read buffer. No checked key is empty, and the differential leaves the empty key out.
+		- A malformed `\u` escape still reads here. Paper 26.3-258 refuses to start on such a file (checked 2026-11-22), so it can't run with the defaults.
 
 - The pre-push hook gates the main checkout's tree, not the commit being pushed
 	- ID: 2026112110300052
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -134,13 +265,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: the real hook with stand-in gates. With the checkout on A, a push of a broken B ran the gate on A and exited 0. Repro: `cli_prepush-pushed-commit_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 4. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: 1a4yxpc failed on the old hook in 5 of its 7 cases and passes now. A real push to a local bare repo was refused from a checkout on another commit, and ran the stand-in gate from a linked worktree on the pushed one. The whole quick gate passed.
+		- 2026-11-22: 1a4q4vw's first case, a code commit with a docs edit left in the tree, now expects a refusal: was "merge", exit 0; now nothing, exit 1.
 	- Origin: bb4ab14, the first pipeline. A sibling of 2026112017593230, which fixed only the docs-only diff. Confirmed.
 	- Sweep: both gate calls in the hook.
+	- Closed reason: Done
+	- Actual cause [Bug]: The hook ran both gates on the checkout it lives in, whatever that held, and never compared it with the pushed commit.
+	- Actual fix [Bug]: A push to main is refused unless the worktree it runs from is on the pushed commit with a clean tree. The gates and the docs list come from that worktree, which may be a linked one. A commit a whole merge gate passed on still skips both gates.
+	- Branch: nov22-2026112110300052
+	- Commit: a46e364
+	- Test case: 1a4yxpc TestPrePushPushedCommit
+	- Swept: both gate calls sit behind the one tree check. The marker, the docs list and the diff read the push's worktree too.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261122-130323
+	- Decisions:
+		- Refused rather than running the gate in a throwaway checkout of the commit. The merge gate's container, root host and marker steps have never run from a fresh checkout, and a 14-minute run there would still idle the push.
+		- A clean tree is an empty `git status --porcelain`, untracked files included, the rule cicd.bash uses for the marker.
+		- The passed marker is read in the push's worktree and in the hook's own checkout, since a whole merge gate on a clean tree vouches for the commit wherever it ran.
 
 - A CICD step at the memory cap stops the whole run
 	- ID: 2026112110300065
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -150,13 +297,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a scope with `MemoryMax=60M`. The child exited 137, then the parent shell got SIGTERM and the scope exited 143.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 5.
+		- 2026-11-22: Verified: a real user scope at 60M with `OOMPolicy=continue`, through `fMemScope`, let the shell go on after its child exited 137, and the scope exited 0. Without it the shell got SIGTERM and the scope exited 143. 1a4yyfc fails on the unfixed `mem-cap.bash` and passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
 	- Origin: bb4ab14. Not seen before. Confirmed.
 	- Sweep: the sister projects' copies of mem-cap.bash, which this project can't change.
+	- Actual cause [Bug]: A user scope takes systemd's default OOM policy, which here is `stop`. One process killed at the cap then stops the whole scope, the run's shell included.
+	- Actual fix [Bug]: `fMemScope` starts the scope with `-p OOMPolicy=continue`.
+	- Swept: `systemd-run` is called only in `mem-cap.bash` and in native mode's `runArgs`. Native mode's unit runs the server alone, so stopping it when its process is killed is right there. No copy of `mem-cap.bash` was found in the sister folders this session can read. Other sister projects with a copy need the same line.
+	- Branch: nov22-2026112110300065
+	- Commit: 21c4a70
+	- Test case: 1a4yyfc TestMemScopeOOMPolicy (the scope's systemd-run args, on a stand-in systemd-run)
+	- Closed: 20261122-130944
 
 - install.bash on a box with the package moves its own copy away, or makes setup fail
 	- ID: 2026112110300078
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+		- For the refusal's wording and the README line.
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -165,13 +322,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: With the package there, install.bash stops before its plan and says to upgrade through the package manager.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 6. Detail in detail_backlog.md.
+		- Verified: 1a3jrx0 passes, and its new case fails with the check taken out (code 0, it went on to the release lookup). The quick gate passes, CodeQL included.
+		- 2026-11-22: Closed without a separate signoff, per the standing policy. The refusal names the package manager and the newer .deb or .rpm, and README says the same, which matches design.md's Boot section.
 	- Origin: 9d7cb3e, install script. The clash came with 0c9de06 (2026111715275041) and check 15's move in f741e0d (2026111911125756). Not seen before. Plausible, read only.
 	- Sweep: only install.bash. setup already guards its copy with `boot.Bin`.
+	- Swept: install.bash is the only hand install that skipped the check. setup's copy uses boot.Bin, and dogfood and the root host checks run on boxes without the package.
+	- Decisions:
+		- 2026-11-22: It stops right after the Linux check, before the network, so nothing is fetched for a box it won't install on. Only a file counts, as with boot.Bin, and the help and --version still work.
+		- 2026-11-22: installerVersion goes to 1.2.0, since a box it used to install on is now refused.
+	- Actual cause [Bug]: install.bash never checked for the package's binary, which setup and repair treat as the one to run.
+	- Actual fix [Bug]: install.bash stops before it looks up a release when /usr/bin/tt-minecraftd is a file, as setup's boot.Bin decides, and says to update through the package manager. Its help, README's install script section and design.md's Boot say so.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a3jrx0, "the package's binary stops it before the plan"
+	- Actual effort: Low
+	- Commit: 8248dbf
+	- Closed reason: Done
+	- Closed: 20261122
 
 - A new install that stops partway can't be run again as setup says
 	- ID: 2026112110300091
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -182,11 +353,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 7.
 	- Origin: b21d65f, the first setup. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: A new install's tree looked the same as anyone's server folder with files in it, so the refusal that sends those to `--adopt` caught setup's own tree too.
+	- Actual fix [Bug]: A new tree gets a `.tt-minecraftd-setup` file right after it's made. A later new install goes on in a tree that has it, without `--adopt`, and keeps what's there. Setup takes the file away once the config is written.
+	- Test case: 1a4z2nr
+	- Verified: 1a4z2nr fails on the old code, where the second run is refused, after a failed firewall step and after a failed image pull. It passes with the fix. Taking out the mark's removal fails it too. The quick gate passes.
+	- Swept: `checkTree` is the one refusal of a tree with files in it. An adopted tree keeps needing `--adopt` on a second run, as before. The dry run writes and removes no mark.
+	- Branch: nov22-2026112110300091
+	- Commit: 8bda998
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and it does what design.md's setup already said.
+	- Closed: 20261122-135347
+	- Decisions: A mark in the tree rather than a new message, since design.md already said a setup that stops partway runs again as a new install.
+		- The mark is a plain file in the tree rather than beside the config, so a tree that's removed or replaced takes it along. A link there doesn't count.
+		- A resumed tree doesn't get the Floodgate key step an adopted one gets, since a tree setup made has no key until the server runs.
 
 - Geyser and Floodgate add-ons are taken for Geyser or Floodgate
 	- ID: 2026112110300104
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -196,13 +380,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a geyser test over those names.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 8.
+		- 2026-11-22: Verified: 1a4z3bm fails on the old geyser.go (6 add-on names taken, and Installed counts add-ons) and passes with the fix. The geyser, setup, repair, update, plugins and cli tests pass, and so does the quick gate for geyser, setup and repair.
 	- Origin: 92e72ff and 9f30908. Not seen before. Confirmed.
 	- Against: design.md's rule that the file name and the `plugin.yml` name both start with the project's name.
+	- Closed reason: Done
+	- Actual cause [Bug]: `Project` and `Installed` matched any file name that starts with `geyser` or `floodgate`, and `Project` any claimed plugin name that does too. Add-ons are named that way.
+	- Actual fix [Bug]: A file name counts when it's the project's name and then anything but a letter or digit. `Project` wants the plugin name GeyserMC's own jar claims, `Geyser-Spigot` or `floodgate`, ignoring case. `Installed` drops a jar whose `plugin.yml` names another plugin, and still counts one with no readable `plugin.yml` by its name. `Latest` checks a download's name with the same rule. design.md's setup steps 7 and 8 and Plugin jars say so.
+	- Actual effort: Low
+	- Test case: 1a4z3bm (TestAddonsArentGeyser), with 1a3jgwr
+	- Branch: nov22-2026112110300104
+	- Closed: 20261122-140102
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, per the standing close policy.
+	- Swept: every caller of `Project` (`repair.GeyserSources`, which setup shares) and `Installed` (setup's `bedrockBuilds`, repair's `bedrockCheck`), and `Latest`'s own name check. update tells Geyser by its source, not its name.
+	- Decisions:
+		- The plugin name has to be GeyserMC's own, not only start with the project's name, since add-ons claim names like GeyserExtras. The data folders `plugins/Geyser-Spigot` and `plugins/floodgate` are named after it.
+		- `Installed` still counts a jar with no readable `plugin.yml` by its name, so setup keeps whatever jar a tree has, as before.
+		- An add-on given GeyserMC's source before this fix keeps it in `plugins.shcl`, and update still says to replace it by hand. The operator removes that source line.
+		- design.md's start-with rule, in the Against row, now says GeyserMC's own plugin names, since that rule is what let add-ons in.
+	- Commit: b6f6c15
 
 - Jar names from the server tree reach the terminal raw on the update agent path
 	- ID: 2026112110300117
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261121-103000
@@ -212,13 +412,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: an update test with a jar named `Chunky\x1b]0;owned\x07.jar`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 9.
+		- 2026-11-22: Verified: 1a4z3r4 fails on the old agent.go (raw ESC, BEL and U+202E in the no-answer line) and passes with the fix, with and without --dry-run. The whole quick gate passes.
 	- Origin: cfd6be9. Reachable since 2b322c0 (2026111914293176), since the agent is now asked about every jar. Same class as 2026111715274877. Confirmed.
 	- Sweep: the other raw prints of the jar name in `update/agent.go`.
+	- Closed reason: Done
+	- Actual cause [Bug]: The agent path in `update/agent.go` printed tree jar names as read. The agent's own text is cleaned in `agent.Check`, so a jar it names with escape codes never matches the raw name, and that jar always gets the "no answer" line, which printed it raw.
+	- Actual fix [Bug]: Every jar name the agent path prints goes through `server.Clean`: the refused, nothing-newer and no-answer lines, the plan, the dry run line, the failed line and its error, the question, and the kept and downloaded lines. update's plan lines are cleaned where they're joined, so a new plan line is covered too.
+	- Actual effort: Low
+	- Test case: 1a4z3r4 (TestAgentJarNameCleaned)
+	- Branch: nov22-2026112110300104
+	- Closed: 20261122-140439
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and the Sweep sites are covered, per the standing close policy.
+	- Swept: every Fprintf, Sprintf and ask in `update/agent.go` that takes `r.Jar`, `s.Jar`, `j.Path` or `s.jar.Name`. Left alone: `newName` and the agent's fields, which `plugins.Claims` and `agent.Check` clean, and Paper build names, which `paper.Name` builds. In `update.go`, the skipped and Geyser lines already clean, and `pluginStep` names equal a checked GeyserMC build path.
+	- Decisions:
+		- Cleaned where printed, not in `plugins.Jars`, as 2026111715274877 decided, so names still match the files.
+		- A jar named with control characters can't be updated through the agent, since its cleaned answer never matches. That's left as is, since it only ever skips.
+	- Commit: 080f8fc
 
 - retire-build reports a failure after it moved the build, and install.bash then leaves no binary
 	- ID: 2026112110300130
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -228,13 +442,30 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: install.bash's reaction, in its test rig. The Go trigger needs root. The root host check couldn't run it, since its image has no `chattr`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 10. Detail in detail_backlog.md.
+		- Verified: 1a4z53w, 1a3jzqr, 1a4z5a4 and 1a4z5d8 fail with the rotation's error returned as the error, and pass now. 1a3jrx0 passes with the rig's retire-build copying. The quick gate passes, CodeQL included.
+		- 2026-11-22: 1a3jzqr expected `Moved <bin> to <kept>.` and now expects `Kept a copy of <bin> as <kept>.`, with the build left in place. Its other checks are unchanged. The install rig's retire-build copies rather than moves.
+		- 2026-11-22: Root host check 1a3jztw failed after the change, since it expected retire-build to move the build. fOldBuild now checks the build is left in place and the "Kept a copy of" line, and keeps its folder owner, mode and 2-copy checks. shellcheck and the cli quick gate pass; the root host run is the round's.
 	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed for install.bash, Plausible for the trigger.
 	- Sweep: the 3 callers of `Retire`.
+	- Closed reason: Done
+	- Actual cause [Bug]: Retire gave the rotation's error as its own, after the move had already worked. install.bash's swap was 2 steps: retire-build moved the old build out, then a rename put the new one in.
+	- Actual fix [Bug]: Retire and the new Keep give a rotation that fails after the build is kept as a separate warning. retire-build prints it and exits 0, setup prints it and goes on, and repair reports FIXED with the warning, through a new repair.Warning. retire-build now uses Keep, which copies and leaves the old build in place, so install.bash's rename of the new build is the only change to the path. design.md's Boot says both.
+	- Test case: 1a4z53w (Retire and Keep with a failed rotation, and Keep leaving the build in place), 1a3jzqr (retire-build), 1a4z5a4 (repair check 15), 1a4z5d8 (setup's copy), 1a3jrx0 (install.bash)
+	- Swept: the 3 callers of Retire: retire-build (now Keep), setup's copy and repair check 15. setup's copy is still a move and then an install, so an interrupt there can leave no binary, filed as 2026112214220945.
+	- Branch: nov22-2026112213470980
+	- Commit: 11da1a9
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail with the rotation's error given back as an error, as before, and pass now.
+	- Closed: 20261122-142151
+	- Decisions:
+		- 2026-11-22: retire-build copies rather than moves, per the detail note's option. install.bash needs no change for it, and works the same with a build that still moves.
+		- 2026-11-22: The rotation failure is faked through oldbuild.FailRotate, since a real one needs chattr as root, which the root host image doesn't have.
+		- 2026-11-22: install.bash's message for a failed retire-build still says "couldn't move the old build out of the way", which 2026112110300429 quotes.
 
 - Retiring a build with an old mtime can prune it at once
 	- ID: 2026112110300143
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -244,12 +475,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `oldbuild_retire-prunes-itself_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 11.
+		- Verified: 1a4z4aw, from the review's repro test, fails on the old oldbuild.go and passes now. The quick gate passes, CodeQL included.
 	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: Retire ran the plain rotation, which ranks every build by the time in its name and knew nothing of the one just moved.
+	- Actual fix [Bug]: Retire rotates with the name it just used held, so the build it moved always stays. design.md's Boot says so.
+	- Test case: 1a4z4aw (a build with an old mtime survives its own Retire, and an older build in its hour is still pruned)
+	- Swept: Retire is the only caller of the rotation outside tests. repair check 15, setup's copy and retire-build all go through Retire.
+	- Branch: nov22-2026112213470980
+	- Commit: 8a1ce19
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (the kept build was gone) and passes after.
+	- Closed: 20261122-141441
 
 - install.bash changes the mode of an existing /usr/local/bin
 	- ID: 2026112110300156
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -259,12 +501,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: in the installer rig, a 0775 folder came out 0755.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 12.
+		- Verified: 1a3jrx0 passes, and its new case fails with the check taken out. The quick gate passes, CodeQL included.
 	- Origin: 9d7cb3e. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `install -d` sets the mode of a folder that's already there, not only of one it makes.
+	- Actual fix [Bug]: install.bash runs it only when /usr/local/bin is missing.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a3jrx0, "an existing folder keeps its mode, and a missing one is made"
+	- Swept: the only other `install -d` is setup's makeTree, which runs only for a new server tree. oldbuild makes its folder with os.MkdirAll, which leaves an existing one alone.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (a 2775 folder came out 2755) and passes after.
+	- Closed: 20261122-134329
+	- Commit: f8bd966
 
 - install.bash with wget follows an https redirect to plain http
 	- ID: 2026112110300169
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -274,12 +527,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a local TLS server answering 302 to a plain http one. wget printed the body, curl refused.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 13.
+		- Verified: 1a4z1d4 passes with curl 8 and GNU Wget 1.25 here, and with Wget 1.21.3 in the quick gate's image, which has no curl, so that arm skips there. It fails with the header check taken out. 1a3jrx0 passes under Bash 3.2 with busybox tools. The quick gate passes, CodeQL included.
 	- Origin: 3b7576c, the second code tidy. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: wget's `--https-only` applies only to links in a recursive run, so a plain download follows any redirect.
+	- Actual fix [Bug]: With wget, install.bash reads the response headers (`-S`) after the download, and a Location that isn't https fails it, with a note saying why. Callers already stop on a failed download, so nothing from it is used.
+	- Decisions:
+		- 2026-11-22: wget refuses rather than the claim being dropped, since the sums come over the same channel as the build. wget has no option to refuse the hop, so its request to the http address still goes out, and what comes back is thrown away.
+		- 2026-11-22: curl's refusal stays silent, as its other failures are.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a4z1d4 (fFetch with the host's own curl and wget, against a local TLS server that redirects to plain http, to https, and to a relative path)
+	- Swept: install.bash's fFetch is the only wget download, and the only curl one in a script a user runs. install-dev.bash names them only in its usage. The Go download client follows any redirect, filed as 2026112213470980.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (wget exited 0 with the plain http body) and passes after.
+	- Closed: 20261122-134645
+	- Commit: 1aa8a36
 
 - One unreadable jar stops setup --adopt and fails repair's plugin sources step
 	- ID: 2026112110300182
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -289,12 +557,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a dangling `plugins/Gone.jar` in a plugins test and in the setup rig.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 14.
+		- 2026-11-22: Since 371d384 (2026112110300013), `Within` already skips a dangling link and a folder named `*.jar`. A jar of another plugin that can't be read, such as one with mode 0000 under repair --check, still failed: 1a4z668 fails on the old code with "permission denied" and passes now.
 	- Origin: 2b322c0, now in 3b7576c. Not seen before. Confirmed.
+	- Actual cause [Bug]: `Unsourced` opened every jar in plugins/ to read its `plugin.yml`, and gave the first read error as its own.
+	- Actual fix [Bug]: `GeyserSources` has `Unsourced` read only jars with a Geyser or Floodgate file name, through the new `geyser.Named`, so another plugin's jar is never opened. A jar that's gone by the time it's read is skipped. design.md's Plugin jars says so.
+	- Decisions:
+		- Of the 2 fixes the item gives, the name filter, since it opens fewer files as root and needs no new warning path. A Geyser or Floodgate jar that can't be read still fails the step, since its source can't be judged and update --plugins then never updates it.
+	- Test case: 1a4z668 (dangling link, folder, unreadable jar beside a Geyser jar), 1a4ytyx
+	- Swept: `Unsourced` callers: `repair.GeyserSources`, which setup and repair's plugin sources step share, and the plugins tests. Other readers of every jar: `update.treeJars` already skips a jar it can't hash and says why, and `geyser.Installed` counts a jar whose `plugin.yml` can't be read by its name.
+	- Verified: 1a4z668 fails on the old code and passes with the fix. The folder and link cases passed on both. The unreadable case runs only as non-root, and ran that way.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-143900
+	- Commit: 23ae0ae
 
 - repair's ownership fix fails while Paper renames files, and skips the mode fix
 	- ID: 2026112110300195
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -304,12 +586,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: with a rename loop, coreutils 9.7 `chown -R` failed 46 of 60 runs. A root host run of repair under the same loop said the fix failed.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 15.
+		- 2026-11-22: 1a4z6cg runs the real `chown -R` and `chmod -R` on the test's own account while a loop renames files. On the old code it failed on its first runs with "No such file or directory", and it passes 100 runs now.
 	- Origin: 1099186. The other half of 2026112017592200, whose sweep covered the walks but not these commands. Confirmed.
+	- Actual cause [Bug]: coreutils exits 1 when a file it listed is gone before it gets to it, and `handOver` took that exit as the fix failing and returned before `chmod -R`.
+	- Actual fix [Bug]: `handOver` reads each command's messages in the C locale, and a run whose only errors are "No such file or directory" counts as done. `chmod -R` runs even when `chown -R` fails, and every tree is tried, with the errors joined. `host.Cmd` gets `Env`, and `ErrCopy` now gets stderr for every command, not only a Tty one. design.md's Tree ownership says so.
+	- Decisions:
+		- The messages are read rather than the tree walked again in Go, since the commands run through sudo and the caller may not be able to read the tree.
+		- A message in another language, as when sudo drops `LC_ALL`, counts as a failure, as before.
+		- A real failure's error keeps the runner's error and adds up to 3 of the other lines.
+	- Test case: 1a4z6cg
+	- Swept: `chown -R` and `chmod -R` in the source: only `handOver`, which `ToServer` and `ToOperator` share for start in both modes, stop, setup and repair's ownership check. Other recursive walks were covered by 2026112017592200.
+	- Verified: 1a4z6cg fails on the old code and passes 3 runs in a row with the fix. The launch, repair and tree tests pass. Only the non-root path ran, with no sudo between, so `LC_ALL` going through sudo wasn't run.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-144000
+	- Commit: 264d080
 
 - status, watch and cmd as root print any file that latest.log links to
 	- ID: 2026112110300208
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -319,13 +616,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a root host run, where `sudo tt-minecraftd status` printed a 0600 file in `/root` through the link.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 16.
+		- 20261122: Verified: 1a4z7n4 and 1a4z7n5 fail with OpenLog following links as before, and pass with the fix. The whole quick gate passed.
+		- Swept: settings.ReadPlayers already reads through linksafe. The log follower and native start's two reads now use OpenLog. Container start reads the log through the runtime's logs, not the file. The other OpenRegular callers read jars, where paper.jar links to its build by design. Plugin jar links are 2026112110300013.
 	- Origin: ba0f959 and 80c5e6f. Same class as 2026111709090967. Confirmed.
 	- Sweep: `settings.ReadPlayers` for the whitelist and ops, the log follower in `launch/session.go`, and native `log()`.
+	- Closed reason: Done
+	- Actual cause [Bug]: status, the cmd answer wait and native start read latest.log through server.OpenRegular, which follows links, so a link in place of the log or the logs folder showed whatever it named.
+	- Actual fix [Bug]: new server.OpenLog opens serverDir, then logs and latest.log with no link followed, and refuses anything but a regular file. status, the log follower and native start's log reads use it. design.md's status section says so.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: 1bdbbfa
+	- Test case: 1a4z7n4, 1a4z7n5
+	- Acceptance signoff: Self-closed: 1a4z7n4 and 1a4z7n5 fail on the unfixed code and pass now.
+	- Closed: 20261122-144844
+	- Decisions:
+		- 20261122: no link is followed below serverDir in any mode, not only as root, so status shows the same with and without sudo. serverDir itself may still be a link, as config allows.
+		- 20261122: the regression tests run as a plain account, since the check doesn't depend on root. The root host repro zzrv001 isn't in checks.bash.
 
 - start and stop waits skip a last look at the deadline
 	- ID: 2026112110300221
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -335,13 +646,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: launch rig tests in `launch_jarlinks-waits_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 17.
+		- 20261122: Verified: 1a4z7n6 fails on the unfixed code (start says it didn't load, stop sends SIGTERM) and passes with the fix. 1a4q5y8 still passes. The whole quick gate passed.
+		- Swept: both waits are in Kit and shared by container and native modes. The countdown and cmd's answer wait don't end at a deadline with an error or a kill.
+		- 20261122: 1a3ej4g's slow foreground case feeds one more `active` unit state, 7 in place of 6, for the extra look. Its asserts are as before.
 	- Origin: 3a04d86. 2026112017592582 (nov20b) rewrote the loop and kept the gap. Confirmed.
 	- Sweep: `waitLoaded` and `waitStopped`, both modes.
+	- Decisions:
+		- 20261122: with a timeout of 0 each wait still looks once.
+	- Closed reason: Done
+	- Actual cause [Bug]: waitLoaded and waitStopped tested the deadline before each look, so the look after the last pause never ran.
+	- Actual fix [Bug]: each wait looks first and tests the deadline after, so the last pause, cut to end at the deadline, is followed by one more look of the log and the process.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: f691689
+	- Test case: 1a4z7n6
+	- Acceptance signoff: Self-closed: 1a4z7n6 fails on the unfixed code and passes now.
+	- Closed: 20261122-144844
 
 - Ctrl-C during a watch reading draws a screen of errors
 	- ID: 2026112110300234
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -351,13 +676,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `cmd_watch-ctrlc_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 18.
+		- 20261122: Verified: 1a4z7n7 fails on the unfixed code (watch and status both draw the broken reading) and passes with the fix. 1a3eka0 still passes. The whole quick gate passed.
+		- Swept: status and watch are the only callers of Probe.Take.
 	- Origin: ba0f959. Not seen before. Confirmed.
 	- Sweep: a one-shot `status`.
+	- Decisions:
+		- 20261122: status cut short exits 1, as design.md's Commands has Ctrl-C end a wait with exit 1. watch keeps exit 0, since Ctrl-C is how it ends.
+	- Closed reason: Done
+	- Actual cause [Bug]: watch drew the reading even when Ctrl-C had ended its context partway, so every look that was cut short showed as an error.
+	- Actual fix [Bug]: watch checks the context after each reading and exits 0 without drawing one Ctrl-C cut short. A one-shot status cut short prints nothing and exits 1, saying it was interrupted. design.md's status and watch section says so.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: d39d187
+	- Test case: 1a4z7n7
+	- Acceptance signoff: Self-closed: 1a4z7n7 fails on the unfixed code and passes now.
+	- Closed: 20261122-144844
 
 - update's library removal checks for a running server long before it removes
 	- ID: 2026112110300247
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -367,11 +705,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 19.
 	- Origin: 2b322c0 (2026111914293176). Not seen before. Plausible, read only.
+	- Closed reason: Done
+	- Actual cause [Bug]: update asked Running once, in lookup, before the plan and the prompt, and clearLibraries removed the jars later with no second look.
+	- Actual fix [Bug]: The look is now Update.mayRun, called in lookup so the plan leaves out a removal it would skip, and again in clearLibraries right before the rm. A server up by then gets the same SKIPPED line, and the update goes on. design.md's update says so.
+	- Test case: 1a4j2rc (new case: Running says no at lookup and yes at the removal)
+	- Swept: clearLibraries is update's only removal Running guards. paper.Prune keeps the build the server runs, so it needs no look. Running has one setter, main.go.
+	- Verified: 1a4j2rc fails with the second look taken out and passes with it. The whole quick gate passes.
+	- Branch: nov22-2026112110300247
+	- Commit: f00c6e4
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-145437
 
 - update --image can rewrite the whole config in canonical form
 	- ID: 2026112110300260
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -382,11 +731,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 20. shcl friction: the fallback to canonical form is shcl's documented behavior.
 	- Origin: bf1ab06. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: pinImage ignored the kept result. shcl's keep-lines save falls back to canonical form after a merge, by design.
+	- Actual fix [Bug]: pinImage asks ToTextKeepLines before saving. When the lines can't be kept in a file that already exists, it leaves the file as it was and fails with the image line to set by hand, quoted. A new config is still written. design.md's update says so.
+	- Test case: 1a4z8mc
+	- Swept: plugins.SetSources has the same unchecked save, filed as 2026112214545321, since a refusal there changes what setup and repair do. Approve, the old third caller, is gone.
+	- Verified: 1a4z8mc fails with the check taken out (keys lower-cased, a line dropped) and passes with it. 1a3fg3w still passes, and so does the whole quick gate.
+	- Decisions: Refuse rather than write and warn, since the canonical form drops lines and comments the operator wrote, and the error gives the one line to set.
+	- Branch: nov22-2026112110300247
+	- Commit: b4ac6cc
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-145437
 
 - Negated root host checks pass when the command they look with can't run
 	- ID: 2026112110300273
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Needs local test suite run?: No
+	- Needs external testing: No
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -396,12 +759,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: with a stand-in sudo, 1a3jqxr and 1a3fh9c printed PASS. Repro: `roothost_negated-checks_repro.bash`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 21.
+		- 2026-11-22: Verified: 1a4z0h0 runs the changed checks from checks.bash with stub sudo, pgrep and systemctl. Its no-container, zfs-list-fails (both checks), no-server-process and nft-fails cases fail on the old checks and pass on the new ones. Its firewall-off table-gone case also fails on the old check, but only because the stub nft lists any table it's asked for. The review's repro now prints FAIL for 1a3jqxr and 1a3fh9c. 1a4q3sg still passes. Quick gate passed.
+		- Verified: 2026-11-22, root-host.bash passed 1a3fh00, 1a3fh68, 1a3fh9c, 1a3jwt0, 1a3fjew and 1a3jgsm, and root-host.bash --zfs passed 1a3jn00 and 1a3jqxr, on round branch nov22. 1a3fj2c skipped, since native mode is off.
 	- Origin: c076344, 684bd24 and 85d60ca. Same class as 2026112017592969, which fixed only `counter` and `before`. Confirmed.
+	- Actual cause [Bug]: These checks pass on a command failing or printing nothing, and a failure of the command they look with reads the same way.
+	- Actual fix [Bug]: Each one first sees its look work. fJarsInContainer and fNativeStart run a `test -f` in the container, or as the server, before the refusals, and fNativeStart needs a process ID from pgrep. A refusal goes through a new `refused`, which fails on podman exec's own exit codes, 125 to 127. fZfsPool and fZfsNone go through a new `none`, which fails when zfs list does. fFirewallOff reads `nft list tables` and fails when nft does.
+	- Decisions:
+		- A negated grep on a file goes through a new `lacks`, which fails when grep can't read the file, since grep exits 2 then. That covers the same gap in fNewInstall, fPodmanStart, fStopCancel and fAgentHandOff.
+		- fStopCancel reads the log through sudo, as `logged` does, since the server still runs then and a log op can't read would now fail the check.
+	- Swept: every `!` in checks.bash, and every `[[ -z "$(...)" ]]`. Left as they are: the `systemctl is-active` and `is-enabled` ones in fNativeStop, fBoot and fFirewallOff, since the checks before them need a working systemctl, `! getent group docker`, `! compgen`, fSameLogin's start, which has a `has` after it, and fFirewallOut's curl, whose counter must go up after it. `hist` and `newest` are used only by the commented-out ZFS checks.
+	- Branch: nov22-2026112110300286
+	- Commit: 7279d7c, a70748f
+	- Test case: 1a4z0h0 TestRootHostLooks
+	- Actual effort: Low
+	- Closed reason: Done
+	- Closed: 20261122
 
 - test-id.bash --check misses some call forms and counts a commented-out ID
 	- ID: 2026112110300286
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -411,12 +789,27 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `--root` on a stand-in tree.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 22.
+		- 2026-11-22: Verified: 1a4z04g fails 10 of its 13 cases on the old test-id.bash and passes all on the new one. The 3 that pass on both are a wrapper whose forward sits in a `{ }` group and 2 controls: a call in a comment or string, and a live line with a trailing comment. 1a3jz1w and 1a4hwpm still pass, also with mawk as awk. `--list` on the real tree is the same as before. Quick gate passed.
 	- Origin: 259938d and c03326e. Not seen before. Confirmed.
+	- Actual cause [Bug]: The root host reader matched only a name at the start of a line, an ID of bare lowercase letters and digits, and a wrapper written `name()`, and skipped any line it couldn't read. The Go reader matched `defer testid.Line` anywhere on a line, a `//` one included.
+	- Actual fix [Bug]: The root host reader finds `check` and its wrappers in command position anywhere on a line, outside comments and quoted strings, and takes the first word after as the ID as written, so the form check refuses one it can't read. It finds wrappers in any function form, and wrappers of wrappers. The Go reader counts only a line that starts with `defer testid.Line`, outside a `/* */` block.
+	- Decisions:
+		- A quoted ID is refused rather than read, so there is one way to write it, as on the Go side.
+		- A wrapper of a wrapper is followed now, which reverses that call on 2026111715275346, since "any call it can't parse fails" covers it.
+		- The commented-out Go IDs, such as 1a3enbm, no longer count toward a repeat or `--new`. A new ID comes from the clock, so it can't meet an old one.
+	- Swept: test-id.bash is the only reader of test IDs in source, and cicd.bash calls it for `--check` and `--list`. The 8 commented-out Go tests have their `func` line commented out too, so none shows as having no ID.
+	- Branch: nov22-2026112110300286
+	- Commit: 8b29816
+	- Test case: 1a4z04g TestTestIDCallForms
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Actual effort: Low
+	- Closed: 20261122-132700
 
 - The startup lint check reports CLEAN for a failed or aborted run
 	- ID: 2026112110300299
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -426,12 +819,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: a stand-in log.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 23.
+		- 2026-11-22: Verified: 1a4yynm fails on the unfixed `lint-report.bash` (a died, an aborted, and a test-failed log each read as CLEAN with exit 0, and an unfinished one was marked seen) and passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
 	- Origin: before 36903d7; 463c99d touched the line. Not seen before. Confirmed.
+	- Actual cause [Bug]: The report looked only for warning lines, and never at how the run ended. A failure line matches none of the warning forms.
+	- Actual fix [Bug]: `lint-report.bash` reports a log with `[ FAILED:`, `[ CICD ABORTED` or a step's FAIL line as FAILED, with those lines and any `--- FAIL:` test lines, and exits 1. A log with no closing `CI/CD: done.` line is UNFINISHED, and `--check` leaves it unmarked. `cicd.bash --help` says so.
+	- Decisions:
+		- `--- FAIL:` lines are shown with a failure but don't count as one alone, since a passing run's output could quote one.
+		- An unfinished log isn't marked seen, so a look taken while a run is going still reports how it ended. Its exit stays 0, since it may still pass.
+	- Swept: `lint-report.bash` is the only reader of the run logs (`grep -rn lint-report`). `cicd.bash --lint-check` execs it with `--check`. All 18 run logs on this box end with the closing line, and none has a `--- FAIL:` line.
+	- Branch: nov22-2026112110300065
+	- Commit: ef0faaa
+	- Test case: 1a4yynm TestLintReportRunResult (clean, warning, died, aborted, test-failed and unfinished stand-in logs)
+	- Closed: 20261122-131035
 
 - A code file renamed to a docs path reads as a docs-only push
 	- ID: 2026112110300312
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -441,12 +846,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `cicd_prepush-rename_repro.bash`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 24.
+		- 2026-11-22: Verified: 1a4yxwm failed on the old hook, where code moved to notes.md ran the docs gate, and passes now. The whole quick gate passed.
 	- Origin: 532c922. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: git diff finds renames by default and lists only the new name.
+	- Actual fix [Bug]: The docs-only check diffs with `--no-renames`, which lists the old path as deleted and the new one as added.
+	- Branch: nov22-2026112110300052
+	- Commit: 22a75f4
+	- Test case: 1a4yxwm TestPrePushRename
+	- Swept: the hook's diff is the only name-only diff in the repo.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261122-130334
 
 - A release run builds and sums files that aren't committed
 	- ID: 2026112110300325
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -455,12 +871,26 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: A release build refuses a tree with changes under `source`, `go.mod` or `go.sum`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 25.
-	- Origin: cicd.bash release steps. Not seen before. Plausible, read only.
+		- 2026-11-22: Reproduced: 1a4yz24 fails on the unfixed `cicd.bash`, where a release build took an untracked `.go` file, an ignored one, and a changed `go.mod` and `config.bash`. It passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Origin: cicd.bash release steps. Not seen before. Confirmed by 1a4yz24.
+	- Actual cause [Bug]: The build step builds the working tree, and nothing compared it with the tagged commit.
+	- Actual fix [Bug]: On a release, the build step refuses when `git status`, untracked and ignored files included, shows anything under `source`, `go.mod`, `go.sum` or `cicd/config.bash`, and names what differs.
+	- Decisions:
+		- `cicd/config.bash` is checked too, beyond the item's wording, since it holds the build flags `verify-release.bash` reads from the tag.
+		- Ignored files count, since go build takes every `.go` file in a folder whether git sees it or not. A wholly ignored folder is named as the folder.
+		- The check is in the build step rather than at the start of the run, since only the build reads those files, and a dev run never trips it.
+	- Swept: `fIsRelease` is read by the build step and the demo step. The demo records from the build step's binary, so the check in the build step covers both. The second build copies the same tree, so it's covered too.
+	- Branch: nov22-2026112110300065
+	- Commit: 4b80726
+	- Test case: 1a4yz24 TestReleaseRefusesDirtyTree (clean, untracked, ignored, `go.mod`, `config.bash`, a file elsewhere, and a dev build)
+	- Closed: 20261122-131421
 
 - cicd.bash --list prints every test ID whatever the run
 	- ID: 2026112110300338
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -470,12 +900,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: both runs.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 26.
+		- 2026-11-22: Verified: 1a4yzbg fails on the unfixed scripts (the cli area listed tests from other packages and the root host checks) and passes after. 1a3jz1w and 1a4hwpm still pass. Quick gate passed. Counts now: 40 for the cli area, 301 for a whole quick gate, 323 for a merge gate, 0 for a gate with `--no-test`.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
 	- Origin: 3b7576c. Not seen before. Confirmed.
+	- Actual cause [Bug]: The list step called `test-id.bash --list`, which had no way to narrow the list, and passed it nothing about the run.
+	- Actual fix [Bug]: `test-id.bash --list` takes `--in PATH` and `--go-name REGEX`. `cicd.bash --list` passes the areas' folders, a name filter for a run with only the fuzz or soak step, and `cicd/root-host` when either root host step runs.
+	- Decisions:
+		- The list follows the run, rather than the help saying it's every ID, since the help already promised that.
+		- Both root host steps list every root host check. The ZFS checks share `checks.bash` with the main ones, and nothing there marks which is which.
+		- The arm64 and race steps list every Go test, as they run every package.
+	- Swept: `test-id.bash --list` is called only by `cicd.bash --list` and 1a3jz1w, which still passes. The step list it reads is the one the run prints as Steps, after every `--no-<step>` flag.
+	- Branch: nov22-2026112110300065
+	- Commit: 408a7c2
+	- Test case: 1a4yzbg TestCicdListFollowsRun (cli area, merge gate, gate with no tests, fuzz and soak alone, root host checks alone)
+	- Closed: 20261122-131742
 
 - README's uninstall steps leave the minecraftd group and name a key a new config lacks
 	- ID: 2026112110300351
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -486,11 +929,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 27.
 	- Origin: 4afd000 and ae42a4f. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The uninstall steps never removed the group, and named a key that only an update pins.
+	- Actual fix [Bug]: Step 5 adds groupdel with a note, step 4 says to list images and that config.shcl has the name after an update, and the package line names the license file.
+	- Branch: nov22-2026112110300351
+	- Commit: cc97d28
+	- Test case: none, README text only.
+	- Actual effort: Low
+	- Closed: 20261122-150507
+	- Acceptance signoff: Self-closed: mechanical doc fix.
 
 - design.md still describes the removed plugin check in places
 	- ID: 2026112110300364
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -500,11 +952,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 28.
 	- Origin: Left by 2b322c0 and by the 2026111918161429 change. Not seen before. Confirmed by reading.
+	- Closed reason: Done
+	- Actual cause [Bug]: 2b322c0 and the 2026111918161429 change left the plugin check in the Testing section and the folder-handle rule.
+	- Actual fix [Bug]: Testing names the plugin jar list and the Geyser and Floodgate sources, the folder-handle rule names Geyser's plugins folder, and the doubled word is gone.
+	- Branch: nov22-2026112110300351
+	- Commit: 0390da3
+	- Test case: none, design.md text only.
+	- Actual effort: Low
+	- Closed: 20261122-150507
+	- Acceptance signoff: Self-closed: mechanical doc fix.
 
 - Accept a same-bytes build in /usr/local/bin only when root owns it and nobody else can write it
 	- ID: 2026112110300377
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -513,11 +975,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- install.bash and setup's copy count a build as current by SHA-256 alone, a link to one included. Also require a regular file owned by root with no group or other write, since root runs it.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 29. Dogfood's `cp -f` makes such a file where `/usr/local/bin` is writable.
+		- Done: install.bash and setup's copy leave the build in place only when it has the same SHA-256 and is a regular file owned by root with no group or other write (`oldbuild.Current`, install.bash's `fRootOnly`). Otherwise they put the build back as root's. The release's own bytes aren't kept in the old-builds folder, since nothing is lost. design.md's setup and Boot, and README's install section, say so. installerVersion goes to 1.2.1.
+		- Verified: 1a4za6c passes. The 4 new 1a3jrx0 cases fail with install.bash's SHA-256-only check put back, and pass now, under Bash 3.2 with busybox tools too. 1a3jzmm's 3 new cases fail with setup's SHA-256-only check put back, and 2 fail when a same-bytes file is kept. The quick gate passes, CodeQL included.
+		- Not verified: a real root-owned file. The tests have no root, so their own uid stands in for root's (`oldbuild.RootUID`, install.bash's `rootUid`).
+	- Decisions:
+		- 2026-11-22: A file with the release's bytes but the wrong owner, mode or a link is written over with no copy kept, since a copy would only hold the same bytes.
+		- 2026-11-22: Running setup from `/usr/local/bin` itself no longer skips the copy on its own. It goes by the same rule, so a link or an operator-owned file there is replaced too.
+	- Swept: every same-build check on `/usr/local/bin`: setup's `copyTarget`, which also had a link-follow skip, and install.bash's `current`. repair check 15 compares against the package's binary and moves a different build, so it's left as is. `oldbuild.Same` has no other caller.
+	- Test case: 1a4za6c, 1a3jzmm, 1a3jrx0
+	- Branch: nov22-2026112110300377
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: the new cases fail on the old checks and pass now.
+	- Closed: 20261122-151149
 
 - Remove the code that plugin approval left with no caller
 	- ID: 2026112110300390
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -527,11 +1001,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Rename `pinnedDirs` and `ReadApproved`, which keep the approval-era names.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 30. Found by coverage (0%) and a scan for exported names with no outside caller.
+		- 2026-11-22: IsBuild, Info.Size and Info.Mod commented out with the reason. 1a3emz4 (TestDescribe) checked Size and Mod, and now checks only About and SHA256; its date setup is commented out.
+	- Closed reason: Done
+	- Test case: none new, since nothing changes behavior. The build and the plugins, paper, update, setup and cli tests cover the renamed callers.
+	- Verified: go vet and every package's tests pass, and so does the whole quick gate.
+	- Swept: every caller of ReadApproved and pinnedDirs in source, cicd and the docs. Only the commented-out tests and the backlog still name ReadApproved. paper.IsBuild had no caller and no test.
+	- Decisions: ReadApproved is now ReadSources and pinnedDirs is jarDirs. The test names TestReadApprovedList and FuzzReadApproved stay, since closed items name them by test ID and name. The Approved type keeps its name, since the item names only the two.
+	- Branch: nov22-2026112214545321
+	- Commit: 143d5de
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical.
+	- Closed: 20261122-150329
 
 - Refuse a config value that an unquoted # cuts short
 	- ID: 2026112110300403
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -541,11 +1026,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `Set` refuses a value whose read-back differs from what was typed. A comment glued to a value in the file gets a warning.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 31. shcl friction: a `#` with no space before it starts a comment.
+		- 2026-11-22: Set refuses a value a comment would cut, glued or spaced, and names what it would read as. A comment right against a value in config.shcl or plugins.shcl gets a warning with its line, from shcl's own hint. design.md's Configuration model says so.
+		- Verified: 1a4zb2g and 1a4zb2h fail on the old code and pass with the change. The whole quick gate passes.
+	- Closed reason: Done
+	- Branch: nov22-2026112110300403
+	- Test case: 1a4zb2g, 1a4zb2h
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Swept: Config.Set is the one place an option is parsed, and config.LoadFile reads both config.shcl and plugins.shcl, so a glued comment warns in both.
+	- Closed: 20261122-151836
+	- Decisions:
+		- Set compares the line as typed against SetLiteral's form of the value, which drops a comment, so any cut is caught without a scan of shcl's quoting here.
+		- In the file only a glued comment warns, as the item asks. A spaced comment after a value is the usual form and stays quiet.
+	- Commit: 88d47a3
 
 - Cover status readings in a soak
 	- ID: 2026112110300416
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -554,11 +1053,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Neither soak covers `status.Probe.Take`, the one loop that runs with no end, in `watch`. Add it, so a small leak per reading shows.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 32.
+		- 2026-11-22: New soak in the status package: one Probe takes reading after reading of a running server, with the process table, cgroup memory, a real ping to a loopback stand-in, sockets, drop counters, player lists, jars, and a log that grows each round.
+		- Verified: 1a4zbf0 passed at 100 and 1000 rounds a half (heap and goroutines flat). A planted 12 kB kept per `Take` and a planted goroutine per ping each turned it red. The soak step ran it in the container with `--leakcheck --backlog-run-quick status`, and the whole quick gate passed.
+	- Decisions:
+		- The command's soak already took a reading each round, but of a stopped server with an empty stand-in host, so the ping, memory, counters and log parts never ran. The new soak covers the running path rather than widening that one.
+		- It soaks `Take` rather than `watch` itself, since watch's own loop only adds a buffer and a ticker per pass.
+	- Test case: 1a4zbf0 TestSoak in status
+	- Swept: `Take` has 2 callers, `showStatus` and `watch` in main.go. Both go through the same Probe.
+	- Branch: nov22-2026112110300416
+	- Commit: 2e8ebd0
+	- Acceptance signoff: Self-closed: clear intent, and the soak was watched to fail on a planted heap and goroutine leak.
+	- Closed: 20261122-152400
 
 - Publish v1.0.0-beta.1 with or before the install.bash that needs retire-build
 	- ID: 2026112110300429
 	- Type: Task
-	- Status: Queued
+	- Status: Stalled
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -567,6 +1077,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- v1.0.0-alpha.1 has no `retire-build`. If dev's install.bash reaches main before beta.1 is published, replacing a build fails, safely, with "couldn't move the old build out of the way".
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 33.
+		- Held for: the v1.0.0-beta.1 release, which a backlog round doesn't publish.
 
 - Root host checks pass on an empty counter or line number
 	- ID: 2026112017592969

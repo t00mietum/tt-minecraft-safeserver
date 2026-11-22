@@ -28,9 +28,9 @@ func FuzzReadApproved(f *testing.F) {
 		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		jars, warns, err := ReadApproved(path)
+		jars, warns, err := ReadSources(path)
 		if err != nil {
-			t.Fatalf("ReadApproved: %v (warnings %v)", err, warns)
+			t.Fatalf("ReadSources: %v (warnings %v)", err, warns)
 		}
 		for _, j := range jars {
 			if !insideServer(j.Name) || j.SHA256 != "" { // a list's sha256 isn't read since 2026111914334569

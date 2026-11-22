@@ -127,7 +127,7 @@ func TestPaper(t *testing.T) {
 		}
 	}
 	// The new build went on the list until 2026111914334585.
-	if list, _, err := plugins.ReadApproved(r.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
+	if list, _, err := plugins.ReadSources(r.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("list written: %+v %v", list, err)
 	}
 
@@ -304,7 +304,7 @@ func TestPlugins(t *testing.T) {
 			t.Errorf("no %q:\n%s", want, r.out)
 		}
 	}
-	list, _, err := plugins.ReadApproved(r.u.PluginsFile)
+	list, _, err := plugins.ReadSources(r.u.PluginsFile)
 	if err != nil || len(list) != 3 {
 		t.Fatalf("approved %+v %v", list, err)
 	}
@@ -520,10 +520,48 @@ func TestUpdateClearsLibraries(t *testing.T) {
 	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || len(g.installed) != 1 || !strings.Contains(r.out.String(), "SKIPPED plugin libraries: the server may be running") {
 		t.Errorf("running: %v, ran %+v\n%s", err, fake.Ran, r.out)
 	}
+	// A server started while the prompt waits keeps its cache too
+	// (2026112110300247).
+	r, g, fake, _ = setUp("y\n")
+	looks := 0
+	r.u.Running = func(context.Context) (bool, error) { looks++; return looks > 1, nil }
+	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || len(g.installed) != 1 || looks != 2 || !strings.Contains(r.out.String(), "SKIPPED plugin libraries: the server may be running") {
+		t.Errorf("started at the prompt: %v, ran %+v, %d looks\n%s", err, fake.Ran, looks, r.out)
+	}
 	r, _, fake, _ = setUp("y\n")
 	r.u.Parts = Parts{Paper: true}
 	r.p.newest = 249
 	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || strings.Contains(r.out.String(), "librar") {
 		t.Errorf("--paper: %v, ran %+v\n%s", err, fake.Ran, r.out)
+	}
+}
+
+// A plugin jar link that leads out of the trees isn't hashed as root, nor
+// put to the agent, and the skip says why (backlog 2026112110300013).
+func TestTreeJarsOutOfTrees(t *testing.T) {
+	defer testid.Line(t, "1a4ytyy")
+	base := t.TempDir()
+	dir := filepath.Join(base, "server")
+	outside := filepath.Join(base, "home")
+	for _, d := range []string{filepath.Join(dir, "plugins"), outside} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{filepath.Join(dir, "plugins", "a.jar"), filepath.Join(outside, "secret.txt")} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(dir, "plugins", "zz-host.jar")); err != nil {
+		t.Fatal(err)
+	}
+	u := &Update{Cfg: &config.Config{ServerDir: dir, OwnerTrees: []string{dir}}, PluginsFile: filepath.Join(base, "plugins.shcl")}
+	jars, skipped := u.treeJars()
+	if len(jars) != 1 || jars[0].Name != "plugins/a.jar" {
+		t.Errorf("jars %+v", jars)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "zz-host.jar leads to ") {
+		t.Errorf("skipped %q", skipped)
 	}
 }

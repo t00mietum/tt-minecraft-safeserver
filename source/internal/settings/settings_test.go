@@ -150,6 +150,25 @@ func TestParseProperties(t *testing.T) {
 	if _, ok := p.get("#"); ok {
 		t.Error("a comment read as a key")
 	}
+
+	// As Java reads them: a lone CR ends a line, a comment never continues,
+	// even after a lone backslash, and a continued line can go on past a CR or
+	// CRLF and into a hash.
+	text := "motd=hi\rwhite-list=false\r\n# old \\\nenable-rcon=true\n! x\\\r\nonline-mode=off\n\\\n # c \\\nc=3\na=1\\\r  #2\\\r\n  3\rb=\\\r"
+	p = parseProperties([]byte(text))
+	for key, want := range map[string]string{"motd": "hi", "white-list": "false", "enable-rcon": "true", "online-mode": "off", "c": "3", "a": "1#23", "b": ""} {
+		if got, ok := p.get(key); !ok || got != want {
+			t.Errorf("%s = %q, %v; want %q", key, got, ok, want)
+		}
+	}
+	if got := string(p.bytes()); got != text {
+		t.Errorf("not kept line for line: %q", got)
+	}
+	p.set("white-list", "true")
+	p.set("enable-query", "false")
+	if got, want := string(p.bytes()), strings.Replace(text, "white-list=false", "white-list=true", 1)+"\renable-query=false\n"; got != want {
+		t.Errorf("set:\n%q\nwant\n%q", got, want)
+	}
 	if got := escape(" a=b:c#d!e\\f"); got != `\ a\=b\:c\#d\!e\\f` {
 		t.Errorf("escape = %q", got)
 	}
@@ -595,6 +614,13 @@ func TestYAMLEveryCopy(t *testing.T) {
 		{"anchored value", spigot, "settings:\n  bungeecord: &t true\n", "", []string{"settings.bungeecord"}},
 		{"section", spigot, "settings:\n  bungeecord:\n    x: 1\n", "", []string{"settings.bungeecord"}},
 		{"lone CR", spigot, "settings:\r  bungeecord: true\n", "", []string{"settings.bungeecord"}},
+		// Bukkit splits a key on dots, and Configurate doesn't.
+		{"dotted key", spigot, "settings.bungeecord: true\n", "settings.bungeecord: false\n", []string{"settings.bungeecord"}},
+		{"dotted key after a safe section", spigot, "settings:\n  bungeecord: false\n\"settings.bungeecord\": on # x\n", "settings:\n  bungeecord: false\n\"settings.bungeecord\": false # x\n", []string{"settings.bungeecord"}},
+		{"dotted key past the setting", spigot, "settings:\n  x: 1\nsettings.bungeecord.x: false\n", "", []string{"settings.bungeecord"}},
+		{"dotted key beside the setting", spigot, "settings.bungeecordx: true\nsettings:\n  x.bungeecord: true\n", "settings.bungeecordx: true\nsettings:\n  x.bungeecord: true\n", nil},
+		{"dotted key in flow style", spigot, "{settings.bungeecord: true}\n", "", []string{"settings.bungeecord"}},
+		{"dotted key, Configurate", paper, "proxies.velocity.enabled: true\nproxies:\n  velocity.enabled: true\n", "proxies.velocity.enabled: true\nproxies:\n  velocity.enabled: true\n", nil},
 	} {
 		cfg, dir := newServer(t)
 		cfg.Bedrock = false

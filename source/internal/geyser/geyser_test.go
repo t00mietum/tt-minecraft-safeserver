@@ -4,6 +4,7 @@
 package geyser
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -193,5 +194,63 @@ func TestProject(t *testing.T) {
 		if got := Project(c.name, c.claim); got != c.want {
 			t.Errorf("Project(%q, %q) = %q, want %q", c.name, c.claim, got, c.want)
 		}
+	}
+}
+
+// Add-ons named like Geyser or Floodgate aren't GeyserMC's, by their file
+// name or the plugin name they claim, so they keep their own source and
+// don't stand in for the real jar at setup.
+func TestAddonsArentGeyser(t *testing.T) {
+	defer testid.Line(t, "1a4z3bm")
+	for _, c := range []struct{ name, claim, want string }{
+		{"plugins/GeyserExtras.jar", "GeyserExtras 2.0.1", ""},
+		{"plugins/GeyserSkinManager-Spigot.jar", "GeyserSkinManager 1.7", ""},
+		{"plugins/GeyserModelEngine.jar", "GeyserModelEngine 1.0", ""},
+		{"plugins/Geyser-ModelEngine.jar", "GeyserModelEngine 1.0", ""},
+		{"plugins/floodgate-addon.jar", "FloodgateAddon 1", ""},
+		{"plugins/GeyserExtras.jar", "Geyser-Spigot 2.12.1", ""},
+		{"plugins/Geyser-Spigot.jar", "Geyser-Spigot 2.12.1-b1", "geyser"},
+		{"plugins/geyser.jar", "geyser-spigot", "geyser"},
+		{"plugins/floodgate-spigot.jar", "floodgate 2.2.5-SNAPSHOT (b123)", "floodgate"},
+	} {
+		if got := Project(c.name, c.claim); got != c.want {
+			t.Errorf("Project(%q, %q) = %q, want %q", c.name, c.claim, got, c.want)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	put := func(name, yml string) {
+		t.Helper()
+		var b strings.Builder
+		z := zip.NewWriter(&b)
+		if yml != "" {
+			w, err := z.Create("plugin.yml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.Write([]byte(yml)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := z.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "plugins", name), []byte(b.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("GeyserExtras.jar", "name: GeyserExtras\nversion: 2.0.1\n")
+	put("Geyser-ModelEngine.jar", "name: GeyserModelEngine\nversion: 1.0\n")
+	put("floodgate-addon.jar", "name: FloodgateAddon\nversion: 1\n")
+	if has, err := Installed(dir); err != nil || len(has) != 0 {
+		t.Errorf("add-ons only: %v %v", has, err)
+	}
+	put("Geyser-Spigot.jar", "name: Geyser-Spigot\nversion: 2.12.1\n")
+	put("floodgate.jar", "")
+	if has, err := Installed(dir); err != nil || !has["geyser"] || !has["floodgate"] {
+		t.Errorf("with GeyserMC's: %v %v", has, err)
 	}
 }
