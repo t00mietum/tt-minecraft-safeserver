@@ -22,6 +22,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -1004,12 +1005,25 @@ func TestRetireBuild(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	kept := filepath.Join(oldBuilds, "tt-minecraftd.20261119-111257")
-	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || out.String() != "Moved "+bin+" to "+kept+".\n" {
+	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || out.String() != "Kept a copy of "+bin+" as "+kept+".\n" {
 		t.Fatalf("code %d\n%s%s", code, out.String(), errOut.String())
 	}
 	if b, err := os.ReadFile(kept); err != nil || string(b) != "old" {
 		t.Errorf("kept %q %v", b, err)
 	}
+	// Left in place, so install.bash's rename is the only change there.
+	if b, err := os.ReadFile(bin); err != nil || string(b) != "old" {
+		t.Errorf("the build isn't in place: %q %v", b, err)
+	}
+	// A failed prune is a warning, since the build is kept.
+	oldbuild.FailRotate = errors.New("operation not permitted")
+	t.Cleanup(func() { oldbuild.FailRotate = nil })
+	out.Reset()
+	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || !strings.HasPrefix(out.String(), "Kept a copy of "+bin+" as "+kept+".2.") ||
+		!strings.Contains(errOut.String(), "warning: couldn't prune the old builds in "+oldBuilds+": operation not permitted") {
+		t.Errorf("failed prune: code %d\n%s%s", code, out.String(), errOut.String())
+	}
+	oldbuild.FailRotate = nil
 	for _, args := range [][]string{{"retire-build"}, {"retire-build", "tt-minecraftd"}, {"retire-build", "/etc/passwd"}, {"retire-build", bin, bin}} {
 		out.Reset()
 		errOut.Reset()

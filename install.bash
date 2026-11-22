@@ -298,7 +298,7 @@ fMain(){
 		fi
 
 		fEcho "Installing ${destPath}"
-		## Staged beside it, so the new build can move the old one out of the way first, and the swap is one rename.
+		## Staged beside it, so the new build can keep a copy of the old one first, and the swap is one rename.
 		local stage="${destDir}/.${exeName}.new"
 		## Only when missing, since install -d sets the mode of one that's there too, such as Debian's old root:staff 2775.
 		if [[ ! -d "${destDir}" ]]; then fAsRoot install -d -m 0755 "${destDir}" || fDie "couldn't make ${destDir}"; fi
@@ -362,3 +362,5 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 ##		- 2026-11-22: Stops when the .deb or .rpm package is installed, and says to update through the
 ##		  package manager. /usr/local/bin is made only when it's missing, so an existing one keeps its mode.
 ##		  With wget, a redirect away from https fails the download, as it does with curl.
+##		  retire-build keeps a copy of the old build and leaves it in place, so the rename of the new one
+##		  is the only change to /usr/local/bin/tt-minecraftd, and there's always a binary there.

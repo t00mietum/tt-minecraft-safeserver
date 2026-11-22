@@ -22,6 +22,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
@@ -1096,6 +1097,29 @@ func TestCopyKeepsOldBuild(t *testing.T) {
 				t.Errorf("%s: changed to %q", c.name, b)
 			}
 		}
+	}
+}
+
+// A move whose rotation then fails is a warning, and setup goes on to its
+// copy, since the other build was kept.
+func TestCopyRotateFails(t *testing.T) {
+	defer testid.Line(t, "1a4z5d8")
+	r := newRig(t, []string{"podman", "catatonit"}, "")
+	r.s.Yes, r.s.AcceptEULA = true, true
+	if err := os.WriteFile(r.s.Exe, []byte("this build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.s.LocalBin, []byte("old build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldbuild.FailRotate = errors.New("operation not permitted")
+	t.Cleanup(func() { oldbuild.FailRotate = nil })
+	if err := r.s.Do(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	copied := slices.Contains(r.ran(), "sudo install -m 0755 -o root -g root "+r.s.Exe+" "+r.s.LocalBin)
+	if !copied || !strings.Contains(r.out.String(), "warning: couldn't prune the old builds in "+r.s.OldBuilds+": operation not permitted") {
+		t.Errorf("copied %v\n%s", copied, r.out)
 	}
 }
 

@@ -74,7 +74,7 @@ case "$1" in
 	retire-build)
 		echo "retire-build $2" >> "${RIG_LOG}"
 		[[ -z "${RIG_NO_RETIRE:-}" ]] || exit 1
-		install -d "${RIG_OLD}" && mv "$2" "${RIG_OLD}/tt-minecraftd.old" ;;
+		install -d "${RIG_OLD}" && install -m 0755 "$2" "${RIG_OLD}/tt-minecraftd.old" ;;
 esac
 `
 

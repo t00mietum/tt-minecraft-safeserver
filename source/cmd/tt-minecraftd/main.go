@@ -161,7 +161,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == retireCmd {
-		return failed(retireBuild(args[1:], stdout), stderr)
+		return failed(retireBuild(args[1:], stdout, stderr), stderr)
 	}
 	inv, code, done := prepare(args, stdout, stderr)
 	if done {
@@ -379,21 +379,26 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 
 // retireCmd is left out of the help. install.bash runs it through sudo,
 // from the build it's about to install, so the build it replaces is kept
-// the same way setup and repair keep one. See design.md, Boot.
+// the same way setup and repair keep one. It copies rather than moves, so
+// install.bash's rename of the new build is the only change to the path,
+// and something is always there. See design.md, Boot.
 const retireCmd = "retire-build"
 
 // oldBuilds is a var so tests don't reach the real folder.
 var oldBuilds = oldbuild.Dir
 
-func retireBuild(args []string, w io.Writer) error {
+func retireBuild(args []string, w, errW io.Writer) error {
 	if len(args) != 1 || filepath.Base(args[0]) != "tt-minecraftd" || !filepath.IsAbs(args[0]) {
 		return errors.New(retireCmd + " takes the full path of one tt-minecraftd build")
 	}
-	to, err := oldbuild.Retire(args[0], oldBuilds, time.Now())
+	to, warn, err := oldbuild.Keep(args[0], oldBuilds, time.Now())
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Moved %s to %s.\n", args[0], to)
+	fmt.Fprintf(w, "Kept a copy of %s as %s.\n", args[0], to)
+	if warn != nil {
+		fmt.Fprintf(errW, "warning: %s\n", warn)
+	}
 	return nil
 }
 

@@ -22,10 +22,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
+- setup's copy to /usr/local/bin leaves no binary if it stops between the move and the install
+	- ID: 2026112214220945
+	- Type: Bug
+	- Status: Queued
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-142209
+	- Opened by:
+	- Related IDs: 2026112110300130
+	- Incorrect behavior [Bug]: setup moves a different build out of /usr/local/bin with oldbuild.Retire, then runs sudo install for its own. An interrupt or a failed install between the two leaves no tt-minecraftd there.
+	- Expected behavior [Bug]: Keep a copy of the old build (oldbuild.Keep) and put the new one in place in one step, as install.bash now does.
+	- Estimated effort: Low
+	- Origin: f741e0d (2026111911125756), seen while fixing 2026112110300130. Plausible, read only.
+
 - Paper and Geyser downloads follow a redirect from https to plain http
 	- ID: 2026112213470980
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261122-134709
@@ -35,6 +49,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Expected behavior [Bug]: A redirect away from https fails the download, as install.bash's do and as the agent's fetch does.
 	- Origin: download.Client, found while fixing 2026112110300169. Not seen before. Plausible, read only.
 	- Sweep: every `download.Client` with a nil or plain HTTP client: paper, geyser, selfupdate, and update's Fetch outside agent.HoldTo.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-22: 1a4z47r, a TLS server answering 302 to a plain http one. The download followed it on the old code.
+	- Actual cause [Bug]: download.Client left the redirect rule to Go's default, which only counts hops.
+	- Actual fix [Bug]: Every download.Client request runs on a copy of its client that refuses a hop from https to anything else, after the client's own rule. A plain http server redirecting to plain http, as the tests' fake APIs do, still works.
+	- Decisions: 2026-11-22: The client's own rule runs first, so the agent's hold keeps its own reason ("isn't https"), which 1a3k0x8 checks.
+	- Test case: 1a4z47r (https to http fails, with and without the client's own rule; https to https and http to http still follow)
+	- Swept: paper, geyser and selfupdate build a download.Client, and update's Fetch is one, so all reach the rule through Client.Get, which Stage, Into and JSON use. agent.API never follows a redirect, and agent's fetch uses PublicClient, which refuses a hop away from https already.
+	- Branch: nov22-2026112213470980
+	- Commit: 94e467e
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (both https to http cases followed) and passes after.
+	- Closed: 20261122-141218
+	- Verified: 1a4z47r fails on the old download.go and passes now. The quick gate passes, CodeQL included.
 
 - Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
 	- ID: 2026111412275150
@@ -358,7 +385,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - retire-build reports a failure after it moved the build, and install.bash then leaves no binary
 	- ID: 2026112110300130
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -368,13 +395,29 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: install.bash's reaction, in its test rig. The Go trigger needs root. The root host check couldn't run it, since its image has no `chattr`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 10. Detail in detail_backlog.md.
+		- Verified: 1a4z53w, 1a3jzqr, 1a4z5a4 and 1a4z5d8 fail with the rotation's error returned as the error, and pass now. 1a3jrx0 passes with the rig's retire-build copying. The quick gate passes, CodeQL included.
+		- 2026-11-22: 1a3jzqr expected "Moved <bin> to <kept>." and now expects "Kept a copy of <bin> as <kept>.", with the build left in place. Its other checks are unchanged. The install rig's retire-build copies rather than moves.
 	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed for install.bash, Plausible for the trigger.
 	- Sweep: the 3 callers of `Retire`.
+	- Closed reason: Done
+	- Actual cause [Bug]: Retire gave the rotation's error as its own, after the move had already worked. install.bash's swap was 2 steps: retire-build moved the old build out, then a rename put the new one in.
+	- Actual fix [Bug]: Retire and the new Keep give a rotation that fails after the build is kept as a separate warning. retire-build prints it and exits 0, setup prints it and goes on, and repair reports FIXED with the warning, through a new repair.Warning. retire-build now uses Keep, which copies and leaves the old build in place, so install.bash's rename of the new build is the only change to the path. design.md's Boot says both.
+	- Test case: 1a4z53w (Retire and Keep with a failed rotation, and Keep leaving the build in place), 1a3jzqr (retire-build), 1a4z5a4 (repair check 15), 1a4z5d8 (setup's copy), 1a3jrx0 (install.bash)
+	- Swept: the 3 callers of Retire: retire-build (now Keep), setup's copy and repair check 15. setup's copy is still a move and then an install, so an interrupt there can leave no binary, filed as 2026112214220945.
+	- Branch: nov22-2026112213470980
+	- Commit: 11da1a9
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail with the rotation's error given back as an error, as before, and pass now.
+	- Closed: 20261122-142151
+	- Decisions:
+		- 2026-11-22: retire-build copies rather than moves, per the detail note's option. install.bash needs no change for it, and works the same with a build that still moves.
+		- 2026-11-22: The rotation failure is faked through oldbuild.FailRotate, since a real one needs chattr as root, which the root host image doesn't have.
+		- 2026-11-22: install.bash's message for a failed retire-build still says "couldn't move the old build out of the way", which 2026112110300429 quotes.
 
 - Retiring a build with an old mtime can prune it at once
 	- ID: 2026112110300143
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -384,7 +427,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 2026-11-21: `oldbuild_retire-prunes-itself_zz_review_test.go`.
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 11.
+		- Verified: 1a4z4aw, from the review's repro test, fails on the old oldbuild.go and passes now. The quick gate passes, CodeQL included.
 	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: Retire ran the plain rotation, which ranks every build by the time in its name and knew nothing of the one just moved.
+	- Actual fix [Bug]: Retire rotates with the name it just used held, so the build it moved always stays. design.md's Boot says so.
+	- Test case: 1a4z4aw (a build with an old mtime survives its own Retire, and an older build in its hour is still pruned)
+	- Swept: Retire is the only caller of the rotation outside tests. repair check 15, setup's copy and retire-build all go through Retire.
+	- Branch: nov22-2026112213470980
+	- Commit: 8a1ce19
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (the kept build was gone) and passes after.
+	- Closed: 20261122-141441
 
 - install.bash changes the mode of an existing /usr/local/bin
 	- ID: 2026112110300156

@@ -470,11 +470,14 @@ func (s *Setup) retire() error {
 	if s.DryRun || s.replaced() == "" {
 		return nil
 	}
-	to, err := oldbuild.Retire(s.binPath(), s.oldBuilds(), time.Now())
+	to, warn, err := oldbuild.Retire(s.binPath(), s.oldBuilds(), time.Now())
 	if err != nil {
 		return fmt.Errorf("moving the other build out of the way: %w", err)
 	}
 	fmt.Fprintf(s.Out, "Moved %s to %s.\n", BinPath, filepath.Join(oldbuild.Dir, filepath.Base(to)))
+	if warn != nil {
+		fmt.Fprintf(s.Out, "warning: %s\n", warn)
+	}
 	return nil
 }
 

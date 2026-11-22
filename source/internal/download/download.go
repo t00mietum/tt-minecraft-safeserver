@@ -13,6 +13,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -59,11 +60,30 @@ func OpenDir(dir string) (int, error) {
 // SHA256Hex is a hash as the APIs give it, once lower-cased.
 var SHA256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// http is a copy of the client that refuses a redirect from https to
+// anything else, since a jar's hash comes over the same channel as the jar.
+// The client's own redirect rule runs first, so its reason is the one given.
 func (c Client) http() *http.Client {
-	if c.HTTP == nil {
-		return &http.Client{Timeout: 10 * time.Minute}
+	base := c.HTTP
+	if base == nil {
+		base = &http.Client{Timeout: 10 * time.Minute}
 	}
-	return c.HTTP
+	own := *base
+	before := base.CheckRedirect
+	own.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if before != nil {
+			if err := before(req, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 { // Go's own limit, which setting this drops
+			return errors.New("too many redirects")
+		}
+		if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return errors.New("redirected away from https")
+		}
+		return nil
+	}
+	return &own
 }
 
 // Get is a GET that only an OK answers.

@@ -5,6 +5,7 @@ package repair
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -196,5 +198,29 @@ func TestPackageOverCopy(t *testing.T) {
 	}
 	if got := look(t, h, shadowCheck); len(got) != 0 {
 		t.Errorf("package only: %q", got)
+	}
+}
+
+// A move whose rotation then fails is still FIXED, with the rotation's
+// error as a warning, since the build was kept. Check 15.
+func TestShadowMoveRotateFails(t *testing.T) {
+	defer testid.Line(t, "1a4z5a4")
+	h, _ := testHost(t, "", "", func(c host.Cmd) ([]byte, error) { return nil, nil })
+	if err := os.WriteFile(h.PkgBin, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.LocalBin, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldbuild.FailRotate = errors.New("operation not permitted")
+	t.Cleanup(func() { oldbuild.FailRotate = nil })
+	var got []string
+	Run(context.Background(), h, []Check{shadowCheck}, false, func(state, text string) { got = append(got, state+" "+text) })
+	want := "FIXED " + boot.LocalBin + " moved to " + oldbuild.Dir + ", so the package's runs; warning: couldn't prune the old builds in " + h.OldBuilds + ": operation not permitted"
+	if !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("got %q", got)
+	}
+	if _, err := os.Lstat(h.LocalBin); !os.IsNotExist(err) {
+		t.Errorf("still in place: %v", err)
 	}
 }

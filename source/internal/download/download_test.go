@@ -166,3 +166,50 @@ func TestStagedSwapRefused(t *testing.T) {
 		t.Errorf("x.jar is now %q", b)
 	}
 }
+
+// A redirect from https to plain http fails the download, with or without a
+// redirect rule of the client's own. https to https, and plain http to plain
+// http as the tests' fake APIs use, still follow.
+func TestRedirectAwayFromHTTPS(t *testing.T) {
+	defer testid.Line(t, "1a4z47r")
+	body := func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "jar") }
+	plain := httptest.NewServer(http.HandlerFunc(body))
+	t.Cleanup(plain.Close)
+	secure := httptest.NewTLSServer(http.HandlerFunc(body))
+	t.Cleanup(secure.Close)
+	to := func(target string) *httptest.Server {
+		ts := httptest.NewTLSServer(http.RedirectHandler(target+"/x.jar", http.StatusFound))
+		t.Cleanup(ts.Close)
+		return ts
+	}
+	plainTo := httptest.NewServer(http.RedirectHandler(plain.URL+"/x.jar", http.StatusFound))
+	t.Cleanup(plainTo.Close)
+	toPlain, toSecure := to(plain.URL), to(secure.URL)
+	own := toPlain.Client()
+	own.CheckRedirect = func(*http.Request, []*http.Request) error { return nil }
+	for _, c := range []struct {
+		name string
+		c    Client
+		url  string
+		ok   bool
+	}{
+		{"https to http", Client{HTTP: toPlain.Client()}, toPlain.URL, false},
+		{"https to http, own rule", Client{HTTP: own}, toPlain.URL, false},
+		{"https to https", Client{HTTP: toSecure.Client()}, toSecure.URL, true},
+		{"http to http", Client{}, plainTo.URL, true},
+	} {
+		resp, err := c.c.Get(context.Background(), c.url)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		switch {
+		case c.ok && err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case !c.ok && (err == nil || !strings.Contains(err.Error(), "redirected away from https")):
+			t.Errorf("%s: err = %v", c.name, err)
+		}
+	}
+	if own.CheckRedirect == nil {
+		t.Error("the caller's client lost its redirect rule")
+	}
+}
