@@ -558,7 +558,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Publish v1.0.0-beta.1 with or before the install.bash that needs retire-build
 	- ID: 2026112110300429
 	- Type: Task
-	- Status: Queued
+	- Status: Stalled
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -567,6 +567,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- v1.0.0-alpha.1 has no `retire-build`. If dev's install.bash reaches main before beta.1 is published, replacing a build fails, safely, with "couldn't move the old build out of the way".
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 33.
+		- Held for: the v1.0.0-beta.1 release, which a backlog round doesn't publish.
 
 - Root host checks pass on an empty counter or line number
 	- ID: 2026112017592969
