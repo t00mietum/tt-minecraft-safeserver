@@ -51,10 +51,7 @@ func runZfsChecks(t *testing.T, pool string) (string, string, int) {
 			t.Fatal(err)
 		}
 	}
-	script, err := filepath.Abs(filepath.Join("..", "..", "..", "cicd", "root-host", "checks.bash"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	script := cicdFile(t, filepath.Join("root-host", "checks.bash"))
 	// #nosec G204 -- test runs the repo's own script
 	cmd := exec.Command(bashPath, script)
 	cmd.Dir = home
@@ -96,7 +93,7 @@ func TestRootHostZfsPoolName(t *testing.T) {
 // Pulls the named functions out of checks.bash, so they can run alone.
 func checksFuncs(t *testing.T, names ...string) string {
 	t.Helper()
-	text, err := os.ReadFile(filepath.Join("..", "..", "..", "cicd", "root-host", "checks.bash"))
+	text, err := os.ReadFile(cicdFile(t, filepath.Join("root-host", "checks.bash")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,10 +240,7 @@ func runConsolePy(t *testing.T, exitAfter string) (string, int) {
 	if err := os.WriteFile(filepath.Join(dir, "tt-minecraftd"), []byte(fake), 0o755); err != nil { // #nosec G306 -- a test stub
 		t.Fatal(err)
 	}
-	script, err := filepath.Abs(filepath.Join("..", "..", "..", "cicd", "root-host", "console.py"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	script := cicdFile(t, filepath.Join("root-host", "console.py"))
 	// #nosec G204 -- test runs the repo's own script
 	cmd := exec.Command(python, "-I", script, "say hi")
 	cmd.Dir = dir
