@@ -120,7 +120,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
 	- Stand-in: none (20261117). Only a player in the game can judge tree felling, leaf decay and the sleep vote.
 
-- Move shared code to tt-safeserver
+	- Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
 	- Status: Stalled
