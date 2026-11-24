@@ -46,7 +46,7 @@ import (
 )
 
 // version is set at release with -ldflags "-X main.version=...".
-var version = "v1.0.0-alpha.1"
+var version = "v1.0.0-beta.1"
 
 // defaultConfig is a var so tests don't read the host's real config.
 var defaultConfig = config.DefaultPath

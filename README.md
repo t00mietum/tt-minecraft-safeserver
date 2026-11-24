@@ -6,7 +6,7 @@
 <div align="center">
 
 [![License: GPL v2+](https://img.shields.io/badge/License-GPLv2%2B-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
-![Lifecycle: Alpha](https://img.shields.io/badge/Lifecycle-Alpha-orange)
+![Lifecycle: Beta](https://img.shields.io/badge/Lifecycle-Beta-yellow)
 [![Release](https://img.shields.io/github/v/release/t00mietum/tt-minecraft-safeserver?include_prereleases&sort=semver)](https://github.com/t00mietum/tt-minecraft-safeserver/releases)
 ![Support](https://img.shields.io/badge/Support-Maintained-brightgreen)
 ![Status: Passing](https://img.shields.io/badge/Status-Passing-brightgreen)
@@ -277,7 +277,7 @@ Release builds are reproducible: a tag always builds to the same bytes. The pipe
 To check a release against its source, run this from a clone:
 
 ~~~bash
-bash cicd/utility/verify-release.bash v1.0.0-alpha.1
+bash cicd/utility/verify-release.bash v1.0.0-beta.1
 ~~~
 
 It rebuilds each Linux binary from the tag, with the Go version and flags the release was built with, and compares it with the release's `SHA256SUMS`. It needs git, curl, and Go 1.21 or newer, which fetches the pinned Go version itself.
