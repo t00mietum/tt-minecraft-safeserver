@@ -1068,7 +1068,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Publish v1.0.0-beta.1 with or before the install.bash that needs retire-build
 	- ID: 2026112110300429
 	- Type: Task
-	- Status: Stalled
+	- Status: Closed
+	- Closed reason: Done
 	- Target version: v1.0.0-beta.1
 	- Priority: Low
 	- Opened: 20261121-103000
@@ -1078,6 +1079,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-21: Code review 20261121 item 33.
 		- Held for: the v1.0.0-beta.1 release, which a backlog round doesn't publish.
+		- 2026-11-23: v1.0.0-beta.1 published as a GitHub pre-release from main at `a6b7ec5`, after a merge gate passed on that commit. Both binaries rebuild to their published sums.
+	- Closed: 20261123-164500
 
 - Root host checks pass on an empty counter or line number
 	- ID: 2026112017592969
