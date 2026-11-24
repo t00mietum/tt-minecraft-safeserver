@@ -1,18 +1,33 @@
 #!/bin/bash
-# Runs the hand tests that need root, against a real Paper server, in a
-# throwaway Debian container with systemd and a real sudo: setup, --adopt,
-# rootful Podman, native mode when it's on, and the firewall. See checks.bash.
-# Needs docker that can run --privileged, and the internet.
-#
-# --zfs runs setup and then the ZFS snapshot checks instead, on a throwaway
-# pool backed by a file in the run's folder. The container shares this host's
-# kernel, so the pool shows in its zpool list until the run destroys it.
-#
-# Usage: root-host.bash [--keep-temp] [--zfs]
+
+#  shellcheck disable=1091  ## 'source is valid here, but shellcheck doesn't know the path to it.'
+#  shellcheck enable=require-variable-braces  ## Every expansion braced: "${var}", not "$var".
+
+##	Purpose:
+##		- Runs the hand tests that need root, against a real Paper server, in a throwaway Debian
+##		  container with systemd and a real sudo: setup, --adopt, rootful Podman, native mode when
+##		  it's on, and the firewall. See checks.bash.
+##		- Needs docker that can run --privileged, and the internet.
+##		- --zfs runs setup and then the ZFS snapshot checks instead, on a throwaway pool backed by a
+##		  file in the run's folder. The container shares this host's kernel, so the pool shows in its
+##		  zpool list until the run destroys it.
+##		- ROOT_HOST_BIN names a linux/amd64 build to check, such as cicd.bash's release build, which
+##		  comes from the pinned Go. Without it, this box's go builds one.
+##	Syntax:
+##		root-host.bash [--keep-temp] [--zfs]
+##	History: At bottom of script.
+
+##	Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+##	Licensed under the GNU General Public License v2.0 or later. Full text at:
+##		https://spdx.org/licenses/GPL-2.0-or-later.html
+##	SPDX-License-Identifier: GPL-2.0-or-later
+
 set -euo pipefail
 
 projectName=tt-minecraft-safeserver
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${here}/../config.bash"
+source "${here}/../utility/include/safe-rm.bash"
 repo="$(cd "${here}/../.." && pwd)"
 keep=0
 pool=''
@@ -27,31 +42,15 @@ done
 HOST_TEMP="$(realpath -m "${HOST_TEMP:-${TMPDIR:-/tmp}}")"
 mkdir -p "${HOST_TEMP}/${projectName}"
 stamp="$(date +%Y%m%d-%H%M%S)"
-for ((n = 1; ; n++)); do
+for ((n = 1; n < 1000; n++)); do
 	runName="$(printf '%s_%03d' "${stamp}" "${n}")"
 	runDir="${HOST_TEMP}/${projectName}/${runName}"
 	mkdir "${runDir}" 2> /dev/null && break
 done
+[[ -d "${runDir}" ]] || { echo "can't make a run folder in ${HOST_TEMP}/${projectName}" >&2; exit 1; }
 echo $$ > "${runDir}/run.pid"
 box="${projectName}-${runName}-root-host"
 
-fSafeRm() {
-	local p="${1:-}" real='' own="${HOST_TEMP:?}/${projectName:?}"
-	if [[ "${#}" -ne 1 || -z "${p}" || "${p}" == *..* || "${p}" == *//* || "${p}" == *$'\n'* ]]; then
-		printf 'safe-rm: refused, bad path: "%s"\n' "${p}" >&2; return 1
-	fi
-	p="${p%/}"
-	if ! [[ "${p}" =~ ^/(.+/)?tmp/[^/]+(/[^/]+)*$ || "${p}" == "${own}"/?* ]]; then
-		printf 'safe-rm: refused, not under a tmp folder: %s\n' "${p}" >&2; return 1
-	fi
-	if [[ "${p}" == "${HOST_TEMP}" || ( "${p}" == "${HOST_TEMP}"/* && "${p#"${HOST_TEMP}"/}" != */* ) ]]; then
-		printf 'safe-rm: refused, a whole project temp folder: %s\n' "${p}" >&2; return 1
-	fi
-	if [[ -L "${p}" ]]; then printf 'safe-rm: refused, a link: %s\n' "${p}" >&2; return 1; fi
-	real="$(realpath -e -- "${p}" 2> /dev/null)" || { printf 'safe-rm: refused, not there: %s\n' "${p}" >&2; return 1; }
-	if [[ "${real}" != "${p}" ]]; then printf 'safe-rm: refused, goes through a link: %s\n' "${p}" >&2; return 1; fi
-	rm -rf --one-file-system -- "${p}" && printf 'removed %s\n' "${p}"
-}
 
 # Only this run's pool, by the name it made. Its server goes first, since
 # Podman's mounts of the dataset keep it busy.
@@ -88,18 +87,21 @@ fCleanup() {
 }
 trap fCleanup EXIT
 
-cpus="$(nproc)"
-jobs=$((cpus / 2))
-(($(cut -d. -f1 /proc/loadavg) > cpus / 2)) && jobs=$((cpus / 4))
-((jobs < 1)) && jobs=1
+jobs="${BUILD_JOBS}"
 
-echo "Building tt-minecraftd"
-(cd "${repo}" && CGO_ENABLED=0 GOFLAGS="-p=${jobs}" nice -n 19 go build -o "${runDir}/tt-minecraftd" ./source/cmd/tt-minecraftd)
+if [[ -n "${ROOT_HOST_BIN:-}" ]]; then
+	[[ -f "${ROOT_HOST_BIN}" && -x "${ROOT_HOST_BIN}" ]] || { echo "ROOT_HOST_BIN isn't a program: ${ROOT_HOST_BIN}" >&2; exit 2; }
+	echo "Checking ${ROOT_HOST_BIN}"
+	cp -- "${ROOT_HOST_BIN}" "${runDir}/tt-minecraftd"
+else
+	echo "Building tt-minecraftd"
+	(cd "${repo}" && CGO_ENABLED=0 GOFLAGS="-p=${jobs}" nice -n 19 go build -o "${runDir}/tt-minecraftd" ./source/cmd/tt-minecraftd)
+fi
 
 tag="${projectName}-root-host:$(sha256sum "${here}/Dockerfile" | cut -c1-12)"
 if ! docker image inspect "${tag}" > /dev/null 2>&1; then
 	echo "Building ${tag}"
-	nice -n 19 docker build -q --label "dev.project=${projectName}" -t "${tag}" "${here}" > /dev/null
+	nice -n 19 docker build -q --label "dev.project=${projectName}" --label "dev.run=${runName}" -t "${tag}" "${here}" > /dev/null
 fi
 
 echo "Starting ${box}"
@@ -130,3 +132,11 @@ fi
 echo "Running the checks; setup downloads Paper, Geyser, Podman, and the image"
 docker exec -u op -e TERM=xterm -e ZFS_POOL="${pool}" -e ZFS_FILE="${pool:+${runDir}/zpool.img}" -w /home/op "${box}" \
 	nice -n 10 bash /usr/local/share/root-host/checks.bash
+
+
+##	History:
+##		- 2026-11-12: Created, with fixes from its first runs.
+##		- 2026-11-12: --zfs: snapshot checks on a throwaway pool.
+##		- 2026-11-13: Native checks skip while native mode is off.
+##		- 2026-11-19: ROOT_HOST_BIN checks a given build, and the image gets the run's label.
+##		- 2026-11-20: Shared removal guard and job count.

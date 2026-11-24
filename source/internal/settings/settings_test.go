@@ -4,6 +4,7 @@
 package settings
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -46,7 +47,7 @@ func keys(problems []Problem) []string {
 // A missing server.properties counts as unsafe, since Minecraft's own
 // defaults have the whitelist off. Fix writes one.
 func TestPropertiesMissing(t *testing.T) {
-	defer testid.Line(t, "df5yk")
+	defer testid.Line(t, "1a3ekkc")
 	cfg, dir := newServer(t)
 	cfg.Bedrock = false // Geyser's file has its own tests
 	problems, err := Check(cfg)
@@ -74,7 +75,7 @@ func TestPropertiesMissing(t *testing.T) {
 // Fix changes only the wrong settings, and keeps comments, order, line ends,
 // and the file's mode.
 func TestPropertiesFix(t *testing.T) {
-	defer testid.Line(t, "df5ym")
+	defer testid.Line(t, "1a3ekpg")
 	cfg, dir := newServer(t)
 	cfg.Bedrock = false
 	cfg.BindIP, cfg.GamePort, cfg.HideOnlinePlayers = "::1", 25570, false
@@ -139,7 +140,7 @@ func TestPropertiesFix(t *testing.T) {
 }
 
 func TestParseProperties(t *testing.T) {
-	defer testid.Line(t, "df5yn")
+	defer testid.Line(t, "1a3eksm")
 	p := parseProperties([]byte("! bang comment\n  # hash comment\na = 1\nb:2\nc 3\nd=x\\\n    y\ne=\\u0041\\t\nf\ng=one\ng=two\n"))
 	for key, want := range map[string]string{"a": "1", "b": "2", "c": "3", "d": "xy", "e": "A\t", "f": "", "g": "two"} {
 		if got, ok := p.get(key); !ok || got != want {
@@ -149,6 +150,25 @@ func TestParseProperties(t *testing.T) {
 	if _, ok := p.get("#"); ok {
 		t.Error("a comment read as a key")
 	}
+
+	// As Java reads them: a lone CR ends a line, a comment never continues,
+	// even after a lone backslash, and a continued line can go on past a CR or
+	// CRLF and into a hash.
+	text := "motd=hi\rwhite-list=false\r\n# old \\\nenable-rcon=true\n! x\\\r\nonline-mode=off\n\\\n # c \\\nc=3\na=1\\\r  #2\\\r\n  3\rb=\\\r"
+	p = parseProperties([]byte(text))
+	for key, want := range map[string]string{"motd": "hi", "white-list": "false", "enable-rcon": "true", "online-mode": "off", "c": "3", "a": "1#23", "b": ""} {
+		if got, ok := p.get(key); !ok || got != want {
+			t.Errorf("%s = %q, %v; want %q", key, got, ok, want)
+		}
+	}
+	if got := string(p.bytes()); got != text {
+		t.Errorf("not kept line for line: %q", got)
+	}
+	p.set("white-list", "true")
+	p.set("enable-query", "false")
+	if got, want := string(p.bytes()), strings.Replace(text, "white-list=false", "white-list=true", 1)+"\renable-query=false\n"; got != want {
+		t.Errorf("set:\n%q\nwant\n%q", got, want)
+	}
 	if got := escape(" a=b:c#d!e\\f"); got != `\ a\=b\:c\#d\!e\\f` {
 		t.Errorf("escape = %q", got)
 	}
@@ -157,7 +177,7 @@ func TestParseProperties(t *testing.T) {
 // The proxy settings in Paper's YAML files are found by their full path,
 // and a fix keeps the comment and the rest of the file.
 func TestYAMLSettings(t *testing.T) {
-	defer testid.Line(t, "df5yp")
+	defer testid.Line(t, "1a3ekwr")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -195,7 +215,7 @@ func TestYAMLSettings(t *testing.T) {
 // The server account can write the tree, so links and pipes there are
 // refused, and a fix never writes through one.
 func TestSettingsLinks(t *testing.T) {
-	defer testid.Line(t, "df5yq")
+	defer testid.Line(t, "1a3ekzw")
 	cfg, dir := newServer(t)
 	outside := t.TempDir()
 	put(t, outside, propertiesFile, "white-list=false\n", 0o640)
@@ -234,7 +254,7 @@ func TestSettingsLinks(t *testing.T) {
 }
 
 func TestWarnings(t *testing.T) {
-	defer testid.Line(t, "df5yr")
+	defer testid.Line(t, "1a3em30")
 	_, dir := newServer(t)
 	if w := Warnings(dir); len(w) != 1 || !strings.Contains(w[0], "whitelist is empty") {
 		t.Errorf("no files: %q", w)
@@ -264,7 +284,7 @@ func TestWarnings(t *testing.T) {
 
 // A name the server account wrote can't flip the text direction of a warning.
 func TestWarningsDirection(t *testing.T) {
-	defer testid.Line(t, "df78g")
+	defer testid.Line(t, "1a3jpj0")
 	_, dir := newServer(t)
 	put(t, dir, "whitelist.json", `[{"name": "Alex"}]`, 0o640)
 	put(t, dir, "ops.json", `[{"name": "Mal\u202eyrot\u2066 x\u2069"}]`, 0o640)
@@ -299,7 +319,7 @@ var geyserNow = strings.Join([]string{
 // With bedrock on, Geyser's listener follows bindIP and bedrockPort, and
 // Bedrock logins go through Floodgate. A fix keeps the comments.
 func TestGeyserConfig(t *testing.T) {
-	defer testid.Line(t, "df5yv")
+	defer testid.Line(t, "1a3emcc")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -357,7 +377,7 @@ func TestGeyserConfig(t *testing.T) {
 // auth-type is looked for where the file's own layout keeps it, and a missing
 // key is added under its section.
 func TestGeyserLayouts(t *testing.T) {
-	defer testid.Line(t, "df5yw")
+	defer testid.Line(t, "1a3emfg")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -396,7 +416,7 @@ func TestGeyserLayouts(t *testing.T) {
 // Geyser's first start would run on its defaults. A linked Geyser folder isn't
 // followed.
 func TestGeyserSkipped(t *testing.T) {
-	defer testid.Line(t, "df5yx")
+	defer testid.Line(t, "1a3emjm")
 	cfg, dir := newServer(t)
 	cfg.Bedrock = false
 	if _, err := Fix(cfg); err != nil {
@@ -439,7 +459,7 @@ func TestGeyserSkipped(t *testing.T) {
 // NetherNet stays on bedrockPort alone. A key left out is Geyser's default,
 // which is already right, so it isn't added.
 func TestGeyserNetherNetPort(t *testing.T) {
-	defer testid.Line(t, "df5yy")
+	defer testid.Line(t, "1a3emnr")
 	cfg, dir := newServer(t)
 	if _, err := Fix(cfg); err != nil {
 		t.Fatal(err)
@@ -475,7 +495,7 @@ func TestGeyserNetherNetPort(t *testing.T) {
 }
 
 func TestEULAFile(t *testing.T) {
-	defer testid.Line(t, "df65n")
+	defer testid.Line(t, "1a3f9nm")
 	dir := t.TempDir()
 	if ok, err := EULAAccepted(dir); ok || err != nil {
 		t.Errorf("no eula.txt: %v %v", ok, err)
@@ -526,7 +546,7 @@ func TestEULAFile(t *testing.T) {
 // Fix writes Geyser's keys before its first start, folders and all. Geyser
 // keeps them and fills in the rest of its layout.
 func TestGeyserFirstStart(t *testing.T) {
-	defer testid.Line(t, "df67a")
+	defer testid.Line(t, "1a3fev8")
 	cfg, dir := newServer(t)
 	cfg.BindIP, cfg.BedrockPort = "192.168.1.123", 19555
 	want := []string{geyserConfig + " bedrock.address", geyserConfig + " bedrock.port", geyserConfig + " java.auth-type"}
@@ -569,5 +589,121 @@ func TestGeyserFirstStart(t *testing.T) {
 	}
 	if fi, _ := os.Stat(filepath.Join(dir, "plugins", "Geyser-Spigot")); fi.Mode().Perm() != 0o750 {
 		t.Errorf("an existing folder's mode changed to %v", fi.Mode())
+	}
+}
+
+// Paper and Geyser read YAML with SnakeYAML, which takes flow style, anchors
+// and merges, and keeps the last copy of a key given twice. Each copy of a
+// key is checked, and a fix that can't edit every bad copy in place leaves the
+// file alone and says so.
+func TestYAMLEveryCopy(t *testing.T) {
+	defer testid.Line(t, "1a3jtbw")
+	const spigot, paper = "spigot.yml", "config/paper-global.yml"
+	for _, c := range []struct {
+		name, file, text, fixed string
+		keys                    []string
+	}{
+		{"repeated key", spigot, "settings:\n  bungeecord: false\n  bungeecord: true\n", "settings:\n  bungeecord: false\n  bungeecord: false\n", []string{"settings.bungeecord"}},
+		{"repeated section", spigot, "settings:\n  bungeecord: TRUE # x\nsettings:\n  debug: false\n", "settings:\n  bungeecord: false # x\nsettings:\n  debug: false\n", []string{"settings.bungeecord"}},
+		{"quoted key, CRLF", paper, "\"proxies\":\r\n  velocity:\r\n    'enabled': yes\r\n", "\"proxies\":\r\n  velocity:\r\n    'enabled': false\r\n", []string{"proxies.velocity.enabled"}},
+		{"flow style", paper, "proxies: {velocity: {enabled: true}, proxy-protocol: true}\n", "", []string{"proxies.velocity.enabled", "proxies.proxy-protocol"}},
+		{"flow in block", paper, "proxies:\n  velocity: {enabled: false}\n  velocity: {enabled: true}\n", "", []string{"proxies.velocity.enabled"}},
+		{"merge", paper, "on: &on\n  enabled: true\nproxies:\n  velocity:\n    <<: *on\n", "", []string{"proxies.velocity.enabled"}},
+		{"alias", spigot, "yes: &t true\nsettings:\n  bungeecord: *t\n", "", []string{"settings.bungeecord"}},
+		{"alias to false", spigot, "off: &f false\nsettings:\n  bungeecord: *f\n", "off: &f false\nsettings:\n  bungeecord: *f\n", nil},
+		{"anchored value", spigot, "settings:\n  bungeecord: &t true\n", "", []string{"settings.bungeecord"}},
+		{"section", spigot, "settings:\n  bungeecord:\n    x: 1\n", "", []string{"settings.bungeecord"}},
+		{"lone CR", spigot, "settings:\r  bungeecord: true\n", "", []string{"settings.bungeecord"}},
+		// Bukkit splits a key on dots, and Configurate doesn't.
+		{"dotted key", spigot, "settings.bungeecord: true\n", "settings.bungeecord: false\n", []string{"settings.bungeecord"}},
+		{"dotted key after a safe section", spigot, "settings:\n  bungeecord: false\n\"settings.bungeecord\": on # x\n", "settings:\n  bungeecord: false\n\"settings.bungeecord\": false # x\n", []string{"settings.bungeecord"}},
+		{"dotted key past the setting", spigot, "settings:\n  x: 1\nsettings.bungeecord.x: false\n", "", []string{"settings.bungeecord"}},
+		{"dotted key beside the setting", spigot, "settings.bungeecordx: true\nsettings:\n  x.bungeecord: true\n", "settings.bungeecordx: true\nsettings:\n  x.bungeecord: true\n", nil},
+		{"dotted key in flow style", spigot, "{settings.bungeecord: true}\n", "", []string{"settings.bungeecord"}},
+		{"dotted key, Configurate", paper, "proxies.velocity.enabled: true\nproxies:\n  velocity.enabled: true\n", "proxies.velocity.enabled: true\nproxies:\n  velocity.enabled: true\n", nil},
+	} {
+		cfg, dir := newServer(t)
+		cfg.Bedrock = false
+		if _, err := Fix(cfg); err != nil {
+			t.Fatal(err)
+		}
+		put(t, dir, c.file, c.text, 0o660)
+		var want []string
+		for _, k := range c.keys {
+			want = append(want, c.file+" "+k)
+		}
+		if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems), want) {
+			t.Errorf("%s: check: %v, %q; want %q", c.name, err, keys(problems), want)
+		}
+		_, err := Fix(cfg)
+		b, _ := os.ReadFile(filepath.Join(dir, c.file))
+		if c.fixed == "" {
+			if err == nil || !strings.Contains(err.Error(), c.file+": can't set ") || string(b) != c.text {
+				t.Errorf("%s: fix: %v, wrote %q", c.name, err, b)
+			}
+			continue
+		}
+		if err != nil || string(b) != c.fixed {
+			t.Errorf("%s: fix: %v, wrote %q; want %q", c.name, err, b, c.fixed)
+		}
+		if problems, err := Check(cfg); err != nil || len(problems) != 0 {
+			t.Errorf("%s: after fix: %v, %q", c.name, err, keys(problems))
+		}
+	}
+
+	// A file the parser can't read is an error, as for Paper, and doesn't
+	// stop the fix of the others.
+	cfg, dir := newServer(t)
+	cfg.Bedrock = false
+	put(t, dir, propertiesFile, "white-list=false\n", 0o660)
+	put(t, dir, spigot, "settings: [\n", 0o660)
+	put(t, dir, paper, "proxies:\n  proxy-protocol: true\n---\nproxies: {}\n", 0o660)
+	if _, err := Check(cfg); err == nil || !strings.Contains(err.Error(), spigot+": can't read it as YAML") || !strings.Contains(err.Error(), paper+": can't read it as YAML: more than one") {
+		t.Errorf("unreadable: %v", err)
+	}
+	if problems, err := Fix(cfg); err == nil || len(problems) == 0 || problems[0].File != propertiesFile {
+		t.Errorf("fix with unreadable files: %v, %q", err, keys(problems))
+	}
+	if problems, _ := Check(cfg); len(problems) != 0 {
+		t.Errorf("server.properties left: %q", keys(problems))
+	}
+
+	// Merges that bring in the same mapping over and over are read once, so
+	// the server account can't stall a check run as root.
+	var bomb strings.Builder
+	bomb.WriteString("m0: &m0\n  bungeecord: true\n")
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&bomb, "m%d: &m%d\n  <<: [%s]\n", i, i, strings.TrimSuffix(strings.Repeat(fmt.Sprintf("*m%d, ", i-1), 8), ", "))
+	}
+	bomb.WriteString("settings:\n  <<: *m10\n")
+	put(t, dir, spigot, bomb.String(), 0o660)
+	put(t, dir, paper, "", 0o660)
+	if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems), []string{spigot + " settings.bungeecord"}) {
+		t.Errorf("merges: %v, %q", err, keys(problems))
+	}
+
+	// Geyser's file too, and a key with no copy where Geyser reads it is
+	// missing.
+	cfg, dir = newServer(t)
+	if _, err := Fix(cfg); err != nil {
+		t.Fatal(err)
+	}
+	good := strings.Replace(geyserNow, "auth-type: online", "auth-type: floodgate", 1)
+	for _, text := range []string{
+		good + "java: {auth-type: online}\n",
+		strings.Replace(good, "  auth-type: floodgate\n", "  auth-type: floodgate\n  auth-type: online\n", 1),
+	} {
+		put(t, dir, geyserConfig, text, 0o660)
+		if problems, err := Check(cfg); err != nil || !reflect.DeepEqual(keys(problems), []string{geyserConfig + " java.auth-type"}) {
+			t.Errorf("%q: %v, %q", text, err, keys(problems))
+		}
+	}
+	put(t, dir, geyserConfig, good+"bedrock:\n  transport: nethernet\n", 0o660)
+	problems, err := Check(cfg)
+	if want := []string{geyserConfig + " bedrock.address", geyserConfig + " bedrock.port"}; err != nil || !reflect.DeepEqual(keys(problems), want) || !problems[0].Missing {
+		t.Errorf("second bedrock section: %v, %+v", err, problems)
+	}
+	if _, err := Fix(cfg); err == nil || !strings.Contains(err.Error(), "bedrock.address, bedrock.port") {
+		t.Errorf("fix of the second bedrock section: %v", err)
 	}
 }

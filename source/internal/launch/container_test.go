@@ -7,22 +7,32 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
 type fakeConsole struct{ sent []string }
 
-func (f *fakeConsole) Send(_ context.Context, line string) error {
+// Send refuses a done ctx, as a real send would.
+func (f *fakeConsole) Send(ctx context.Context, line string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.sent = append(f.sent, line)
 	return nil
 }
@@ -40,6 +50,10 @@ type rig struct {
 	states  []string
 	log     string
 	tables  string
+	// exit is what the runtime's wait prints, the container's exit code.
+	exit string
+	// sudoFree makes sudo -n work, as a NOPASSWD rule or a cached login does.
+	sudoFree bool
 }
 
 func newRig(t *testing.T) *rig {
@@ -72,18 +86,20 @@ func newRig(t *testing.T) *rig {
 	if err := os.WriteFile(filepath.Join(dir, "whitelist.json"), []byte(`[{"uuid": "5e0c6c7f-4d0a-4d1e-9a0e-4b9e3c2f1a01", "name": "Steve"}]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Both jars are empty, and approved.
-	list := filepath.Join(base, "plugins.shcl")
-	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	if err := os.WriteFile(list, []byte("jar: paper-26.3-244.jar\n\tsha256: "+empty+"\njar: plugins/Geyser-Spigot.jar\n\tsha256: "+empty+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n"}
+	g := &rig{r: &host.Fake{}, console: &fakeConsole{}, out: &bytes.Buffer{}, dir: dir, tables: "table inet tt_minecraftd\n", exit: "0\n"}
 	g.r.Reply = g.reply
 	noRuntimes(t)
 	inGroup(t, groupHere)
+	// Firewall rules that match the config, with no IPv6 subnets.
+	fw := firewall.Files{Rules: filepath.Join(base, "firewall.nft"), ResolvConf: filepath.Join(base, "resolv.conf"), Routes: filepath.Join(base, "ipv6_route")}
+	if err := os.WriteFile(fw.ResolvConf, []byte("nameserver 127.0.0.53\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fw.Rules, []byte(firewall.Rules(&cfg, firewall.Local{DNS: []netip.Addr{netip.MustParseAddr("127.0.0.53")}})), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	g.d = &Boxed{
-		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, PluginsFile: list, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
+		Kit: Kit{Run: g.r, Console: g.console, Cfg: &cfg, FirewallFiles: fw, Out: g.out, Sleep: func(d time.Duration) { g.slept += d }},
 		IDs: func(string, string) (string, string, error) { return "990", "991", nil },
 	}
 	return g
@@ -118,8 +134,12 @@ func (g *rig) reply(c host.Cmd) ([]byte, error) {
 		return []byte(s + "\n"), nil
 	case len(c.Args) > 2 && c.Args[1] == "logs":
 		return []byte(g.log), nil
+	case len(c.Args) > 2 && c.Args[1] == "wait":
+		return []byte(g.exit), nil
 	case c.Args[0] == "nft":
 		return []byte(g.tables), nil
+	case host.Quote(c.Args) == "sudo -n true" && !g.sudoFree:
+		return nil, errors.New("sudo: a password is required")
 	}
 	return nil, nil
 }
@@ -138,7 +158,7 @@ func (g *rig) changes() []string {
 // create then start, since Podman's run --detach warns when started from a
 // script.
 func TestDockerStart(t *testing.T) {
-	defer testid.Line(t, "df5xp")
+	defer testid.Line(t, "1a3egrr")
 	g := newRig(t)
 	g.states = []string{"exited", "running"}
 	g.log = "[12:00:09 INFO]: Done (8.1s)! For help, type \"help\"\n"
@@ -174,10 +194,44 @@ func TestDockerStart(t *testing.T) {
 	}
 }
 
+// start tries sudo -n first, quietly and without the terminal, and asks with
+// sudo -v only when that fails. A NOPASSWD rule beside password rules passes
+// sudo -n but not sudo -v.
+func TestStartSudoNoPassword(t *testing.T) {
+	defer testid.Line(t, "1a3jsfr")
+	for _, free := range []bool{true, false} {
+		g := newRig(t)
+		g.sudoFree = free
+		g.states = []string{"exited", "running"}
+		g.log = "[12:00:09 INFO]: Done (8.1s)! For help, type \"help\"\n"
+		if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+			t.Fatal(err)
+		}
+		tries, asks := 0, 0
+		for _, c := range g.r.Ran {
+			switch host.Quote(c.Args) {
+			case "sudo -n true":
+				tries++
+				if !c.Look || !c.Quiet || c.Tty {
+					t.Errorf("sudo -n true ran as %+v", c)
+				}
+			case "sudo -v":
+				asks++
+				if !c.Tty || c.Look {
+					t.Errorf("sudo -v ran as %+v, want on the terminal, and not a look, so dry run prints it and doesn't ask", c)
+				}
+			}
+		}
+		if wantAsks := map[bool]int{true: 0, false: 1}[free]; tries != 1 || asks != wantAsks {
+			t.Errorf("sudo -n works %v: tried %d, asked %d, want 1 and %d", free, tries, asks, wantAsks)
+		}
+	}
+}
+
 // Another Paper server, such as one the old scripts started, stops start
 // before it changes anything.
 func TestDockerStartRefuses(t *testing.T) {
-	defer testid.Line(t, "df5xq")
+	defer testid.Line(t, "1a3egvw")
 	g := newRig(t)
 	g.ps = "safeserver 4242 java -Xmx6G -jar paper-26.3-244.jar nogui\n"
 	err := g.d.Start(context.Background(), StartMode{})
@@ -203,7 +257,7 @@ func TestDockerStartRefuses(t *testing.T) {
 // A server that dies while loading gets its log tail shown, and one that's
 // slow is left running with an error.
 func TestDockerStartFails(t *testing.T) {
-	defer testid.Line(t, "df5xr")
+	defer testid.Line(t, "1a3egz0")
 	g := newRig(t)
 	g.states = []string{"", "exited"}
 	g.log = "Error: Unable to access jarfile paper.jar\n"
@@ -220,10 +274,181 @@ func TestDockerStartFails(t *testing.T) {
 	}
 }
 
+// markWriter notes the kit's clock at each line that names a wait's start or end.
+type markWriter struct {
+	k     *Kit
+	w     io.Writer
+	marks []time.Duration
+}
+
+func (m *markWriter) Write(p []byte) (int, error) {
+	if s := string(p); strings.Contains(s, "Waiting for the server") || strings.Contains(s, "still up after") {
+		m.marks = append(m.marks, m.k.slept)
+	}
+	return m.w.Write(p)
+}
+
+// The load and stop waits end at their timeout, however long each look takes.
+func TestWaitDeadline(t *testing.T) {
+	defer testid.Line(t, "1a4q5y8")
+	const look = 300 * time.Millisecond
+	slow := func(g *rig) *markWriter {
+		reply := g.r.Reply
+		g.r.Reply = func(c host.Cmd) ([]byte, error) {
+			g.d.slept += look
+			return reply(c)
+		}
+		m := &markWriter{k: &g.d.Kit, w: g.out}
+		g.d.Out = m
+		return m
+	}
+
+	g := newRig(t)
+	g.states = []string{"", "running"}
+	m := slow(g)
+	err := g.d.Start(context.Background(), StartMode{})
+	end := g.d.slept
+	if !errors.Is(err, errSlowLoad) || len(m.marks) != 1 {
+		t.Fatalf("start: err %v, marks %v", err, m.marks)
+	}
+	// One pass (log and state) can run past the deadline, no more.
+	if took := end - m.marks[0]; took < g.d.Cfg.StartTimeout || took > g.d.Cfg.StartTimeout+2*look {
+		t.Errorf("start waited %s, timeout %s", took, g.d.Cfg.StartTimeout)
+	}
+
+	g = newRig(t)
+	g.states = []string{"running"}
+	m = slow(g)
+	if err := g.d.Stop(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.marks) != 2 {
+		t.Fatalf("stop: marks %v, output %q", m.marks, g.out.String())
+	}
+	if took := m.marks[1] - m.marks[0]; took < g.d.Cfg.StopTimeout || took > g.d.Cfg.StopTimeout+look {
+		t.Errorf("stop waited %s, timeout %s", took, g.d.Cfg.StopTimeout)
+	}
+}
+
+// A Done line or an exit just before the deadline still counts, since each
+// wait looks once more after its last pause.
+func TestWaitsLookAtDeadline(t *testing.T) {
+	defer testid.Line(t, "1a4z7n6")
+	g := newRig(t)
+	g.states = []string{"", "running"}
+	reply := g.r.Reply
+	g.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if len(c.Args) > 2 && c.Args[1] == "logs" && g.d.slept >= g.d.Cfg.StartTimeout-500*time.Millisecond {
+			return []byte(`[12:00:00] [Server thread/INFO]: Done (4.5s)! For help, type "help"` + "\n"), nil
+		}
+		return reply(c)
+	}
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Errorf("start: %v\n%s", err, g.out.String())
+	}
+
+	g = newRig(t)
+	reply = g.r.Reply
+	g.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if len(c.Args) > 2 && c.Args[1] == "ps" {
+			if g.d.slept >= g.d.Cfg.StopTimeout-500*time.Millisecond {
+				return []byte("exited\n"), nil
+			}
+			return []byte("running\n"), nil
+		}
+		return reply(c)
+	}
+	if err := g.d.Stop(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if out := g.out.String(); strings.Contains(out, "SIGTERM") || !strings.Contains(out, "The server stopped.") {
+		t.Errorf("stop sent SIGTERM to a server that had stopped:\n%s", out)
+	}
+	if ran := strings.Join(g.changes(), "\n"); strings.Contains(ran, " stop --time") {
+		t.Errorf("stop ran a kill:\n%s", ran)
+	}
+}
+
+// A start that fails after the hand-off, with the server down, hands the
+// trees back. One that leaves the server up, or can't tell, says how to get
+// them back. Inside the boot unit, ExecStop's stop does it.
+func TestFailedStartHandsBack(t *testing.T) {
+	defer testid.Line(t, "1a3jx9m")
+	back := "sudo chown -R -- alice:minecraftd "
+	failing := func(g *rig, step string, cancel func()) {
+		g.r.Reply = func(c host.Cmd) ([]byte, error) {
+			if len(c.Args) > 1 && c.Args[1] == step {
+				if cancel != nil {
+					cancel()
+				}
+				return nil, errors.New(step + ": image not known")
+			}
+			return g.reply(c)
+		}
+	}
+	for _, c := range []struct {
+		name, step string
+		states     []string
+		log        string
+		inUnit     bool
+		ctrlC      bool
+		handBack   bool
+		says       string
+	}{
+		{"create fails", "create", []string{"", ""}, "", false, false, true, "create: image not known"},
+		{"start fails", "start", []string{"", "created"}, "", false, false, true, "start: image not known"},
+		{"dies while loading", "", []string{"", "exited"}, "Error: Unable to access jarfile paper.jar\n", false, false, true, "exited while loading"},
+		{"slow load", "", []string{"", "running"}, "", false, false, false, "didn't finish loading"},
+		{"start fails, server up", "start", []string{"", "running"}, "", false, false, false, "the trees are still minecraftd's, and stop hands them back"},
+		{"Ctrl-C in create", "create", []string{"", ""}, "", false, true, false, "the trees are still minecraftd's, and stop hands them back"},
+		{"in the unit", "create", []string{"", ""}, "", true, false, false, "create: image not known"},
+	} {
+		g := newRig(t)
+		g.d.InUnit = c.inUnit
+		g.d.Cfg.RunUser = "minecraftd"
+		g.states, g.log = c.states, c.log
+		ctx, cancel := context.WithCancel(context.Background())
+		if c.step != "" {
+			var onFail func()
+			if c.ctrlC {
+				onFail = cancel
+			}
+			failing(g, c.step, onFail)
+		}
+		err := g.d.Start(ctx, StartMode{})
+		cancel()
+		got := g.changes()
+		if err == nil || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: err %v, want %q", c.name, err, c.says)
+		}
+		if handed := strings.HasPrefix(got[len(got)-1], back); handed != c.handBack {
+			t.Errorf("%s: hand-back %v, want %v; ran %q", c.name, handed, c.handBack, got)
+		}
+		if c.inUnit && strings.Contains(err.Error(), "stop hands them back") {
+			t.Errorf("%s: err %v", c.name, err)
+		}
+	}
+
+	// Native mode, when systemd-run fails.
+	n := newNativeRig(t)
+	n.states = []string{"inactive", "failed"}
+	inner := n.r.Reply
+	n.r.Reply = func(c host.Cmd) ([]byte, error) {
+		if c.Args[0] == "systemd-run" {
+			return nil, errors.New("systemd-run: unit exists")
+		}
+		return inner(c)
+	}
+	err := n.n.Start(context.Background(), StartMode{})
+	if got := n.changes(); err == nil || !strings.HasPrefix(got[len(got)-1], back) {
+		t.Errorf("native, systemd-run fails: err %v, ran %q", err, got)
+	}
+}
+
 // --debug runs attached and hands the trees back after. --foreground skips
 // sudo and waits for the container, for the boot unit. Dry run waits for nothing.
 func TestDockerStartModes(t *testing.T) {
-	defer testid.Line(t, "df5xs")
+	defer testid.Line(t, "1a3eh24")
 	g := newRig(t)
 	if err := g.d.Start(context.Background(), StartMode{Debug: true}); err != nil {
 		t.Fatal(err)
@@ -257,7 +482,7 @@ func TestDockerStartModes(t *testing.T) {
 }
 
 func TestDockerStop(t *testing.T) {
-	defer testid.Line(t, "df5xt")
+	defer testid.Line(t, "1a3eh58")
 	g := newRig(t)
 	g.states = []string{"running", "running", "running", "exited"}
 	if err := g.d.Stop(context.Background(), 12); err != nil {
@@ -280,10 +505,126 @@ func TestDockerStop(t *testing.T) {
 	}
 }
 
+// Ctrl-C in the countdown ends it at once, tells the players the stop is
+// off, and fails, with the server and its trees left as they were.
+func TestStopCountdownInterrupt(t *testing.T) {
+	defer testid.Line(t, "1a3jwac")
+	g := newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Sleep = func(d time.Duration) {
+		g.slept += d
+		cancel()
+	}
+	err := g.d.Stop(ctx, 300)
+	if !errors.Is(err, ErrInterrupted) || !strings.Contains(err.Error(), "wasn't stopped") {
+		t.Errorf("err %v", err)
+	}
+	if want := []string{"say The server stops in 300 seconds.", stopOff}; !reflect.DeepEqual(g.console.sent, want) {
+		t.Errorf("sent %q, want %q", g.console.sent, want)
+	}
+	if got := g.changes(); !reflect.DeepEqual(got, []string{"sudo -v"}) || g.slept != 240*time.Second {
+		t.Errorf("ran %q, slept %s", got, g.slept)
+	}
+
+	// Ctrl-C while a line goes out is the same.
+	g = newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Console = cancelConsole{fakeConsole: g.console, cancel: cancel}
+	err = g.d.Stop(ctx, 10)
+	if !errors.Is(err, ErrInterrupted) || !reflect.DeepEqual(g.console.sent, []string{stopOff}) || g.slept != 0 {
+		t.Errorf("in a send: err %v, sent %q, slept %s", err, g.console.sent, g.slept)
+	}
+
+	// Once the stop line is out, Ctrl-C leaves the server stopping.
+	g = newRig(t)
+	g.states = []string{"running"}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	g.d.Sleep = func(time.Duration) { cancel() }
+	err = g.d.Stop(ctx, 0)
+	if !errors.Is(err, ErrInterrupted) || !strings.Contains(err.Error(), "still stopping") || !reflect.DeepEqual(g.console.sent, []string{"stop"}) {
+		t.Errorf("in the save: err %v, sent %q", err, g.console.sent)
+	}
+}
+
+// cancelConsole is Ctrl-C while the first line goes out.
+type cancelConsole struct {
+	*fakeConsole
+	cancel func()
+}
+
+func (c cancelConsole) Send(ctx context.Context, line string) error {
+	c.cancel()
+	return c.fakeConsole.Send(ctx, line)
+}
+
+// The real clock's wait ends at Ctrl-C.
+func TestPauseInterrupt(t *testing.T) {
+	defer testid.Line(t, "1a3jwdg")
+	k := &Kit{}
+	if err := k.pause(context.Background(), time.Millisecond); err != nil {
+		t.Errorf("short wait: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	start := time.Now()
+	if err := k.pause(ctx, time.Hour); !errors.Is(err, ErrInterrupted) || time.Since(start) > time.Minute {
+		t.Errorf("cut short: %v after %s", err, time.Since(start))
+	}
+	if err := k.pause(ctx, time.Hour); !errors.Is(err, ErrInterrupted) {
+		t.Errorf("already done: %v", err)
+	}
+}
+
+// In --foreground, as at boot, a slow load is only a warning and the wait
+// goes on, since an exit there makes systemd stop the server. The
+// container's exit code is passed on.
+func TestForegroundSlowLoad(t *testing.T) {
+	defer testid.Line(t, "1a3jwgm")
+	g := newRig(t)
+	g.d.Root = true
+	g.states = []string{"", "running"}
+	if err := g.d.Start(context.Background(), StartMode{Foreground: true}); err != nil {
+		t.Fatalf("slow: %v", err)
+	}
+	lines := g.r.Lines()
+	if !strings.Contains(g.out.String(), "warning: the server didn't finish loading in 5s") || lines[len(lines)-2] != "sudo docker wait tt-minecraftd" ||
+		!strings.Contains(lines[len(lines)-1], "chown -R -- alice:minecraftd") {
+		t.Errorf("slow: ran %q, output %q", lines, g.out.String())
+	}
+
+	for _, c := range []struct {
+		exit string
+		code int
+		bad  bool
+	}{{"137\n", 137, false}, {"1\n", 1, false}, {"", 0, true}, {"Error: no such container\n", 0, true}} {
+		g = newRig(t)
+		g.d.Root = true
+		g.states = []string{"", "running"}
+		g.log = doneLine
+		g.exit = c.exit
+		err := g.d.Start(context.Background(), StartMode{Foreground: true})
+		var exit ExitError
+		got := g.changes()
+		switch {
+		case !strings.Contains(got[len(got)-1], "chown -R -- alice:minecraftd"):
+			t.Errorf("exit %q: no hand-back, ran %q", c.exit, got)
+		case c.bad && (err == nil || errors.As(err, &exit)):
+			t.Errorf("exit %q: err %v", c.exit, err)
+		case !c.bad && (!errors.As(err, &exit) || exit.Code != c.code):
+			t.Errorf("exit %q: err %v", c.exit, err)
+		}
+	}
+}
+
 // Only update --mc-version snapshots now, so start and stop with zfsDataset
 // set run no zfs.
 func TestNoStartStopSnapshot(t *testing.T) {
-	defer testid.Line(t, "df78z")
+	defer testid.Line(t, "1a3jr0w")
 	g := newRig(t)
 	g.d.Cfg.ZfsDataset = "tank/mc"
 	g.states = []string{"exited", "running", "running", "running", "exited"}
@@ -305,7 +646,7 @@ func TestNoStartStopSnapshot(t *testing.T) {
 // Not running: the trees still go back, as after a crash. Stuck: SIGTERM,
 // then SIGKILL after docker's grace time.
 func TestDockerStopEdges(t *testing.T) {
-	defer testid.Line(t, "df5xv")
+	defer testid.Line(t, "1a3eh8c")
 	g := newRig(t)
 	g.states = []string{"exited"}
 	if err := g.d.Stop(context.Background(), 30); err != nil {
@@ -350,7 +691,7 @@ func (failConsole) Send(context.Context, string) error { return errors.New("no s
 // An unsafe setting stops a start in either mode, after sudo and before
 // anything changes. A likely mistake only warns.
 func TestStartChecksSettings(t *testing.T) {
-	defer testid.Line(t, "df5yj")
+	defer testid.Line(t, "1a3ekg8")
 	for _, native := range []bool{false, true} {
 		g := newNativeRig(t)
 		start := g.d.Start
@@ -391,7 +732,7 @@ func TestStartChecksSettings(t *testing.T) {
 // With firewall on, a start without the table stops after sudo, in either
 // mode, before anything changes. With it off, nft isn't asked.
 func TestStartChecksFirewall(t *testing.T) {
-	defer testid.Line(t, "df66f")
+	defer testid.Line(t, "1a3fc6w")
 	for _, native := range []bool{false, true} {
 		g := newNativeRig(t)
 		start := g.d.Start
@@ -427,77 +768,146 @@ func TestStartChecksFirewall(t *testing.T) {
 	}
 }
 
-// A new or changed jar stops a start in either mode, after sudo and before
-// anything changes. Geyser extensions count, and get read-only mounts too.
-func TestStartChecksPlugins(t *testing.T) {
-	defer testid.Line(t, "df5z4")
-	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	ext := filepath.Join("plugins", "Geyser-Spigot", "extensions", "thing.jar")
+// Rules written for another config, or that miss a new IPv6 subnet, stop a
+// start in either mode before anything changes, even with the table loaded.
+func TestStartChecksFirewallRules(t *testing.T) {
+	defer testid.Line(t, "1a3jvqm")
 	for _, native := range []bool{false, true} {
-		for _, c := range []struct {
-			what, file, text, says string
-		}{
-			{"new", "plugins/floodgate.jar", "", "not approved: plugins/floodgate.jar"},
-			{"changed", "plugins/Geyser-Spigot.jar", "evil", "changed since it was approved: plugins/Geyser-Spigot.jar"},
-			{"paper", "paper-26.3-244.jar", "evil", "changed since it was approved: paper-26.3-244.jar"},
-			{"extension", ext, "", "not approved: " + filepath.ToSlash(ext)},
+		for what, change := range map[string]func(g *nativeRig){
+			"allowFrom": func(g *nativeRig) { g.d.Cfg.AllowFrom = []string{"any"} },
+			"runUser":   func(g *nativeRig) { g.d.Cfg.RunUser = "mc" },
+			"bedrock":   func(g *nativeRig) { g.d.Cfg.Bedrock = !g.d.Cfg.Bedrock },
+			"no file": func(g *nativeRig) {
+				if err := os.Remove(g.d.FirewallFiles.Rules); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"new subnet": func(g *nativeRig) {
+				route := "20010db8000100020000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n"
+				if err := os.WriteFile(g.d.FirewallFiles.Routes, []byte(route), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
 		} {
 			g := newNativeRig(t)
+			change(g)
 			start := g.d.Start
 			if native {
 				start = g.n.Start
 			}
-			if err := os.MkdirAll(filepath.Dir(filepath.Join(g.dir, c.file)), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(g.dir, c.file), []byte(c.text), 0o600); err != nil {
-				t.Fatal(err)
-			}
 			err := start(context.Background(), StartMode{})
-			if err == nil || !strings.Contains(err.Error(), "repair --approve-plugins") || len(g.changes()) != 1 || !strings.Contains(g.out.String(), c.says) {
-				t.Errorf("native %v, %s: err %v, ran %q, output %q", native, c.what, err, g.changes(), g.out.String())
+			if err == nil || !strings.Contains(err.Error(), "firewall rules don't match") || !strings.Contains(err.Error(), "repair") || len(g.changes()) != 1 {
+				t.Errorf("native %v, %s: err %v, ran %q", native, what, err, g.changes())
 			}
 		}
+	}
+}
 
+// A new or changed jar stops a start in either mode, after sudo and before
+// anything changes. Geyser extensions count, and get read-only mounts too.
+// Commented out by 2026111914334569: start no longer checks jars against an approved list. TestStartTrustsJars covers what replaced it.
+// func TestStartChecksPlugins(t *testing.T) {
+// 	defer testid.Line(t, "1a3en8g")
+// 	empty := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+// 	ext := filepath.Join("plugins", "Geyser-Spigot", "extensions", "thing.jar")
+// 	for _, native := range []bool{false, true} {
+// 		for _, c := range []struct {
+// 			what, file, text, says string
+// 		}{
+// 			{"new", "plugins/floodgate.jar", "", "not approved: plugins/floodgate.jar"},
+// 			{"changed", "plugins/Geyser-Spigot.jar", "evil", "changed since it was approved: plugins/Geyser-Spigot.jar"},
+// 			{"paper", "paper-26.3-244.jar", "evil", "changed since it was approved: paper-26.3-244.jar"},
+// 			{"extension", ext, "", "not approved: " + filepath.ToSlash(ext)},
+// 		} {
+// 			g := newNativeRig(t)
+// 			start := g.d.Start
+// 			if native {
+// 				start = g.n.Start
+// 			}
+// 			if err := os.MkdirAll(filepath.Dir(filepath.Join(g.dir, c.file)), 0o700); err != nil {
+// 				t.Fatal(err)
+// 			}
+// 			if err := os.WriteFile(filepath.Join(g.dir, c.file), []byte(c.text), 0o600); err != nil {
+// 				t.Fatal(err)
+// 			}
+// 			err := start(context.Background(), StartMode{})
+// 			if err == nil || !strings.Contains(err.Error(), "repair --approve-plugins") || len(g.changes()) != 1 || !strings.Contains(g.out.String(), c.says) {
+// 				t.Errorf("native %v, %s: err %v, ran %q, output %q", native, c.what, err, g.changes(), g.out.String())
+// 			}
+// 		}
+//
+// 		g := newNativeRig(t)
+// 		start := g.d.Start
+// 		if native {
+// 			start = g.n.Start
+// 		}
+// 		g.d.PluginsFile, g.n.PluginsFile = filepath.Join(t.TempDir(), "none.shcl"), filepath.Join(t.TempDir(), "none.shcl")
+// 		if err := start(context.Background(), StartMode{}); err == nil || !strings.Contains(g.out.String(), "not approved: paper-26.3-244.jar") {
+// 			t.Errorf("native %v, no list: err %v, output %q", native, err, g.out.String())
+// 		}
+// 	}
+//
+// 	g := newRig(t)
+// 	g.d.DryRun = true
+// 	if err := os.MkdirAll(filepath.Join(g.dir, filepath.Dir(ext)), 0o700); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if err := os.WriteFile(filepath.Join(g.dir, ext), nil, 0o600); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	f, err := os.OpenFile(g.d.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if _, err := f.WriteString("jar: " + filepath.ToSlash(ext) + "\n\tsha256: " + empty + "\n"); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	f.Close()
+// 	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
+// 	if create := g.r.Lines()[len(g.r.Ran)-2]; !strings.Contains(create, mount) {
+// 		t.Errorf("no read-only mount for the extension in %q", create)
+// 	}
+// }
+
+// A new or changed jar, Paper build, or Geyser extension doesn't stop a
+// start in either mode, and still gets a read-only mount (2026111914293176).
+func TestStartTrustsJars(t *testing.T) {
+	defer testid.Line(t, "1a4j19g")
+	ext := filepath.Join("plugins", "Geyser-Spigot", "extensions", "thing.jar")
+	for _, native := range []bool{false, true} {
 		g := newNativeRig(t)
 		start := g.d.Start
+		g.d.DryRun, g.n.DryRun = true, true
 		if native {
 			start = g.n.Start
 		}
-		g.d.PluginsFile, g.n.PluginsFile = filepath.Join(t.TempDir(), "none.shcl"), filepath.Join(t.TempDir(), "none.shcl")
-		if err := start(context.Background(), StartMode{}); err == nil || !strings.Contains(g.out.String(), "not approved: paper-26.3-244.jar") {
-			t.Errorf("native %v, no list: err %v, output %q", native, err, g.out.String())
+		for file, text := range map[string]string{"plugins/floodgate.jar": "", "plugins/Geyser-Spigot.jar": "changed", "paper-26.3-244.jar": "changed", ext: ""} {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(g.dir, file)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(g.dir, file), []byte(text), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-
-	g := newRig(t)
-	g.d.DryRun = true
-	if err := os.MkdirAll(filepath.Join(g.dir, filepath.Dir(ext)), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(g.dir, ext), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.OpenFile(g.d.PluginsFile, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("jar: " + filepath.ToSlash(ext) + "\n\tsha256: " + empty + "\n"); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
-		t.Fatal(err)
-	}
-	mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
-	if create := g.r.Lines()[len(g.r.Ran)-2]; !strings.Contains(create, mount) {
-		t.Errorf("no read-only mount for the extension in %q", create)
+		if err := start(context.Background(), StartMode{}); err != nil || strings.Contains(g.out.String(), "approve") {
+			t.Errorf("native %v: err %v, output %q", native, err, g.out.String())
+		}
+		if native {
+			continue
+		}
+		mount := "type=bind,src=" + filepath.Join(g.dir, ext) + ",dst=" + filepath.Join(g.dir, ext) + ",readonly"
+		if create := g.r.Lines()[len(g.r.Ran)-2]; !strings.Contains(create, mount) {
+			t.Errorf("no read-only mount for the extension in %q", create)
+		}
 	}
 }
 
 // Podman gets the same run command as Docker, through sudo.
 func TestPodmanStart(t *testing.T) {
-	defer testid.Line(t, "df64f")
+	defer testid.Line(t, "1a3f5yw")
 	docker := newRig(t)
 	docker.states = []string{"", "running"}
 	docker.log = "Done (1.0s)! For help, type \"help\""
@@ -536,7 +946,7 @@ func TestPodmanStart(t *testing.T) {
 // A container from before a runMode change is found under the other runtime,
 // and stop goes there. Only runMode's runtime has to answer.
 func TestFindContainer(t *testing.T) {
-	defer testid.Line(t, "df64g")
+	defer testid.Line(t, "1a3f620")
 	states := map[string]string{}
 	fails := map[string]bool{}
 	installed := map[string]bool{}
@@ -608,10 +1018,167 @@ func TestFindContainer(t *testing.T) {
 	if g.d.Runtime != "docker" || !strings.Contains(g.out.String(), "under docker, not podman") {
 		t.Errorf("stop stayed on %q: %q", g.d.Runtime, g.out.String())
 	}
-	for _, c := range g.r.Ran[2:] {
+	// sudo -n true, sudo -v, then the podman look that finds nothing.
+	for _, c := range g.r.Ran[3:] {
 		if c.Args[0] == "podman" {
 			t.Errorf("asked podman after finding docker's: %q", g.r.Lines())
 			break
 		}
+	}
+}
+
+// A jar's name comes from the server account, so start's refusal shows it
+// without its escape codes.
+// Commented out by 2026111914334569: start no longer prints jar names, since it doesn't check them.
+// func TestStartCleansJarName(t *testing.T) {
+// 	defer testid.Line(t, "1a3jtj4")
+// 	g := newRig(t)
+// 	if err := os.WriteFile(filepath.Join(g.dir, "plugins", "\x1b]0;owned\x07\x1b[2K\rGeyser-Spigot.jar"), nil, 0o600); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	err := g.d.Start(context.Background(), StartMode{})
+// 	out := g.out.String()
+// 	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "not approved: plugins/]0;owned[2KGeyser-Spigot.jar\n") {
+// 		t.Errorf("err %v, output %q", err, out)
+// 	}
+// }
+
+// The log tail of a server that died while loading is the server's text, so
+// it's shown without escape codes, a line per line.
+func TestStartCleansLogTail(t *testing.T) {
+	defer testid.Line(t, "1a3jtn8")
+	g := newRig(t)
+	g.states = []string{"", "exited"}
+	g.log = "first \x1b]52;c;ZWNobyBoaQ==\x07line\r\nsecond\x1b[2J line\n"
+	err := g.d.Start(context.Background(), StartMode{})
+	out := g.out.String()
+	if err == nil || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "first ]52;c;ZWNobyBoaQ==line\nsecond[2J line\n") {
+		t.Errorf("err %v, output %q", err, out)
+	}
+}
+
+// Two plugin jars that link to one file give one mount, since Docker and
+// Podman refuse a destination given twice.
+func TestStartJarLinksOneMount(t *testing.T) {
+	defer testid.Line(t, "1a3jyf4")
+	g := newRig(t)
+	g.d.DryRun = true
+	// Approving them went in 2026111914334569.
+	for _, name := range []string{"one.jar", "two.jar"} {
+		if err := os.Symlink("Geyser-Spigot.jar", filepath.Join(g.dir, "plugins", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// So do two trees that are one folder.
+	alias := filepath.Join(filepath.Dir(g.dir), "alias")
+	if err := os.Symlink("server", alias); err != nil {
+		t.Fatal(err)
+	}
+	g.d.Cfg.OwnerTrees = []string{g.dir, alias, g.dir}
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(g.dir, "plugins", "Geyser-Spigot.jar")
+	create := g.r.Lines()[len(g.r.Ran)-2]
+	if n := strings.Count(create, "dst="+real+","); n != 1 {
+		t.Errorf("%d mounts of %s in %q", n, real, create)
+	}
+	if n := strings.Count(create, "dst="+g.dir+" "); n != 1 {
+		t.Errorf("%d mounts of %s in %q", n, g.dir, create)
+	}
+	// Native mode takes the same list for its read-only paths.
+	jars, err := LockedJars(g.dir, []string{g.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{filepath.Join(g.dir, "paper-26.3-244.jar"), real}; !slices.Equal(jars, want) {
+		t.Errorf("LockedJars gave %q, want %q", jars, want)
+	}
+}
+
+// A jar link the server account plants in plugins/ that leads out of the
+// trees stops start before anything runs, so it can't have a host file or
+// folder mounted into the container (backlog 2026112110300013).
+func TestStartJarLinkOutOfTrees(t *testing.T) {
+	defer testid.Line(t, "1a4ytyw")
+	plant := map[string]func(g *rig, outside string) error{
+		"file": func(g *rig, outside string) error {
+			return os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(g.dir, "plugins", "zz-host.jar"))
+		},
+		"folder": func(g *rig, outside string) error {
+			return os.Symlink(outside, filepath.Join(g.dir, "plugins", "zz-host.jar"))
+		},
+		"extensions folder": func(g *rig, outside string) error {
+			if err := os.MkdirAll(filepath.Join(g.dir, "plugins", "Geyser-Spigot"), 0o700); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(outside, "x.jar"), nil, 0o600); err != nil {
+				return err
+			}
+			return os.Symlink(outside, filepath.Join(g.dir, "plugins", "Geyser-Spigot", "extensions"))
+		},
+		"paper.jar": func(g *rig, outside string) error {
+			if err := os.Remove(filepath.Join(g.dir, "paper.jar")); err != nil {
+				return err
+			}
+			return os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(g.dir, "paper.jar"))
+		},
+	}
+	for name, how := range plant {
+		t.Run(name, func(t *testing.T) {
+			g := newRig(t)
+			g.d.DryRun = true
+			outside := filepath.Join(filepath.Dir(filepath.Dir(g.dir)), "home", "alice")
+			if err := os.MkdirAll(outside, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := how(g, outside); err != nil {
+				t.Fatal(err)
+			}
+			err := g.d.Start(context.Background(), StartMode{})
+			if err == nil || !strings.Contains(err.Error(), "outside serverDir and ownerTrees") && !errors.Is(err, server.ErrNotRegular) {
+				t.Errorf("err %v", err)
+			}
+			if lines := strings.Join(g.r.Lines(), "\n"); strings.Contains(lines, "alice") {
+				t.Errorf("the outside path reached a command:\n%s", lines)
+			}
+			if _, err := LockedJars(g.dir, []string{g.dir}); err == nil {
+				t.Error("LockedJars took it, so native start would chown it")
+			}
+		})
+	}
+
+	// A pipe in the tree isn't a jar either.
+	g := newRig(t)
+	g.d.DryRun = true
+	if err := syscall.Mkfifo(filepath.Join(g.dir, "plugins", "pipe.jar"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.d.Start(context.Background(), StartMode{}); !errors.Is(err, server.ErrNotRegular) {
+		t.Errorf("pipe: err %v", err)
+	}
+
+	// A link to a jar in another tree is fine, and that jar is mounted.
+	g = newRig(t)
+	g.d.DryRun = true
+	other := filepath.Join(filepath.Dir(g.dir), "shared")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "lib.jar"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(other, "lib.jar"), filepath.Join(g.dir, "plugins", "lib.jar")); err != nil {
+		t.Fatal(err)
+	}
+	g.d.Cfg.OwnerTrees = []string{g.dir, other}
+	if err := g.d.Start(context.Background(), StartMode{}); err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Join(g.r.Lines(), "\n"); !strings.Contains(lines, "dst="+filepath.Join(other, "lib.jar")+",readonly") {
+		t.Errorf("no read-only mount of the other tree's jar in:\n%s", lines)
 	}
 }

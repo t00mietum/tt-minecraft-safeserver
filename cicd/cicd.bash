@@ -46,7 +46,8 @@
 ##	   --keep-temp         keep the run's temp folder and containers, and say where they are
 ##	   --list              print the steps and test IDs the other options would run, and run nothing
 ##	   --lint-check        print only run output that wasn't seen before, then mark it seen. For the
-##	                       startup ritual. Exit 2 when there is no log yet.
+##	                       startup ritual. A failed run is FAILED with exit 1, and one still running
+##	                       or killed is UNFINISHED and stays unseen. Exit 2 when there is no log yet.
 ##	   -h, --help          show this help
 ##	- If neither -q nor -m is given, the run prompts once for a commit message (Ctrl+C aborts the
 ##	  whole run), then finishes unattended.
@@ -54,12 +55,12 @@
 ##	- CICD_MEM_CAP caps the run's memory, with no swap: a size such as 24g, or none.
 ##	  The default is a third of RAM, from 4g to 32g.
 ##	- The arm64 step builds the test binaries for linux/arm64 and runs them on the arm64 test box,
-##	  ARM64_HOST in config.bash, under the shared host lock. VM_STATE_TOOL holds the box and puts a
+##	  ARM64_HOST in config.bash, under the shared host lock. VM_STATE_TOOL takes the box and puts a
 ##	  VM back the way it was found. A box or tool that isn't there, or a box busy past
 ##	  ARM64_LOCK_WAIT, is a SKIP and the run goes on. CICD_ARM64_HOST, CICD_ARM64_SSH, CICD_VM_STATE
 ##	  and CICD_ARM64_LOCK_WAIT override them.
 ##	- The fuzz step runs each Fuzz target in turn for FUZZ_TIME in config.bash (FUZZ_TIME_QUICK in
-##	  --quick, FUZZ_TIME_LONG in --long), from a copy of the tree, so a failing input lands in the
+##	  --quick, FUZZ_TIME_LONG in --long), from a copy of the tree, so a failing input ends up in the
 ##	  run folder. Its file is printed; copy it to the package's testdata/fuzz to keep it as a test.
 ##	  CICD_FUZZ_TIME overrides the time in every run.
 ##	- The soak step runs each TestSoak, which loops the main actions headless and fails when the live
@@ -71,7 +72,8 @@
 ##	  --no-container. It uses a quarter of the cores, and skips on a box that isn't Linux amd64.
 ##	- The demo step records the README's CLI demo gif from the linux/amd64 build, with
 ##	  utility/demo.bash, in the build container as root with no network, since it writes a made-up
-##	  install under /etc and /srv. Each render goes to DEMO_DIR in config.bash, GFS-rotated. Only a
+##	  install under /etc and /srv. utility/demo/scenario.toml has the steps, and script.txt beside
+##	  it the plan. Each render goes to DEMO_DIR in config.bash, GFS-rotated. Only a
 ##	  release run copies it to DEMO_GIF, which the publish stage then commits. Without the container
 ##	  it's a SKIP.
 ##	- The two root host steps take about 3 minutes each and need docker that can run --privileged.
@@ -143,8 +145,9 @@ fStepEnd(){
 	stepResult["${stepNow}"]="${r}${stepSkip:+ (${stepSkip})}"
 	stepName=""
 }
-## A step that can't run here. The run goes on, and the summary says why.
-fSkip(){ stepSkip="$*"; fEcho_Clean "SKIP: $*"; }
+## A step, or part of one, that can't run here. The run goes on, the summary says why, and the
+## merge gate doesn't count it as passed.
+fSkip(){ stepSkip="${stepSkip:+${stepSkip}; }$*"; fEcho_Clean "SKIP: $*"; }
 
 mode=default; message=""; quiet=0; leakOpt=""; noContainer=0; noRemote=0; keepTemp=0; listOnly=0; lintCheck=0
 gateAreas=(); aliasNote=""; modeOpts=()
@@ -188,7 +191,7 @@ if ((handsOff)) && [[ -n "${message}" ]]; then fUsage "--${mode} never publishes
 
 areaDirs=()
 if [[ "${mode}" == gate ]]; then
-	gateAreasAll=(cli); for d in "${root}"/source/internal/*/; do gateAreasAll+=("$(basename "${d}")"); done
+	gateAreasAll=(cli); for d in "${root}"/source/internal/*/; do d="${d%/}"; gateAreasAll+=("${d##*/}"); done
 	for a in "${gateAreas[@]:-}"; do
 		[[ -z "${a}" ]] && continue
 		[[ " ${gateAreasAll[*]} " == *" ${a} "* ]] || fUsage "--backlog-run-quick: no area '${a}'. Areas: ${gateAreasAll[*]}"
@@ -304,7 +307,7 @@ fRunTmpDone(){
 	fEcho_Clean
 }
 if ((! listOnly)); then
-	## Once, so every path under it is spelled the same.
+	## Once, so every path under it is written the same.
 	HOST_TEMP="$(realpath -e -- "${HOST_TEMP:-${TMPDIR:-/tmp}}")" || fDie "no temp folder at ${HOST_TEMP:-${TMPDIR:-/tmp}}"
 	export HOST_TEMP
 	runRoot="${HOST_TEMP}/${APP_NAME}"
@@ -342,10 +345,14 @@ fGlobFiles shellFiles "${SHELL_LINT_GLOBS[@]}"
 fGlobFiles mdFiles "${MD_LINT_GLOBS[@]}"
 
 ## The version, read from its one place.
-goVersion="$(sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1)"
+fReadVersion(){ sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1 ;}
+goVersion="$(fReadVersion)"
 [[ -n "${goVersion}" ]] || fDie "no version in ${VERSION_FILE}"
 fCommitEpoch(){ git log -1 --format=%ct 2>/dev/null || echo 0 ;}
 fIsRelease(){ [[ "$(git branch --show-current 2>/dev/null)" == main && "$(git describe --exact-match --tags HEAD 2>/dev/null || true)" == "${goVersion}" ]] && echo 1 || echo 0 ;}
+## What a release build reads that isn't committed: untracked and ignored files too, since go build
+## takes every .go file in a folder. config.bash has the flags verify-release.bash reads from the tag.
+fReleaseDirty(){ git status --porcelain --untracked-files=all --ignored=matching -- source go.mod go.sum cicd/config.bash 2>/dev/null || echo "?? (git status failed)" ;}
 
 ## A host tool by name: on PATH, or where go install puts it.
 fHostTool(){ local f="" d
@@ -359,7 +366,7 @@ fCtrSetup(){
 	local tag
 	((! noContainer)) || { fEcho_Clean "Container: off (--no-container), running on this box"; return 0; }
 	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fEcho_Clean "Container: no docker here, running on this box"; return 0; fi
-	tag="${APP_NAME}-cicd:$({ cat "${here}/container/Dockerfile" "${here}/container/markdownlint/package-lock.json"; grep -E '^(GO_IMAGE|STATICCHECK_VERSION|GOVULNCHECK_VERSION|GOSEC_VERSION|NFPM_VERSION|NODE_[A-Z0-9_]*|SHELLCHECK_[A-Z0-9_]*)=' "${here}/config.bash"; } | sha256sum | cut -c1-12)"
+	tag="${APP_NAME}-cicd:$({ cat "${here}/container/Dockerfile" "${here}/container/markdownlint/package-lock.json"; grep -E '^(GO_IMAGE|STATICCHECK_VERSION|GOVULNCHECK_VERSION|GOSEC_VERSION|NFPM_VERSION|NODE_[A-Z0-9_]*|SHELLCHECK_[A-Z0-9_]*|MONASPACE_[A-Z0-9_]*)=' "${here}/config.bash"; } | sha256sum | cut -c1-12)"
 	if ! docker image inspect "${tag}" >/dev/null 2>&1; then
 		fEcho_Clean "Container: building ${tag}"
 		if ! nice -n 19 docker build -q --label "dev.project=${APP_NAME}" --label "dev.run=${runName}" \
@@ -367,7 +374,8 @@ fCtrSetup(){
 			--build-arg "GOSEC_VERSION=${GOSEC_VERSION}" --build-arg "NFPM_VERSION=${NFPM_VERSION}" \
 			--build-arg "NODE_VERSION=${NODE_VERSION}" --build-arg "NODE_SHA256_AMD64=${NODE_SHA256_AMD64}" --build-arg "NODE_SHA256_ARM64=${NODE_SHA256_ARM64}" \
 			--build-arg "SHELLCHECK_VERSION=${SHELLCHECK_VERSION}" --build-arg "SHELLCHECK_SHA256_AMD64=${SHELLCHECK_SHA256_AMD64}" \
-			--build-arg "SHELLCHECK_SHA256_ARM64=${SHELLCHECK_SHA256_ARM64}" -t "${tag}" "${here}/container" >/dev/null; then
+			--build-arg "SHELLCHECK_SHA256_ARM64=${SHELLCHECK_SHA256_ARM64}" \
+			--build-arg "MONASPACE_VERSION=${MONASPACE_VERSION}" --build-arg "MONASPACE_SHA256=${MONASPACE_SHA256}" -t "${tag}" "${here}/container" >/dev/null; then
 			fEcho_Clean "Container: the image would not build, running on this box"; return 0
 		fi
 	fi
@@ -402,9 +410,9 @@ fGo(){
 	else
 		( for w in "${envs[@]:-}"; do [[ -z "${w}" || "${w}" == HEAVY=1 || "${w}" == MOUNT=* ]] || export "${w?}"; done
 		  export GOMAXPROCS="${jobs}" GOFLAGS="${GOFLAGS:+${GOFLAGS} }-buildvcs=false"
-		  cmd="$1"; shift
+		  tool="$1"; cmd="$1"; shift
 		  case "${cmd}" in
-			staticcheck|gosec|govulncheck|nfpm) cmd="$(fHostTool "${cmd}")"; [[ -n "${cmd}" ]] || { echo "not installed: $1" >&2; exit 127; } ;;
+			staticcheck|gosec|govulncheck|nfpm) cmd="$(fHostTool "${tool}")"; [[ -n "${cmd}" ]] || { echo "not installed: ${tool}" >&2; exit 127; } ;;
 		  esac
 		  "${cmd}" "$@" )
 	fi
@@ -435,20 +443,26 @@ fStepSync(){
 		fi
 	fi
 	## Read after the sync, which can move HEAD.
-	goVersion="$(sed -n 's/^var version = "\(.*\)".*/\1/p' "${root}/${VERSION_FILE}" | head -n 1)"
+	goVersion="$(fReadVersion)"
 }
 
 formatChanged=()
 fStepFormat(){
-	local bad
-	bad="$(gofmt -l source 2>/dev/null || true)"
+	local bad rc=0 err="${runTmp}/gofmt.err"
+	## The image's gofmt, at the pinned Go. A gofmt that's missing or can't parse a file is a FAIL, not clean.
+	bad="$(fGo format -- gofmt -l source 2> "${err}")" || rc=$?
+	if ((rc)); then cat -- "${err}"; fDie "gofmt failed (exit ${rc})"; fi
 	if [[ -z "${bad}" ]]; then fEcho_Clean "gofmt: clean"; return 0; fi
 	if ((handsOff)) || [[ "${mode}" == gate ]]; then
 		printf '%s\n' "${bad}"; fDie "gofmt wants to reformat the files above"
 	fi
 	## A run that publishes may reformat, and records which files it touched so publish adds only those.
-	local f
-	while IFS= read -r f; do gofmt -w "${f}"; formatChanged+=("${f}"); done <<< "${bad}"
+	## The tree is read-only in the container, so the rewrite is the host's gofmt.
+	local files=()
+	mapfile -t files <<< "${bad}"
+	command -v gofmt >/dev/null 2>&1 || fDie "gofmt isn't on PATH here, to reformat the files above"
+	gofmt -w "${files[@]}" || fDie "gofmt -w failed"
+	formatChanged+=("${files[@]}")
 	fEcho_Clean "gofmt: reformatted ${#formatChanged[@]} file(s)"
 }
 
@@ -468,11 +482,11 @@ fStepLint(){
 	if ((useContainer)) || command -v shellcheck >/dev/null 2>&1; then
 		fGo lint -- shellcheck "${shellFiles[@]}" 2>&1 | fLintOut || fDie "shellcheck findings"
 		fEcho_Clean "shellcheck: clean"
-	else fEcho "WARNING: shellcheck skipped (not installed)"; fi
+	else fSkip "shellcheck isn't installed here"; fi
 	if ((useContainer)) || command -v markdownlint >/dev/null 2>&1; then
 		fGo lint -- markdownlint "${mdFiles[@]}" 2>&1 | fLintOut || fDie "markdownlint findings"
 		fEcho_Clean "markdownlint: clean (${#mdFiles[@]} file(s))"
-	else fEcho "WARNING: markdownlint skipped (not installed)"; fi
+	else fSkip "markdownlint isn't installed here"; fi
 	"${here}/utility/test-id.bash" --check -q || fDie "test IDs (see above)"
 	fEcho_Clean "test IDs: every test has its own"
 	((! useContainer)) || return 0
@@ -487,6 +501,12 @@ fStepLint(){
 	((${#drift[@]} == 0)) || fEcho "WARNING: tool versions differ from the recorded set: ${drift[*]}"
 }
 
+## A test ID line, as testid.Line prints it. The ID's length is set by test-id.bash.
+idRe='[0-9a-z]{7}'
+fIdLines(){ grep -E "^(PASS|FAIL|SKIP) ${idRe} " "$1" | sed 's/^/  /' || true ;}  ## LOG
+fTestNoise(){ grep -vE "^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS ${idRe} |SKIP ${idRe} )" "$1" | tail -n "$2" || true ;}  ## LOG N: what's left once the ID lines are out
+fPassCount(){ grep -cE "^PASS ${idRe} " "$1" || true ;}  ## LOG
+
 ## One line per test with its ID, from the test binary's own output, then the verdict.
 fGoTestRun(){ ## LABEL [VAR=value...]: go test over the chosen packages, to a log in the run folder
 	local label="$1" log rc=0 extra=()
@@ -494,12 +514,12 @@ fGoTestRun(){ ## LABEL [VAR=value...]: go test over the chosen packages, to a lo
 	log="${runTmp}/gotest_${label}.log"
 	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
 	fGo test "${extra[@]}" "$@" -- go test -count=1 -p "${testJobs}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	fIdLines "${log}"
 	if ((rc)); then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true
+		fTestNoise "${log}" 80
 		fDie "go test failed (${label})"
 	fi
-	fEcho_Clean "go test (${label}): $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+	fEcho_Clean "go test (${label}): $(fPassCount "${log}") test line(s) passed"
 }
 fStepTest(){
 	local fresh="${runTmp}/gotmp"
@@ -515,18 +535,22 @@ fStepRace(){
 	[[ "${leakOpt}" != --no-leakcheck ]] || extra+=(CICD_NO_LEAKCHECK=1)
 	## -race needs cgo, and the container has gcc.
 	fGo race "${extra[@]}" HEAVY=1 CGO_ENABLED=1 "TMPDIR=${fresh}" -- go test -race -count=1 -p "${HEAVY_JOBS}" -v "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
-	if ((rc)); then grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true; fDie "race test failed"; fi
-	fEcho_Clean "go test -race: $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+	if ((rc)); then fTestNoise "${log}" 80; fDie "race test failed"; fi
+	fEcho_Clean "go test -race: $(fPassCount "${log}") test line(s) passed"
 }
 fStepVuln(){
 	local out rc=0
 	out="$(fGo vuln -- govulncheck -test "${pkgs[@]}" 2>&1)" || rc=$?
-	if ((rc)); then
-		## Offline is a skip. A real finding says "Vulnerability #".
-		if grep -q 'Vulnerability #' <<< "${out}"; then grep -E 'Vulnerability #|Found in|Fixed in|More info|affected by' <<< "${out}" | fLintOut; fDie "govulncheck findings"; fi
+	((rc)) || { fEcho_Clean "govulncheck: clean"; return 0; }
+	## A finding says "Vulnerability #" and exits 3. Only a failed fetch of the database is a skip;
+	## any other error, a missing govulncheck included, fails the step.
+	if grep -q 'Vulnerability #' <<< "${out}"; then grep -E 'Vulnerability #|Found in|Fixed in|More info|affected by' <<< "${out}" | fLintOut; fDie "govulncheck findings"; fi
+	if grep -q '^govulncheck: fetching vulnerabilities: ' <<< "${out}"; then
+		grep -m 1 '^govulncheck: fetching vulnerabilities: ' <<< "${out}" | sed 's/^/  /'
 		fSkip "govulncheck can't reach vuln.go.dev"; return 0
 	fi
-	fEcho_Clean "govulncheck: clean"
+	tail -n 20 <<< "${out}"
+	fDie "govulncheck failed (exit ${rc})"
 }
 
 ## Each Fuzz target for its budget, from a copy of the tree: go test writes a failing input under
@@ -540,13 +564,13 @@ fStepFuzz(){
 	cp -a -- source go.mod go.sum "${copy}/"
 	fEcho_Clean "${budget} per target, ${HEAVY_JOBS} worker(s)"
 	while IFS= read -r f; do
-		dir="./$(dirname "${f}")"
+		dir="./${f%/*}"
 		while IFS= read -r name; do
 			n=$((n + 1)); rc=0
 			fGo fuzz HEAVY=1 -- go -C "${copy}" test -count=1 -run '^$' -fuzz "^${name}\$" -fuzztime "${budget}" -parallel "${HEAVY_JOBS}" "${dir}" > "${log}" 2>&1 || rc=$?
-			grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+			fIdLines "${log}"
 			if ((rc)); then
-				grep -vE '^(fuzz: elapsed|(PASS|FAIL|SKIP) [0-9a-z]{5} )' "${log}" | tail -n 40 || true
+				grep -vE "^(fuzz: elapsed|(PASS|FAIL|SKIP) ${idRe} )" "${log}" | tail -n 40 || true
 				found="$(find "${copy}/${dir#./}/testdata/fuzz/${name}" -type f -newer "${copy}/go.mod" 2>/dev/null | head -n 1)"
 				[[ -z "${found}" ]] || { fEcho_Clean "failing input: ${found}"; sed 's/^/  /' "${found}"; }
 				fDie "fuzzing found a failure in ${name} (${dir})"
@@ -557,23 +581,34 @@ fStepFuzz(){
 	fEcho_Clean "fuzzing: ${n} target(s), nothing found"
 }
 
+## The heap profiles from round N and 2N, one tar per run, kept on a pass or a fail.
+fSoakKeep(){ ## PROFILE_DIR
+	local tar="soak_${stamp}.tar"
+	[[ -n "$(find "$1" -name '*.pb.gz' -print -quit)" ]] || return 0
+	mkdir -p -- "${root}/${SOAK_DIR}"
+	tar -C "$1" -cf "${root}/${SOAK_DIR}/${tar}" . || { fEcho "WARNING: can't keep the soak profiles"; return 0; }
+	gfs_rotate "${root}/${SOAK_DIR}" soak tar >/dev/null 2>&1 || true
+	fEcho_Clean "heap profiles kept in ${SOAK_DIR}; to see what grew: go tool pprof -base <test>_half.pb.gz <test>_double.pb.gz"
+}
 ## Each TestSoak, with the rounds set: the tests skip without them.
 fStepSoak(){
-	local log="${runTmp}/soak.log" rounds="${SOAK_ROUNDS}" rc=0 n
+	local log="${runTmp}/soak.log" rounds="${SOAK_ROUNDS}" rc=0 n prof="${runTmp}/soakprof"
 	[[ "${mode}" != long ]] || rounds="${SOAK_ROUNDS_LONG}"
 	rounds="${CICD_SOAK_ROUNDS:-${rounds}}"
 	[[ "${rounds}" =~ ^[1-9][0-9]*$ ]] || fDie "soak rounds '${rounds}' isn't a count"
 	fEcho_Clean "rounds ${rounds} and $((rounds * 2)), ${HEAVY_JOBS} worker(s)"
-	fGo soak HEAVY=1 "${SOAK_ENV}=${rounds}" -- go test -count=1 -p "${HEAVY_JOBS}" -v -run '^TestSoak$' "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
+	mkdir -- "${prof}"
+	fGo soak HEAVY=1 "${SOAK_ENV}=${rounds}" "${SOAK_PROFILE_ENV}=${prof}" -- go test -count=1 -p "${HEAVY_JOBS}" -v -run '^TestSoak$' "${pkgs[@]}" > "${log}" 2>&1 || rc=$?
+	fSoakKeep "${prof}"
 	## A test's numbers, then its PASS or FAIL line: go test prints each package's output in one piece.
-	grep -E '^((PASS|FAIL|SKIP) [0-9a-z]{5} |[[:space:]]+soak_test\.go:[0-9]+: )' "${log}" | sed -E 's/^[[:space:]]*/  /' || true
+	grep -E "^((PASS|FAIL|SKIP) ${idRe} |[[:space:]]+soak_test\.go:[0-9]+: )" "${log}" | sed -E 's/^[[:space:]]*/  /' || true
 	if ((rc)); then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|(PASS|FAIL|SKIP) [0-9a-z]{5} |[[:space:]]+soak_test\.go:)' "${log}" | tail -n 40 || true
+		grep -vE "^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|(PASS|FAIL|SKIP) ${idRe} |[[:space:]]+soak_test\.go:)" "${log}" | tail -n 40 || true
 		fDie "soak test failed"
 	fi
 	## A skip here means the rounds never reached the test, so it checked nothing.
-	! grep -qE '^SKIP [0-9a-z]{5} ' "${log}" || fDie "a soak test skipped: ${SOAK_ENV} didn't reach it"
-	n="$(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true)"
+	! grep -qE "^SKIP ${idRe} " "${log}" || fDie "a soak test skipped: ${SOAK_ENV} didn't reach it"
+	n="$(fPassCount "${log}")"
 	((n)) || { fSkip "no soak tests in ${pkgs[*]}"; return 0; }
 	fEcho_Clean "soak: ${n} test(s), nothing grew"
 }
@@ -618,29 +653,53 @@ fStepCodeql(){
 	while IFS= read -r -d '' f; do [[ ! -f "${f}" ]] || files+=("${f}"); done < <(git ls-files -z -- source go.mod go.sum)
 	((${#files[@]})) || fDie "no tracked Go files to analyze"
 	cp --parents -t "${copy}" -- "${files[@]}"
-	fEcho_Clean "${#files[@]} tracked file(s), ${HEAVY_JOBS} thread(s), ${ram} MB, suite ${CODEQL_SUITE#*:}"
+	## CodeQL only reports on code under the source root, so the modules go in as vendor/.
+	fGo codeql -- go -C "${copy}" mod vendor >> "${log}" 2>&1 || { tail -n 20 "${log}"; fDie "go mod vendor failed"; }
+	fEcho_Clean "${#files[@]} tracked file(s) and $(grep -c '^# ' "${copy}/vendor/modules.txt") vendored module(s), ${HEAVY_JOBS} thread(s), ${ram} MB, suite ${CODEQL_SUITE#*:}"
 	rc=0
 	fGo codeql HEAVY=1 "${mount[@]}" -- "${cql}" database create "${db}" --language=go --source-root="${copy}" \
+		--extractor-option=go.extract_vendor_dirs=true \
 		--command="go build -p ${HEAVY_JOBS} ./..." --threads="${HEAVY_JOBS}" --ram="${ram}" >> "${log}" 2>&1 || rc=$?
 	((rc == 0)) || { tail -n 40 "${log}"; fDie "codeql database create failed"; }
 	fGo codeql HEAVY=1 "${mount[@]}" -- "${cql}" database analyze "${db}" "${CODEQL_SUITE}" --format=csv --output="${out}" \
 		--threads="${HEAVY_JOBS}" --ram="${ram}" >> "${log}" 2>&1 || rc=$?
 	((rc == 0)) || { tail -n 40 "${log}"; fDie "codeql database analyze failed"; }
-	## name, description, severity, message, path, line, ...
+	## name, description, severity, message, path, line, ... A message can run over several lines.
 	re='^"(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","(([^"]|"")*)","([0-9]+)"'
+	local rec="" q key shown="${runTmp}/codeql.txt" stale=()
+	local -i nNew=0 nKnown=0
+	## Third-party results looked at and let through: "rule|path|line|why". Read the file for each one's reason.
+	local -A known=()
+	if [[ -f "${root}/${CODEQL_KNOWN}" ]]; then
+		while IFS='|' read -r f key q _; do [[ "${f}" =~ ^[[:space:]]*(#|$) ]] || known["${f}|${key}|${q}"]=0; done < "${root}/${CODEQL_KNOWN}"
+	fi
+	: > "${shown}"
 	while IFS= read -r f; do
-		if [[ "${f}" =~ ${re} ]]; then printf '  %s:%s: %s: %s (%s)\n' "${BASH_REMATCH[9]#/}" "${BASH_REMATCH[11]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[7]//\"\"/\"}" "${BASH_REMATCH[1]}"
-		else printf '  %s\n' "${f}"; fi
-	done < "${out}" | fLintOut
-	n="$(grep -c . "${out}" || true)"
-	((n == 0)) || fDie "CodeQL: ${n} result(s)"
-	fEcho_Clean "CodeQL ${CODEQL_VERSION}: no results"
+		rec+="${rec:+ }${f}"; q="${rec//[^\"]/}"
+		((${#q} % 2 == 0)) || continue
+		if [[ "${rec}" =~ ${re} ]]; then
+			key="${BASH_REMATCH[1]}|${BASH_REMATCH[9]#/}|${BASH_REMATCH[11]}"
+			if [[ -n "${known[${key}]+x}" ]]; then known["${key}"]=1; nKnown+=1; rec=""; continue; fi
+			printf '  %s:%s: %s: %s (%s)\n' "${BASH_REMATCH[9]#/}" "${BASH_REMATCH[11]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[7]//\"\"/\"}" "${BASH_REMATCH[1]}"
+		else printf '  %s\n' "${rec}"; fi >> "${shown}"
+		nNew+=1; rec=""
+	done < "${out}"
+	fLintOut < "${shown}"
+	for key in "${!known[@]}"; do [[ "${known[${key}]}" == 1 ]] || stale+=("${key}"); done
+	((${#stale[@]} == 0)) || fEcho "WARNING: ${CODEQL_KNOWN} has ${#stale[@]} entry(ies) that matched nothing, so take them out: ${stale[*]}"
+	((nNew == 0)) || fDie "CodeQL: ${nNew} result(s)"
+	q=""; ((nKnown == 0)) || q=", and ${nKnown} known third-party one(s) let through, per ${CODEQL_KNOWN}"
+	fEcho_Clean "CodeQL ${CODEQL_VERSION}: no new results${q}"
 }
 
 relDir=""
 fStepBuild(){
-	local t os arch out epoch rel sum1 sum2
+	local t os arch out epoch rel dirty sum1 sum2 built=()
 	epoch="$(fCommitEpoch)"; rel="$(fIsRelease)"
+	if [[ "${rel}" == 1 ]]; then
+		dirty="$(fReleaseDirty)"
+		[[ -z "${dirty}" ]] || fDie "a release builds only what the tag has, and these differ from it: ${dirty//$'\n'/; }"
+	fi
 	relDir="${root}/${RELEASE_DIR}/${goVersion}"
 	mkdir -p -- "${relDir}"
 	for t in "${RELEASE_TARGETS[@]}"; do
@@ -651,24 +710,41 @@ fStepBuild(){
 			-ldflags "${GO_LDFLAGS_COMMON} -X main.version=${goVersion} -X main.buildEpoch=${epoch} -X main.release=${rel}" -o "${out}" "${GO_MAIN_PKG}" \
 			|| fDie "go build failed for ${os}/${arch}"
 		cp -f -- "${out}" "${relDir}/${EXE_NAME}-${os}-${arch}"
+		built+=("${EXE_NAME}-${os}-${arch}")
 		fEcho_Clean "built ${EXE_NAME}-${os}-${arch}  $(sha256sum "${out}" | cut -c1-16)  $(stat -c %s "${out}") bytes"
 	done
+	## Sums for these binaries now, since a run without the package step would leave an older
+	## run's SHA256SUMS beside them. Packages left from an older run aren't listed until it runs.
+	fReleaseSums "${built[@]}"
 	if [[ "${mode}" != quick ]]; then
-		## The same source has to give the same bytes, from another path.
-		mkdir -p -- "${runTmp}/build2"
-		fGo build GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOAMD64=v1 -- go build "${GO_BUILD_FLAGS[@]}" -p "${BUILD_JOBS}" \
+		## The same source has to give the same bytes from a copy at another path. The second build gets
+		## an empty cache of its own, or it only links again from the first one's objects.
+		local copy="${runTmp}/build2src" cache2="${runTmp}/build2cache"
+		mkdir -- "${copy}" "${cache2}" "${runTmp}/build2"
+		cp -a -- "${root}/source" "${root}/go.mod" "${root}/go.sum" "${copy}/"
+		fGo build "GOCACHE=${cache2}" GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOAMD64=v1 -- go -C "${copy}" build "${GO_BUILD_FLAGS[@]}" -p "${BUILD_JOBS}" \
 			-ldflags "${GO_LDFLAGS_COMMON} -X main.version=${goVersion} -X main.buildEpoch=${epoch} -X main.release=${rel}" -o "${runTmp}/build2/${EXE_NAME}-linux-amd64" "${GO_MAIN_PKG}" \
 			|| fDie "go build failed (second build)"
+		[[ -n "$(find "${cache2}" -mindepth 1 -maxdepth 1 -print -quit)" ]] || fDie "the second build didn't use its own cache, so it proves nothing"
 		sum1="$(sha256sum < "${runTmp}/build/${EXE_NAME}-linux-amd64")"; sum2="$(sha256sum < "${runTmp}/build2/${EXE_NAME}-linux-amd64")"
 		[[ "${sum1}" == "${sum2}" ]] || fDie "the same source built to two different binaries"
-		fEcho_Clean "reproducible: two builds of linux/amd64 give the same checksum"
+		fEcho_Clean "reproducible: linux/amd64 built again from a copy at another path, with an empty cache, gives the same checksum"
 	fi
 	fEcho_Clean "$("${runTmp}/build/${EXE_NAME}-linux-amd64" --version 2>&1 || true)"
 }
 fStepPackage(){
-	local t arch f ver="${goVersion#v}" yaml epoch fmt
+	local t arch f ver="${goVersion#v}" yaml epoch fmt named files=()
+	## A package's place per the FHS and Debian policy. /usr/local/bin is for hand installs: setup's
+	## copy, install.bash, dogfood. The build skips its copy and runs this one when it's there, so it
+	## has to name both, and nothing else. See design.md, Boot.
+	local dst="/usr/bin/${EXE_NAME}" hand want
 	epoch="$(fCommitEpoch)"
 	[[ -d "${relDir}" ]] || fDie "no build to package"
+	hand="$(sed -n 's/^destDir="\(.*\)"$/\1/p' install.bash)/${EXE_NAME}"
+	[[ "${hand}" != "${dst}" ]] || fDie "install.bash puts the binary where the packages do, ${dst}"
+	want="$(printf '%s\n' "${dst}" "${hand}" | sort -u)"
+	named="$(grep -aoE "/[a-z/]+/bin/${EXE_NAME}" "${runTmp}/build/${EXE_NAME}-linux-amd64" | sort -u || true)"
+	[[ "${named}" == "${want}" ]] || fDie "the build names '${named//$'\n'/, }', not the package's ${dst} and install.bash's ${hand}"
 	for t in "${RELEASE_TARGETS[@]}"; do
 		arch="${t##*/}"
 		yaml="${runTmp}/nfpm_${arch}.yaml"
@@ -683,7 +759,7 @@ license: GPL-2.0-or-later
 homepage: https://github.com/t00mietum/tt-minecraft-safeserver
 contents:
   - src: ${runTmp}/build/${EXE_NAME}-linux-${arch}
-    dst: /usr/bin/${EXE_NAME}
+    dst: ${dst}
     file_info:
       mode: 0755
   - src: license.md
@@ -693,13 +769,31 @@ EOF_YAML
 			fGo package "SOURCE_DATE_EPOCH=${epoch}" -- nfpm package -p "${fmt}" -f "${yaml}" -t "${runTmp}/pkg_${arch}.${fmt}" > "${runTmp}/nfpm.log" 2>&1 \
 				|| { cat "${runTmp}/nfpm.log"; fDie "nfpm failed for ${fmt} ${arch}"; }
 			f="${runTmp}/pkg_${arch}.${fmt}"
+			fPkgHas "${fmt}" "${f}" "${dst}"
 			cp -f -- "${f}" "${relDir}/${EXE_NAME}_${ver}_${arch}.${fmt}"
 			fEcho_Clean "packaged ${EXE_NAME}_${ver}_${arch}.${fmt}"
 		done
 	done
-	(cd "${relDir}" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > "${runTmp}/sums" && cp -f -- "${runTmp}/sums" SHA256SUMS)
-	fEcho_Clean "SHA256SUMS: $(wc -l < "${relDir}/SHA256SUMS") file(s)"
+	mapfile -t files < <(find "${relDir}" -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n')
+	fReleaseSums "${files[@]}"
 	fReleaseRotate
+}
+## SHA256SUMS in relDir over the named files there, sorted, and nothing else.
+fReleaseSums(){ ## file...
+	local files=()
+	mapfile -t files < <(printf '%s\n' "$@" | LC_ALL=C sort)
+	(cd "${relDir}" && sha256sum -- "${files[@]}" > "${runTmp}/sums") || fDie "can't checksum the release files"
+	cp -f -- "${runTmp}/sums" "${relDir}/SHA256SUMS"
+	fEcho_Clean "SHA256SUMS: ${#files[@]} file(s)"
+}
+## The package's own file list has the binary at dst. Read on this box, with dpkg-deb or rpm.
+fPkgHas(){ ## fmt file dst
+	local list tool=rpm
+	[[ "${1}" != deb ]] || tool=dpkg-deb
+	if ! command -v "${tool}" > /dev/null; then fEcho_Clean "no ${tool} here, so where the .${1} puts the binary isn't checked"; return 0; fi
+	if [[ "${1}" == deb ]]; then list="$(dpkg-deb -c "${2}" | awk '{print $NF}' | sed 's|^\.||')"; else list="$(rpm -qlp "${2}")"; fi \
+		|| fDie "${tool} can't read ${2##*/}"
+	grep -qxF -- "${3}" <<< "${list}" || fDie "the .${1} doesn't put the binary in ${3}; it has: ${list//$'\n'/ }"
 }
 ## One folder per version. Keep the newest few, by modification time.
 fReleaseRotate(){
@@ -733,20 +827,24 @@ fStepArm64(){
 		fSkip "${ARM64_HOST} isn't there, or stayed busy past ${lockWait}s; exit ${rc}"; return 0
 	fi
 	grep -E '^(box: |work folder: |removed |arm64-tests: )' "${log}" || true
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	fIdLines "${log}"
 	if [[ -f "${state}/rc" ]]; then read -r testRc < "${state}/rc" || true; fi
 	if [[ "${testRc}" != 0 ]]; then
-		grep -vE '^(=== (RUN|PAUSE|CONT|NAME)|--- (PASS|SKIP)|PASS [0-9a-z]{5} |SKIP [0-9a-z]{5} )' "${log}" | tail -n 80 || true
+		fTestNoise "${log}" 80
 		fDie "arm64 tests failed on ${ARM64_HOST}"
 	fi
 	((rc == 0)) || fEcho "WARNING: ${VM_STATE_TOOL} exited ${rc} after the tests passed; check ${ARM64_HOST} went back as found"
-	fEcho_Clean "arm64 on ${ARM64_HOST}: $(grep -cE '^PASS [0-9a-z]{5} ' "${log}" || true) test line(s) passed"
+	fEcho_Clean "arm64 on ${ARM64_HOST}: $(fPassCount "${log}") test line(s) passed"
 }
 fRootHost(){ ## [--zfs]
-	local log="${runTmp}/roothost${1:-}.log" rc=0
+	local log="${runTmp}/roothost${1:-}.log" rc=0 bin="${runTmp}/build/${EXE_NAME}-linux-amd64" envs=() opts=("$@")
 	if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then fSkip "no docker here"; return 0; fi
-	nice -n 19 bash "${here}/root-host/root-host.bash" "${@}" > "${log}" 2>&1 || rc=$?
-	grep -E '^(PASS|FAIL|SKIP) [0-9a-z]{5} ' "${log}" | sed 's/^/  /' || true
+	## The release build from the pinned Go, when this run made one, rather than this box's go.
+	[[ ! -x "${bin}" ]] || envs+=("ROOT_HOST_BIN=${bin}")
+	((! keepTemp)) || opts+=(--keep-temp)
+	env "${envs[@]}" nice -n 19 bash "${here}/root-host/root-host.bash" "${opts[@]}" > "${log}" 2>&1 || rc=$?
+	grep -E '^(Checking|Building) ' "${log}" | head -n 1 | sed 's/^/  /' || true
+	fIdLines "${log}"
 	if ((rc)); then tail -n 60 "${log}"; fDie "root host checks failed"; fi
 	fEcho_Clean "root host: $(grep -cE '^PASS ' "${log}" || true) check(s) passed"
 }
@@ -795,7 +893,7 @@ fStepPublish(){
 	local f branch changed=("${formatChanged[@]}" "${demoChanged[@]}")
 	if ((${#changed[@]})); then
 		[[ -n "${publishMsg}" ]] || publishMsg="${APP_NAME} CI/CD ${stamp}"
-		for f in "${changed[@]}"; do fGitTool add -- "${f}"; done
+		fGitTool add -- "${changed[@]}"
 		fGitTool commit -m "${publishMsg}" -- "${changed[@]}" >/dev/null
 		fEcho_Clean "committed ${#changed[@]} file(s) the run changed: ${changed[*]}: \"${publishMsg}\""
 	else
@@ -804,6 +902,23 @@ fStepPublish(){
 	branch="$(git branch --show-current)"
 	if [[ -z "${branch}" ]]; then fSkip "no branch to push"; return 0; fi
 	if GIT_SSH_COMMAND='ssh' fGitTool push -u origin "${branch}" >/dev/null 2>&1; then fEcho_Clean "pushed ${branch}"; else fEcho "WARNING: push of ${branch} failed"; fi
+}
+
+## True when the merge gate may leave its marker. Otherwise it prints why not. Every step has to be
+## on and PASS, apart from an arm64 SKIP, since the box can be away; a SKIP anywhere else checked
+## nothing. The tree has to be clean, on the same commit, from start to end.
+fGateWhole(){
+	local s r
+	for s in "${allSteps[@]}"; do
+		[[ -z "${stepOff[${s}]:-}" || "${stepOff[${s}]}" == "not part of the merge run" ]] || { printf 'with %s off' "${s}"; return 1; }
+	done
+	for s in "${stepList[@]}"; do
+		r="${stepResult[${s}]:-none}"
+		[[ "${r}" == PASS || ( "${s}" == arm64 && "${r}" == SKIP* ) ]] || { printf '%s ended %s' "${s}" "${r}"; return 1; }
+	done
+	[[ -n "${startHead}" && -z "${startDirty}" ]] || { printf 'on a dirty tree'; return 1; }
+	[[ "$(git rev-parse HEAD 2>/dev/null || true)" == "${startHead}" ]] || { printf 'HEAD moved during the run'; return 1; }
+	[[ -z "$(git status --porcelain 2>/dev/null || echo unknown)" ]] || { printf 'the tree changed during the run'; return 1; }
 }
 
 fCpuPlan(){
@@ -837,9 +952,27 @@ for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || offNote+="${s} ($
 [[ -z "${offNote}" ]] || fEcho_Clean "Turned off ..........: ${offNote%, }"
 fEcho_Clean
 
+## The test IDs of this run's steps: every Go test where the tests run, only the Fuzz targets or
+## TestSoak where just those steps do, in the areas named, and the root host checks where either
+## root host step runs.
 if ((listOnly)); then
-	fEcho_Clean "$(bash "${here}/utility/test-id.bash" --list | grep -c .) test(s) with IDs:"
-	bash "${here}/utility/test-id.bash" --list | sed 's/^/  /'
+	listArgs=(); goName=""; ids=""
+	for s in test race arm64; do [[ " ${stepList[*]} " != *" ${s} "* ]] || goName=.; done
+	if [[ -z "${goName}" ]]; then
+		[[ " ${stepList[*]} " != *" fuzz "* ]] || goName+="|^Fuzz"
+		[[ " ${stepList[*]} " != *" soak "* ]] || goName+="|^TestSoak\$"
+		goName="${goName#|}"
+	fi
+	if [[ -n "${goName}" ]]; then
+		if ((${#areaDirs[@]})); then for d in "${areaDirs[@]}"; do listArgs+=(--in "${d%/...}"); done
+		else listArgs+=(--in source); fi
+		listArgs+=(--go-name "${goName}")
+	fi
+	[[ " ${stepList[*]} " != *" roothost "* && " ${stepList[*]} " != *" rootzfs "* ]] || listArgs+=(--in cicd/root-host)
+	((! ${#listArgs[@]})) || ids="$(bash "${here}/utility/test-id.bash" --list "${listArgs[@]}")"
+	n=0; [[ -z "${ids}" ]] || n="$(grep -c . <<< "${ids}")"
+	fEcho_Clean "${n} test(s) with IDs:"
+	[[ -z "${ids}" ]] || while IFS= read -r l; do printf '  %s\n' "${l}"; done <<< "${ids}"
 	fEcho_Clean
 	exit 0
 fi
@@ -854,14 +987,18 @@ fi
 if [[ -n "${LINT_LOG_DIR:-}" ]] && mkdir -p "${root}/${LINT_LOG_DIR}" 2>/dev/null; then
 	gfs_rotate "${root}/${LINT_LOG_DIR}" run log >/dev/null 2>&1 || true
 	gfs_rotate "${root}/${LINT_LOG_DIR}" lint txt >/dev/null 2>&1 || true
-	exec > >(tee "${root}/${LINT_LOG_DIR}/run_${stamp}.log") 2>&1
+	## The tee ignores Ctrl-C, or it dies first and the EXIT trap's first write takes SIGPIPE, skipping cleanup.
+	exec > >(trap '' INT TERM; exec tee "${root}/${LINT_LOG_DIR}/run_${stamp}.log") 2>&1
 	## Wait for tee to drain, else the prompt comes back mid-flush.
 	teePid=$!
 	trap 'fRunTmpDone "$?"; exec 1>&- 2>&-; wait "${teePid}" 2>/dev/null' EXIT
 fi
 
-needCtr=0; for s in lint test race fuzz soak vuln codeql build package arm64 demo; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
+needCtr=0; for s in format lint test race fuzz soak vuln codeql build package arm64 demo; do [[ " ${stepList[*]} " != *" ${s} "* ]] || needCtr=1; done
 ((! needCtr)) || fCtrSetup
+
+## What the merge gate's marker names: the commit the steps ran on, not wherever HEAD is at the end.
+startHead="$(git rev-parse HEAD 2>/dev/null || true)"; startDirty="$(git status --porcelain 2>/dev/null || echo unknown)"
 
 for s in "${stepList[@]}"; do
 	fStep "${s}"
@@ -893,13 +1030,11 @@ for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" ]] || fEcho_Clean "  of
 ## A whole merge gate that passed on a clean tree leaves its commit for the pre-push hook, which
 ## skips a second run. A 14-minute gate inside the hook lets the git host drop the push's connection.
 if [[ "${mode}" == merge ]]; then
-	gateWhole=1
-	for s in "${allSteps[@]}"; do [[ -z "${stepOff[${s}]:-}" || "${stepOff[${s}]}" == "not part of the merge run" ]] || gateWhole=0; done
-	if ((gateWhole)) && [[ -z "$(git status --porcelain 2>/dev/null)" ]]; then
-		mkdir -p -- "${root}/cicd/artifacts" && git rev-parse HEAD > "${root}/cicd/artifacts/merge-gate-passed"
-		fEcho_Clean "Merge gate passed on $(git rev-parse --short HEAD); a push of that commit to main skips it"
+	if gateWhy="$(fGateWhole)"; then
+		mkdir -p -- "${root}/cicd/artifacts" && printf '%s\n' "${startHead}" > "${root}/cicd/artifacts/merge-gate-passed"
+		fEcho_Clean "Merge gate passed on ${startHead:0:7}; a push of that commit to main skips it"
 	else
-		fEcho_Clean "Merge gate passed, but on a dirty tree or with steps off, so a push to main runs it again"
+		fEcho_Clean "Merge gate passed, but ${gateWhy}, so a push to main runs it again"
 	fi
 fi
 fSection "${APP_NAME} CI/CD: done."
@@ -915,3 +1050,12 @@ fEcho_Clean
 ##		- 2026-11-13: CodeQL step: the pinned Go bundle over the tracked Go files, cached outside the repo.
 ##		- 2026-11-13: demo step: the README's CLI demo gif, kept GFS-rotated, and committed only at a release.
 ##		- 2026-11-14: a whole merge gate on a clean tree records its commit, for the pre-push hook.
+##		- 2026-11-18: the gate marker needs every step to PASS on the commit the run started on. gofmt runs
+##		  in the image and its errors fail, govulncheck skips only a failed fetch, and the second build is from a copy.
+##		- 2026-11-19: the .deb and .rpm put the binary in /usr/bin, and the build has to name that path.
+##		- 2026-11-19: the build step writes SHA256SUMS for its binaries, so a run without the package step leaves no stale one.
+##		- 2026-11-19: CodeQL checks the vendored modules too, with known results in CODEQL_KNOWN. The soak keeps its
+##		  heap profiles. The root host steps check the run's release build. The demo is drawn by gen-demo-gif.py.
+##		- 2026-11-20: the run log's tee ignores Ctrl-C, so the exit trap's cleanup still runs.
+##		- 2026-11-22: a release build refuses files under source, go.mod, go.sum or config.bash that the tag doesn't have.
+##		- 2026-11-22: --list prints only the test IDs of the steps and areas the run has.

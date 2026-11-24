@@ -16,27 +16,60 @@ type properties struct {
 
 type propLine struct {
 	text       string // as in the file, continuations and all
+	end        string // the line end after text, empty for a last line with none
 	key, value string
 	entry      bool
 }
 
+// parseProperties reads lines as Java's Properties.load does: a line ends at
+// LF, CR or CRLF, and a comment never continues onto the next. A # or ! is a
+// comment wherever the logical line is still empty, even after a backslash.
 func parseProperties(b []byte) properties {
 	var p properties
-	phys := strings.Split(string(b), "\n")
-	if phys[len(phys)-1] == "" {
-		phys = phys[:len(phys)-1]
-	}
+	phys := splitLines(string(b))
 	for i := 0; i < len(phys); i++ {
-		text := phys[i]
-		logical := strings.TrimSuffix(text, "\r")
-		for continues(logical) && i+1 < len(phys) {
+		text, end := phys[i].text, phys[i].end
+		logical := ""
+		for {
+			seg := strings.TrimLeft(phys[i].text, " \t\f")
+			if logical == "" && seg != "" && (seg[0] == '#' || seg[0] == '!') {
+				logical = seg
+				break
+			}
+			logical += seg
+			if !continues(logical) || i+1 == len(phys) {
+				break
+			}
+			logical = logical[:len(logical)-1]
 			i++
-			text += "\n" + phys[i]
-			logical = logical[:len(logical)-1] + strings.TrimLeft(strings.TrimSuffix(phys[i], "\r"), " \t\f")
+			text += end + phys[i].text
+			end = phys[i].end
 		}
-		p.lines = append(p.lines, parseLine(text, logical))
+		l := parseLine(text, logical)
+		l.end = end
+		p.lines = append(p.lines, l)
 	}
 	return p
+}
+
+type physLine struct{ text, end string }
+
+func splitLines(s string) []physLine {
+	var lines []physLine
+	for s != "" {
+		i := strings.IndexAny(s, "\r\n")
+		if i < 0 {
+			lines = append(lines, physLine{s, ""})
+			break
+		}
+		n := 1
+		if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+			n = 2
+		}
+		lines = append(lines, physLine{s[:i], s[i : i+n]})
+		s = s[i+n:]
+	}
+	return lines
 }
 
 // continues says the line ends in an odd number of backslashes.
@@ -108,7 +141,7 @@ func unescape(s string) string {
 }
 
 // escape writes a value as Java's Properties.store would, for the characters
-// a setting here can hold, such as the colons in an IPv6 address.
+// a setting here can have, such as the colons in an IPv6 address.
 func escape(s string) string {
 	var b strings.Builder
 	for i, c := range s {
@@ -145,32 +178,40 @@ func (p properties) get(key string) (string, bool) {
 
 // set changes every line for key, or adds one at the end.
 func (p *properties) set(key, value string) {
-	line := propLine{text: key + "=" + escape(value), key: key, value: value, entry: true}
+	line := propLine{text: key + "=" + escape(value), end: "\n", key: key, value: value, entry: true}
 	found := false
 	for i, l := range p.lines {
 		if l.entry && l.key == key {
-			if strings.HasSuffix(l.text, "\r") {
-				line.text += "\r"
-			}
+			line.end = l.end
 			p.lines[i] = line
 			found = true
 		}
 	}
 	if !found {
 		// A last line that ends in a backslash would take the new one as its
-		// continuation, so a blank line goes between.
-		if n := len(p.lines); n > 0 && continues(strings.TrimSuffix(p.lines[n-1].text, "\r")) {
-			p.lines = append(p.lines, propLine{})
+		// continuation, so a blank line goes between. Its end is the same as the
+		// line before, since an LF after a lone CR would only make a CRLF.
+		if n := len(p.lines); n > 0 && p.lines[n-1].entry && continues(p.lines[n-1].text) {
+			blank := propLine{end: p.lines[n-1].end}
+			if blank.end == "" {
+				blank.end = "\n"
+			}
+			p.lines = append(p.lines, blank)
 		}
 		p.lines = append(p.lines, line)
 	}
 }
 
+// bytes gives the file as it was read, with a line end added to a last line
+// that has none.
 func (p properties) bytes() []byte {
 	var b strings.Builder
 	for _, l := range p.lines {
 		b.WriteString(l.text)
-		b.WriteByte('\n')
+		if l.end == "" {
+			l.end = "\n"
+		}
+		b.WriteString(l.end)
 	}
 	return []byte(b.String())
 }

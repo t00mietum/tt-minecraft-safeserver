@@ -4,7 +4,9 @@
 
 ##	Purpose:
 ##		- One-line dev environment setup for tt-minecraft-safeserver on Debian and its derivatives.
-##		  Installs what's missing of git, Go, and docker through apt, and clones main.
+##		  Installs what's missing of git and Go through apt, and clones main. Docker or Podman
+##		  has to be there already, unless asked to install docker.
+##		- With --any-distro it installs nothing, and only checks that what it needs is there.
 ##		- States its plan and asks first. Re-running it is safe: what's there is skipped, and an
 ##		  existing clone is left as is.
 ##	Syntax:
@@ -21,7 +23,7 @@
 
 set -Eeuo pipefail
 
-installerVersion="1.0.0"
+installerVersion="1.1.0"
 projectName="tt-minecraft-safeserver"
 cloneUrl="https://github.com/t00mietum/tt-minecraft-safeserver.git"
 cloneBranch="main"
@@ -34,33 +36,41 @@ ttyDev="/dev/tty"
 
 fEcho(){       printf '[ %s ]\n' "$*"; }
 fEcho_Clean(){ printf '%s\n' "$*"; }
-fDie(){        printf '[ ERROR: %s ]\n' "$*" >&2; echo >&2; exit 1; }
+fDie(){        { echo; printf '[ ERROR: %s ]\n' "$*"; echo; } >&2; exit 1; }
+fBadArg(){     { echo; printf '[ ERROR: %s ]\n' "$*"; echo; } >&2; }
 
 ## Spelled out rather than read from the header, since under `bash <(curl ...)` there's no file to read.
-fUsage(){ cat <<'EOF'
+fUsage(){ echo; cat <<'EOF'
 Usage:
 	bash <(curl -fsSL https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash) [options]
 	bash <(wget -qO- https://raw.githubusercontent.com/t00mietum/tt-minecraft-safeserver/main/install-dev.bash) [options]
 Options:
-	--dir PATH ...... where to clone (default: ./tt-minecraft-safeserver)
-	--no-docker ..... don't install docker. cicd/cicd.bash then runs on this box, and needs
-	                  staticcheck and gosec on PATH.
-	-y|--yes ........ skip the prompt
-	--version ....... print this installer's version
-	-h|--help ....... this help
+	--dir PATH ......... where to clone (default: ./tt-minecraft-safeserver)
+	--install-docker ... install docker.io through apt when there's no docker or podman
+	--no-docker ........ go on without docker or podman. cicd/cicd.bash then runs on this box,
+	                     and needs staticcheck and gosec on PATH.
+	--any-distro ....... for a distro this doesn't support. Installs nothing, and checks that git,
+	                     Go 1.21 or newer, and docker or podman are already there.
+	-y|--yes ........... skip the prompt
+	--version .......... print this installer's version
+	-h|--help .......... this help
 Notes:
 	- Options take "--name value" or "--name=value".
-	- Installs what's missing of git, ca-certificates, golang-go, and docker.io through apt-get,
-	  through sudo when needed, then clones the main branch.
-	- Debian and its derivatives only for now.
+	- Installs what's missing of git, ca-certificates, and golang-go through apt-get, through sudo
+	  when needed, then clones the main branch.
+	- Docker or Podman has to be installed already, since cicd/cicd.bash runs its checks in a
+	  container. --install-docker or --no-docker get past that.
+	- Debian and its derivatives, or any distro with --any-distro.
 EOF
+echo
 }
 
-## Ctrl-D, or no terminal at all, reads as no.
+## Ctrl-D reads as no. The terminal echoes a typed answer, so only Ctrl-D needs the line ended.
 fAsk(){
 	local answer=""
-	if [[ -t 0 ]]; then read -r -p "$1 [y/N] " answer || true
-	elif { : < "${ttyDev}"; } 2> /dev/null; then printf '%s [y/N] ' "$1"; read -r answer < "${ttyDev}" || true; echo
+	if [[ -t 0 ]]; then read -r -p "$1 [y/N] " answer || { answer=""; echo; }
+	elif { : < "${ttyDev}"; } 2> /dev/null; then printf '%s [y/N] ' "$1"; read -r answer < "${ttyDev}" || { answer=""; echo; }
+	else fEcho "There's no terminal to ask on. Add --yes to go ahead without asking."; return 1
 	fi
 	case "${answer}" in y|Y|yes|Yes|YES) return 0 ;; *) return 1 ;; esac
 }
@@ -82,21 +92,31 @@ fIsClone(){
 fRoot(){ if ((useSudo)); then sudo "$@"; else "$@"; fi; }
 
 fMain(){
-	local dir="" withDocker=1 assumeYes=0
+	local dir="" withDocker=1 installDocker=0 anyDistro=0 assumeYes=0
 	while (($#)); do case "$1" in
-		--dir)       dir="${2:-}"; shift; (($#)) && shift ;;
-		--dir=*)     dir="${1#*=}"; shift ;;
-		--no-docker) withDocker=0; shift ;;
-		-y|--yes)    assumeYes=1; shift ;;
-		--version)   echo "${projectName} dev installer v${installerVersion}"; return 0 ;;
-		-h|--help)   fUsage; return 0 ;;
-		*) printf '[ ERROR: unknown option: %s (try --help) ]\n' "$1" >&2; return 2 ;;
+		--dir)            (($# >= 2)) || { fBadArg "--dir needs a folder"; return 2; }; dir="$2"; shift 2 ;;
+		--dir=*)          dir="${1#*=}"; shift ;;
+		--install-docker) installDocker=1; shift ;;
+		--no-docker)      withDocker=0; shift ;;
+		--any-distro)     anyDistro=1; shift ;;
+		-y|--yes)         assumeYes=1; shift ;;
+		--version)        echo "${projectName} dev installer v${installerVersion}"; return 0 ;;
+		-h|--help)        fUsage; return 0 ;;
+		*) fBadArg "unknown option: $1 (try --help)"; return 2 ;;
 	esac; done
+	if ((installDocker && ! withDocker)); then fBadArg "--install-docker and --no-docker cancel each other out"; return 2; fi
+	if ((installDocker && anyDistro)); then fBadArg "--any-distro installs nothing, so it doesn't go with --install-docker"; return 2; fi
+	## Bash leaves a ~ after --dir= alone, which would make a folder named ~ here.
+	# shellcheck disable=SC2088  # a literal ~ is what is being matched
+	if [[ "${dir}" == "~" || "${dir}" == "~/"* ]]; then
+		[[ "${HOME:-}" == /* ]] || { fBadArg "--dir starts with ~, but HOME isn't set to a full path"; return 2; }
+		dir="${HOME}${dir:1}"
+	elif [[ "${dir}" == "~"* ]]; then
+		fBadArg "--dir ${dir} starts with ~, which only means the home folder as ~ or ~/path. Give a full path"; return 2
+	fi
 	if [[ -z "${dir}" ]]; then dir="${PWD}/${projectName}"
 	elif [[ "${dir}" != /* ]]; then dir="${PWD}/${dir}"; fi
 	while [[ "${dir}" == ?*/ ]]; do dir="${dir%/}"; done
-
-	echo
 
 	## What this box is.
 	[[ "$(uname -s)" == Linux ]] || fDie "${projectName} runs on Linux only"
@@ -105,23 +125,40 @@ fMain(){
 		osId="$(awk -F= '$1 == "ID" { gsub(/"/, "", $2); print $2 }' "${osRelease}")"
 		osLike="$(awk -F= '$1 == "ID_LIKE" { gsub(/"/, "", $2); print $2 }' "${osRelease}")"
 	fi
-	case "${osId}" in
-		debian) : ;;
-		nixos) fDie "NixOS isn't supported yet. Its module is planned for a later release." ;;
-		*) case " ${osLike} " in
-			*" debian "*) : ;;
-			*) fDie "only Debian and its derivatives are supported for now, since this installs packages through apt (this is '${osId:-unknown}')" ;;
-		esac ;;
-	esac
+	## Nothing this does is tied to a distro once it installs nothing, so --any-distro skips all of it, NixOS included.
+	if ((! anyDistro)); then
+		case "${osId}" in
+			debian) : ;;
+			nixos) fDie "NixOS isn't supported yet. Its module is planned for a later release. --any-distro skips this check, and installs nothing." ;;
+			*) case " ${osLike} " in
+				*" debian "*) : ;;
+				*) fDie "only Debian and its derivatives are supported for now, since this installs packages through apt (this is '${osId:-unknown}'). --any-distro skips this check, and installs nothing." ;;
+			esac ;;
+		esac
+	fi
 
 	## What's missing.
-	local pkgs="" have="" goMinor
-	if command -v git > /dev/null; then have="${have}, git"; else pkgs="${pkgs} git"; fi
+	local pkgs="" have="" missing="" goMinor runtime=""
+	if command -v git > /dev/null; then have="${have}, git"; else pkgs="${pkgs} git"; missing="${missing}, git"; fi
+	## Not in missing: the path is Debian's, and elsewhere a missing CA bundle shows up as a failed clone.
 	[[ -e "${caFile}" ]] || pkgs="${pkgs} ca-certificates"
 	goMinor="$(fGoMinor)"
-	if [[ -n "${goMinor}" ]] && ((goMinor >= goMinMinor)); then have="${have}, Go 1.${goMinor}"; else pkgs="${pkgs} golang-go"; fi
+	if [[ -n "${goMinor}" ]] && ((goMinor >= goMinMinor)); then have="${have}, Go 1.${goMinor}"
+	else pkgs="${pkgs} golang-go"; missing="${missing}, Go 1.${goMinMinor} or newer"; fi
 	if ((withDocker)); then
-		if command -v docker > /dev/null; then have="${have}, docker"; else pkgs="${pkgs} docker.io"; fi
+		if command -v docker > /dev/null; then
+			## podman-docker's docker is Podman, which needs no group.
+			case "$(docker --version 2> /dev/null || true)" in *[Pp]odman*) runtime="podman-docker" ;; *) runtime="docker" ;; esac
+			have="${have}, docker"
+		elif command -v podman > /dev/null; then runtime="podman"; have="${have}, podman"
+		elif ((installDocker)); then pkgs="${pkgs} docker.io"
+		elif ((anyDistro)); then missing="${missing}, docker or podman"
+		else fDie "docker or podman is needed, since cicd/cicd.bash runs its checks in a container. Install one first, or add --install-docker to install docker.io through apt, or --no-docker to go on without either."
+		fi
+	fi
+	if ((anyDistro)); then
+		[[ -z "${missing}" ]] || fDie "--any-distro installs nothing, and this box is missing: ${missing#, }. Install it with this distro's package manager, then run this again."
+		pkgs=""
 	fi
 	pkgs="${pkgs# }"; have="${have#, }"
 
@@ -138,10 +175,13 @@ fMain(){
 	fi
 
 	## The plan.
+	echo
 	fEcho "Plan"
 	if [[ -n "${pkgs}" ]]; then
 		local how=""; if ((useSudo)); then how=", through sudo"; fi
 		fEcho_Clean "    Packages ...: ${pkgs}, from apt${how}${have:+ (already here: ${have})}"
+	elif ((anyDistro)); then
+		fEcho_Clean "    Packages ...: none, since --any-distro installs nothing. ${have} already here."
 	else
 		fEcho_Clean "    Packages ...: none needed, ${have} already here"
 	fi
@@ -153,7 +193,7 @@ fMain(){
 	fi
 	echo
 	if ((! assumeYes)); then
-		fAsk "Go ahead?" || { fEcho "Stopped. Nothing was changed."; echo; return 1; }
+		fAsk "Go ahead?" || { echo; fEcho "Stopped. Nothing was changed."; echo; return 1; }
 		echo
 	fi
 
@@ -183,11 +223,17 @@ fMain(){
 	fEcho_Clean "    go build ./source/cmd/tt-minecraftd ...... build the tool"
 	fEcho_Clean "    cicd/cicd.bash --gate .................... the checks to pass before a commit"
 	fEcho_Clean "    cicd/cicd.bash --help .................... the other runs"
-	if [[ " ${pkgs} " == *" docker.io "* && "$(id -u)" != 0 ]]; then
+	## A docker that was already here may still refuse this account, and cicd then runs on this box without a word.
+	if [[ "$(id -u)" != 0 ]] && { [[ " ${pkgs} " == *" docker.io "* ]] || { [[ "${runtime}" == docker ]] && ! docker info > /dev/null 2>&1; }; }; then
 		echo
 		fEcho_Clean "    cicd/cicd.bash runs its Go steps in docker. To use docker without sudo, add this account"
 		fEcho_Clean "    to the docker group, which is the same as root, and log in again:"
 		fEcho_Clean "        sudo usermod -aG docker ${USER:-\$USER}"
+	fi
+	if [[ "${runtime}" == podman ]]; then
+		echo
+		fEcho_Clean "    cicd/cicd.bash calls docker, which Podman's podman-docker package adds. Without it, the"
+		fEcho_Clean "    checks run on this box, and need staticcheck and gosec on PATH."
 	fi
 	echo
 }
@@ -198,3 +244,6 @@ if ! (return 0 2> /dev/null); then fMain "$@"; fi
 
 ##	History:
 ##		- 2026-11-14: Created.
+##		- 2026-11-17: Docker or Podman is a prerequisite, with --install-docker. Added --any-distro.
+##		- 2026-11-20: Errors have a blank line either side, and with no terminal to ask on it says to
+##		  add --yes. --dir with no value is refused rather than read as the default.

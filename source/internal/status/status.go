@@ -39,12 +39,10 @@ const BootUnit = boot.UnitName
 // logLines is how much of latest.log status shows.
 const logLines = 10
 
-// Probe takes the readings. One Probe can take many, as watch does, and keeps
-// the plugin sums between them.
+// Probe takes the readings. One Probe can take many, as watch does.
 type Probe struct {
-	Run         host.Runner
-	Cfg         *config.Config
-	PluginsFile string
+	Run host.Runner
+	Cfg *config.Config
 	// ReadFile reads /proc and /sys, for the server's mode and memory.
 	ReadFile func(string) ([]byte, error)
 	Ping     func(ctx context.Context, addr string) (server.PingReply, error)
@@ -54,14 +52,13 @@ type Probe struct {
 	// Group says why this login can't read the tree through runGroup, for a
 	// read that was refused. nil leaves that out.
 	Group func(group, what string) error
-	sums  plugins.Sums
 	// denied is a read of the tree refused in this reading.
 	denied bool
 }
 
 // NewProbe gives a Probe on the real host.
-func NewProbe(r host.Runner, c *config.Config, pluginsFile string) *Probe {
-	return &Probe{Run: r, Cfg: c, PluginsFile: pluginsFile, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0, Group: launch.GroupProblem}
+func NewProbe(r host.Runner, c *config.Config) *Probe {
+	return &Probe{Run: r, Cfg: c, ReadFile: os.ReadFile, Ping: server.Ping, Root: os.Geteuid() == 0, Group: launch.GroupProblem}
 }
 
 // Line is one labeled line. A Line with no label goes on under the one above.
@@ -207,11 +204,14 @@ func (p *Probe) ports(ctx context.Context) []Line {
 	if err != nil {
 		lines = append(lines, Line{"Ports", "can't list sockets: " + err.Error()})
 	} else {
-		lines = append(lines, portLines(out, "tcp", p.Cfg.GamePort)...)
+		rows := ssRows(out)
+		lines = append(lines, portLines(rows, "tcp", p.Cfg.GamePort, "")...)
 		if p.Cfg.Bedrock {
-			// NetherNet: signaling on TCP, game traffic on UDP.
-			lines = append(lines, portLines(out, "tcp", p.Cfg.BedrockPort)...)
-			lines = append(lines, portLines(out, "udp", p.Cfg.BedrockPort)...)
+			// NetherNet: signaling on TCP, game traffic on UDP. Geyser opens
+			// the UDP socket per join, so it's normally closed when idle.
+			lines = append(lines, portLines(rows, "tcp", p.Cfg.BedrockPort, "")...)
+			lines = append(lines, portLines(rows, "udp", p.Cfg.BedrockPort,
+				fmt.Sprintf("udp %d opens when a Bedrock player joins", p.Cfg.BedrockPort))...)
 		}
 		lines[0].Label = "Ports"
 	}
@@ -252,14 +252,26 @@ func (p *Probe) firewall(ctx context.Context) []Line {
 	}
 }
 
-// portLines reads ss -H -t -u -a -n: netid, state, queues, local, peer.
-func portLines(ss []byte, proto string, port int) []Line {
+// ssRows splits ss -H -t -u -a -n into fields: netid, state, queues, local,
+// peer. Short lines are left out.
+func ssRows(ss []byte) [][]string {
+	var rows [][]string
+	for l := range strings.Lines(string(ss)) {
+		if f := strings.Fields(l); len(f) >= 6 {
+			rows = append(rows, f)
+		}
+	}
+	return rows
+}
+
+// portLines reads ssRows for one port. idle, when set, replaces the line for
+// a port nothing listens on.
+func portLines(rows [][]string, proto string, port int, idle string) []Line {
 	want := strconv.Itoa(port)
 	var listen []string
 	conns := 0
-	for _, l := range strings.Split(string(ss), "\n") {
-		f := strings.Fields(l)
-		if len(f) < 6 || f[0] != proto {
+	for _, f := range rows {
+		if f[0] != proto {
 			continue
 		}
 		i := strings.LastIndexByte(f[4], ':')
@@ -273,7 +285,10 @@ func portLines(ss []byte, proto string, port int) []Line {
 			conns++
 		}
 	}
-	if len(listen) == 0 {
+	switch {
+	case len(listen) == 0 && idle != "":
+		return []Line{{"", idle}}
+	case len(listen) == 0:
 		return []Line{{"", fmt.Sprintf("nothing listens on %s %d", proto, port)}}
 	}
 	text := fmt.Sprintf("%s %s listening", proto, strings.Join(listen, ", "))
@@ -306,42 +321,26 @@ func (p *Probe) ops() Line {
 	}
 	names := make([]string, 0, len(list))
 	for _, o := range list {
-		names = append(names, server.Clean(o.Name))
+		names = append(names, o.Name) // Write cleans
 	}
 	return Line{"Ops", strings.Join(names, ", ")}
 }
 
+// plugins lists the jars the server loads. Since 2026111914293176 they
+// aren't checked against a list, so none is opened.
 func (p *Probe) plugins() Line {
-	approved, _, err := plugins.ReadApproved(p.PluginsFile)
-	if errors.Is(err, fs.ErrNotExist) {
-		return Line{"Plugins", "no approved list at " + p.PluginsFile + " yet"}
-	}
+	jars, err := plugins.Jars(p.Cfg.ServerDir)
 	if err != nil {
-		return Line{"Plugins", "can't read the approved list: " + err.Error()}
+		return Line{"Plugins", "can't list the jars: " + p.cantRead(err)}
 	}
-	c, err := plugins.CheckJars(p.Cfg.ServerDir, approved, &p.sums)
-	if err != nil {
-		return Line{"Plugins", "can't check the jars: " + p.cantRead(err)}
+	if len(jars) == 0 {
+		return Line{"Plugins", "none"}
 	}
-	var text string
-	switch {
-	case c.Jars == 0:
-		text = "none"
-	case c.OK():
-		text = fmt.Sprintf("%d %s, all approved", c.Jars, plural(c.Jars, "jar"))
-	default:
-		text = fmt.Sprintf("%d %s, NOT all approved, so start refuses", c.Jars, plural(c.Jars, "jar"))
+	names := make([]string, 0, len(jars))
+	for _, j := range jars {
+		names = append(names, j.Name)
 	}
-	if len(c.New) > 0 {
-		text += "; new: " + strings.Join(c.New, ", ")
-	}
-	if len(c.Changed) > 0 {
-		text += "; changed: " + strings.Join(c.Changed, ", ")
-	}
-	if len(c.Missing) > 0 {
-		text += "; approved but gone: " + strings.Join(c.Missing, ", ")
-	}
-	return Line{"Plugins", text}
+	return Line{"Plugins", fmt.Sprintf("%d %s: %s", len(jars), plural(len(jars), "jar"), strings.Join(names, ", "))}
 }
 
 func (p *Probe) trees() []Line {
@@ -387,7 +386,7 @@ func (p *Probe) boot(ctx context.Context) Line {
 // server tree is mounted in the container.
 func (p *Probe) log() []Line {
 	file := server.LogFile(p.Cfg.ServerDir)
-	tail, err := tailFile(file, logLines)
+	tail, err := tailLog(p.Cfg.ServerDir, logLines)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return []Line{{"Log", "no " + file + " yet"}}
@@ -396,14 +395,14 @@ func (p *Probe) log() []Line {
 	}
 	lines := []Line{{"Log", file}}
 	for _, l := range tail {
-		lines = append(lines, Line{"", server.Clean(l)})
+		lines = append(lines, Line{"", l})
 	}
 	return lines
 }
 
-// tailFile reads only the end of a file, since a log can be large.
-func tailFile(file string, n int) ([]string, error) {
-	f, err := server.OpenRegular(file)
+// tailLog reads only the end of latest.log, since it can be large.
+func tailLog(serverDir string, n int) ([]string, error) {
+	f, err := server.OpenLog(serverDir)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +430,8 @@ func tailFile(file string, n int) ([]string, error) {
 
 // Write prints the report, with a blank line at the start, the end, and
 // between sections. Lines longer than width are cut, unless width is 0.
+// Every line is cleaned here, since most of it comes from the server: jar
+// names, the ping, the log.
 func (r Report) Write(w io.Writer, width int) error {
 	var b strings.Builder
 	b.WriteString("\n")
@@ -440,7 +441,7 @@ func (r Report) Write(w io.Writer, width int) error {
 			if l.Label != "" {
 				label = l.Label + ":"
 			}
-			b.WriteString(cut(fmt.Sprintf("%-11s %s", label, l.Text), width))
+			b.WriteString(cut(server.Clean(fmt.Sprintf("%-11s %s", label, l.Text)), width))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")

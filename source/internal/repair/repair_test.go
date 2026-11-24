@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,8 +33,10 @@ func testHost(t *testing.T, passwd, group string, reply func(c host.Cmd) ([]byte
 	}
 	h.Cfg.OwnerTrees = []string{h.Cfg.ServerDir}
 	h.ConfigPath = filepath.Join(dir, "config.shcl")
-	h.RulesFile, h.UnitFile, h.ResolvConf = filepath.Join(dir, "firewall.nft"), filepath.Join(dir, "fw.service"), filepath.Join(dir, "resolv.conf")
+	h.RulesFile, h.UnitFile, h.ResolvConf, h.Routes = filepath.Join(dir, "firewall.nft"), filepath.Join(dir, "fw.service"), filepath.Join(dir, "resolv.conf"), filepath.Join(dir, "ipv6_route")
 	h.BootFile = filepath.Join(dir, "boot.service")
+	h.PkgBin, h.LocalBin = filepath.Join(dir, "usr-bin-tt-minecraftd"), filepath.Join(dir, "usr-local-bin-tt-minecraftd")
+	h.OldBuilds = filepath.Join(dir, "old-builds")
 	for file, text := range map[string]string{h.Passwd: passwd, h.Group: group} {
 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
@@ -93,7 +96,7 @@ func hasAll(t *testing.T, what string, have []string, want ...string) {
 }
 
 func TestRun(t *testing.T) {
-	defer testid.Line(t, "df5za")
+	defer testid.Line(t, "1a3env8")
 	fixed := 0
 	checks := []Check{
 		{Name: "fine", Look: func(context.Context, *Host) ([]Finding, error) { return nil, nil }},
@@ -128,7 +131,7 @@ func TestRun(t *testing.T) {
 }
 
 func TestConfigCheck(t *testing.T) {
-	defer testid.Line(t, "df5zb")
+	defer testid.Line(t, "1a3enyc")
 	h, f := testHost(t, "", "", nil)
 	hasAll(t, "missing", look(t, h, configCheck), "no config at "+h.ConfigPath+"; sudo tt-minecraftd setup writes one")
 
@@ -156,7 +159,7 @@ const (
 )
 
 func TestAccountCheck(t *testing.T) {
-	defer testid.Line(t, "df5zc")
+	defer testid.Line(t, "1a3ep1g")
 	h, _ := testHost(t, goodPasswd, goodGroup, nil)
 	if got := look(t, h, accountCheck); len(got) != 0 {
 		t.Errorf("good account: %q", got)
@@ -182,6 +185,14 @@ func TestAccountCheck(t *testing.T) {
 		t.Errorf("loose account: %q", got)
 	}
 
+	// The account there and its group not: one run makes the group and moves
+	// the account to it, in that order.
+	h, f = testHost(t, "minecraftd:x:999:100::/nonexistent:/usr/sbin/nologin\n", "users:x:100:\n", nil)
+	want = []string{"sudo groupadd --system minecraftd", "sudo usermod --gid minecraftd minecraftd"}
+	if got := fixAll(t, h, f, accountCheck); !reflect.DeepEqual(got, want) {
+		t.Errorf("group missing: %q", got)
+	}
+
 	for _, uid := range []string{"0", "1000"} {
 		h, f = testHost(t, "minecraftd:x:"+uid+":990::/home/m:/bin/bash\n", "sudo:x:27:minecraftd\nminecraftd:x:990:\n", nil)
 		found := look(t, h, accountCheck)
@@ -195,7 +206,7 @@ func TestAccountCheck(t *testing.T) {
 }
 
 func TestOperatorCheck(t *testing.T) {
-	defer testid.Line(t, "df5zd")
+	defer testid.Line(t, "1a3ep4m")
 	h, _ := testHost(t, goodPasswd, goodGroup, nil)
 	if got := look(t, h, operatorCheck); len(got) != 0 {
 		t.Errorf("listed member: %q", got)
@@ -220,7 +231,7 @@ func TestOperatorCheck(t *testing.T) {
 }
 
 func TestServerTreeCheck(t *testing.T) {
-	defer testid.Line(t, "df5ze")
+	defer testid.Line(t, "1a3ep7r")
 	h, _ := testHost(t, "", "", nil)
 	dir := h.Cfg.ServerDir
 	hasAll(t, "no folder", look(t, h, serverTreeCheck), "server folder "+dir+" is missing", "sudo tt-minecraftd setup makes one")
@@ -293,7 +304,7 @@ func ownHost(t *testing.T, serverIsMe bool, state string) (*Host, *host.Fake) {
 }
 
 func TestOwnershipCheck(t *testing.T) {
-	defer testid.Line(t, "df5zf")
+	defer testid.Line(t, "1a3epaw")
 	if os.Getuid() == 990 {
 		t.Skip("the test's uid is the fake service account's")
 	}
@@ -323,7 +334,24 @@ func TestOwnershipCheck(t *testing.T) {
 	if err := os.Chmod(filepath.Join(h.Cfg.ServerDir, "world", "open.txt"), 0o664); err != nil {
 		t.Fatal(err)
 	}
-	hasAll(t, "running, open file", look(t, h, ownershipCheck), "has 1 file with modes other than ug+rwX,o-rwx [fix]")
+	hasAll(t, "running, open file", look(t, h, ownershipCheck), "has 1 file other accounts can reach [fix]")
+
+	// Running, files and folders tighter than ug+rwX, as Java and Paper leave them, pass.
+	h, _ = ownHost(t, true, "running")
+	for _, p := range []string{"level.dat_new", "spark.tmp"} {
+		if err := os.WriteFile(filepath.Join(h.Cfg.ServerDir, "world", p), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(h.Cfg.ServerDir, "world", "nethernet"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.Cfg.ServerDir, "world", "nethernet", "identity.pem"), nil, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, ownershipCheck); len(got) != 0 {
+		t.Errorf("running, tight modes: %q", got)
+	}
 
 	// Stopped, the trees go back to the operator.
 	h, _ = ownHost(t, true, "")
@@ -351,14 +379,72 @@ func TestOwnershipCheck(t *testing.T) {
 	}
 	h.Cfg.RunMode = "docker"
 	f.Reply = func(host.Cmd) ([]byte, error) { return []byte("running\n"), nil }
-	hasAll(t, "docker, open jar", look(t, h, ownershipCheck), "has 1 file with modes")
+	hasAll(t, "docker, open jar", look(t, h, ownershipCheck), "has 1 file other accounts can reach")
 
 	h.Cfg.OwnerTrees = append(h.Cfg.OwnerTrees, filepath.Join(filepath.Dir(h.Cfg.ServerDir), "gone"))
 	hasAll(t, "missing tree", look(t, h, ownershipCheck), "tree "+filepath.Join(filepath.Dir(h.Cfg.ServerDir), "gone")+" is missing")
 }
 
+// A running Paper saves through temp files it renames, so a file or folder
+// can go between the walk's listing and its look at it.
+func TestOwnershipCheckFileGone(t *testing.T) {
+	defer testid.Line(t, "1a4q4c8")
+	h, _ := ownHost(t, true, "running")
+	world := filepath.Join(h.Cfg.ServerDir, "world")
+	if err := os.MkdirAll(filepath.Join(world, "playerdata", "inner"), 0o770); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"level.dat_new", "playerdata/a.dat_tmp", "playerdata/inner/b.dat"} {
+		if err := os.WriteFile(filepath.Join(world, filepath.FromSlash(p)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One open file is left, so the walk is shown to go on past the gaps.
+	open := filepath.Join(world, "zz-open.txt")
+	if err := os.WriteFile(open, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	gone := map[string]func(string) error{
+		// Renamed before its lstat, as Paper does with level.dat_new.
+		filepath.Join(world, "level.dat_new"): func(p string) error {
+			return os.Rename(p, filepath.Join(world, "level.dat"))
+		},
+		// Gone before its lstat.
+		filepath.Join(world, "playerdata", "a.dat_tmp"): os.Remove,
+		// A folder gone before it's read.
+		filepath.Join(world, "playerdata", "inner"): os.RemoveAll,
+	}
+	seen := map[string]bool{}
+	old := walkDir
+	t.Cleanup(func() { walkDir = old })
+	walkDir = func(root string, fn fs.WalkDirFunc) error {
+		return old(root, func(p string, d fs.DirEntry, err error) error {
+			if take := gone[p]; take != nil && !seen[p] {
+				seen[p] = true
+				if err := take(p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return fn(p, d, err)
+		})
+	}
+	hasAll(t, "files gone mid-walk", look(t, h, ownershipCheck), "has 1 file other accounts can reach [fix]")
+	if len(seen) != len(gone) {
+		t.Errorf("the walk reached %d of the %d files taken away", len(seen), len(gone))
+	}
+
+	// A tree root that's gone is still an error.
+	if _, _, err := walkTree(filepath.Join(world, "nowhere"), 0, 0, true, nil); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing root: %v", err)
+	}
+}
+
 func TestBedrockCheck(t *testing.T) {
-	defer testid.Line(t, "df5zg")
+	defer testid.Line(t, "1a3epe0")
 	h, f := testHost(t, "", "", nil)
 	if bedrockCheck.Applies(h.Cfg) {
 		t.Error("applies with bedrock off")
@@ -385,8 +471,11 @@ func TestBedrockCheck(t *testing.T) {
 	if err := os.Chmod(key, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := fixAll(t, h, f, bedrockCheck); !reflect.DeepEqual(got, []string{"sudo chmod o-rwx -- " + key}) {
-		t.Errorf("open key: %q", got)
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("open key ran %q", got)
+	}
+	if fi, err := os.Stat(key); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Errorf("open key, fixed: %v %v", fi.Mode(), err)
 	}
 	if err := os.Chmod(key, 0o640); err != nil {
 		t.Fatal(err)
@@ -396,8 +485,60 @@ func TestBedrockCheck(t *testing.T) {
 	}
 }
 
+// The key's mode is changed as root, so a link on the way to it isn't
+// followed.
+func TestBedrockKeyLinks(t *testing.T) {
+	defer testid.Line(t, "1a3js6c")
+	h, f := testHost(t, "", "", nil)
+	h.Cfg.Bedrock = true
+	plugins := filepath.Join(h.Cfg.ServerDir, "plugins")
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "key.pem")
+	for _, file := range []string{filepath.Join(plugins, "Geyser-Spigot.jar"), filepath.Join(plugins, "floodgate-spigot.jar"), secret} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(secret, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(outside, filepath.Join(plugins, "floodgate")); err != nil {
+		t.Fatal(err)
+	}
+	got := look(t, h, bedrockCheck)
+	hasAll(t, "linked folder", got, filepath.Join(plugins, "floodgate")+" is a link")
+	if strings.Contains(strings.Join(got, "\n"), "[fix]") {
+		t.Errorf("linked folder has a fix: %q", got)
+	}
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("linked folder ran %q", got)
+	}
+
+	if err := os.Remove(filepath.Join(plugins, "floodgate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(plugins, "floodgate"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(plugins, "floodgate", "key.pem")); err != nil {
+		t.Fatal(err)
+	}
+	hasAll(t, "linked key", look(t, h, bedrockCheck), "key.pem is a link")
+	if got := fixAll(t, h, f, bedrockCheck); len(got) != 0 {
+		t.Errorf("linked key ran %q", got)
+	}
+
+	if fi, err := os.Stat(secret); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Errorf("the link's target changed: %v %v", fi.Mode(), err)
+	}
+}
+
 func TestDockerCheck(t *testing.T) {
-	defer testid.Line(t, "df5zh")
+	defer testid.Line(t, "1a3eph4")
 	var noImage bool
 	var state string
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
@@ -436,7 +577,7 @@ func TestDockerCheck(t *testing.T) {
 // Podman mode also finds an old container left under Docker, and needs
 // catatonit.
 func TestPodmanChecks(t *testing.T) {
-	defer testid.Line(t, "df64h")
+	defer testid.Line(t, "1a3f654")
 	states := map[string]string{"podman": "running", "docker": "exited"}
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
 		if c.Args[1] == "ps" {
@@ -465,6 +606,8 @@ func TestPodmanChecks(t *testing.T) {
 	t.Cleanup(func() { catatonitPaths = was })
 	dir := t.TempDir()
 	catatonitPaths = []string{filepath.Join(dir, "catatonit")}
+	hasAll(t, "no catatonit, no apt", look(t, h, catatonitCheck), "catatonit isn't installed", "the distro's catatonit package adds it")
+	launch.Installed = func(name string) bool { return name == "apt-get" }
 	hasAll(t, "no catatonit", look(t, h, catatonitCheck), "catatonit isn't installed", "apt-get install catatonit")
 	if err := os.WriteFile(catatonitPaths[0], nil, 0o755); err != nil {
 		t.Fatal(err)
@@ -479,7 +622,7 @@ func TestPodmanChecks(t *testing.T) {
 }
 
 func TestDatasetCheck(t *testing.T) {
-	defer testid.Line(t, "df5zj")
+	defer testid.Line(t, "1a3epm8")
 	var mounted string
 	var err error
 	h, f := testHost(t, "", "", func(host.Cmd) ([]byte, error) { return []byte(mounted + "\n"), err })
@@ -501,10 +644,28 @@ func TestDatasetCheck(t *testing.T) {
 	hasAll(t, "missing", look(t, h, datasetCheck), "dataset tank/mc doesn't exist, or zfs can't be asked: dataset does not exist")
 }
 
+// boxCID is a container id for the othersCheck process tables.
+const boxCID = "4f1e0c5b2a3d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7"
+
+// procCgroups gives a ReadFile for /proc/<pid>/cgroup from a pid -> path
+// map. Any other pid can't be read.
+func procCgroups(paths map[string]string) func(string) ([]byte, error) {
+	return func(name string) ([]byte, error) {
+		for pid, path := range paths {
+			if name == "/proc/"+pid+"/cgroup" {
+				return []byte("0::" + path + "\n"), nil
+			}
+		}
+		return nil, os.ErrNotExist
+	}
+}
+
 func TestOthersCheck(t *testing.T) {
-	defer testid.Line(t, "df5zk")
-	ps := "  990  100 java -Xmx4G -jar /srv/mc/paper.jar nogui\n 1000  200 /usr/bin/java -jar paper-26.3-244.jar\n 1000  300 bash\n 1234  400 java -jar paper.jar\n"
+	defer testid.Line(t, "1a3epqc")
+	ps := "  990    99     1  60 catatonit -- sh -c " + launch.Wrapper + " sh java -Xmx4G -jar paper.jar --nogui\n" +
+		"  990   100    99  60 java -Xmx4G -jar /srv/mc/paper.jar nogui\n 1000   200     1  60 /usr/bin/java -jar paper-26.3-244.jar\n 1000   300     1  60 bash\n 1234   400     1  60 java -jar paper.jar\n"
 	h, f := testHost(t, goodPasswd, goodGroup, func(host.Cmd) ([]byte, error) { return []byte(ps), nil })
+	h.ReadFile = procCgroups(map[string]string{"100": "/machine.slice/libpod-" + boxCID + ".scope/container", "200": "/user.slice/user-1000.slice/session-2.scope"})
 	found := look(t, h, othersCheck)
 	want := []string{
 		"a Paper server this tool didn't start is running, pid 200 as alice; it's left alone, and start refuses until it's stopped",
@@ -518,8 +679,43 @@ func TestOthersCheck(t *testing.T) {
 	}
 }
 
+// A Paper under runUser's uid is the tool's only when status would call it
+// so: in the native unit, or in a container under the wrapper.
+func TestOthersCheckSameUID(t *testing.T) {
+	defer testid.Line(t, "1a3jy5r")
+	cases := []struct {
+		name, cgroup, parent string
+		ours                 bool
+	}{
+		{"by hand", "/user.slice/user-990.slice/session-5.scope", "bash", false},
+		{"old scripts in tmux", "/user.slice/user-990.slice/user@990.service/tmux-spawn-1.scope", "tmux new -d -s mc", false},
+		{"another container", "/machine.slice/libpod-" + boxCID + ".scope/container", "/run/podman-init -- java -jar paper.jar", false},
+		{"no cgroup read", "", "sh -c " + launch.Wrapper + " sh java", false},
+		{"podman", "/machine.slice/libpod-" + boxCID + ".scope/container", "/run/podman-init -- sh -c " + launch.Wrapper + " sh java -jar paper.jar", true},
+		{"docker", "/system.slice/docker-" + boxCID + ".scope", "docker-init -- sh -c " + launch.Wrapper + " sh java -jar paper.jar", true},
+		{"native", "/system.slice/" + launch.Unit, "tmux new -d -s mc", true},
+	}
+	for _, c := range cases {
+		ps := "  990    50     1  60 " + c.parent + "\n  990    51    50  60 java -Xmx4G -jar paper.jar --nogui\n"
+		h, _ := testHost(t, goodPasswd, goodGroup, func(host.Cmd) ([]byte, error) { return []byte(ps), nil })
+		paths := map[string]string{}
+		if c.cgroup != "" {
+			paths["51"] = c.cgroup
+		}
+		h.ReadFile = procCgroups(paths)
+		found := look(t, h, othersCheck)
+		want := []string(nil)
+		if !c.ours {
+			want = []string{"a Paper server this tool didn't start is running, pid 51 as minecraftd; it's left alone, and start refuses until it's stopped"}
+		}
+		if !reflect.DeepEqual(found, want) {
+			t.Errorf("%s: found %q", c.name, found)
+		}
+	}
+}
+
 func TestHostFirewallCheck(t *testing.T) {
-	defer testid.Line(t, "df5zm")
+	defer testid.Line(t, "1a3eptg")
 	units := map[string]bool{}
 	var ufw, firewalld string
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
@@ -549,9 +745,57 @@ func TestHostFirewallCheck(t *testing.T) {
 	if got := look(t, h, hostFirewallCheck); !reflect.DeepEqual(got, want) {
 		t.Errorf("ufw: %q", got)
 	}
+	// an outgoing or forward rule for the port doesn't let players in
+	ufw = "Status: active\nDefault: deny (incoming), allow (outgoing)\n\nTo                         Action      From\n--                         ------      ----\n25565/tcp                  ALLOW OUT   Anywhere\n19132                      ALLOW FWD   Anywhere\n19132/udp on eth0          ALLOW IN    Anywhere\n"
+	hasAll(t, "ufw out and fwd", look(t, h, hostFirewallCheck), "on 25565/tcp;", "on 19132/tcp;")
+	if got := look(t, h, hostFirewallCheck); len(got) != 2 {
+		t.Errorf("ufw out and fwd: %q", got)
+	}
 	ufw = "Status: active\nDefault: allow (incoming), allow (outgoing)\n"
 	if got := look(t, h, hostFirewallCheck); len(got) != 0 {
 		t.Errorf("ufw allows all: %q", got)
+	}
+	// ufw limit, allow from, and a port list each let players in.
+	head := "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\nNew profiles: skip\n\nTo                         Action      From\n--                         ------      ----\n"
+	for _, rules := range []string{
+		"25565/tcp                  LIMIT IN    Anywhere\n19132                      LIMIT IN    Anywhere\n",
+		"Anywhere                   ALLOW IN    192.168.0.0/16\n",
+		"Anywhere on eth0           ALLOW IN    Anywhere\n",
+		"19132,25565/tcp            ALLOW IN    Anywhere\n19132/udp                  ALLOW IN    Anywhere\n",
+		"80,19000:19200,25565/tcp   ALLOW IN    Anywhere\n19132/udp (v6)             ALLOW IN    Anywhere (v6)\n",
+	} {
+		ufw = head + rules
+		if got := look(t, h, hostFirewallCheck); len(got) != 0 {
+			t.Errorf("ufw %q: %q", rules, got)
+		}
+	}
+	ufw = head + "Anywhere/udp               ALLOW IN    Anywhere\n80,443,25566/tcp           LIMIT IN    Anywhere\nAnywhere                   DENY IN     10.0.0.0/8\n"
+	want = []string{
+		"ufw is active and doesn't let players in on 25565/tcp; sudo ufw allow 25565/tcp adds it",
+		"ufw is active and doesn't let players in on 19132/tcp; sudo ufw allow 19132/tcp adds it",
+	}
+	if got := look(t, h, hostFirewallCheck); !reflect.DeepEqual(got, want) {
+		t.Errorf("ufw other ports: %q", got)
+	}
+	// First match wins: a deny from Anywhere ahead of the allow blocks the port.
+	open := "25565/tcp                  ALLOW IN    Anywhere\n19132/udp                  ALLOW IN    Anywhere\n"
+	blocked := func(rule, p string) string {
+		return fmt.Sprintf("ufw is active and its rule %q blocks players on %s, ahead of any rule that lets them in", rule, p)
+	}
+	for _, c := range []struct{ rules, want string }{
+		{"19132/tcp                  DENY IN     Anywhere\n19000:19200/tcp            ALLOW IN    Anywhere\n" + open, "ufw is active and doesn't let players in on 19132/tcp; sudo ufw allow 19132/tcp adds it"},
+		{"19000:19200/tcp            DENY IN     Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, blocked("19000:19200/tcp DENY IN Anywhere", "19132/tcp")},
+		{"Anywhere/udp               REJECT IN   Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, blocked("Anywhere/udp REJECT IN Anywhere", "19132/udp")},
+		{"19132,25565/tcp            DENY IN     Anywhere\n19132/tcp (v6)             ALLOW IN    Anywhere (v6)\n" + open, blocked("19132,25565/tcp DENY IN Anywhere", "25565/tcp")},
+		{"19132/tcp                  ALLOW IN    Anywhere\n19132/tcp                  DENY IN     Anywhere\n" + open, ""},
+		{"19132/tcp                  DENY IN     10.0.0.0/8\n19132/tcp                  ALLOW IN    Anywhere\n" + open, ""},
+		{"19132/tcp                  DENY OUT    Anywhere\n19132/tcp                  ALLOW IN    Anywhere\n" + open, ""},
+	} {
+		ufw = head + c.rules
+		got := look(t, h, hostFirewallCheck)
+		if c.want == "" && len(got) != 0 || c.want != "" && !slices.Contains(got, c.want) {
+			t.Errorf("ufw %q: %q", c.rules, got)
+		}
 	}
 
 	units["ufw"], units["firewalld"] = false, true

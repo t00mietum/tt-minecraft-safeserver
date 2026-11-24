@@ -4,15 +4,18 @@
 package update
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -101,10 +104,10 @@ func (r *rig) files() []string {
 	return names
 }
 
-// --paper stays on the Minecraft version, asks, approves the new build, and
-// keeps the last 2.
+// --paper stays on the Minecraft version, asks, points paper.jar at the new
+// build, and keeps the last 2.
 func TestPaper(t *testing.T) {
-	defer testid.Line(t, "df66z")
+	defer testid.Line(t, "1a3fdrw")
 	ctx := context.Background()
 
 	r := newRig(t, "y\n", 249)
@@ -117,14 +120,15 @@ func TestPaper(t *testing.T) {
 	if !reflect.DeepEqual(r.files(), []string{"paper-26.3-244.jar", "paper-26.3-249.jar", "paper.jar"}) {
 		t.Errorf("left %q\n%s", r.files(), r.out)
 	}
-	for _, want := range []string{"from build 244 to build 249", "Go ahead?", "approved", "older builds removed: paper-26.3-240.jar", "next start"} {
+	// "approved" was in this list until 2026111914334585.
+	for _, want := range []string{"from build 244 to build 249", "Go ahead?", "older builds removed: paper-26.3-240.jar", "next start"} {
 		if !strings.Contains(r.out.String(), want) {
 			t.Errorf("no %q:\n%s", want, r.out)
 		}
 	}
-	list, _, err := plugins.ReadApproved(r.u.PluginsFile)
-	if err != nil || len(list) != 1 || list[0].Name != "paper-26.3-249.jar" || list[0].SHA256 != strings.Repeat("cd", 32) {
-		t.Errorf("approved %+v %v", list, err)
+	// The new build went on the list until 2026111914334585.
+	if list, _, err := plugins.ReadSources(r.u.PluginsFile); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("list written: %+v %v", list, err)
 	}
 
 	r = newRig(t, "n\n", 249)
@@ -176,6 +180,51 @@ func TestPaper(t *testing.T) {
 	}
 }
 
+// --paper keeps the build paper.jar led to, however the link is written, and
+// only that one: a same-named build elsewhere doesn't save the local file.
+func TestPaperKeepsLinkedBuild(t *testing.T) {
+	defer testid.Line(t, "1a3jxcr")
+	ctx := context.Background()
+	both := []string{"paper-26.3-244.jar", "paper-26.3-249.jar", "paper.jar"}
+	for _, c := range []struct {
+		name string
+		link func(server string) string
+		want []string
+	}{
+		{"plain", func(string) string { return "paper-26.3-244.jar" }, both},
+		{"dot slash", func(string) string { return "./paper-26.3-244.jar" }, both},
+		{"full path", func(s string) string { return filepath.Join(s, "paper-26.3-244.jar") }, both},
+		{"up and back", func(string) string { return "../server/paper-26.3-244.jar" }, both},
+		{"double slash", func(s string) string { return s + "//paper-26.3-244.jar" }, both},
+		{"elsewhere", func(s string) string {
+			other := filepath.Join(filepath.Dir(s), "other")
+			if err := os.Mkdir(other, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(other, "paper-26.3-244.jar"), []byte("other"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(other, "paper-26.3-244.jar")
+		}, []string{"paper-26.3-249.jar", "paper.jar"}},
+	} {
+		r := newRig(t, "", 249)
+		r.u.Yes = true
+		jar := filepath.Join(r.dir, "paper.jar")
+		if err := os.Remove(jar); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(c.link(r.dir), jar); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.u.Do(ctx); err != nil {
+			t.Fatalf("%s: %v\n%s", c.name, err, r.out)
+		}
+		if !reflect.DeepEqual(r.files(), c.want) {
+			t.Errorf("%s: left %q, want %q\n%s", c.name, r.files(), c.want, r.out)
+		}
+	}
+}
+
 // fakeGeyser has Geyser 2.1 build 9, and writes "new" for it.
 type fakeGeyser struct {
 	asked     []string
@@ -205,8 +254,9 @@ func sumOf(text string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// pluginRig has Geyser approved with its source, Floodgate approved at the
-// newest build, and a plugin with a source update doesn't know.
+// pluginRig has Geyser with its source, Floodgate at the newest build, and a
+// plugin with a source update doesn't know. Until 2026111914334585 they were
+// approved by hash; now the hash is the file's own.
 func pluginRig(t *testing.T, answers string) (*rig, *fakeGeyser) {
 	t.Helper()
 	r := newRig(t, answers, 244)
@@ -230,7 +280,7 @@ func pluginRig(t *testing.T, answers string) (*rig, *fakeGeyser) {
 		}
 		infos = append(infos, plugins.Info{Jar: plugins.Jar{Name: "plugins/" + j.name}, SHA256: sumOf(j.text), Source: j.src})
 	}
-	if err := plugins.Approve(r.u.PluginsFile, infos); err != nil {
+	if err := plugins.SetSources(r.u.PluginsFile, infos); err != nil {
 		t.Fatal(err)
 	}
 	return r, g
@@ -239,7 +289,7 @@ func pluginRig(t *testing.T, answers string) (*rig, *fakeGeyser) {
 // --plugins updates what has a known source and a newer build, keeps the
 // source, and leaves the rest.
 func TestPlugins(t *testing.T) {
-	defer testid.Line(t, "df672")
+	defer testid.Line(t, "1a3fe28")
 	ctx := context.Background()
 
 	r, g := pluginRig(t, "y\n")
@@ -249,17 +299,18 @@ func TestPlugins(t *testing.T) {
 	if !reflect.DeepEqual(g.installed, []string{"Geyser-Spigot.jar"}) || len(r.p.asked) > 0 {
 		t.Errorf("installed %q, Paper asked %q", g.installed, r.p.asked)
 	}
-	for _, want := range []string{"Update plugins/Geyser-Spigot.jar from an older build to Geyser 2.1 build 9", "OK      plugins/floodgate-spigot.jar is the newest build", "SKIPPED plugins/Thing.jar: its source isn't one update knows", "FIXED   plugins/Geyser-Spigot.jar approved"} {
+	for _, want := range []string{"Update plugins/Geyser-Spigot.jar from an older build to Geyser 2.1 build 9", "OK      plugins/floodgate-spigot.jar is the newest build", "SKIPPED plugins/Thing.jar: its source isn't one update knows", "FIXED   Geyser 2.1 build 9 downloaded"} { // "approved" until 2026111914334585
 		if !strings.Contains(r.out.String(), want) {
 			t.Errorf("no %q:\n%s", want, r.out)
 		}
 	}
-	list, _, err := plugins.ReadApproved(r.u.PluginsFile)
+	list, _, err := plugins.ReadSources(r.u.PluginsFile)
 	if err != nil || len(list) != 3 {
 		t.Fatalf("approved %+v %v", list, err)
 	}
 	for _, a := range list {
-		if a.Name == "plugins/Geyser-Spigot.jar" && (a.SHA256 != sumOf("new") || a.Source != g.Source("geyser")) {
+		// The hash was sumOf("new") until 2026111914334585, and isn't written now.
+		if a.Name == "plugins/Geyser-Spigot.jar" && (a.SHA256 != "" || a.Source != g.Source("geyser")) {
 			t.Errorf("Geyser's entry %+v", a)
 		}
 	}
@@ -286,7 +337,9 @@ func TestPlugins(t *testing.T) {
 	if err := os.Remove(filepath.Join(r.dir, "plugins", "Geyser-Spigot.jar")); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.u.Do(ctx); err != nil || len(g.installed) > 0 || !strings.Contains(r.out.String(), "not in the server folder") {
+	// It said "not in the server folder" until 2026111914334585. A listed
+	// jar that's gone isn't a jar now, so there's nothing to say.
+	if err := r.u.Do(ctx); err != nil || len(g.installed) > 0 || strings.Contains(r.out.String(), "Geyser-Spigot.jar") {
 		t.Errorf("removed: %v, installed %q\n%s", err, g.installed, r.out)
 	}
 
@@ -308,7 +361,7 @@ func TestPlugins(t *testing.T) {
 // --mc-version asks even with --yes, snapshots before anything changes, and
 // won't go back to an older version.
 func TestMCVersion(t *testing.T) {
-	defer testid.Line(t, "df78m")
+	defer testid.Line(t, "1a3jpyg")
 	ctx := context.Background()
 	snap := "zfs snapshot -- tank/mc@20261112-110000_pre_tt-minecraftd-mc-version"
 	move := func(answers, dataset string) (*rig, *host.Fake) {
@@ -394,5 +447,121 @@ func TestMCVersion(t *testing.T) {
 		if err := r.u.Do(ctx); err == nil || !strings.Contains(err.Error(), "--mc-version") || len(r.p.asked) > 0 {
 			t.Errorf("%+v %q: %v, asked %q", c.parts, c.version, err, r.p.asked)
 		}
+	}
+}
+
+// update --plugins, and a plain update, remove the plugins' libraries from
+// Paper's cache as the service account, after the plugins. Paper's own,
+// named in paper.jar's libraries.list, stay, and so does the cache while the
+// server runs, or when --plugins isn't a part (2026111914334585).
+func TestUpdateClearsLibraries(t *testing.T) {
+	defer testid.Line(t, "1a4j2rc")
+	ctx := context.Background()
+	setUp := func(answers string) (*rig, *fakeGeyser, *host.Fake, []string) {
+		t.Helper()
+		r, g := pluginRig(t, answers)
+		fake := &host.Fake{}
+		r.u.Run, r.u.Cfg.RunUser = fake, "minecraftd"
+		var b bytes.Buffer
+		z := zip.NewWriter(&b)
+		w, err := z.Create("META-INF/libraries.list")
+		if err == nil {
+			_, err = w.Write([]byte(sumOf("own") + "\tcom.x:own:1\tcom/x/own/1/own-1.jar\n"))
+		}
+		if err == nil {
+			err = z.Close()
+		}
+		if err == nil {
+			err = os.WriteFile(filepath.Join(r.dir, "paper-26.3-244.jar"), b.Bytes(), 0o600)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doomed []string
+		for _, name := range []string{"libraries/com/x/own/1/own-1.jar", "libraries/org/a/a/1/a-1.jar", "plugins/.paper-remapped/Geyser-Spigot.jar"} {
+			file := filepath.Join(r.dir, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, []byte(name), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(name, "own") {
+				doomed = append(doomed, file)
+			}
+		}
+		return r, g, fake, doomed
+	}
+
+	r, g, fake, doomed := setUp("y\n")
+	if err := r.u.Do(ctx); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	want := append([]string{"rm", "-f", "--"}, doomed...)
+	if len(fake.Ran) != 1 || !slices.Equal(fake.Ran[0].Args, want) || fake.Ran[0].As != "minecraftd" || len(g.installed) != 1 {
+		t.Errorf("ran %+v, want %q as minecraftd; installed %q", fake.Ran, want, g.installed)
+	}
+	for _, s := range []string{"Remove the 2 libraries plugins asked Paper for", "FIXED   Geyser 2.1 build 9 downloaded", "FIXED   2 plugin libraries removed from Paper's cache"} {
+		if !strings.Contains(r.out.String(), s) {
+			t.Errorf("no %q:\n%s", s, r.out)
+		}
+	}
+	if i, k := strings.Index(r.out.String(), "FIXED   Geyser"), strings.Index(r.out.String(), "libraries removed"); i > k {
+		t.Errorf("libraries removed before the plugins:\n%s", r.out)
+	}
+
+	// A no removes nothing, and neither does an update without --plugins.
+	r, _, fake, _ = setUp("n\n")
+	if err := r.u.Do(ctx); err == nil || len(fake.Ran) > 0 {
+		t.Errorf("a no: %v, ran %+v", err, fake.Ran)
+	}
+	r, g, fake, _ = setUp("y\n")
+	r.u.Running = func(context.Context) (bool, error) { return true, nil }
+	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || len(g.installed) != 1 || !strings.Contains(r.out.String(), "SKIPPED plugin libraries: the server may be running") {
+		t.Errorf("running: %v, ran %+v\n%s", err, fake.Ran, r.out)
+	}
+	// A server started while the prompt waits keeps its cache too
+	// (2026112110300247).
+	r, g, fake, _ = setUp("y\n")
+	looks := 0
+	r.u.Running = func(context.Context) (bool, error) { looks++; return looks > 1, nil }
+	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || len(g.installed) != 1 || looks != 2 || !strings.Contains(r.out.String(), "SKIPPED plugin libraries: the server may be running") {
+		t.Errorf("started at the prompt: %v, ran %+v, %d looks\n%s", err, fake.Ran, looks, r.out)
+	}
+	r, _, fake, _ = setUp("y\n")
+	r.u.Parts = Parts{Paper: true}
+	r.p.newest = 249
+	if err := r.u.Do(ctx); err != nil || len(fake.Ran) > 0 || strings.Contains(r.out.String(), "librar") {
+		t.Errorf("--paper: %v, ran %+v\n%s", err, fake.Ran, r.out)
+	}
+}
+
+// A plugin jar link that leads out of the trees isn't hashed as root, nor
+// put to the agent, and the skip says why (backlog 2026112110300013).
+func TestTreeJarsOutOfTrees(t *testing.T) {
+	defer testid.Line(t, "1a4ytyy")
+	base := t.TempDir()
+	dir := filepath.Join(base, "server")
+	outside := filepath.Join(base, "home")
+	for _, d := range []string{filepath.Join(dir, "plugins"), outside} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{filepath.Join(dir, "plugins", "a.jar"), filepath.Join(outside, "secret.txt")} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(dir, "plugins", "zz-host.jar")); err != nil {
+		t.Fatal(err)
+	}
+	u := &Update{Cfg: &config.Config{ServerDir: dir, OwnerTrees: []string{dir}}, PluginsFile: filepath.Join(base, "plugins.shcl")}
+	jars, skipped := u.treeJars()
+	if len(jars) != 1 || jars[0].Name != "plugins/a.jar" {
+		t.Errorf("jars %+v", jars)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "zz-host.jar leads to ") {
+		t.Errorf("skipped %q", skipped)
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -70,7 +71,8 @@ func noHostRunner(t *testing.T) (*host.Fake, *int) {
 		*took++
 		return fake, func(c *config.Config) *repairpkg.Host {
 			return &repairpkg.Host{Run: fake, Cfg: c, ConfigPath: inv.configPath, Passwd: passwd, Group: group,
-				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), BootFile: filepath.Join(etc, "boot.service"),
+				RulesFile: filepath.Join(etc, "rules.nft"), UnitFile: filepath.Join(etc, "unit"), ResolvConf: filepath.Join(etc, "resolv.conf"), Routes: filepath.Join(etc, "ipv6_route"), BootFile: filepath.Join(etc, "boot.service"),
+				PkgBin: filepath.Join(etc, "usr-bin-tt-minecraftd"), LocalBin: filepath.Join(etc, "usr-local-bin-tt-minecraftd"), OldBuilds: filepath.Join(etc, "old-builds"),
 				NftThere: func() bool { return false }}
 		}
 	}
@@ -132,7 +134,7 @@ func runArgs(args ...string) (code int, stdout, stderr string) {
 }
 
 func TestHelpAboutVersion(t *testing.T) {
-	defer testid.Line(t, "df5xj")
+	defer testid.Line(t, "1a3egc8")
 	noDefaultConfig(t)
 	for _, c := range []struct {
 		args []string
@@ -162,7 +164,7 @@ func TestHelpAboutVersion(t *testing.T) {
 }
 
 func TestUsageErrors(t *testing.T) {
-	defer testid.Line(t, "df5xk")
+	defer testid.Line(t, "1a3egfc")
 	noDefaultConfig(t)
 	bad := [][]string{
 		{},
@@ -174,6 +176,8 @@ func TestUsageErrors(t *testing.T) {
 		{"stop", "--warn", "-1"},
 		{"stop", "--warn", "soon"},
 		{"watch", "--interval", "0"},
+		{"watch", "--interval", "9300000000"},
+		// --approve-plugins went in 2026111914334569, so these are unknown flags now.
 		{"repair", "--approve-plugins", "--check"},
 		{"repair", "--approve-plugins", "--dry-run"},
 		{"status", "--set", "heapMax"},
@@ -196,7 +200,7 @@ func TestUsageErrors(t *testing.T) {
 // Options reach the config in the order given, so the last one wins, and the
 // common ones work before the command too.
 func TestOptionsReachConfig(t *testing.T) {
-	defer testid.Line(t, "df5xm")
+	defer testid.Line(t, "1a3egjg")
 	t.Setenv("SUDO_USER", "")
 	t.Setenv("USER", "alice")
 	noDefaultConfig(t)
@@ -239,7 +243,7 @@ func TestOptionsReachConfig(t *testing.T) {
 // A missing default file means the defaults, with a warning. A missing file
 // named by --config is an error.
 func TestMissingConfig(t *testing.T) {
-	defer testid.Line(t, "df5xn")
+	defer testid.Line(t, "1a3egnm")
 	noDefaultConfig(t)
 	var errOut bytes.Buffer
 	inv, _, done := prepare([]string{"status"}, &bytes.Buffer{}, &errOut)
@@ -257,10 +261,10 @@ func TestMissingConfig(t *testing.T) {
 
 // watch redraws until Ctrl-C, and sends no screen codes to a file or pipe.
 func TestWatch(t *testing.T) {
-	defer testid.Line(t, "df5yg")
+	defer testid.Line(t, "1a3eka0")
 	cfg := config.Defaults()
 	cfg.ServerDir, cfg.OwnerTrees = t.TempDir(), nil
-	probe := status.NewProbe(&host.Fake{}, &cfg, filepath.Join(t.TempDir(), "plugins.shcl"))
+	probe := status.NewProbe(&host.Fake{}, &cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	var out bytes.Buffer
@@ -275,11 +279,34 @@ func TestWatch(t *testing.T) {
 	}
 }
 
+// Ctrl-C during a reading leaves the screen as it was: watch draws nothing
+// more and exits 0, and status prints nothing and says it was interrupted.
+func TestStatusCtrlC(t *testing.T) {
+	defer testid.Line(t, "1a4z7n7")
+	cfg := config.Defaults()
+	cfg.ServerDir, cfg.OwnerTrees = t.TempDir(), nil
+	r := host.NewExec(false)
+	r.QuietErr = true
+	probe := status.NewProbe(r, &cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out bytes.Buffer
+	if err := watch(ctx, probe, &out, time.Second); err != nil || out.Len() != 0 {
+		t.Errorf("watch: err %v, drew:\n%s", err, out.String())
+	}
+	if err := showStatus(ctx, probe, &out); !errors.Is(err, launch.ErrInterrupted) || out.Len() != 0 {
+		t.Errorf("status: err %v, printed:\n%s", err, out.String())
+	}
+	if err := showStatus(context.Background(), status.NewProbe(&host.Fake{}, &cfg), &out); err != nil || !strings.Contains(out.String(), "Server:     not running in podman mode\n") {
+		t.Errorf("status: err %v, printed:\n%s", err, out.String())
+	}
+}
+
 // repair fixes the safe settings as root, running itself through sudo when
 // it isn't, and --check or --dry-run only reports, without root. Either one
 // exits 1 while something is wrong.
 func TestRepair(t *testing.T) {
-	defer testid.Line(t, "df5ys")
+	defer testid.Line(t, "1a3em64")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	var again []string
@@ -309,7 +336,7 @@ func TestRepair(t *testing.T) {
 		t.Fatal("prepare stopped")
 	}
 	var b bytes.Buffer
-	if err := repair(context.Background(), inv, strings.NewReader(""), &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
+	if err := repair(context.Background(), inv, &b, true); err != nil || !strings.Contains(b.String(), "FIXED   server.properties: white-list is now \"true\"") {
 		t.Errorf("as root: %v, %q", err, b.String())
 	}
 	code, out, _ := runArgs("repair", "--check", set)
@@ -320,63 +347,219 @@ func TestRepair(t *testing.T) {
 
 // repair reports jars that aren't approved, and --approve-plugins asks about
 // each one: yes approves it, no moves it out, and no answer leaves it.
-func TestRepairApprovePlugins(t *testing.T) {
-	defer testid.Line(t, "df5z5")
+// Commented out by 2026111914334569: repair --approve-plugins went with plugin approval.
+// func TestRepairApprovePlugins(t *testing.T) {
+// 	defer testid.Line(t, "1a3enbm")
+// 	noDefaultConfig(t)
+// 	noHostChecks(t)
+// 	dir := t.TempDir()
+// 	for name, text := range map[string]string{"plugins/a.jar": "a", "plugins/b.jar": "b", "plugins/c.jar": "c", "paper.jar": "p"} {
+// 		if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 	}
+// 	set := "--set=serverDir=" + dir
+// 	code, out, _ := runArgs("repair", "--check", set)
+// 	if code != exitError || !strings.Contains(out, "FAILED  plugins/a.jar isn't approved; repair --approve-plugins") || !strings.Contains(out, "FAILED  paper.jar isn't approved") {
+// 		t.Errorf("--check: exit %d, stdout %q", code, out)
+// 	}
+//
+// 	repairWith := func(answers string) (string, error) {
+// 		t.Helper()
+// 		inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
+// 		if done {
+// 			t.Fatal("prepare stopped")
+// 		}
+// 		var b bytes.Buffer
+// 		err := repair(context.Background(), inv, strings.NewReader(answers), &b, true)
+// 		return b.String(), err
+// 	}
+// 	out, err := repairWith("y\nmaybe\nn\ny\n")
+// 	for _, want := range []string{
+// 		"plugins/a.jar (new)\n  sha256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n  size:   1 bytes\n",
+// 		"  says:   no plugin.yml\nApprove it? [y/n] \n",
+// 		"Approve it? [y/n] Approve it? [y/n] ",
+// 		"FIXED   plugins/b.jar refused, and moved to " + filepath.Join(dir, "plugins-refused", "b.jar"),
+// 		"FIXED   plugins/a.jar approved\nFIXED   plugins/c.jar approved\nFAILED  paper.jar isn't approved; no answer\n",
+// 	} {
+// 		if !strings.Contains(out, want) {
+// 			t.Errorf("first pass lacks %q:\n%s", want, out)
+// 		}
+// 	}
+// 	if err == nil {
+// 		t.Error("first pass: no error with paper.jar left")
+// 	}
+//
+// 	if out, err := repairWith("y\n"); err != nil || !strings.Contains(out, "paper.jar (new)") || strings.Contains(out, "a.jar") {
+// 		t.Errorf("second pass: %v\n%s", err, out)
+// 	}
+// 	code, out, _ = runArgs("repair", "--check", set)
+// 	if code != exitOK || !strings.Contains(out, "OK      plugins: 3 jars, all approved\n") {
+// 		t.Errorf("after: exit %d, stdout %q", code, out)
+// 	}
+// }
+
+// repair --approve-plugins asks once about the plugin libraries Paper
+// downloaded. repair --check leaves them out, since start removes them.
+// Commented out by 2026111914334569: repair no longer asks about plugin libraries, since library pinning went.
+// func TestRepairApproveLibraries(t *testing.T) {
+// 	defer testid.Line(t, "1a4hxz9")
+// 	noDefaultConfig(t)
+// 	noHostChecks(t)
+// 	dir := t.TempDir()
+// 	for name, text := range map[string]string{"paper.jar": "p", "libraries/org/a/a/1/a-1.jar": "a", "libraries/org/b/b/2/b-2.jar": "b", "libraries/org/b/b/2/b-2.pom": "b"} {
+// 		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o700); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 	}
+// 	set := "--set=serverDir=" + dir
+// 	repairWith := func(answers string) (string, error) {
+// 		t.Helper()
+// 		inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
+// 		if done {
+// 			t.Fatal("prepare stopped")
+// 		}
+// 		var b bytes.Buffer
+// 		err := repair(context.Background(), inv, strings.NewReader(answers), &b, true)
+// 		return b.String(), err
+// 	}
+// 	out, err := repairWith("y\nn\n")
+// 	for _, want := range []string{
+// 		"FIXED   paper.jar approved\n",
+// 		"Plugin libraries that Paper downloaded, not approved yet:\n  libraries/org/a/a/1/a-1.jar (new)\n    sha256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb, 1 bytes, ",
+// 		"  libraries/org/b/b/2/b-2.jar (new)\n",
+// 		"Approve all 2? [y/n] \n",
+// 		"OK      libraries: left unapproved; the next start removes them\n",
+// 	} {
+// 		if !strings.Contains(out, want) {
+// 			t.Errorf("first pass lacks %q:\n%s", want, out)
+// 		}
+// 	}
+// 	if err != nil || strings.Contains(out, ".pom") {
+// 		t.Errorf("first pass: %v\n%s", err, out)
+// 	}
+// 	if code, out, _ := runArgs("repair", "--check", set); code != exitOK || strings.Contains(out, "libraries") {
+// 		t.Errorf("--check: exit %d, stdout %q", code, out)
+// 	}
+// 	if out, err := repairWith("y\n"); err != nil || !strings.Contains(out, "FIXED   libraries: 2 approved") || strings.Contains(out, "paper.jar (new)") {
+// 		t.Errorf("second pass: %v\n%s", err, out)
+// 	}
+// 	if out, err := repairWith(""); err != nil || strings.Contains(out, "Plugin libraries") {
+// 		t.Errorf("third pass: %v\n%s", err, out)
+// 	}
+// 	if err := os.WriteFile(filepath.Join(dir, "libraries/org/b/b/2/b-2.jar"), []byte("b2"), 0o600); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if out, err := repairWith(""); err == nil || !strings.Contains(out, "libraries/org/b/b/2/b-2.jar (changed)\n") || !strings.Contains(out, "Approve it? [y/n] ") ||
+// 		!strings.Contains(out, "FAILED  libraries: not approved; no answer") {
+// 		t.Errorf("changed, no answer: %v\n%s", err, out)
+// 	}
+// }
+
+// A Geyser jar approved through repair gets GeyserMC's source, as setup's do.
+// Commented out by 2026111914334569: repair gives the source without asking now. TestRepairGeyserSource covers it.
+// func TestRepairApproveGeyserSource(t *testing.T) {
+// 	defer testid.Line(t, "1a3jh30")
+// 	noDefaultConfig(t)
+// 	noHostChecks(t)
+// 	dir := t.TempDir()
+// 	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	var b bytes.Buffer
+// 	z := zip.NewWriter(&b)
+// 	w, err := z.Create("plugin.yml")
+// 	if err == nil {
+// 		_, err = w.Write([]byte("name: Geyser-Spigot\nversion: 2.12.1\n"))
+// 	}
+// 	if err == nil {
+// 		err = z.Close()
+// 	}
+// 	if err == nil {
+// 		err = os.WriteFile(filepath.Join(dir, "plugins", "Geyser-Spigot.jar"), b.Bytes(), 0o600)
+// 	}
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	inv, _, done := prepare([]string{"repair", "--approve-plugins", "--set=serverDir=" + dir}, &bytes.Buffer{}, &bytes.Buffer{})
+// 	if done {
+// 		t.Fatal("prepare stopped")
+// 	}
+// 	var out bytes.Buffer
+// 	_ = repair(context.Background(), inv, strings.NewReader("y\n"), &out, true) // paper.jar is missing, which isn't this test's
+// 	src := geyserAPI.Source("geyser")
+// 	if !strings.Contains(out.String(), "  source: "+src+"\nApprove it?") {
+// 		t.Errorf("source not shown:\n%s", out.String())
+// 	}
+// 	approved, _, err := plugins.ReadApproved(inv.pluginsFile())
+// 	if err != nil || len(approved) != 1 || approved[0].Source != src {
+// 		t.Errorf("approved %v, %v; want the source %s", approved, err, src)
+// 	}
+// }
+
+// repair gives a Geyser jar with no source GeyserMC's, without asking, and
+// --check reports it. A jar only named like one doesn't get one, and none is
+// asked about (2026111914334569).
+func TestRepairGeyserSource(t *testing.T) {
+	defer testid.Line(t, "1a4j1s4")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	dir := t.TempDir()
-	for name, text := range map[string]string{"plugins/a.jar": "a", "plugins/b.jar": "b", "plugins/c.jar": "c", "paper.jar": "p"} {
-		if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
-			t.Fatal(err)
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, yml := range map[string]string{"Geyser-Spigot.jar": "name: Geyser-Spigot\nversion: 2.12.1\n", "geyser-lookalike.jar": "name: Lookalike\n", "Thing.jar": "name: Thing\n"} {
+		var b bytes.Buffer
+		z := zip.NewWriter(&b)
+		w, err := z.Create("plugin.yml")
+		if err == nil {
+			_, err = w.Write([]byte(yml))
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+		if err == nil {
+			err = z.Close()
+		}
+		if err == nil {
+			err = os.WriteFile(filepath.Join(dir, "plugins", name), b.Bytes(), 0o600)
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	set := "--set=serverDir=" + dir
+	src := geyserAPI.Source("geyser")
 	code, out, _ := runArgs("repair", "--check", set)
-	if code != exitError || !strings.Contains(out, "FAILED  plugins/a.jar isn't approved; repair --approve-plugins") || !strings.Contains(out, "FAILED  paper.jar isn't approved") {
+	if code != exitError || !strings.Contains(out, "FAILED  plugins/Geyser-Spigot.jar has no source, so update --plugins skips it; repair gives it "+src+"\n") ||
+		strings.Contains(out, "Thing") || strings.Contains(out, "lookalike") || strings.Contains(out, "approve") {
 		t.Errorf("--check: exit %d, stdout %q", code, out)
 	}
-
-	repairWith := func(answers string) (string, error) {
-		t.Helper()
-		inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
-		if done {
-			t.Fatal("prepare stopped")
-		}
-		var b bytes.Buffer
-		err := repair(context.Background(), inv, strings.NewReader(answers), &b, true)
-		return b.String(), err
+	inv, _, done := prepare([]string{"repair", set}, &bytes.Buffer{}, &bytes.Buffer{})
+	if done {
+		t.Fatal("prepare stopped")
 	}
-	out, err := repairWith("y\nmaybe\nn\ny\n")
-	for _, want := range []string{
-		"plugins/a.jar (new)\n  sha256: ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb\n  size:   1 bytes\n",
-		"  says:   no plugin.yml\nApprove it? [y/n] \n",
-		"Approve it? [y/n] Approve it? [y/n] ",
-		"FIXED   plugins/b.jar refused, and moved to " + filepath.Join(dir, "plugins-refused", "b.jar"),
-		"FIXED   plugins/a.jar approved\nFIXED   plugins/c.jar approved\nFAILED  paper.jar isn't approved; no answer\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("first pass lacks %q:\n%s", want, out)
-		}
+	var b bytes.Buffer
+	_ = repair(context.Background(), inv, &b, true) // paper.jar is missing, which isn't this test's
+	if !strings.Contains(b.String(), "FIXED   plugins/Geyser-Spigot.jar gets its updates from "+src+"\n") || strings.Contains(b.String(), "[y/n]") {
+		t.Errorf("repair:\n%s", b.String())
 	}
-	if err == nil {
-		t.Error("first pass: no error with paper.jar left")
+	listed, _, err := plugins.ReadSources(inv.pluginsFile())
+	if err != nil || len(listed) != 1 || listed[0].Name != "plugins/Geyser-Spigot.jar" || listed[0].Source != src || listed[0].SHA256 != "" {
+		t.Errorf("list %v, %v; want only the source %s", listed, err, src)
 	}
-
-	if out, err := repairWith("y\n"); err != nil || !strings.Contains(out, "paper.jar (new)") || strings.Contains(out, "a.jar") {
-		t.Errorf("second pass: %v\n%s", err, out)
-	}
-	code, out, _ = runArgs("repair", "--check", set)
-	if code != exitOK || !strings.Contains(out, "OK      plugins: 3 jars, all approved\n") {
+	if code, out, _ := runArgs("repair", "--check", set); !strings.Contains(out, "OK      plugin sources\n") {
 		t.Errorf("after: exit %d, stdout %q", code, out)
 	}
 }
 
-// A Geyser jar approved through repair gets GeyserMC's source, as setup's do.
-func TestRepairApproveGeyserSource(t *testing.T) {
-	defer testid.Line(t, "df76r")
+// repair leaves a plugins.shcl it can't save with its lines kept as it was,
+// and warns with the line to add, rather than failing (2026112214545321).
+func TestRepairGeyserSourceNotKept(t *testing.T) {
+	defer testid.Line(t, "1a4z975")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	dir := t.TempDir()
@@ -398,25 +581,33 @@ func TestRepairApproveGeyserSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inv, _, done := prepare([]string{"repair", "--approve-plugins", "--set=serverDir=" + dir}, &bytes.Buffer{}, &bytes.Buffer{})
+	inv, _, done := prepare([]string{"repair", "--set=serverDir=" + dir}, &bytes.Buffer{}, &bytes.Buffer{})
 	if done {
 		t.Fatal("prepare stopped")
 	}
-	var out bytes.Buffer
-	_ = repair(context.Background(), inv, strings.NewReader("y\n"), &out, true) // paper.jar is missing, which isn't this test's
-	src := geyserAPI.Source("geyser")
-	if !strings.Contains(out.String(), "  source: "+src+"\nApprove it?") {
-		t.Errorf("source not shown:\n%s", out.String())
+	merged := "# mine\njar: plugins/Thing.jar  # by hand\n\n# pasted again\njar: plugins/Thing.jar\n"
+	if err := os.MkdirAll(filepath.Dir(inv.pluginsFile()), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	approved, _, err := plugins.ReadApproved(inv.pluginsFile())
-	if err != nil || len(approved) != 1 || approved[0].Source != src {
-		t.Errorf("approved %v, %v; want the source %s", approved, err, src)
+	if err := os.WriteFile(inv.pluginsFile(), []byte(merged), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	_ = repair(context.Background(), inv, &out, true) // paper.jar is missing, which isn't this test's
+	src := geyserAPI.Source("geyser")
+	if !strings.Contains(out.String(), "warning: "+inv.pluginsFile()+": saving would rewrite every line") ||
+		!strings.Contains(out.String(), `Add source: "`+src+`" under jar: "plugins/Geyser-Spigot.jar" there by hand`) ||
+		strings.Contains(out.String(), "FAILED  plugins") || strings.Contains(out.String(), "FIXED   plugins/Geyser-Spigot.jar") {
+		t.Errorf("repair:\n%s", out.String())
+	}
+	if got, _ := os.ReadFile(inv.pluginsFile()); string(got) != merged {
+		t.Errorf("file changed:\n%s", got)
 	}
 }
 
 // cmd takes the rest of the line as the console command; console takes none.
 func TestConsoleCmdArgs(t *testing.T) {
-	defer testid.Line(t, "df5z8")
+	defer testid.Line(t, "1a3enn0")
 	noDefaultConfig(t)
 	var out, errOut bytes.Buffer
 	inv, _, done := prepare([]string{"cmd", "--set", "heapMax=2G", "whitelist", "add", "Steve"}, &out, &errOut)
@@ -439,7 +630,7 @@ func TestConsoleCmdArgs(t *testing.T) {
 // stop, console, and cmd follow a server that runs natively while runMode
 // names a container, and the other way round. Podman to Docker is Boxed's.
 func TestFollowMode(t *testing.T) {
-	defer testid.Line(t, "df67x")
+	defer testid.Line(t, "1a3fgpm")
 	old := serverMode
 	t.Cleanup(func() { serverMode = old })
 	for _, c := range []struct{ runMode, running, want, say string }{
@@ -463,7 +654,7 @@ func TestFollowMode(t *testing.T) {
 // repair runs the host checks before the safe settings and after the plugins,
 // and a failed one makes the exit 1.
 func TestRepairOrder(t *testing.T) {
-	defer testid.Line(t, "df5zn")
+	defer testid.Line(t, "1a3epxm")
 	noDefaultConfig(t)
 	old := repairSteps
 	t.Cleanup(func() { repairSteps = old })
@@ -484,7 +675,7 @@ func TestRepairOrder(t *testing.T) {
 // setup runs itself through sudo unless it's root or a dry run, and on an
 // existing install it runs repair.
 func TestSetup(t *testing.T) {
-	defer testid.Line(t, "df65m")
+	defer testid.Line(t, "1a3f9jg")
 	noDefaultConfig(t)
 	noHostChecks(t)
 	fakePaperMC(t)
@@ -531,7 +722,7 @@ func TestSetup(t *testing.T) {
 // update runs itself through sudo unless it's root or a dry run, and a dry
 // run shows the plan without downloading.
 func TestUpdate(t *testing.T) {
-	defer testid.Line(t, "df671")
+	defer testid.Line(t, "1a3fdz4")
 	noDefaultConfig(t)
 	fakePaperMC(t)
 	// hits := fakeReleases(t)
@@ -593,7 +784,7 @@ func TestUpdate(t *testing.T) {
 // --mc-version is in the help, and one that can't work is refused before
 // sudo asks for a password.
 func TestUpdateMCVersion(t *testing.T) {
-	defer testid.Line(t, "df78n")
+	defer testid.Line(t, "1a3jq1m")
 	noDefaultConfig(t)
 	var again []string
 	old := asRoot
@@ -620,7 +811,7 @@ func TestUpdateMCVersion(t *testing.T) {
 // run through sudo in a file only the operator can read, and removes it
 // after. The flag that names the file isn't in the help.
 func TestUpdateAgent(t *testing.T) {
-	defer testid.Line(t, "df76m")
+	defer testid.Line(t, "1a3jgpg")
 	if os.Geteuid() == 0 {
 		t.Skip("the agent doesn't run as root")
 	}
@@ -634,9 +825,8 @@ func TestUpdateAgent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(server, "plugins", "Thing.jar"), []byte("thing"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := plugins.Approve(filepath.Join(dir, "plugins.shcl"), []plugins.Info{{Jar: plugins.Jar{Name: "plugins/Thing.jar"}, SHA256: strings.Repeat("ab", 32)}}); err != nil {
-		t.Fatal(err)
-	}
+	// It was approved here until 2026111914334585. update asks about the
+	// jars in the tree now.
 	ask := filepath.Join(dir, "ask")
 	if err := os.WriteFile(ask, []byte("#!/bin/sh\nwhile read -r _; do :; done\necho '{\"jars\": []}'\n"), 0o700); err != nil { // #nosec G306 -- the test's own agent
 		t.Fatal(err)
@@ -692,7 +882,7 @@ func TestUpdateAgent(t *testing.T) {
 
 // update --paper asks the agent too, when PaperMC's lookup fails.
 func TestUpdateAgentPaper(t *testing.T) {
-	defer testid.Line(t, "df795")
+	defer testid.Line(t, "1a3jrkm")
 	if os.Geteuid() == 0 {
 		t.Skip("the agent doesn't run as root")
 	}
@@ -726,7 +916,7 @@ func TestUpdateAgentPaper(t *testing.T) {
 }
 
 func TestBuildNumber(t *testing.T) {
-	defer testid.Line(t, "df785")
+	defer testid.Line(t, "1a3jnfm")
 	for _, c := range []struct {
 		at   time.Time
 		want string
@@ -744,7 +934,7 @@ func TestBuildNumber(t *testing.T) {
 }
 
 func TestVersionLine(t *testing.T) {
-	defer testid.Line(t, "df786")
+	defer testid.Line(t, "1a3jnjr")
 	at := time.Date(2026, 10, 24, 22, 0, 0, 0, time.UTC)
 	date := at.Local().Format("2006-01-02")
 	if got, want := versionLine(at, true, false), "tt-minecraftd "+version+" build decp8 ("+date+")"; got != want {
@@ -762,7 +952,7 @@ func TestVersionLine(t *testing.T) {
 // --foreground, since systemctl runs it, and the unit is asked about that
 // config.
 func TestBootUnitRefuses(t *testing.T) {
-	defer testid.Line(t, "df78w")
+	defer testid.Line(t, "1a3jqqg")
 	noDefaultConfig(t)
 	old := bootServes
 	t.Cleanup(func() { bootServes = old })
@@ -779,5 +969,143 @@ func TestBootUnitRefuses(t *testing.T) {
 	}
 	if len(asked) != 2 || asked[0] != defaultConfig {
 		t.Errorf("asked about %q, want %s", asked, defaultConfig)
+	}
+}
+
+// A jar's name is the server account's, so repair shows it without its
+// escape codes, in the report and in the question.
+// Commented out by 2026111914334569: repair no longer reports or asks about jar names. Its report funnel is still covered by TestRunCleansError.
+// func TestRepairCleansJarName(t *testing.T) {
+// 	defer testid.Line(t, "1a3jv4w")
+// 	noDefaultConfig(t)
+// 	noHostChecks(t)
+// 	dir := t.TempDir()
+// 	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if err := os.WriteFile(filepath.Join(dir, "plugins", "x\x1b]0;owned\x07\x1b[2K\r.jar"), []byte("x"), 0o600); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	set := "--set=serverDir=" + dir
+// 	shown := "plugins/x]0;owned[2K.jar"
+// 	code, out, _ := runArgs("repair", "--check", set)
+// 	if code != exitError || strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "FAILED  "+shown+" isn't approved") {
+// 		t.Errorf("--check: exit %d, stdout %q", code, out)
+// 	}
+// 	inv, _, done := prepare([]string{"repair", "--approve-plugins", set}, &bytes.Buffer{}, &bytes.Buffer{})
+// 	if done {
+// 		t.Fatal("prepare stopped")
+// 	}
+// 	var b bytes.Buffer
+// 	_ = repair(context.Background(), inv, strings.NewReader("y\n"), &b, true)
+// 	if out := b.String(); strings.ContainsAny(out, "\x1b\x07\r") || !strings.Contains(out, "\n"+shown+" (new)\n") || !strings.Contains(out, "FIXED   "+shown+" approved") {
+// 		t.Errorf("--approve-plugins: %q", out)
+// 	}
+// }
+
+// An error can name a file the server account named, so the one run prints
+// is cleaned, line by line.
+func TestRunCleansError(t *testing.T) {
+	defer testid.Line(t, "1a3jv80")
+	noDefaultConfig(t)
+	dir := t.TempDir()
+	if err := os.Symlink("paper\x1b[2J\x07.jar", filepath.Join(dir, "paper.jar")); err != nil {
+		t.Fatal(err)
+	}
+	code, _, msg := runArgs("update", "--paper", "--dry-run", "--set=serverDir="+dir)
+	if code != exitError || strings.ContainsAny(msg, "\x1b\x07") || !strings.Contains(msg, "paper.jar links to") {
+		t.Errorf("exit %d, stderr %q", code, msg)
+	}
+}
+
+// start --foreground's error for a server that exited with a code of its own
+// exits with that code, so systemd sees a crash at boot as a failure.
+func TestServerExitCode(t *testing.T) {
+	defer testid.Line(t, "1a3jwpw")
+	for _, c := range []struct {
+		err  error
+		code int
+	}{
+		{nil, exitOK},
+		{launch.ExitError{Code: 137}, 137},
+		{errors.Join(errors.New("hand-back failed"), launch.ExitError{Code: 1}), 1},
+		{launch.ExitError{Code: -1}, exitError},
+		{launch.ExitError{Code: 300}, exitError},
+		{errors.New("other"), exitError},
+	} {
+		var msg bytes.Buffer
+		if got := failed(c.err, &msg); got != c.code || (c.err != nil) != strings.HasPrefix(msg.String(), "tt-minecraftd: ") {
+			t.Errorf("%v: exit %d, stderr %q; want %d", c.err, got, msg.String(), c.code)
+		}
+	}
+}
+
+// Dry runs and repair --check never ask for a sudo password, so their
+// runners put -n on every sudo (2026111715275268).
+func TestDryRunsNoPrompt(t *testing.T) {
+	defer testid.Line(t, "1a3jy2m")
+	noPrompt := func(r host.Runner) bool {
+		e, ok := r.(*host.Exec)
+		return ok && e.NoPrompt
+	}
+	if !noPrompt(hostRunner(true)) || noPrompt(hostRunner(false)) {
+		t.Error("setup's and update's runner: NoPrompt doesn't follow --dry-run")
+	}
+	for _, check := range []bool{true, false} {
+		h, _, _ := repairSteps(invocation{opts: options{check: check}})
+		if noPrompt(h.Run) != check {
+			t.Errorf("repair --check %v: NoPrompt is %v", check, !check)
+		}
+	}
+}
+
+// install.bash's hidden retire-build keeps the build it replaces in the
+// old-builds folder, and takes only a full path to a tt-minecraftd. It isn't
+// in the help.
+func TestRetireBuild(t *testing.T) {
+	defer testid.Line(t, "1a3jzqr")
+	old := oldBuilds
+	oldBuilds = filepath.Join(t.TempDir(), "old-builds")
+	t.Cleanup(func() { oldBuilds = old })
+	bin := filepath.Join(t.TempDir(), "tt-minecraftd")
+	if err := os.WriteFile(bin, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Date(2026, 11, 19, 11, 12, 57, 0, time.Local)
+	if err := os.Chtimes(bin, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	kept := filepath.Join(oldBuilds, "tt-minecraftd.20261119-111257")
+	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || out.String() != "Kept a copy of "+bin+" as "+kept+".\n" {
+		t.Fatalf("code %d\n%s%s", code, out.String(), errOut.String())
+	}
+	if b, err := os.ReadFile(kept); err != nil || string(b) != "old" {
+		t.Errorf("kept %q %v", b, err)
+	}
+	// Left in place, so install.bash's rename is the only change there.
+	if b, err := os.ReadFile(bin); err != nil || string(b) != "old" {
+		t.Errorf("the build isn't in place: %q %v", b, err)
+	}
+	// A failed prune is a warning, since the build is kept.
+	oldbuild.FailRotate = errors.New("operation not permitted")
+	t.Cleanup(func() { oldbuild.FailRotate = nil })
+	out.Reset()
+	if code := run([]string{"retire-build", bin}, &out, &errOut); code != exitOK || !strings.HasPrefix(out.String(), "Kept a copy of "+bin+" as "+kept+".2.") ||
+		!strings.Contains(errOut.String(), "warning: couldn't prune the old builds in "+oldBuilds+": operation not permitted") {
+		t.Errorf("failed prune: code %d\n%s%s", code, out.String(), errOut.String())
+	}
+	oldbuild.FailRotate = nil
+	for _, args := range [][]string{{"retire-build"}, {"retire-build", "tt-minecraftd"}, {"retire-build", "/etc/passwd"}, {"retire-build", bin, bin}} {
+		out.Reset()
+		errOut.Reset()
+		if code := run(args, &out, &errOut); code != exitError || !strings.Contains(errOut.String(), "takes the full path of one tt-minecraftd build") {
+			t.Errorf("%q: code %d\n%s", args, code, errOut.String())
+		}
+	}
+	out.Reset()
+	run([]string{"--help"}, &out, &errOut)
+	if strings.Contains(out.String(), "retire") {
+		t.Errorf("in the help:\n%s", out.String())
 	}
 }

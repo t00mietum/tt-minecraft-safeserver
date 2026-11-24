@@ -43,6 +43,7 @@ type AttachConsole struct {
 	argv []string
 }
 
+// Send types line into the container's console, then detaches.
 func (a AttachConsole) Send(ctx context.Context, line string) error {
 	if err := checkLine(line); err != nil {
 		return err
@@ -64,6 +65,7 @@ func (a AttachConsole) Send(ctx context.Context, line string) error {
 		return fmt.Errorf("console: %w", err)
 	}
 
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, attachTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- the runtime comes from the checked config
@@ -85,10 +87,16 @@ func (a AttachConsole) Send(ctx context.Context, line string) error {
 	if typeErr != nil && !errors.Is(typeErr, errExited) {
 		_ = cmd.Cancel() // the type error is the one to show
 		<-exited
+		if parent.Err() != nil {
+			return fmt.Errorf("console: %w before attach read the line", ErrInterrupted)
+		}
 		return fmt.Errorf("console: %w", typeErr)
 	}
 	err = <-exited
 	switch {
+	// Ctrl-C ends ctx too, and isn't a detach that took too long.
+	case parent.Err() != nil:
+		return fmt.Errorf("console: %w before %s detached", ErrInterrupted, host.Quote(argv))
 	case ctx.Err() != nil:
 		return fmt.Errorf("%s didn't detach in %s", host.Quote(argv), attachTimeout)
 	case typeErr == nil && (err == nil || detachedDocker(err, errText.String())):

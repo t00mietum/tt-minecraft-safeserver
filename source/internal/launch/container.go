@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -42,7 +43,7 @@ type Boxed struct {
 	// host's names.
 	IDs func(userName, groupName string) (uid, gid string, err error)
 	// Runtime is podman or docker, or runMode when empty. Stop, console, and
-	// cmd move it to the runtime that holds the container.
+	// cmd move it to the runtime that has the container.
 	Runtime string
 }
 
@@ -55,7 +56,7 @@ var Installed = func(name string) bool {
 	return err == nil
 }
 
-// StartMode holds start's options.
+// StartMode is start's options.
 type StartMode struct {
 	Debug      bool
 	Foreground bool
@@ -86,28 +87,25 @@ func PsArgs(runtime string) []string {
 	return []string{runtime, "ps", "--all", "--filter", "name=^" + Container + "$", "--filter", "label=" + Container, "--format", "{{.State}}"}
 }
 
-// FindContainer gives the runtime that holds the container, and its state.
+// FindContainer gives the runtime that has the container, and its state.
 // runMode's runtime is asked first, then any other that's installed, since
 // the container may be from before a runMode change. A running container
 // wins over a stopped one. Both are "" when there's none.
 func FindContainer(ctx context.Context, r host.Runner, runMode string) (runtime, state string, err error) {
-	for _, rt := range Runtimes {
-		if rt != runMode {
-			continue
-		}
-		if state, err = ContainerState(ctx, r, rt); err != nil || state == "running" {
-			return rt, state, err
+	if slices.Contains(Runtimes, runMode) {
+		if state, err = ContainerState(ctx, r, runMode); err != nil || state == "running" {
+			return runMode, state, err
 		}
 		if state != "" {
-			runtime = rt
+			runtime = runMode
 		}
 	}
 	for _, rt := range Runtimes {
 		if rt == runMode || !Installed(rt) {
 			continue
 		}
-		// Only runMode's runtime has to answer. Docker's daemon may well be
-		// down on a host that moved to Podman.
+		// Only runMode's runtime has to work. Docker's daemon may be down on
+		// a host that moved to Podman.
 		other, err := ContainerState(ctx, r, rt)
 		switch {
 		case err != nil || other == "":
@@ -120,7 +118,7 @@ func FindContainer(ctx context.Context, r host.Runner, runMode string) (runtime,
 	return runtime, state, nil
 }
 
-// locate moves to the runtime that holds the container, when it's not runMode's.
+// locate moves to the runtime that has the container, when it's not runMode's.
 func (d *Boxed) locate(ctx context.Context) error {
 	if err := d.sudoUp(ctx); err != nil {
 		return err
@@ -168,13 +166,7 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 	}
-	if err := d.checkSettings(); err != nil {
-		return err
-	}
-	if err := d.checkPlugins(); err != nil {
-		return err
-	}
-	if err := d.checkFirewall(ctx); err != nil {
+	if err := d.preflight(ctx); err != nil {
 		return err
 	}
 	args, err := d.runArgs()
@@ -214,16 +206,16 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	// Not run --detach: Podman's run warns when its own stdin isn't a
 	// terminal, as from a script or the boot unit, detached or not.
 	if _, err := d.Run.Run(ctx, d.box(false, append([]string{"create"}, args...)...)); err != nil {
-		return err
+		return d.failedStart(ctx, d, err)
 	}
 	if _, err := d.Run.Run(ctx, d.box(false, "start", Container)); err != nil {
-		return err
+		return d.failedStart(ctx, d, err)
 	}
 	if d.DryRun {
 		return nil
 	}
-	if err := d.waitLoaded(ctx, d); err != nil {
-		return err
+	if err := d.waitLoaded(ctx, d); err != nil && !d.slowAtBoot(mode, err) {
+		return d.failedStart(ctx, d, err)
 	}
 	// The container's log comes through the runtime, but cmd and status
 	// read the tree.
@@ -233,10 +225,36 @@ func (d *Boxed) Start(ctx context.Context, mode StartMode) error {
 	if !mode.Foreground {
 		return nil
 	}
-	if _, err := d.Run.Run(ctx, d.box(true, "wait", Container)); err != nil {
+	out, err := d.Run.Run(ctx, d.box(true, "wait", Container))
+	if err != nil {
+		if d.stoppedByUnit(ctx, d) {
+			return nil
+		}
 		return err
 	}
-	return d.handBack(ctx)
+	return errors.Join(d.startHandBack(ctx), exited(out))
+}
+
+// ExitError is the server's own exit code, when it isn't 0. start
+// --foreground exits with it, so systemd sees a crash as a failure.
+type ExitError struct{ Code int }
+
+func (e ExitError) Error() string { return "the server exited with code " + strconv.Itoa(e.Code) }
+
+// exited reads the exit code that the runtime's wait prints.
+func exited(out []byte) error {
+	lines := strings.Fields(string(out))
+	if len(lines) == 0 {
+		return errors.New("wait gave no exit code for the server")
+	}
+	code, err := strconv.Atoi(lines[len(lines)-1])
+	switch {
+	case err != nil:
+		return fmt.Errorf("wait gave %q, not the server's exit code", lines[len(lines)-1])
+	case code != 0:
+		return ExitError{Code: code}
+	}
+	return nil
 }
 
 func (d *Boxed) running(ctx context.Context) (bool, error) {
@@ -281,19 +299,31 @@ func (d *Boxed) runArgs() ([]string, error) {
 		"--memory", memCap, "--memory-swap", memCap,
 		"--oom-score-adj", "1000",
 		"--init", "--interactive", "--tty",
-		"--workdir", c.ServerDir,
 	}
+	// serverDir may be a link, which the container wouldn't have.
+	work, err := filepath.EvalSymlinks(c.ServerDir)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--workdir", work)
+	var trees []string
 	for _, t := range c.OwnerTrees {
 		real, err := filepath.EvalSymlinks(t)
 		if err != nil {
 			// tree.ToServer warns about a missing tree.
 			continue
 		}
+		// Two trees may be one folder by way of a link, and a mount
+		// destination can't be given twice.
+		if slices.Contains(trees, real) {
+			continue
+		}
 		if args, err = appendMount(args, real, false); err != nil {
 			return nil, err
 		}
+		trees = append(trees, real)
 	}
-	jars, err := LockedJars(c.ServerDir)
+	jars, err := LockedJars(c.ServerDir, c.OwnerTrees)
 	if err != nil {
 		return nil, err
 	}
@@ -301,6 +331,11 @@ func (d *Boxed) runArgs() ([]string, error) {
 		if args, err = appendMount(args, j, true); err != nil {
 			return nil, err
 		}
+	}
+	warns, err := boxLinks(trees, append(slices.Clone(trees), jars...))
+	d.warn(warns)
+	if err != nil {
+		return nil, err
 	}
 	args = append(args, c.Image, "sh", "-c", Wrapper, "sh")
 	return append(args, server.JavaArgs(c, "java")...), nil
@@ -318,25 +353,34 @@ func appendMount(args []string, path string, readOnly bool) ([]string, error) {
 	return append(args, "--mount", m), nil
 }
 
-// LockedJars gives paper.jar and the jars plugins.Jars checks, after links, so
-// each can be mounted read-only over itself.
-func LockedJars(serverDir string) ([]string, error) {
+// LockedJars gives paper.jar and the jars plugins.Jars lists, after links, so
+// each can be mounted read-only over itself. Each must be a regular file in
+// serverDir or one of trees (plugins.Within), or start would mount, or in
+// native mode chown, whatever host path a planted link names.
+func LockedJars(serverDir string, trees []string) ([]string, error) {
 	paper, err := filepath.EvalSymlinks(filepath.Join(serverDir, "paper.jar"))
 	if err != nil {
 		return nil, fmt.Errorf("no paper.jar in %s: %w", serverDir, err)
+	}
+	if paper, err = plugins.Within(paper, serverDir, trees); err != nil {
+		return nil, err
 	}
 	found, err := plugins.Jars(serverDir)
 	if err != nil {
 		return nil, err
 	}
-	jars := make([]string, 0, len(found))
+	jars := make([]string, 0, len(found)+1)
 	jars = append(jars, paper)
+	// Several links may lead to one file, and Docker and Podman refuse a
+	// mount destination given twice.
+	seen := map[string]bool{paper: true}
 	for _, j := range found {
-		real, err := filepath.EvalSymlinks(j.File)
+		real, err := plugins.Within(j.File, serverDir, trees)
 		if err != nil {
 			return nil, err
 		}
-		if real != paper {
+		if !seen[real] {
+			seen[real] = true
 			jars = append(jars, real)
 		}
 	}
@@ -364,14 +408,7 @@ func (d *Boxed) OpenConsole(ctx context.Context) error {
 	d.say(consoleHello)
 	c := d.box(false, "attach", "--sig-proxy=false", "--detach-keys=ctrl-c", Container)
 	c.Tty = true
-	return d.session(ctx, d, c, attachDetached)
-}
-
-// attachDetached is docker attach's exit after the detach keys, which is 1.
-// Podman's is 0.
-func attachDetached(err error) bool {
-	var exit *exec.ExitError
-	return errors.As(err, &exit) && exit.ExitCode() == 1
+	return d.session(ctx, d, c, detachedDocker)
 }
 
 // SendCmd is cmd: one console line, and what the server says back.

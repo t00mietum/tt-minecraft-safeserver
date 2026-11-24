@@ -12,7 +12,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
-	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
 )
 
 var containerCheck = Check{
@@ -36,7 +36,7 @@ var containerCheck = Check{
 			}
 			state, err := launch.ContainerState(ctx, h.Run, other)
 			if err != nil || state == "" || state == "running" {
-				continue // the image finding already says when runMode's runtime can't be asked
+				continue // nothing to clean up in a runtime that can't be asked
 			}
 			found = append(found, Finding{
 				Problem: "an old container, " + launch.Container + ", is still there under " + other + ", " + state,
@@ -57,18 +57,22 @@ var catatonitCheck = Check{
 		if HasCatatonit() {
 			return nil, nil
 		}
-		return []Finding{{Problem: "catatonit isn't installed, so Podman can't start the container; apt-get install catatonit adds it"}}, nil
+		return []Finding{{Problem: "catatonit isn't installed, so Podman can't start the container; " + adds("catatonit")}}, nil
 	},
+}
+
+// adds says how to install pkg: through apt where there is one, else the
+// distro's own way.
+func adds(pkg string) string {
+	if launch.Installed("apt-get") {
+		return "apt-get install " + pkg + " adds it"
+	}
+	return "the distro's " + pkg + " package adds it"
 }
 
 // HasCatatonit tells whether catatonit is where Podman looks, or on PATH.
 func HasCatatonit() bool {
-	for _, p := range catatonitPaths {
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return true
-		}
-	}
-	return launch.Installed("catatonit")
+	return anyRegular(catatonitPaths) || launch.Installed("catatonit")
 }
 
 // catatonitPaths are where Podman looks for it, as init_path's default and
@@ -98,12 +102,13 @@ var datasetCheck = Check{
 	},
 }
 
-// othersCheck names Paper servers running as anyone but runUser. Both modes
-// run the server under runUser's uid on the host, the container included.
+// othersCheck names Paper servers this tool didn't start, told apart the way
+// status does. A uid doesn't tell them apart: one started by hand as runUser
+// has the tool's uid.
 var othersCheck = Check{
 	Name: "no other Paper servers",
 	Look: func(ctx context.Context, h *Host) ([]Finding, error) {
-		ps, err := h.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"ps", "-eo", "uid=,pid=,args="}})
+		ps, err := h.Run.Run(ctx, host.Cmd{Look: true, Args: status.PsArgs})
 		if err != nil {
 			return nil, err
 		}
@@ -111,17 +116,14 @@ var othersCheck = Check{
 		if err != nil {
 			return nil, err
 		}
-		ours := ""
-		if u, ok := a.user(h.Cfg.RunUser); ok {
-			ours = strconv.Itoa(u.uid)
+		readFile := h.ReadFile
+		if readFile == nil {
+			readFile = os.ReadFile
 		}
 		var found []Finding
-		for _, p := range server.PaperProcs(ps) {
-			if p.User == ours {
-				continue
-			}
-			name := p.User
-			if uid, err := strconv.Atoi(p.User); err == nil {
+		for _, p := range status.Others(ps, readFile) {
+			name := p.UID
+			if uid, err := strconv.Atoi(p.UID); err == nil {
 				name = a.userName(uid)
 			}
 			found = append(found, Finding{Problem: "a Paper server this tool didn't start is running, pid " + p.PID + " as " + name + "; it's left alone, and start refuses until it's stopped"})

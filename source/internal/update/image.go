@@ -192,6 +192,11 @@ func pinImage(file, image string) error {
 	if s := doc.SetString("image", image); s != shcl.SetOk {
 		return fmt.Errorf("can't set image: %s", s)
 	}
+	// shcl falls back to its own form when it can't keep the lines, such as
+	// after it merged a repeated key, which would rewrite the operator's file.
+	if _, kept := doc.ToTextKeepLines(); !kept && !fresh {
+		return fmt.Errorf("saving would rewrite every line in shcl's own form, such as when a key is given more than once, so it's left as it was. Set image: \"%s\" there by hand", image)
+	}
 	if _, err := doc.SaveFileKeepLines(file); err != nil {
 		return err
 	}

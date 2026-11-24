@@ -26,7 +26,7 @@ var (
 )
 
 func TestPromptHoldsOnlyTheQuestion(t *testing.T) {
-	defer testid.Line(t, "df75x")
+	defer testid.Line(t, "1a3jeem")
 	q := Question{Minecraft: "26.3", Paper: "26.3-249", Jars: asked}
 	p := Prompt(q)
 	if !strings.HasPrefix(p, instructions) {
@@ -42,7 +42,7 @@ func TestPromptHoldsOnlyTheQuestion(t *testing.T) {
 }
 
 func TestParseFindsTheAnswer(t *testing.T) {
-	defer testid.Line(t, "df75y")
+	defer testid.Line(t, "1a3jehr")
 	one := `{"jars": [{"jar": "plugins/Chunky.jar", "version": "1.4.40", "url": "https://cdn.modrinth.com/c.jar"}]}`
 	want := Answer{Jars: []Suggestion{{Jar: "plugins/Chunky.jar", Version: "1.4.40", URL: "https://cdn.modrinth.com/c.jar"}}}
 	good := map[string]string{
@@ -73,10 +73,46 @@ func TestParseFindsTheAnswer(t *testing.T) {
 			t.Errorf("%s: no error, got %+v", name, got)
 		}
 	}
+
+	// The question and the form as the prompt has them, quoted back before
+	// or after the answer.
+	q := Question{Minecraft: "26.3", Jars: []Jar{{Path: "plugins/Chunky.jar", About: "Chunky 1.4.28", SHA256: sum256, Source: "https://hangar.papermc.io/x"}}}
+	prompt := Prompt(q)
+	question := prompt[strings.LastIndex(prompt, "\n{")+1:]
+	form := prompt[strings.Index(prompt, "\n{\"jars\"")+1:]
+	form = form[:strings.IndexByte(form, '\n')]
+	if !strings.Contains(question, `"minecraftVersion"`) || !strings.Contains(form, `"<jar, as given>"`) {
+		t.Fatalf("prompt changed:\n%s", prompt)
+	}
+	quoted := map[string]string{
+		"question first":  "You asked about:\n~~~json\n" + question + "~~~\nMy answer:\n~~~json\n" + one + "\n~~~\n",
+		"form first":      "In the form " + form + " that is:\n" + one,
+		"both first":      question + form + "\n" + one,
+		"whole prompt":    "> " + prompt + "\n" + one,
+		"question after":  one + "\nfor " + question,
+		"form after":      one + "\nin the form " + form,
+		"draft, then fix": strings.Replace(one, "1.4.40", "1.4.39", 1) + "\nSorry, the newest is:\n" + one,
+	}
+	for name, reply := range quoted {
+		got, err := Parse(reply)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %+v %v", name, got, err)
+		}
+	}
+	for name, reply := range map[string]string{"only the question": question, "only the form": form, "only both": question + form} {
+		if got, err := Parse(reply); err == nil || !strings.Contains(err.Error(), "only repeats") {
+			t.Errorf("%s: got %+v %v", name, got, err)
+		}
+	}
+	// Extra fields in a real answer still don't make it the question.
+	withVersion := `{"minecraftVersion": "26.3", ` + one[1:]
+	if got, err := Parse(question + withVersion); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("answer naming the version: got %+v %v", got, err)
+	}
 }
 
 func TestCheckHoldsSuggestionsToTheRules(t *testing.T) {
-	defer testid.Line(t, "df75z")
+	defer testid.Line(t, "1a3jemw")
 	ok := Suggestion{
 		Jar:      "plugins/LuckPerms-Bukkit.jar",
 		Version:  "5.5.17",
@@ -135,7 +171,7 @@ func TestCheckHoldsSuggestionsToTheRules(t *testing.T) {
 }
 
 func TestCheckCleansText(t *testing.T) {
-	defer testid.Line(t, "df760")
+	defer testid.Line(t, "1a3jer0")
 	s := Suggestion{
 		Jar:     "plugins/Chunky.jar",
 		Version: "1.4\x1b[2J.40\u202e",
@@ -157,7 +193,7 @@ func TestCheckCleansText(t *testing.T) {
 }
 
 func TestNewPicksTheKind(t *testing.T) {
-	defer testid.Line(t, "df761")
+	defer testid.Line(t, "1a3jev4")
 	cfg := config.Defaults()
 	for kind, says := range map[string]string{
 		"none":      "no agent is set",
@@ -196,7 +232,7 @@ type askFunc func(ctx context.Context, prompt string) (string, error)
 func (f askFunc) Ask(ctx context.Context, prompt string) (string, error) { return f(ctx, prompt) }
 
 func TestSuggestAsksAndChecks(t *testing.T) {
-	defer testid.Line(t, "df765")
+	defer testid.Line(t, "1a3jf7m")
 	q := Question{Minecraft: "26.3", Jars: asked}
 	var sent string
 	reply := `{"jars": [{"jar": "plugins/Chunky.jar", "version": "1.4.40", "url": "https://evil.example/c.jar"}]}`
@@ -224,7 +260,7 @@ func TestSuggestAsksAndChecks(t *testing.T) {
 // The move report keeps only the jars asked about. Both parts of the prompt
 // show only when asked.
 func TestPaperAndMoveReport(t *testing.T) {
-	defer testid.Line(t, "df790")
+	defer testid.Line(t, "1a3jr40")
 	q := Question{Minecraft: "26.3", Paper: "249", FindPaper: "26.4", MoveTo: "26.4", Plugins: asked}
 	p := Prompt(q)
 	if !strings.Contains(p, `"paper": {"version"`) || !strings.Contains(p, `"moveReport": [{"jar"`) || !strings.Contains(p, `"findPaperFor": "26.4"`) {
@@ -241,6 +277,11 @@ func TestPaperAndMoveReport(t *testing.T) {
 	a, err := Parse(reply)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A question with jars has a jars key, and is no answer for Paper or the move.
+	all := Prompt(Question{Minecraft: "26.3", Paper: "249", Jars: asked, FindPaper: "26.4", MoveTo: "26.4", Plugins: asked})
+	if again, err := Parse("You asked:\n" + all + "\n" + reply); err != nil || !reflect.DeepEqual(again, a) {
+		t.Errorf("after the prompt quoted back: %+v %v", again, err)
 	}
 	got, err := CheckPaper(a, "26.4", hosts)
 	if err != nil || got.Build != 12 || got.SHA256 != sum256 || got.Notes != "first stable[2J" {
@@ -280,5 +321,39 @@ func TestPaperAndMoveReport(t *testing.T) {
 	}
 	if _, err := Parse(`{"moveReport": []}`); err != nil {
 		t.Errorf("a report alone: %v", err)
+	}
+}
+
+// The vendor's own key goes only to the vendor's own API, not to a gateway or
+// local server agentURL names. TT_MINECRAFTD_AGENT_KEY goes to any.
+func TestVendorKeyStaysHome(t *testing.T) {
+	defer testid.Line(t, "1a3k10c")
+	env := map[string]string{"ANTHROPIC_API_KEY": "ak", "OPENAI_API_KEY": "ok"}
+	old := getenv
+	getenv = func(k string) string { return env[k] }
+	t.Cleanup(func() { getenv = old })
+	cfg := config.Defaults()
+	cfg.AgentModel = "m"
+	for _, c := range []struct{ kind, url, key string }{
+		{"openai", "", "ok"},
+		{"openai", "https://api.openai.com/v1", "ok"},
+		{"openai", "https://API.OpenAI.com./v1", "ok"},
+		{"anthropic", "https://api.anthropic.com/v1", "ak"},
+		{"openai", "https://openrouter.ai/api/v1", ""},
+		{"openai", "https://api.openai.com.evil.example/v1", ""},
+		{"openai", "http://127.0.0.1:11434/v1", ""},
+		{"openai", "https://api.anthropic.com/v1", ""},
+		{"anthropic", "https://gateway.example/v1", ""},
+	} {
+		cfg.Agent, cfg.AgentURL = c.kind, c.url
+		a, err := New(&cfg)
+		if api, ok := a.(API); err != nil || !ok || api.Key != c.key {
+			t.Errorf("%s at %q: %+v, %v", c.kind, c.url, a, err)
+		}
+	}
+	env["TT_MINECRAFTD_AGENT_KEY"] = "tk"
+	cfg.Agent, cfg.AgentURL = "openai", "https://openrouter.ai/api/v1"
+	if a, err := New(&cfg); err != nil || a.(API).Key != "tk" {
+		t.Errorf("tool key: %+v, %v", a, err)
 	}
 }

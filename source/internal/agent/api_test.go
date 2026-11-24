@@ -50,7 +50,7 @@ func last(body map[string]any) map[string]any {
 }
 
 func TestOpenAIRunsFetches(t *testing.T) {
-	defer testid.Line(t, "df769")
+	defer testid.Line(t, "1a3jfm4")
 	page := pages(t)
 	call := fmt.Sprintf(`{"choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [
 		{"id": "c1", "type": "function", "function": {"name": "fetch", "arguments": "{\"url\": \"%s/json\"}"}}]}}]}`, page.URL)
@@ -81,7 +81,7 @@ func TestOpenAIRunsFetches(t *testing.T) {
 }
 
 func TestAnthropicRunsFetches(t *testing.T) {
-	defer testid.Line(t, "df76a")
+	defer testid.Line(t, "1a3jfq8")
 	page := pages(t)
 	call := fmt.Sprintf(`{"stop_reason": "tool_use", "content": [{"type": "text", "text": "Looking."},
 		{"type": "tool_use", "id": "tu1", "name": "fetch", "input": {"url": "%s/json"}}]}`, page.URL)
@@ -105,7 +105,7 @@ func TestAnthropicRunsFetches(t *testing.T) {
 }
 
 func TestAPIFailures(t *testing.T) {
-	defer testid.Line(t, "df76b")
+	defer testid.Line(t, "1a3jftc")
 	ctx := context.Background()
 	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error": "bad key"}`, http.StatusUnauthorized)
@@ -143,5 +143,71 @@ func TestAPIFailures(t *testing.T) {
 	if _, err := (API{Kind: "openai", URL: junk.URL, Model: "m"}).Ask(ctx, "q"); err == nil ||
 		!strings.Contains(err.Error(), "doesn't run as root") {
 		t.Errorf("root: %v", err)
+	}
+}
+
+// rawStatus answers 404 with a reason phrase holding escape codes.
+func rawStatus(w http.ResponseWriter, _ *http.Request) {
+	c, buf, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	_, _ = buf.WriteString("HTTP/1.1 404 \x1b]0;owned\x07\x1b[2Jgone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	_ = buf.Flush()
+}
+
+// The agent's server and a fetched page give their own reason phrase, so
+// errors name the status by its code.
+func TestStatusByCode(t *testing.T) {
+	defer testid.Line(t, "1a3jv1r")
+	ts := httptest.NewServer(http.HandlerFunc(rawStatus))
+	t.Cleanup(ts.Close)
+	_, err := API{Kind: "openai", URL: ts.URL, Model: "m"}.Ask(context.Background(), "q")
+	if err == nil || strings.ContainsAny(err.Error(), "\x1b\x07") || !strings.Contains(err.Error(), "said 404 Not Found") {
+		t.Errorf("API: %v", err)
+	}
+	tls := httptest.NewTLSServer(http.HandlerFunc(rawStatus))
+	t.Cleanup(tls.Close)
+	got := (&Fetcher{Client: tls.Client()}).Fetch(context.Background(), tls.URL+"/page")
+	if strings.ContainsAny(got, "\x1b\x07") || !strings.Contains(got, "HTTP 404 Not Found") {
+		t.Errorf("fetch: %q", got)
+	}
+}
+
+// A redirect could send the key and the prompt to another host, or down to
+// plain http, so the API client doesn't follow one.
+func TestAPIKeepsTheKeyOnRedirect(t *testing.T) {
+	defer testid.Line(t, "1a3jw78")
+	var elsewhere []string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere = append(elsewhere, r.Method+" "+r.URL.Path+" x-api-key="+r.Header.Get("x-api-key")+" auth="+r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices": [{"message": {"content": "{\"jars\": []}"}}], "content": [{"type": "text", "text": "{\"jars\": []}"}]}`)
+	}))
+	t.Cleanup(other.Close)
+	// localhost against httptest's 127.0.0.1, so it's another host.
+	away := strings.Replace(other.URL, "127.0.0.1", "localhost", 1)
+	for _, code := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusFound} {
+		moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, away+r.URL.Path, code)
+		}))
+		t.Cleanup(moved.Close)
+		given := moved.Client()
+		for _, kind := range []string{"anthropic", "openai"} {
+			for _, client := range []*http.Client{nil, given} {
+				api := API{Kind: kind, URL: moved.URL + "/v1", Model: "m", Key: "secret-" + kind, Client: client}
+				_, err := api.Ask(context.Background(), "q")
+				if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("said %d", code)) || !strings.Contains(err.Error(), "Redirects aren't followed") || strings.Contains(err.Error(), "secret") {
+					t.Errorf("%d %s, own client %v: %v", code, kind, client != nil, err)
+				}
+			}
+		}
+		if given.CheckRedirect != nil {
+			t.Errorf("%d: the client passed in was changed", code)
+		}
+	}
+	if len(elsewhere) > 0 {
+		t.Errorf("the other host got:\n%s", strings.Join(elsewhere, "\n"))
 	}
 }

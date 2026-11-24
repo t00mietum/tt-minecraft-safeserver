@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // DefaultBase is PaperMC's download API, called Fill.
@@ -213,34 +214,26 @@ func (a API) NewestStable(ctx context.Context, version string) (Build, error) {
 // following links, as the settings package does, since the server account
 // may own the tree. The new files take the folder's owner and group.
 func (a API) Install(ctx context.Context, serverDir string, b Build) error {
-	dirfd, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	dirfd, err := download.OpenDir(serverDir)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return err
 	}
 	defer syscall.Close(dirfd)
 	if err := a.fetch().Into(ctx, dirfd, serverDir, download.File{Name: b.Name, URL: b.URL, SHA256: b.SHA256, Size: b.Size}); err != nil {
 		return err
 	}
-	var st syscall.Stat_t
-	if err := syscall.Fstat(dirfd, &st); err != nil {
-		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
-	}
-	return link(dirfd, serverDir, b.Name, st)
+	return link(dirfd, serverDir, b.Name)
 }
 
 // Point makes paper.jar in serverDir a link to name, a build already there,
 // owned like the folder.
 func Point(serverDir, name string) error {
-	dirfd, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	dirfd, err := download.OpenDir(serverDir)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return err
 	}
 	defer syscall.Close(dirfd)
-	var st syscall.Stat_t
-	if err := syscall.Fstat(dirfd, &st); err != nil {
-		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
-	}
-	return link(dirfd, serverDir, name, st)
+	return link(dirfd, serverDir, name)
 }
 
 // Name is a build's file name, as PaperMC gives it.
@@ -308,7 +301,11 @@ func versionID(e *zip.File) string {
 }
 
 // link makes paper.jar a link to name, replacing what's there in one rename.
-func link(dirfd int, serverDir, name string, st syscall.Stat_t) error {
+func link(dirfd int, serverDir, name string) error {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(dirfd, &st); err != nil {
+		return &fs.PathError{Op: "stat", Path: serverDir, Err: err}
+	}
 	tmp, err := download.TempName("paper.jar")
 	if err != nil {
 		return err
@@ -344,11 +341,8 @@ func symlinkat(target string, dirfd int, name string) error {
 	return nil
 }
 
-// atSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
-const atSymlinkNoFollow = 0x100
-
 func fchownatNoFollow(dirfd int, name string, uid, gid int) error {
-	return syscall.Fchownat(dirfd, name, uid, gid, atSymlinkNoFollow)
+	return syscall.Fchownat(dirfd, name, uid, gid, download.AtSymlinkNoFollow)
 }
 
 // Linked is the build paper.jar links to, read from the target's name.
@@ -357,6 +351,9 @@ type Linked struct {
 	ID      int
 	// Target is the link's text, such as paper-26.3-249.jar.
 	Target string
+	// Name is the build's file name in serverDir when paper.jar leads to a
+	// file there, however the link is written. Empty otherwise.
+	Name string
 	// Gone is a link to a build that isn't there.
 	Gone bool
 }
@@ -373,13 +370,27 @@ func Current(serverDir string) (*Linked, error) {
 	case err != nil:
 		return nil, err
 	}
+	// Refused whole, since Target is shown and parseName checks only the
+	// last part.
+	if server.Clean(target) != target {
+		return nil, fmt.Errorf("paper.jar links to %q, a name with control characters, so its version is unknown", target)
+	}
 	l, ok := parseName(filepath.Base(target))
 	if !ok {
 		return nil, fmt.Errorf("paper.jar links to %s, which isn't named paper-VERSION-BUILD.jar, so its version is unknown", target)
 	}
 	l.Target = target
-	if _, err := os.Stat(link); errors.Is(err, fs.ErrNotExist) {
+	dest, err := os.Stat(link)
+	if errors.Is(err, fs.ErrNotExist) {
 		l.Gone = true
+	}
+	// ./name, a full path, or ../server/name all reach the same file, and
+	// Prune matches on the plain name.
+	if err == nil {
+		base := filepath.Base(target)
+		if here, err := os.Stat(filepath.Join(serverDir, base)); err == nil && os.SameFile(here, dest) {
+			l.Name = base
+		}
 	}
 	return &l, nil
 }
@@ -401,11 +412,12 @@ func parseName(name string) (Linked, bool) {
 	return Linked{Version: rest[:i], ID: id}, true
 }
 
-// IsBuild tells whether name, under serverDir, is named like a Paper build.
-func IsBuild(name string) bool {
-	_, build := parseName(name)
-	return build && !strings.Contains(name, "/")
-}
+// Commented out by 2026112110300390: nothing calls it since plugin approval went.
+// // IsBuild tells whether name, under serverDir, is named like a Paper build.
+// func IsBuild(name string) bool {
+// 	_, build := parseName(name)
+// 	return build && !strings.Contains(name, "/")
+// }
 
 // Prune removes the Paper builds in serverDir besides the ones named in keep,
 // and gives the names it removed. Only plain files named like a build go.

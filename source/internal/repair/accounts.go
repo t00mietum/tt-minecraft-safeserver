@@ -28,8 +28,8 @@ type group struct {
 	members []string
 }
 
-// accounts reads passwd and group files fresh, since a fix just before may
-// have changed them.
+// accounts is the passwd and group files, read fresh each time, since a fix
+// just before may have changed them.
 type accounts struct {
 	users  []account
 	groups []group
@@ -149,7 +149,9 @@ var accountCheck = Check{
 				Fix:     h.fix("usermod", "--shell", noLogin[0], user),
 			})
 		}
-		if hasGroup && u.gid != g.gid {
+		// A group groupadd is about to make has a gid of its own, so the
+		// account's can't be it yet.
+		if !hasGroup || u.gid != g.gid {
 			found = append(found, Finding{
 				Problem: fmt.Sprintf("%s's own group isn't %s", user, groupName),
 				Fixed:   user + "'s own group is now " + groupName,

@@ -17,9 +17,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // DefaultBase is GeyserMC's download API.
@@ -72,7 +76,7 @@ func (a API) fetch() download.Client {
 }
 
 // Source is the address update --plugins gets a project's newest jar from,
-// as the approved list keeps it.
+// as plugins.shcl keeps it.
 func (a API) Source(project string) string {
 	return a.base() + "/" + project + "/versions/latest/builds/latest/downloads/spigot"
 }
@@ -99,7 +103,7 @@ func (a API) Latest(ctx context.Context, project string) (Build, error) {
 		return Build{}, fmt.Errorf("%s: odd version %q or build %d", Title(project), b.Version, b.ID)
 	case !ok:
 		return Build{}, errors.New(what + " has no Paper download")
-	case !jarName.MatchString(b.Name) || !strings.HasPrefix(strings.ToLower(b.Name), project):
+	case !jarName.MatchString(b.Name) || !named(b.Name, project):
 		// repair and update tell the plugin by its name.
 		return Build{}, fmt.Errorf("%s: odd file name %q", what, b.Name)
 	case !download.SHA256Hex.MatchString(b.SHA256):
@@ -112,58 +116,64 @@ func (a API) Latest(ctx context.Context, project string) (Build, error) {
 // Install downloads b into serverDir's plugins folder, making the folder when
 // it's missing, owned like serverDir.
 func (a API) Install(ctx context.Context, serverDir string, b Build) error {
-	top, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	top, err := linksafe.Open(serverDir)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return err
 	}
-	defer syscall.Close(top)
-	dir := serverDir + "/plugins"
-	err = syscall.Mkdirat(top, "plugins", 0o770)
-	switch {
-	case err == nil:
-		if err := chownLike(top, "plugins"); err != nil {
-			return &fs.PathError{Op: "chown", Path: dir, Err: err}
-		}
-	case !errors.Is(err, syscall.EEXIST):
-		return &fs.PathError{Op: "mkdir", Path: dir, Err: err}
+	defer top.Close()
+	dir, err := top.Mkdir("plugins", nil)
+	if errors.Is(err, fs.ErrExist) {
+		dir, err = top.Sub("plugins")
 	}
-	fd, err := syscall.Openat(top, "plugins", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return &fs.PathError{Op: "open", Path: dir, Err: err}
+		return err
 	}
-	defer syscall.Close(fd)
-	return a.fetch().Into(ctx, fd, dir, download.File{Name: b.Name, URL: b.URL, SHA256: b.SHA256})
+	defer dir.Close()
+	return a.fetch().Into(ctx, dir.Fd(), top.Name("plugins"), download.File{Name: b.Name, URL: b.URL, SHA256: b.SHA256})
 }
 
-// chownLike gives a new folder the owner and group of the one it's in, and
-// the tree's mode past the umask. Only root can chown, and a test run isn't.
-func chownLike(top int, name string) error {
-	if os.Geteuid() == 0 {
-		var st syscall.Stat_t
-		if err := syscall.Fstat(top, &st); err != nil {
-			return err
-		}
-		if err := syscall.Fchownat(top, name, int(st.Uid), int(st.Gid), atSymlinkNoFollow); err != nil {
-			return err
-		}
+// pluginNames are the names GeyserMC's own jars give in plugin.yml. Add-ons
+// such as GeyserExtras or a Floodgate add-on start with the same word.
+var pluginNames = map[string]string{"geyser": "Geyser-Spigot", "floodgate": "floodgate"}
+
+// named tells if a file name in plugins/ is the project's: the project's
+// name, then anything but a letter or digit, so GeyserExtras.jar isn't.
+func named(file, p string) bool {
+	rest, ok := strings.CutPrefix(strings.ToLower(file), p)
+	if !ok || rest == "" {
+		return false
 	}
-	return syscall.Fchmodat(top, name, 0o770, 0)
+	r, _ := utf8.DecodeRuneInString(rest)
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
-// atSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
-const atSymlinkNoFollow = 0x100
+// Named says whether a jar in plugins/, by its path under serverDir, has a
+// GeyserMC project's file name, as Project needs.
+func Named(name string) bool {
+	if path.Dir(name) != "plugins" {
+		return false
+	}
+	for _, p := range Projects {
+		if named(path.Base(name), p) {
+			return true
+		}
+	}
+	return false
+}
 
-// Project is the GeyserMC project a jar in plugins/ is, when both its file
-// name and the plugin name it claims start with the project's name, or "".
-// setup and repair give such a jar GeyserMC's source when they first approve
-// it, so update --plugins keeps it current, as it does the ones setup got.
+// Project is the GeyserMC project a jar in plugins/ is, when its file name
+// is the project's and the plugin name it claims is GeyserMC's own, or "".
+// claim is the jar's About, the plugin name and then its version. setup and
+// repair give such a jar GeyserMC's source when it has none, so update
+// --plugins keeps it current, as it does the ones setup got.
 func Project(name, claim string) string {
 	if path.Dir(name) != "plugins" {
 		return ""
 	}
-	file, claim := strings.ToLower(path.Base(name)), strings.ToLower(claim)
+	file := path.Base(name)
+	plugin, _, _ := strings.Cut(claim, " ")
 	for _, p := range Projects {
-		if strings.HasPrefix(file, p) && strings.HasPrefix(claim, p) {
+		if named(file, p) && strings.EqualFold(plugin, pluginNames[p]) {
 			return p
 		}
 	}
@@ -171,23 +181,39 @@ func Project(name, claim string) string {
 }
 
 // Installed tells which projects have a jar in serverDir's plugins folder,
-// by the jar's name, as GeyserMC names them.
+// by the jar's name, as GeyserMC names them. A jar whose plugin.yml names
+// another plugin, such as an add-on, doesn't count. One that names none is
+// taken by its name, as setup keeps whatever jar a tree has.
 func Installed(serverDir string) (map[string]bool, error) {
-	entries, err := os.ReadDir(serverDir + "/plugins")
+	dir := serverDir + "/plugins"
+	entries, err := os.ReadDir(dir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
 	has := map[string]bool{}
 	for _, e := range entries {
-		name := strings.ToLower(e.Name())
-		if !strings.HasSuffix(name, ".jar") {
+		if !strings.HasSuffix(strings.ToLower(e.Name()), ".jar") {
 			continue
 		}
 		for _, p := range Projects {
-			if strings.HasPrefix(name, p) {
+			if !named(e.Name(), p) {
+				continue
+			}
+			if claim := claimed(dir + "/" + e.Name()); claim == "" || strings.EqualFold(claim, pluginNames[p]) {
 				has[p] = true
 			}
 		}
 	}
 	return has, nil
+}
+
+// claimed is the plugin name a jar says it is, or "" when it can't be read.
+func claimed(file string) string {
+	f, err := server.OpenRegular(file)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	name, _ := plugins.Claims(f)
+	return name
 }

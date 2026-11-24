@@ -6,9 +6,12 @@
 package settings
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 )
@@ -77,17 +80,20 @@ func propertyRules(c *config.Config) []rule {
 }
 
 // yamlSetting is a dotted path in a Paper YAML file. A missing file or key is
-// fine, since each one defaults to off.
+// fine, since each one defaults to off. dotted says the file's reader splits
+// a key on dots: Bukkit's for spigot.yml does, and Configurate for Paper's own
+// files doesn't.
 type yamlSetting struct {
 	dir, file string
 	path      []string
+	dotted    bool
 }
 
 var yamlSettings = []yamlSetting{
-	{"", "spigot.yml", []string{"settings", "bungeecord"}},
-	{"config", "paper-global.yml", []string{"proxies", "velocity", "enabled"}},
+	{"", "spigot.yml", []string{"settings", "bungeecord"}, true},
+	{"config", "paper-global.yml", []string{"proxies", "velocity", "enabled"}, false},
 	// A client could send its own PROXY header and claim any address.
-	{"config", "paper-global.yml", []string{"proxies", "proxy-protocol"}},
+	{"config", "paper-global.yml", []string{"proxies", "proxy-protocol"}, false},
 }
 
 // Check lists the settings that aren't safe. It changes nothing.
@@ -106,7 +112,7 @@ func scan(c *config.Config, fix bool) ([]Problem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer top.close()
+	defer top.Close()
 	problems, err := scanProperties(top, propertyRules(c), fix)
 	if err != nil {
 		return problems, err
@@ -120,18 +126,19 @@ func scan(c *config.Config, fix bool) ([]Problem, error) {
 		}
 		byFile[name] = append(byFile[name], s)
 	}
+	// A YAML file that can't be read or fixed doesn't stop the others.
+	var errs []error
 	for _, name := range order {
 		found, err := scanYAML(top, byFile[name], fix)
 		problems = append(problems, found...)
-		if err != nil {
-			return problems, err
-		}
+		errs = append(errs, err)
 	}
-	if !c.Bedrock {
-		return problems, nil
+	if c.Bedrock {
+		found, err := scanGeyser(top, c, fix)
+		problems = append(problems, found...)
+		errs = append(errs, err)
 	}
-	found, err := scanGeyser(top, c, fix)
-	return append(problems, found...), err
+	return problems, errors.Join(errs...)
 }
 
 func joinName(dir, file string) string {
@@ -144,7 +151,7 @@ func joinName(dir, file string) string {
 const propertiesFile = "server.properties"
 
 func scanProperties(top dir, rules []rule, fix bool) ([]Problem, error) {
-	text, st, err := top.read(propertiesFile)
+	text, st, err := top.Read(propertiesFile)
 	missingFile := isNotExist(err)
 	if err != nil && !missingFile {
 		return nil, err
@@ -166,49 +173,46 @@ func scanProperties(top dir, rules []rule, fix bool) ([]Problem, error) {
 	for _, p := range problems {
 		props.set(p.Key, p.Want)
 	}
-	if missingFile {
-		st = nil
-	}
-	return problems, top.write(propertiesFile, props.bytes(), st)
+	return problems, top.Write(propertiesFile, props.bytes(), st)
 }
+
+func isFalse(have string) bool { return strings.EqualFold(have, "false") }
 
 func scanYAML(top dir, list []yamlSetting, fix bool) ([]Problem, error) {
 	d := top
 	if list[0].dir != "" {
-		sub, err := top.sub(list[0].dir)
+		sub, err := top.Sub(list[0].dir)
 		if isNotExist(err) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		defer sub.close()
+		defer sub.Close()
 		d = sub
 	}
 	name := joinName(list[0].dir, list[0].file)
-	text, st, err := d.read(list[0].file)
+	text, st, err := d.Read(list[0].file)
 	if isNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(string(text), "\n")
-	var problems []Problem
-	for _, s := range list {
-		i, ok := yamlFind(lines, s.path)
-		if !ok {
-			continue
+	keysFor := func(*yaml.Node) []yamlKey {
+		keys := make([]yamlKey, 0, len(list))
+		for _, s := range list {
+			keys = append(keys, yamlKey{path: s.path, want: "false", missingOK: true, dotted: s.dotted, ok: isFalse})
 		}
-		have := yamlValue(lines[i])
-		if strings.EqualFold(have, "false") {
-			continue
-		}
-		problems = append(problems, Problem{File: name, Key: strings.Join(s.path, "."), Have: have, Want: "false"})
-		lines[i] = yamlSet(lines[i], "false")
+		return keys
 	}
-	if !fix || len(problems) == 0 {
-		return problems, nil
+	if !fix {
+		problems, _, err := yamlScan(name, text, keysFor)
+		return problems, err
 	}
-	return problems, d.write(list[0].file, []byte(strings.Join(lines, "\n")), st)
+	problems, fixed, err := yamlFix(name, text, keysFor)
+	if err != nil || len(problems) == 0 {
+		return problems, err
+	}
+	return problems, d.Write(list[0].file, fixed, st)
 }

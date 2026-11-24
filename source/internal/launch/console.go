@@ -31,6 +31,7 @@ type TmuxConsole struct {
 	User string
 }
 
+// Send types line and Enter into the tmux session.
 func (t TmuxConsole) Send(ctx context.Context, line string) error {
 	if err := checkLine(line); err != nil {
 		return err

@@ -48,15 +48,21 @@ func (k *Kit) mustRun(ctx context.Context, e engine) error {
 
 // session hands this terminal to the console. A detach leaves the server up,
 // and its trees with it. An exit, such as after stop, hands them back.
-// detached, when set, says whether an error from c is only how it detaches.
-func (k *Kit) session(ctx context.Context, e engine, c host.Cmd, detached func(error) bool) error {
+// detached, when set, says whether an error from c and the end of its stderr
+// are only how it detaches. The exit code alone can't say, since sudo and
+// docker exit 1 on their own failures too.
+func (k *Kit) session(ctx context.Context, e engine, c host.Cmd, detached func(err error, stderr string) bool) error {
+	var said errTail
+	if detached != nil {
+		c.ErrCopy = &said
+	}
 	_, err := k.Run.Run(ctx, c)
 	if k.DryRun {
 		return err
 	}
 	up, upErr := e.running(ctx)
 	if upErr == nil && up {
-		if err != nil && detached != nil && detached(err) {
+		if err != nil && detached != nil && detached(err, string(said.buf)) {
 			err = nil
 		}
 		if err == nil {
@@ -71,17 +77,64 @@ func (k *Kit) session(ctx context.Context, e engine, c host.Cmd, detached func(e
 	return errors.Join(err, k.handBack(ctx))
 }
 
+// errTailMax is how much of a console's stderr errTail keeps. docker attach
+// says it detached in its last line.
+const errTailMax = 4096
+
+// errTail keeps the end of what's written to it.
+type errTail struct {
+	buf []byte
+}
+
+func (t *errTail) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > errTailMax {
+		t.buf = append([]byte(nil), t.buf[len(t.buf)-errTailMax:]...)
+	}
+	return len(p), nil
+}
+
 // checkCmd keeps stop and restart off cmd, since stop also hands the trees
-// back, and Paper's restart only stops without a restart script.
+// back, and Paper's restart only stops without a restart script. A namespace
+// such as minecraft: or bukkit: names the same command, and execute and
+// return run one after their run keyword, nested or not.
 func checkCmd(line string) error {
-	word, _, _ := strings.Cut(strings.TrimSpace(line), " ")
-	switch strings.ToLower(strings.TrimPrefix(word, "/")) {
-	case "":
+	words := strings.Fields(line)
+	if len(words) == 0 {
 		return errors.New("no console command given")
-	case "stop", "restart":
-		return fmt.Errorf("%s isn't sent through cmd; tt-minecraftd stop stops the server and hands the trees back", word)
+	}
+	first := cmdName(words[0])
+	if first == "stop" || first == "restart" {
+		return stopRefused(words[0])
+	}
+	// Every word after a run is tried as the command, which covers a nested
+	// execute too, and is linear. A player or score named run can only refuse
+	// more.
+	if first == "execute" || first == "return" {
+		for i := 1; i < len(words)-1; i++ {
+			if strings.ToLower(words[i]) != "run" {
+				continue
+			}
+			if name := cmdName(words[i+1]); name == "stop" || name == "restart" {
+				return stopRefused(words[i+1])
+			}
+		}
 	}
 	return nil
+}
+
+func stopRefused(word string) error {
+	return fmt.Errorf("%s isn't sent through cmd; tt-minecraftd stop stops the server and hands the trees back", word)
+}
+
+// cmdName gives a console command's name without its slash or namespace,
+// lower-cased, since Bukkit's names ignore case.
+func cmdName(word string) string {
+	name := strings.ToLower(strings.TrimPrefix(word, "/"))
+	if i := strings.LastIndexByte(name, ':'); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
 }
 
 // command sends one console line and prints the log lines that follow it,
@@ -97,7 +150,7 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 	if err := k.groupProblem("the server's log"); err != nil {
 		return err
 	}
-	log := &logFollow{file: server.LogFile(k.Cfg.ServerDir)}
+	log := &logFollow{serverDir: k.Cfg.ServerDir}
 	defer log.close()
 	if err := log.skip(); err != nil {
 		return err
@@ -109,21 +162,20 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 		return nil
 	}
 	// Only the server thread's lines count, since the answer comes from there.
-	// Geyser's STUN lines just after a start used to end the wait before it.
+	// Geyser's STUN lines right after a start used to end the wait before it.
 	// A line with no thread goes with the one before it.
 	seen, quiet, ours := false, 0, true
 	for i := range answerMax {
-		if ctx.Err() != nil {
-			return nil
+		if err := k.pause(ctx, answerPoll); err != nil {
+			return fmt.Errorf("%w after the line was sent", err)
 		}
-		k.Sleep(answerPoll)
 		lines, err := log.next()
 		if err != nil {
 			return err
 		}
 		heard := false
 		for _, l := range lines {
-			k.say("%s", server.Clean(l))
+			k.say("%s", l)
 			if thread, ok := server.LogThread(l); ok {
 				ours = thread == server.MainThread
 			}
@@ -145,7 +197,7 @@ func (k *Kit) command(ctx context.Context, e engine, line string) error {
 // logFollow reads what's added to a log. A new or shorter file, as Paper
 // starts each day, is read from its start.
 type logFollow struct {
-	file string
+	serverDir string
 	// last is the file read last time, held open so its inode can't go to
 	// the next new file, as ext4 does once a removed file is closed.
 	last *os.File
@@ -158,7 +210,7 @@ type logFollow struct {
 
 // skip moves to the end of the file, so only what comes next is read.
 func (f *logFollow) skip() error {
-	fh, err := server.OpenRegular(f.file)
+	fh, err := server.OpenLog(f.serverDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -182,7 +234,7 @@ func (f *logFollow) skip() error {
 }
 
 func (f *logFollow) next() ([]string, error) {
-	fh, err := server.OpenRegular(f.file)
+	fh, err := server.OpenLog(f.serverDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

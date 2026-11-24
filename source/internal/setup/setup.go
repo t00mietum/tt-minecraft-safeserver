@@ -7,6 +7,7 @@ package setup
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -17,7 +18,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/boot"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
@@ -25,6 +29,8 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
@@ -33,10 +39,10 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
 
-// BinPath is where setup puts the tool, which the boot unit runs.
-const BinPath = boot.Bin
+// BinPath is where setup puts the tool when no package has.
+const BinPath = boot.LocalBin
 
-// Setup holds one run's options. Accounts and Repair let tests stay off the
+// Setup is one run's options. Accounts and Repair let tests stay off the
 // host's real accounts and checks.
 type Setup struct {
 	Run host.Runner
@@ -53,8 +59,12 @@ type Setup struct {
 	AcceptEULA bool
 	In         *bufio.Scanner
 	Out        io.Writer
-	// Exe is the running binary, copied to BinPath when it's elsewhere.
+	// Exe is the running binary, copied to BinPath when it's elsewhere and
+	// no package has put the tool in place.
 	Exe string
+	// PkgBin, LocalBin and OldBuilds stand in for boot.PkgBin, BinPath and
+	// oldbuild.Dir. Empty means the real ones.
+	PkgBin, LocalBin, OldBuilds string
 	// Accounts gives the Host the account checks look at.
 	Accounts func(c *config.Config) *repair.Host
 	// Repair runs the repair command on c, with check for --check.
@@ -64,7 +74,16 @@ type Setup struct {
 	Update func(ctx context.Context, c *config.Config) error
 	Paper  PaperSource
 	Geyser GeyserSource
+	// resume is a new install going on in a tree an earlier one made.
+	resume bool
 }
+
+// partialMark is the file a new install leaves in the tree it made, until it
+// writes the config, so a setup that stopped partway can go on there without
+// --adopt.
+const partialMark = ".tt-minecraftd-setup"
+
+const partialText = "# tt-minecraftd setup made this folder and hasn't finished. Run setup again to go on; it removes this file when it writes the config.\n"
 
 // PaperSource is where Paper builds come from: paper.API, or a test's.
 type PaperSource interface {
@@ -83,9 +102,10 @@ type GeyserSource interface {
 
 // Do runs setup: repair on an existing install, the install steps otherwise.
 func (s *Setup) Do(ctx context.Context) error {
-	if _, err := os.Stat(s.ConfigPath); err == nil {
+	switch _, err := os.Stat(s.ConfigPath); {
+	case err == nil:
 		return s.existing(ctx)
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	case !errors.Is(err, fs.ErrNotExist):
 		return err
 	}
 	if err := s.refuseRunning(ctx); err != nil {
@@ -108,7 +128,10 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.checkTree(cfg); err != nil {
 		return err
 	}
-	jars, err := s.newJars(cfg)
+	if err := s.needApt(cfg); err != nil {
+		return err
+	}
+	jars, err := s.unsourced(cfg)
 	if err != nil {
 		return err
 	}
@@ -154,7 +177,11 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.getBedrock(ctx, cfg, bedrock); err != nil {
 		return err
 	}
-	if err := s.approve(jars); err != nil {
+	s.floodgateKey(ctx, &cfg, report)
+	if failed {
+		return stopped
+	}
+	if err := s.sources(jars); err != nil {
 		return err
 	}
 	s.firewall(ctx, &cfg, report)
@@ -173,7 +200,7 @@ func (s *Setup) Do(ctx context.Context) error {
 		}
 	}
 	if exe != "" {
-		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", exe, BinPath}}); err != nil {
+		if err := s.copySelf(ctx, exe); err != nil {
 			return err
 		}
 	}
@@ -181,6 +208,7 @@ func (s *Setup) Do(ctx context.Context) error {
 	if err := s.writeConfig(opts); err != nil {
 		return err
 	}
+	s.clearMark(cfg.ServerDir)
 	if s.DryRun {
 		report("PLAN", "repair --check runs last")
 		return nil
@@ -195,6 +223,10 @@ func (s *Setup) Do(ctx context.Context) error {
 func (s *Setup) existing(ctx context.Context) error {
 	if s.Adopt != "" {
 		return fmt.Errorf("%s is there already, so this isn't a new install; set serverDir in it to move to another server folder", s.ConfigPath)
+	}
+	// Geyser and Floodgate would go into a live server's plugins folder.
+	if err := s.refuseRunning(ctx); err != nil {
+		return err
 	}
 	cfg := s.Loaded
 	var bedrock []geyser.Build
@@ -260,7 +292,7 @@ func (s *Setup) options(ctx context.Context) ([]config.Option, error) {
 	if given(opts, "runMode") {
 		return opts, nil
 	}
-	mode, err := s.pickRuntime(ctx)
+	mode, err := s.pickRuntime()
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +318,7 @@ func given(opts []config.Option, key string) bool {
 
 // pickRuntime is design.md's pick: Podman, else Docker, else Podman through
 // apt or native mode. Docker is never installed.
-func (s *Setup) pickRuntime(context.Context) (string, error) {
+func (s *Setup) pickRuntime() (string, error) {
 	switch {
 	case launch.Installed("podman"):
 		return "podman", nil
@@ -303,7 +335,7 @@ func (s *Setup) pickRuntime(context.Context) (string, error) {
 		}
 		return "", errors.New("nothing changed; setup needs Podman or Docker")
 	}
-	fmt.Fprintln(s.Out, "\nNeither Podman nor Docker is installed. Podman runs the server in a container, which keeps it away from the rest of the host. Native mode runs it in a systemd sandbox instead, which is less.")
+	fmt.Fprintln(s.Out, "\nNeither Podman nor Docker is installed. Podman runs the server in a container, which keeps it away from the rest of the host. Native mode runs it in a systemd sandbox instead, which keeps it less apart.")
 	if s.confirm("Install Podman and catatonit through apt? n uses native mode [y/n] ") {
 		return "podman", nil
 	}
@@ -326,6 +358,19 @@ func (s *Setup) packages(c config.Config) []string {
 	return pkgs
 }
 
+// needApt refuses, before any change, when install would need apt and there
+// isn't any. packages leaves nftables out then, for the firewall step.
+func (s *Setup) needApt(c config.Config) error {
+	pkgs := s.packages(c)
+	switch {
+	case len(pkgs) == 0 || launch.Installed("apt-get"):
+		return nil
+	case len(pkgs) == 1:
+		return fmt.Errorf("%s isn't installed, and there's no apt-get to install it with; install it first", pkgs[0])
+	}
+	return fmt.Errorf("%s aren't installed, and there's no apt-get to install them with; install them first", strings.Join(pkgs, " and "))
+}
+
 func (s *Setup) install(ctx context.Context, c config.Config) error {
 	pkgs := s.packages(c)
 	if len(pkgs) == 0 {
@@ -340,7 +385,8 @@ func (s *Setup) install(ctx context.Context, c config.Config) error {
 }
 
 // checkTree refuses a new install over a folder that has files in it, since
-// --adopt is how to take one over.
+// --adopt is how to take one over. A tree an earlier setup made and didn't
+// finish is gone on with.
 func (s *Setup) checkTree(c config.Config) error {
 	entries, err := os.ReadDir(c.ServerDir)
 	switch {
@@ -352,69 +398,93 @@ func (s *Setup) checkTree(c config.Config) error {
 		return nil
 	case err != nil:
 		return err
+	case len(entries) > 0 && madeHere(c.ServerDir):
+		s.resume = true
 	case len(entries) > 0:
 		return fmt.Errorf("%s has files in it already; give --adopt %[1]s to take it over as it is", c.ServerDir)
 	}
 	return nil
 }
 
-// newJars are the plugin jars that aren't approved yet, as on an adopted tree.
-func (s *Setup) newJars(c config.Config) ([]plugins.Info, error) {
-	if _, err := os.Stat(c.ServerDir); errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	approved, _, err := plugins.ReadApproved(s.PluginsFile)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
-	check, err := plugins.CheckJars(c.ServerDir, approved, &plugins.Sums{})
-	if err != nil {
-		return nil, err
-	}
-	want := make(map[string]bool, len(check.New)+len(check.Changed))
-	for _, name := range check.New {
-		want[name] = true
-	}
-	for _, name := range check.Changed {
-		want[name] = false
-	}
-	all, err := plugins.Jars(c.ServerDir)
-	if err != nil {
-		return nil, err
-	}
-	var jars []plugins.Info
-	for _, j := range all {
-		isNew, ok := want[j.Name]
-		if !ok {
-			continue
-		}
-		info, err := plugins.Describe(j)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", j.Name, err)
-		}
-		// A changed jar keeps the source it has.
-		if p := geyser.Project(info.Name, info.About); isNew && p != "" && s.Geyser != nil {
-			info.Source = s.Geyser.Source(p)
-		}
-		jars = append(jars, info)
-	}
-	return jars, nil
+func madeHere(dir string) bool {
+	fi, err := os.Lstat(filepath.Join(dir, partialMark))
+	return err == nil && fi.Mode().IsRegular()
 }
 
-// copyTarget is the binary to copy to BinPath, or empty when it runs from
-// there already.
+// unsourced are the Geyser and Floodgate jars in plugins/ that plugins.shcl
+// gives no source, as on an adopted tree, each with GeyserMC's.
+func (s *Setup) unsourced(c config.Config) ([]plugins.Info, error) {
+	if _, err := os.Stat(c.ServerDir); errors.Is(err, fs.ErrNotExist) || s.Geyser == nil {
+		return nil, nil
+	}
+	return repair.GeyserSources(c.ServerDir, c.OwnerTrees, s.PluginsFile, s.Geyser.Source)
+}
+
+// copyTarget is the binary to copy to BinPath, or empty when BinPath holds
+// it already, by oldbuild.Current. A package's binary leaves the copy out,
+// since one in BinPath would come first on PATH and outlast the next package
+// upgrade.
 func (s *Setup) copyTarget() string {
-	if s.Exe == "" {
+	if s.Exe == "" || boot.Bin(s.PkgBin) == boot.PkgBin {
 		return ""
 	}
 	exe, err := filepath.EvalSymlinks(s.Exe)
 	if err != nil {
 		exe = s.Exe
 	}
-	if bin, err := filepath.EvalSymlinks(BinPath); err == nil && bin == exe {
+	// Even when it runs from BinPath: a link there, or a file the operator
+	// can change, gets a root-owned copy in its place.
+	if oldbuild.Current(exe, s.binPath()) {
 		return ""
 	}
 	return exe
+}
+
+func (s *Setup) binPath() string {
+	return cmp.Or(s.LocalBin, BinPath)
+}
+
+func (s *Setup) oldBuilds() string {
+	return cmp.Or(s.OldBuilds, oldbuild.Dir)
+}
+
+// replaced is where a copy of the other build in BinPath goes before the
+// copy, or empty when there's no plain file there to keep, or it's exe's
+// bytes and only its owner or mode is wrong.
+func (s *Setup) replaced(exe string) string {
+	if fi, err := os.Lstat(s.binPath()); err != nil || !fi.Mode().IsRegular() || oldbuild.Same(exe, s.binPath()) {
+		return ""
+	}
+	to, err := oldbuild.Where(s.binPath(), s.oldBuilds())
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(oldbuild.Dir, filepath.Base(to))
+}
+
+// copySelf puts exe in BinPath as install.bash does: it keeps a copy of the
+// other build there, as repair's check 15 would, stages exe beside it, and
+// renames it into place, so there's always a build in BinPath.
+func (s *Setup) copySelf(ctx context.Context, exe string) error {
+	if !s.DryRun && s.replaced(exe) != "" {
+		to, warn, err := oldbuild.Keep(s.binPath(), s.oldBuilds(), time.Now())
+		if err != nil {
+			return fmt.Errorf("keeping a copy of the other build: %w", err)
+		}
+		fmt.Fprintf(s.Out, "Kept a copy of %s as %s.\n", BinPath, filepath.Join(oldbuild.Dir, filepath.Base(to)))
+		if warn != nil {
+			fmt.Fprintf(s.Out, "warning: %s\n", warn)
+		}
+	}
+	stage := filepath.Join(filepath.Dir(s.binPath()), "."+filepath.Base(s.binPath())+".new")
+	if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-m", "0755", "-o", "root", "-g", "root", exe, stage}}); err != nil {
+		return err
+	}
+	if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"mv", "-f", "-T", stage, s.binPath()}}); err != nil {
+		_, _ = s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"rm", "-f", stage}}) // the move's error says more
+		return err
+	}
+	return nil
 }
 
 func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info, exe string, build *paper.Build, bedrock []geyser.Build) {
@@ -424,21 +494,24 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Install %s through apt.\n", strings.Join(pkgs, " and "))
 	}
 	fmt.Fprintf(w, "  - Make account %s and group %s where they're missing, and put %s in the group.\n", c.RunUser, c.RunGroup, c.OwnerAfterStop)
-	if s.Adopt != "" {
+	switch {
+	case s.Adopt != "":
 		fmt.Fprintf(w, "  - Take over %s as it is, and hand it to %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
-	} else {
+	case s.resume:
+		fmt.Fprintf(w, "  - Go on in %s, which an earlier setup made and didn't finish, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
+	default:
 		fmt.Fprintf(w, "  - Make %s, owned by %s, group %s.\n", c.ServerDir, c.OwnerAfterStop, c.RunGroup)
 	}
 	if build != nil {
-		fmt.Fprintf(w, "  - Download Paper %s build %d, check its SHA-256, approve it, and point paper.jar at it.\n", build.Version, build.ID)
+		fmt.Fprintf(w, "  - Download Paper %s build %d, check its SHA-256, and point paper.jar at it.\n", build.Version, build.ID)
 	}
-	if accepted, _ := settings.EULAAccepted(c.ServerDir); !accepted {
+	if accepted, _ := settings.EULAAccepted(c.ServerDir); !accepted { // a read error is the EULA step's to report
 		fmt.Fprintf(w, "  - Ask whether you accept the Minecraft EULA, and write eula.txt only after a yes.\n")
 	}
 	fmt.Fprintf(w, "  - Write the safe server settings.\n")
 	s.planBedrock(bedrock)
 	if n := len(jars); n > 0 {
-		fmt.Fprintf(w, "  - Approve the %d plugin %s there, listed with %s hashes below.\n", n, plural(n, "jar"), plural(n, "its", "their"))
+		fmt.Fprintf(w, "  - Give the %d Geyser and Floodgate %s there GeyserMC's source in %s, for update --plugins, listed below.\n", n, plural(n, "jar"), s.PluginsFile)
 	}
 	if c.Firewall {
 		fmt.Fprintf(w, "  - Write the firewall rules to %s, and enable and start %s.\n", firewall.RulesFile, firewall.UnitName)
@@ -450,20 +523,16 @@ func (s *Setup) plan(c config.Config, opts []config.Option, jars []plugins.Info,
 		fmt.Fprintf(w, "  - Install and enable %s, which starts the server at boot.\n", boot.UnitName)
 	}
 	if exe != "" {
+		if to := s.replaced(exe); to != "" {
+			fmt.Fprintf(w, "  - Keep a copy of the other build in %s as %s, where old builds are kept.\n", BinPath, to)
+		}
 		fmt.Fprintf(w, "  - Copy %s to %s.\n", exe, BinPath)
 	}
 	fmt.Fprintf(w, "  - Write %s, with %s.\n", s.ConfigPath, keyList(opts))
 	fmt.Fprintf(w, "  - Check it all, as repair --check does.\n\n")
 	// Before the question, so the yes covers jars that were seen.
 	for _, j := range jars {
-		about := j.About
-		if about == "" {
-			about = "no plugin.yml"
-		}
-		fmt.Fprintf(w, "%s\n  sha256: %s\n  says:   %s\n", j.Name, j.SHA256, about)
-		if j.Source != "" {
-			fmt.Fprintf(w, "  source: %s\n", j.Source)
-		}
+		fmt.Fprintf(w, "%s\n  says:   %s\n  source: %s\n", server.Clean(j.Name), j.About, j.Source)
 	}
 	if len(jars) > 0 {
 		fmt.Fprintln(w)
@@ -478,7 +547,7 @@ func (s *Setup) planBedrock(bedrock []geyser.Build) {
 	for i, b := range bedrock {
 		names[i] = fmt.Sprintf("%s %s build %d", geyser.Title(b.Project), b.Version, b.ID)
 	}
-	fmt.Fprintf(s.Out, "  - Download %s into plugins/, check %s SHA-256, and approve %s.\n", strings.Join(names, " and "), plural(len(bedrock), "its", "their"), plural(len(bedrock), "it", "them"))
+	fmt.Fprintf(s.Out, "  - Download %s into plugins/, and check %s SHA-256.\n", strings.Join(names, " and "), plural(len(bedrock), "its", "their"))
 }
 
 func keyList(opts []config.Option) string {
@@ -501,9 +570,10 @@ func lastOfEach(opts []config.Option) []config.Option {
 		k := strings.ToLower(opts[i].Key)
 		if !seen[k] {
 			seen[k] = true
-			keep = append([]config.Option{opts[i]}, keep...)
+			keep = append(keep, opts[i])
 		}
 	}
+	slices.Reverse(keep)
 	return keep
 }
 
@@ -552,6 +622,15 @@ func (s *Setup) reporter(failed *bool) repair.Report {
 	}
 }
 
+// agentHint leads with a CLI on the operator's own subscription, which
+// costs far less than the API kinds. README's Update agent has the rest.
+const agentHint = `
+# Update agent, off until set. A subscription CLI run as you is cheapest.
+# The API kinds, openai and anthropic, are the fallback. See README's Update agent.
+# agent: command
+# agentCommand: [codex, --search, exec, --sandbox, read-only, --skip-git-repo-check, --ephemeral, -]
+`
+
 // configText is the file setup writes: only the keys that were given or
 // picked, so the rest keep following the defaults.
 func configText(opts []config.Option) string {
@@ -560,13 +639,36 @@ func configText(opts []config.Option) string {
 	for _, o := range lastOfEach(opts) {
 		b.WriteString(o.Key + ": " + o.Value + "\n")
 	}
+	if !given(opts, "agent") {
+		b.WriteString(agentHint)
+	}
 	return b.String()
 }
 
-// configDir makes the config's folder, which the approved list shares.
+// configDir makes the config's folder, which plugins.shcl shares.
 func (s *Setup) configDir() (string, error) {
 	dir := filepath.Dir(s.ConfigPath)
 	return dir, os.MkdirAll(dir, 0o755) // #nosec G301 -- status reads the config without sudo
+}
+
+// writeSources adds jars' sources to plugins.shcl beside the config.
+func (s *Setup) writeSources(jars []plugins.Info) error {
+	if _, err := s.configDir(); err != nil {
+		return err
+	}
+	// Sources only feed update --plugins, so a file shcl can't keep isn't
+	// worth failing setup over.
+	var nk *plugins.NotKept
+	if err := plugins.SetSources(s.PluginsFile, jars); errors.As(err, &nk) {
+		fmt.Fprintf(s.Out, "warning: %s\n", server.Clean(nk.Error()))
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("can't write %s: %w", s.PluginsFile, err)
+	}
+	for _, j := range jars {
+		fmt.Fprintf(s.Out, "%-7s %s gets its updates from %s\n", "FIXED", server.Clean(j.Name), j.Source)
+	}
+	return nil
 }
 
 func (s *Setup) writeConfig(opts []config.Option) error {
@@ -607,12 +709,13 @@ func (s *Setup) writeConfig(opts []config.Option) error {
 }
 
 // firewall is step 9, repair's firewall check with its fixes. A dry run may
-// not have nft yet, since apt only printed its install.
+// not have nft yet, since apt only printed its install. Without apt to get it,
+// the check runs and fails as the real run does.
 func (s *Setup) firewall(ctx context.Context, c *config.Config, report repair.Report) {
 	if !c.Firewall {
 		return
 	}
-	if s.DryRun && !hasNft() {
+	if s.DryRun && !hasNft() && slices.Contains(s.packages(*c), "nftables") {
 		report("PLAN", "firewall rules written to "+firewall.RulesFile+", and "+firewall.UnitName+" enabled and started")
 		return
 	}
@@ -652,20 +755,12 @@ func (s *Setup) getPaper(ctx context.Context, c config.Config, b *paper.Build) e
 		return err
 	}
 	fmt.Fprintf(s.Out, "%-7s Paper %s build %d downloaded, and its SHA-256 matches; paper.jar points at %s\n", "FIXED", b.Version, b.ID, b.Name)
-	// start pins the build paper.jar points at, like a plugin.
-	if _, err := s.configDir(); err != nil {
-		return err
-	}
-	if err := plugins.Approve(s.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: b.Name}, SHA256: b.SHA256, Size: b.Size}}); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
-	}
-	fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", b.Name)
 	return nil
 }
 
 // bedrockBuilds are the Geyser and Floodgate builds to download with bedrock
 // on. A tree that has one already keeps it, as with paper.jar, and setup
-// approves it with the other jars.
+// gives it GeyserMC's source.
 func (s *Setup) bedrockBuilds(ctx context.Context, c config.Config) ([]geyser.Build, error) {
 	if !c.Bedrock {
 		return nil, nil
@@ -688,8 +783,8 @@ func (s *Setup) bedrockBuilds(ctx context.Context, c config.Config) ([]geyser.Bu
 	return builds, nil
 }
 
-// getBedrock downloads Geyser and Floodgate, and approves them with their
-// source, for update --plugins. The safe settings have written Geyser's keys
+// getBedrock downloads Geyser and Floodgate, and writes their source, for
+// update --plugins. The safe settings have written Geyser's keys
 // by then; Floodgate's config is left to its first start.
 func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser.Build) error {
 	if len(builds) == 0 {
@@ -707,18 +802,35 @@ func (s *Setup) getBedrock(ctx context.Context, c config.Config, builds []geyser
 			return err
 		}
 		fmt.Fprintf(s.Out, "%-7s %s %s build %d downloaded, and its SHA-256 matches\n", "FIXED", geyser.Title(b.Project), b.Version, b.ID)
-		jars = append(jars, plugins.Info{Jar: plugins.Jar{Name: b.Path()}, SHA256: b.SHA256, Source: s.Geyser.Source(b.Project)})
+		jars = append(jars, plugins.Info{Jar: plugins.Jar{Name: b.Path()}, Source: s.Geyser.Source(b.Project)})
 	}
-	if _, err := s.configDir(); err != nil {
-		return err
+	return s.writeSources(jars)
+}
+
+// floodgateKey takes other accounts' access to the Floodgate key away on an
+// adopted tree, as repair does, since handing the tree to the operator leaves
+// the modes. The final check fails on it otherwise. A dry run only says so.
+func (s *Setup) floodgateKey(ctx context.Context, c *config.Config, report repair.Report) {
+	if s.Adopt == "" || !c.Bedrock {
+		return
 	}
-	if err := plugins.Approve(s.PluginsFile, jars); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
+	h := s.Accounts(c)
+	if !s.DryRun {
+		repair.Run(ctx, h, []repair.Check{repair.FloodgateKeyCheck}, false, report)
+		return
 	}
-	for _, j := range jars {
-		fmt.Fprintf(s.Out, "%-7s %s approved\n", "FIXED", j.Name)
+	found, err := repair.FloodgateKeyCheck.Look(ctx, h)
+	if err != nil {
+		report("FAILED", repair.FloodgateKeyCheck.Name+": "+err.Error())
+		return
 	}
-	return nil
+	for _, f := range found {
+		if f.Fix == nil {
+			report("FAILED", f.Problem)
+			continue
+		}
+		report("PLAN", f.Fixed)
+	}
 }
 
 // accounts makes the account and group, and puts the operator in it. Under
@@ -739,14 +851,44 @@ func (s *Setup) accounts(ctx context.Context, c *config.Config, report repair.Re
 // which is how a stopped server's tree is. See design.md's Tree ownership.
 func (s *Setup) makeTree(ctx context.Context, c *config.Config) error {
 	if s.Adopt == "" {
-		_, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-d", "-o", c.OwnerAfterStop, "-g", c.RunGroup, "-m", "0770", c.ServerDir}})
-		return err
+		if _, err := s.Run.Run(ctx, host.Cmd{Sudo: true, Args: []string{"install", "-d", "-o", c.OwnerAfterStop, "-g", c.RunGroup, "-m", "0770", c.ServerDir}}); err != nil || s.DryRun {
+			return err
+		}
+		return s.mark(c.ServerDir)
 	}
 	warns, err := tree.ToOperator(ctx, s.Run, c)
 	for _, w := range warns {
 		fmt.Fprintf(s.Out, "warning: %s\n", w)
 	}
 	return err
+}
+
+// mark leaves partialMark in a tree setup made, through a handle, since the
+// operator owns the folder by then.
+func (s *Setup) mark(dir string) error {
+	d, err := linksafe.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Write(partialMark, []byte(partialText), nil)
+}
+
+// clearMark takes partialMark away once the config is written. A setup after
+// that is an existing install, and a leftover mark would let one that finds
+// the config moved aside go on over a tree the server has used since.
+func (s *Setup) clearMark(dir string) {
+	if s.DryRun {
+		return
+	}
+	d, err := linksafe.Open(dir)
+	if err == nil {
+		err = syscall.Unlinkat(d.Fd(), partialMark)
+		d.Close()
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(s.Out, "warning: can't remove %s: %v\n", filepath.Join(dir, partialMark), err)
+	}
 }
 
 func (s *Setup) eula(c config.Config) error {
@@ -789,16 +931,9 @@ func (s *Setup) safeSettings(c *config.Config, report repair.Report) {
 	}
 }
 
-func (s *Setup) approve(jars []plugins.Info) error {
+func (s *Setup) sources(jars []plugins.Info) error {
 	if len(jars) == 0 || s.DryRun {
 		return nil
 	}
-	if _, err := s.configDir(); err != nil {
-		return err
-	}
-	if err := plugins.Approve(s.PluginsFile, jars); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
-	}
-	fmt.Fprintf(s.Out, "%-7s %d plugin %s approved\n", "FIXED", len(jars), plural(len(jars), "jar"))
-	return nil
+	return s.writeSources(jars)
 }

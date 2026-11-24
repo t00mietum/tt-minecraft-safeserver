@@ -14,7 +14,7 @@ import (
 // Any text in the config file gives warnings at worst, never an error or a
 // panic, and a setting that didn't take leaves the default.
 func FuzzRead(f *testing.F) {
-	defer testid.Line(f, "df788")
+	defer testid.Line(f, "1a3jns0")
 	f.Add("runMode: native\ngamePort: 25565\nheapMax: 4GB\n")
 	f.Add("allowFrom: [ 192.0.2.0/24, \"2001:db8::/32\" ]\nagent: { kind: command, command: \"/bin/true\" }\n")
 	f.Add("gamePort: 99999\ngamePort: 1\nrunMode(0): x\n\x00\xff{{\n")

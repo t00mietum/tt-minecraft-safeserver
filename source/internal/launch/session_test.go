@@ -5,7 +5,9 @@ package launch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -24,7 +27,7 @@ import (
 // over with Ctrl-C as the way out. An exit hands the trees back; a detach
 // doesn't.
 func TestOpenConsole(t *testing.T) {
-	defer testid.Line(t, "df5z6")
+	defer testid.Line(t, "1a3ener")
 	g := newRig(t)
 	g.states = []string{"running"}
 	if err := g.d.OpenConsole(context.Background()); err != nil {
@@ -37,21 +40,43 @@ func TestOpenConsole(t *testing.T) {
 		t.Errorf("docker, detached: ran %q, output %q", got, out)
 	}
 
-	// docker attach exits 1 after the detach keys. Any other failure is an error.
-	for code, wantErr := range map[int]bool{1: false, 2: true} {
+	// docker attach exits 1 after the detach keys, and says so on stderr.
+	// sudo after failed password tries, and docker on its own errors, exit 1
+	// too, and aren't a detach.
+	for _, tc := range []struct {
+		code    int
+		stderr  string
+		wantErr bool
+	}{
+		{1, "read escape sequence\n", false},
+		{1, "", true},
+		{1, "sudo: 3 incorrect password attempts\n", true},
+		{1, "Error response from daemon: No such container: tt-minecraftd\n", true},
+		{2, "read escape sequence\n", true},
+	} {
 		g = newRig(t)
 		g.states = []string{"running"}
-		exit := exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+		exit := exec.Command("sh", "-c", "exit "+strconv.Itoa(tc.code)).Run()
 		g.r.Reply = func(c host.Cmd) ([]byte, error) {
 			if c.Args[1] == "attach" {
+				if c.ErrCopy != nil {
+					_, _ = io.WriteString(c.ErrCopy, tc.stderr)
+				}
 				return nil, fmt.Errorf("docker attach: %w", exit)
 			}
 			return g.reply(c)
 		}
 		err := g.d.OpenConsole(context.Background())
-		if (err != nil) != wantErr || strings.Contains(g.out.String(), "Detached") == wantErr {
-			t.Errorf("docker attach exit %d: err %v, output %q", code, err, g.out.String())
+		if (err != nil) != tc.wantErr || strings.Contains(g.out.String(), "Detached") == tc.wantErr {
+			t.Errorf("docker attach exit %d, stderr %q: err %v, output %q", tc.code, tc.stderr, err, g.out.String())
 		}
+	}
+
+	// Only the end of a long stderr is kept, and the detach is in its last line.
+	var tail errTail
+	_, _ = io.WriteString(&tail, strings.Repeat("x", 3*errTailMax)+"read escape sequence\n")
+	if len(tail.buf) != errTailMax || !strings.HasSuffix(string(tail.buf), "read escape sequence\n") {
+		t.Errorf("errTail kept %d bytes, ending %q", len(tail.buf), tail.buf[max(0, len(tail.buf)-30):])
 	}
 
 	g = newRig(t)
@@ -130,7 +155,7 @@ func (g *cmdRig) add(t *testing.T, text string) {
 // cmd prints only the lines after the command, whole, joins a line written
 // in two parts, drops escape codes, and stops once the answer goes quiet.
 func TestSendCmd(t *testing.T) {
-	defer testid.Line(t, "df5z7")
+	defer testid.Line(t, "1a3enhw")
 	g := newCmdRig(t, "[12:00:01 INFO]: from before\n[12:00:02 INFO]: half wri")
 	g.feed = []string{"", "tten\n[12:00:03 INFO]: Added Steve to the whitelist\n[12:00:03 INFO]: \x1b[31mred\r\n[12:00:03 INFO]: par", "t two\n"}
 	if err := g.n.SendCmd(context.Background(), "whitelist add Steve"); err != nil {
@@ -163,7 +188,7 @@ func TestSendCmd(t *testing.T) {
 	}
 
 	// A server that's down, or a command that's stop by another road, sends nothing.
-	for _, line := range []string{"stop", " /Stop now", "restart", " "} {
+	for _, line := range []string{"stop", " /Stop now", "restart", " ", "minecraft:stop", "bukkit:restart", "execute run stop"} {
 		g = newCmdRig(t, "")
 		if err := g.n.SendCmd(context.Background(), line); err == nil || len(g.console.sent) != 0 || len(g.r.Ran) != 0 {
 			t.Errorf("%q: err %v, sent %q", line, err, g.console.sent)
@@ -194,10 +219,24 @@ func TestSendCmd(t *testing.T) {
 	}
 }
 
+// Ctrl-C while cmd waits for the answer fails, rather than exit 0 as if the
+// answer was all shown.
+func TestSendCmdInterrupt(t *testing.T) {
+	defer testid.Line(t, "1a3jwkr")
+	g := newCmdRig(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g.n.Sleep = func(time.Duration) { cancel() }
+	err := g.n.SendCmd(ctx, "list")
+	if !errors.Is(err, ErrInterrupted) || !reflect.DeepEqual(g.console.sent, []string{"list"}) {
+		t.Errorf("err %v, sent %q", err, g.console.sent)
+	}
+}
+
 // Lines from other threads, such as Geyser's just after a start, are shown
 // but don't end the wait while the server thread is slow to answer.
 func TestSendCmdOtherThreads(t *testing.T) {
-	defer testid.Line(t, "df753")
+	defer testid.Line(t, "1a3jbxc")
 	stun := "[12:00:03] [NetherNet Built-in Signaling-4-1/INFO]: [StunObserver] STUN discovery maps this host\n"
 	answer := "[12:00:04] [Server thread/INFO]: There are 0 of a max of 20 players online: \n"
 	g := newCmdRig(t, "")
@@ -226,12 +265,16 @@ func TestSendCmdOtherThreads(t *testing.T) {
 // A log removed and made again, as at a rollover, is read from its start,
 // even where the new file gets the old one's inode, as on ext4.
 func TestLogFollowNewFile(t *testing.T) {
-	defer testid.Line(t, "df5zp")
-	path := filepath.Join(t.TempDir(), "latest.log")
+	defer testid.Line(t, "1a3eq0r")
+	dir := t.TempDir()
+	path := server.LogFile(dir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte("old line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := &logFollow{file: path}
+	f := &logFollow{serverDir: dir}
 	defer f.close()
 	if err := f.skip(); err != nil {
 		t.Fatal(err)
@@ -245,5 +288,28 @@ func TestLogFollowNewFile(t *testing.T) {
 	lines, err := f.next()
 	if want := []string{"new day", "answer"}; err != nil || !reflect.DeepEqual(lines, want) {
 		t.Errorf("got %q, %v, want %q", lines, err, want)
+	}
+}
+
+// checkCmd refuses stop and restart under any name the console takes for
+// them, and nothing that only mentions them.
+func TestCheckCmd(t *testing.T) {
+	defer testid.Line(t, "1a3jy8w")
+	for _, line := range []string{
+		"stop", "/stop", "STOP", "minecraft:stop", "/Minecraft:Stop", "bukkit:restart", "spigot:restart",
+		"execute run stop", "minecraft:execute as @a run minecraft:stop", "execute if entity @p run execute run restart",
+		"execute run return run stop", "return run stop", "execute\trun\tstop",
+	} {
+		if err := checkCmd(line); err == nil || !strings.Contains(err.Error(), "tt-minecraftd stop") {
+			t.Errorf("%q: err %v, want refused", line, err)
+		}
+	}
+	for _, line := range []string{
+		"list", "say stop", "whitelist add stop", "tell restart hi", "execute run say hi", "execute as stop run say hi",
+		"execute run", "minecraft:list", "stopwatch", "execute run stopwatch", ":", "minecraft:",
+	} {
+		if err := checkCmd(line); err != nil {
+			t.Errorf("%q: err %v, want sent", line, err)
+		}
 	}
 }

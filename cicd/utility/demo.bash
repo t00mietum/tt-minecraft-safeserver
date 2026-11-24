@@ -6,9 +6,11 @@
 ##		- Records the README's CLI demo: a short session with the built tool, typed out and rendered
 ##		  to a gif. For cicd.bash's demo step, which runs it as root in a throwaway container with
 ##		  no network, since it writes a made-up install under /etc and /srv.
-##		- Everything in it is made up: the players, the host name, and the plugin. ss and systemctl
-##		  and nft are stand-ins for the sockets, the boot unit and the firewall counters.
-##		- No window and no display: each screen is drawn with ImageMagick and joined with gifsicle.
+##		- Everything in it is made up: the players, the host name, and the plugin. ss, systemctl, nft,
+##		  podman and catatonit are stand-ins for the sockets, the boot unit, the firewall, the
+##		  runtime and its init.
+##		- demo/gen-demo-gif.py, a copy of gitsby's, types and runs the steps in demo/scenario.toml and draws the gif,
+##		  with Pillow and gifsicle, so no window or display is used. demo/script.txt is the plan.
 ##	Syntax:
 ##		demo.bash EXE WORK_DIR OUT_GIF
 ##		  WORK_DIR must be empty or missing. OWNER=UID:GID hands WORK_DIR and OUT_GIF to that account.
@@ -28,23 +30,19 @@ exe="$1"; work="${2%/}"; outGif="$3"
 ## It writes into /etc and /srv, so only where those are thrown away after.
 if ! [[ -f /.dockerenv || -f /run/.containerenv ]] || ((EUID != 0)); then echo "demo: runs only as root in a throwaway container" >&2; exit 2; fi
 [[ -x "${exe}" ]] || { echo "demo: no program at ${exe}" >&2; exit 2; }
-for t in convert gifsicle; do command -v "${t}" >/dev/null 2>&1 || { echo "demo: needs ${t}" >&2; exit 1; }; done
+for t in python3 fc-match gifsicle; do command -v "${t}" >/dev/null 2>&1 || { echo "demo: needs ${t}" >&2; exit 1; }; done
 mkdir -p -- "${work}"
 [[ -z "$(ls -A -- "${work}")" ]] || { echo "demo: ${work} isn't empty" >&2; exit 2; }
 ## Handed back on failure too, or the caller can't remove its own run folder.
 trap '[[ -z "${OWNER:-}" ]] || chown -R -- "${OWNER}" "${work}" "${outGif}" 2>/dev/null || true' EXIT
 
-## Screen size in characters, and how it's drawn.
-cols=88; rows=26; font="DejaVu-Sans-Mono"; pt=15; fg="#c5c8c6"; bg="#1d1f21"
-cellW=9; cellH=19; padX=14; padY=12
-prompt='$ '
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ## The made-up install.
 install -D -m 0755 -- "${exe}" /usr/local/bin/tt-minecraftd
 mkdir -p /etc/tt-minecraftd /srv/tt-minecraftd/server/logs /srv/tt-minecraftd/server/plugins /srv/tt-minecraftd/server/world "${work}/bin"
 cat > /etc/tt-minecraftd/config.shcl <<'EOF'
-runMode: native
-javaBin: /usr/local/bin/java
+runMode: podman
 heapMax: 4GB
 memCap: 6GB
 bedrock: false
@@ -52,12 +50,6 @@ EOF
 printf 'demo jar\n' > /srv/tt-minecraftd/server/plugins/LuckyChest.jar
 printf 'demo jar\n' > /srv/tt-minecraftd/server/paper-26.3-50.jar
 ln -s paper-26.3-50.jar /srv/tt-minecraftd/server/paper.jar
-cat > /etc/tt-minecraftd/plugins.shcl <<EOF
-jar: plugins/LuckyChest.jar
-	sha256: $(sha256sum < /srv/tt-minecraftd/server/plugins/LuckyChest.jar | cut -d' ' -f1)
-jar: paper-26.3-50.jar
-	sha256: $(sha256sum < /srv/tt-minecraftd/server/paper-26.3-50.jar | cut -d' ' -f1)
-EOF
 cat > /srv/tt-minecraftd/server/whitelist.json <<'EOF'
 [
   {"uuid": "6a1e3f0c-2b4d-4c8e-9f1a-0d3b5c7e9a11", "name": "PebbleFox"},
@@ -89,60 +81,39 @@ cat > "${work}/bin/systemctl" <<'EOF'
 #!/bin/sh
 echo enabled
 EOF
+## repair loads the rules with nft -f, start asks for the table, and status reads the counters.
+## repair looks for nft by path, so it goes in /usr/sbin too.
 cat > "${work}/bin/nft" <<'EOF'
 #!/bin/sh
-c(){ printf '{"counter":{"family":"inet","table":"tt_minecraftd","name":"%s","packets":%s}}' "$1" "$2"; }
-printf '{"nftables":[%s,%s,%s,%s,%s,%s]}\n' "$(c in_refused 41)" "$(c in_flood 3)" "$(c in_closed 12)" "$(c out_local 0)" "$(c out_lan 7)" "$(c out_web 2)"
+case "$*" in
+	"list tables inet") echo "table inet tt_minecraftd" ;;
+	"-j list counters inet")
+		c(){ printf '{"counter":{"family":"inet","table":"tt_minecraftd","name":"%s","packets":%s}}' "$1" "$2"; }
+		printf '{"nftables":[%s,%s,%s,%s,%s,%s]}\n' "$(c in_refused 41)" "$(c in_flood 3)" "$(c in_closed 12)" "$(c out_local 0)" "$(c out_lan 7)" "$(c out_web 2)" ;;
+esac
 EOF
-chmod 0755 "${work}/bin/ss" "${work}/bin/systemctl" "${work}/bin/nft"
+## Podman with nothing running and the pinned image pulled, for status, repair and start.
+cat > "${work}/bin/podman" <<'EOF'
+#!/bin/sh
+case "$1 $2" in "image inspect") echo sha256:0f3c9e2a7b5d4c1e8f6a2b9d0c7e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e ;; esac
+EOF
+printf '#!/bin/sh\n' > "${work}/bin/catatonit"
+chmod 0755 "${work}/bin/ss" "${work}/bin/systemctl" "${work}/bin/nft" "${work}/bin/podman" "${work}/bin/catatonit"
+install -m 0755 -- "${work}/bin/nft" /usr/sbin/nft
 
-## The session: each command as typed, then its real output.
-session=(
-	"tt-minecraftd --version"
-	"tt-minecraftd status"
-	"tt-minecraftd start --dry-run"
-)
-
-## One screen per frame: the last rows lines of the session so far, plus a cursor.
-frames="${work}/frames"; mkdir -p -- "${frames}"
-declare -i nFrame=0
-screen=()
-fShot(){ ## DELAY_CS [CURSOR_LINE]: draw the screen as it is now, shown for DELAY_CS hundredths
-	local delay="$1" last="${2:-}" f txt lines
-	printf -v f '%s/%05d' "${frames}" "${nFrame}"
-	lines=("${screen[@]}")
-	[[ -z "${last}" ]] || lines+=("${last}")
-	((${#lines[@]} <= rows)) || lines=("${lines[@]: -rows}")
-	printf -v txt '%s\n' "${lines[@]}"
-	## -annotate reads \ and % as escapes, and a leading @ as a file name.
-	txt="${txt//\\/\\\\}"; txt="${txt//%/%%}"; [[ "${txt}" != @* ]] || txt="\\${txt}"
-	convert -size "$((cols * cellW + 2 * padX))x$((rows * cellH + 2 * padY))" "xc:${bg}" -font "${font}" -pointsize "${pt}" -fill "${fg}" \
-		-interline-spacing 2 -gravity northwest -annotate "+${padX}+${padY}" "${txt}" -depth 8 "${f}.gif" 2> "${f}.err" \
-		|| { cat "${f}.err" >&2; return 1; }
-	echo "${delay}" > "${f}.delay"
-	nFrame+=1
-}
-
-export PATH="${work}/bin:${PATH}" HOME="${work}/home" TERM=dumb COLUMNS="${cols}"
+## The steps run the installed copy by name, with the stand-ins first on PATH, from a home of
+## their own.
+export PATH="${work}/bin:${PATH}" HOME="${work}/home" TERM=dumb
 mkdir -p -- "${HOME}"
 cd "${HOME}"
-fShot 80 "${prompt}_"
-for cmd in "${session[@]}"; do
-	## Typed a few characters at a time, which keeps the frame count down.
-	for ((i = 3; i < ${#cmd}; i += 3)); do fShot 7 "${prompt}${cmd:0:i}_"; done
-	fShot 50 "${prompt}${cmd}_"
-	screen+=("${prompt}${cmd}")
-	out="$(bash -c "${cmd}" 2>&1 || true)"
-	while IFS= read -r line; do screen+=("${line:0:cols}"); done <<< "${out}"
-	fShot 350 "${prompt}_"
-done
-fShot 200 "${prompt}_"
-
-args=()
-for f in "${frames}"/*.gif; do args+=("-d$(cat "${f%.gif}.delay")" "${f}"); done
-gifsicle --no-warnings --loop -O3 --colors 16 "${args[@]}" -o "${outGif}"
-echo "demo: ${nFrame} frames, $(stat -c %s "${outGif}") bytes -> ${outGif}"
+env -u DISPLAY -u WAYLAND_DISPLAY python3 "${here}/demo/gen-demo-gif.py" --scenario "${here}/demo/scenario.toml" \
+	--out "${outGif}" --bin "${exe}"
 
 
 ##	History:
 ##		- 2026-11-13: Created.
+##		- 2026-11-14: Podman in the made-up config, since native mode is off.
+##		- 2026-11-19: Drawn by demo/gen-demo-gif.py from demo/scenario.toml: typed by hand, 50 fps,
+##		  a drawn window, and 3 s of black before the loop.
+##		- 2026-11-20: gitsby's generator and font, so the gif looks like gitsby's.
+##		- 2026-11-20: Stand-ins for Podman, catatonit and nft's table list, so repair and the dry run after it pass.

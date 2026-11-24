@@ -4,12 +4,17 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,7 +26,11 @@ import (
 type installRig struct {
 	t                         *testing.T
 	bin, rel, dest, log, tty  string
+	old                       string
+	noRetire                  bool
+	rootUID                   int // who counts as root; the rig's own uid by default
 	osRelease, arch, bashPath string
+	systemd, sys              string
 	releases                  []rigRelease
 }
 
@@ -29,6 +38,7 @@ type rigRelease struct {
 	tag          string
 	pre, draft   bool
 	badSum, nada bool // a wrong sum listed, or no binary at all
+	broken       bool // a binary that matches its sum and won't run
 }
 
 const rigCurl = `#!@BASH@
@@ -48,15 +58,25 @@ const rigUname = `#!@BASH@
 case "$1" in -s) echo Linux ;; -m) echo "${RIG_ARCH}" ;; esac
 `
 
+// The rig has no root, so the owner is logged and left out.
 const rigSudo = `#!@BASH@
 echo "sudo $*" >> "${RIG_LOG}"
-exec "$@"
+args=()
+while (($#)); do
+	if [[ "$1" == -o || "$1" == -g ]] && [[ "${2:-}" == root ]]; then shift 2; continue; fi
+	args+=("$1"); shift
+done
+exec "${args[@]}"
 `
 
 const rigExe = `#!@BASH@
 case "$1" in
 	--version) printf 'tt-minecraftd @TAG@ build test (2026-11-14)\nCopyright\n' ;;
 	setup) shift; echo "setup $*" >> "${RIG_LOG}" ;;
+	retire-build)
+		echo "retire-build $2" >> "${RIG_LOG}"
+		[[ -z "${RIG_NO_RETIRE:-}" ]] || exit 1
+		install -d "${RIG_OLD}" && install -m 0755 "$2" "${RIG_OLD}/tt-minecraftd.old" ;;
 esac
 `
 
@@ -64,17 +84,18 @@ func newInstallRig(t *testing.T, fetcher string) *installRig {
 	t.Helper()
 	dir := t.TempDir()
 	r := &installRig{t: t, bin: filepath.Join(dir, "bin"), rel: filepath.Join(dir, "rel"), dest: filepath.Join(dir, "usr-local-bin"),
-		log: filepath.Join(dir, "log"), tty: filepath.Join(dir, "tty"), osRelease: filepath.Join(dir, "os-release"), arch: "x86_64"}
+		log: filepath.Join(dir, "log"), old: filepath.Join(dir, "old-builds"), tty: filepath.Join(dir, "tty"), osRelease: filepath.Join(dir, "os-release"), arch: "x86_64",
+		systemd: filepath.Join(dir, "run-systemd-system"), sys: filepath.Join(dir, "sys"), rootUID: os.Getuid()}
 	var err error
 	if r.bashPath, err = exec.LookPath("bash"); err != nil {
 		t.Skip("no bash")
 	}
-	for _, d := range []string{r.bin, r.rel, r.dest} {
+	for _, d := range []string{r.bin, r.rel, r.dest, r.systemd, r.sys} {
 		if err := os.Mkdir(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat"} {
+	for _, tool := range []string{"bash", "awk", "sort", "id", "sha256sum", "mktemp", "install", "rm", "rmdir", "cat", "mv", "tr", "stat"} {
 		p, err := exec.LookPath(tool)
 		if err != nil {
 			t.Fatalf("%s: %v", tool, err)
@@ -127,6 +148,9 @@ func (r *installRig) publish(rels ...rigRelease) {
 		for _, arch := range []string{"amd64", "arm64"} {
 			name := "tt-minecraftd-linux-" + arch
 			body := strings.ReplaceAll(strings.ReplaceAll(rigExe, "@BASH@", r.bashPath), "@TAG@", rel.tag)
+			if rel.broken {
+				body = "#!" + r.bashPath + "\nexit 3\n"
+			}
 			if !rel.nada {
 				r.write(filepath.Join(d, name), body)
 			}
@@ -150,11 +174,16 @@ func (r *installRig) run(args ...string) (string, int) {
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; shift 4; fMain "$@"`, "rig", script, r.dest, r.osRelease, r.tty}, args...)
+	// catatonit, nft and the package's binary are looked for in r.sys only, so the host's don't count.
+	all := append([]string{"-c", `source "$1"; destDir="$2"; osRelease="$3"; ttyDev="$4"; systemdDir="$5"; catatonitPaths="$6/catatonit"; nftPaths="$6/nft"; pkgBin="$6/tt-minecraftd"; rootUid="$7"; shift 7; fMain "$@"`,
+		"rig", script, r.dest, r.osRelease, r.tty, r.systemd, r.sys, strconv.Itoa(r.rootUID)}, args...)
 	// #nosec G204 -- test runs the repo's own script
 	cmd := exec.Command(r.bashPath, all...)
 	tmp := r.t.TempDir()
-	cmd.Env = []string{"PATH=" + r.bin, "HOME=" + r.t.TempDir(), "TMPDIR=" + tmp, "RIG_LOG=" + r.log, "RIG_REL=" + r.rel, "RIG_ARCH=" + r.arch}
+	cmd.Env = []string{"PATH=" + r.bin, "HOME=" + r.t.TempDir(), "TMPDIR=" + tmp, "RIG_LOG=" + r.log, "RIG_REL=" + r.rel, "RIG_ARCH=" + r.arch, "RIG_OLD=" + r.old}
+	if r.noRetire {
+		cmd.Env = append(cmd.Env, "RIG_NO_RETIRE=1")
+	}
 	out, err := cmd.CombinedOutput()
 	if left, _ := os.ReadDir(tmp); len(left) != 0 {
 		r.t.Errorf("left %s in the temp folder", left[0].Name())
@@ -166,6 +195,23 @@ func (r *installRig) run(args ...string) (string, int) {
 		r.t.Fatal(err)
 	}
 	return string(out), code
+}
+
+// have puts what setup would otherwise get through apt in place: podman
+// and docker on PATH, catatonit and nft where the script looks, or with
+// "bin/" on PATH. "tt-minecraftd" is the package's binary.
+func (r *installRig) have(what ...string) {
+	r.t.Helper()
+	for _, w := range what {
+		switch {
+		case w == "podman" || w == "docker":
+			r.script(w, "#!/bin/sh\n")
+		case strings.HasPrefix(w, "bin/"):
+			r.script(strings.TrimPrefix(w, "bin/"), "#!/bin/sh\n")
+		default:
+			r.write(filepath.Join(r.sys, w), "x\n")
+		}
+	}
 }
 
 func (r *installRig) logText() string {
@@ -192,7 +238,7 @@ func (r *installRig) installed() string {
 }
 
 func TestInstallScript(t *testing.T) {
-	defer testid.Line(t, "df798")
+	defer testid.Line(t, "1a3jrx0")
 
 	t.Run("stable over a newer pre-release, then setup with its options", func(t *testing.T) {
 		r := newInstallRig(t, "curl")
@@ -204,8 +250,12 @@ func TestInstallScript(t *testing.T) {
 		if !strings.Contains(r.logText(), "setup --yes --accept-eula\n") {
 			t.Errorf("setup didn't get its options:\n%s", r.logText())
 		}
-		if strings.Contains(r.logText(), "sudo") {
-			t.Errorf("used sudo on a writable folder:\n%s", r.logText())
+		// 2026-11-19: a writable folder skipped sudo, and the binary stayed the operator's (2026111715275548).
+		if os.Geteuid() != 0 && !strings.Contains(r.logText(), "sudo install -m 0755 -o root -g root ") {
+			t.Errorf("didn't install as root on a writable folder:\n%s", r.logText())
+		}
+		if strings.Contains(r.logText(), "retire-build") {
+			t.Errorf("moved a build that wasn't there:\n%s", r.logText())
 		}
 	})
 
@@ -244,13 +294,67 @@ func TestInstallScript(t *testing.T) {
 			t.Fatal("first run failed")
 		}
 		out, code := r.run("--yes")
-		if code != 0 || strings.Contains(r.logText(), "releases/download") || !strings.Contains(r.logText(), "setup") {
+		if code != 0 || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || !strings.Contains(r.logText(), "setup") || strings.Contains(r.logText(), "retire-build") {
 			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
 		}
 		if !strings.Contains(out, "already v1.0.0") {
 			t.Errorf("plan doesn't say it's current:\n%s", out)
 		}
 	})
+
+	// root runs it, so the release's bytes count only in a plain file only root can change.
+	for _, c := range []struct {
+		name string
+		make func(r *installRig, dest, release string) error
+	}{
+		{"group-writable", func(_ *installRig, dest, release string) error {
+			if err := os.WriteFile(dest, []byte(release), 0o775); err != nil {
+				return err
+			}
+			return os.Chmod(dest, 0o775)
+		}},
+		{"other-writable", func(_ *installRig, dest, release string) error {
+			if err := os.WriteFile(dest, []byte(release), 0o757); err != nil {
+				return err
+			}
+			return os.Chmod(dest, 0o757)
+		}},
+		{"not root's", func(r *installRig, dest, release string) error {
+			r.rootUID = os.Getuid() + 1
+			return os.WriteFile(dest, []byte(release), 0o755)
+		}},
+		{"a link to it", func(r *installRig, dest, release string) error {
+			own := filepath.Join(r.t.TempDir(), "mine")
+			if err := os.WriteFile(own, []byte(release), 0o755); err != nil {
+				return err
+			}
+			return os.Symlink(own, dest)
+		}},
+	} {
+		t.Run("the release's build "+c.name+" is put back as root's, with no copy kept", func(t *testing.T) {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			dest := filepath.Join(r.dest, "tt-minecraftd")
+			release, err := os.ReadFile(filepath.Join(r.rel, "v1.0.0", "tt-minecraftd-linux-amd64"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.make(r, dest, string(release)); err != nil {
+				t.Fatal(err)
+			}
+			out, code := r.run("--yes")
+			fi, err := os.Lstat(dest)
+			if code != 0 || err != nil || !fi.Mode().IsRegular() || r.installed() != "v1.0.0" || !strings.Contains(r.logText(), "/tt-minecraftd-linux-amd64") {
+				t.Fatalf("code %d, %v\n%s\n%s", code, err, out, r.logText())
+			}
+			if !strings.Contains(r.logText(), "sudo install -m 0755 -o root -g root") || strings.Contains(r.logText(), "retire-build") || strings.Contains(out, "already v1.0.0") {
+				t.Errorf("not put back through sudo, or a copy was kept:\n%s\n%s", out, r.logText())
+			}
+			if !strings.Contains(out, "the release's build, put back as root's") {
+				t.Errorf("the plan doesn't say why:\n%s", out)
+			}
+		})
+	}
 
 	t.Run("an older install is replaced", func(t *testing.T) {
 		r := newInstallRig(t, "curl")
@@ -268,6 +372,74 @@ func TestInstallScript(t *testing.T) {
 		out, code := r.run("--yes")
 		if code != 0 || r.installed() != "v1.1.0" || !strings.Contains(out, "replacing v1.0.0") {
 			t.Fatalf("code %d, installed %q\n%s", code, r.installed(), out)
+		}
+	})
+
+	t.Run("a local build with the release's version is replaced", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		local := strings.ReplaceAll(strings.ReplaceAll(rigExe, "@BASH@", r.bashPath), "@TAG@", "v1.0.0") + "# dogfood\n"
+		r.write(dest, local)
+		if err := os.Chmod(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out, code := r.run("--yes")
+		got, _ := os.ReadFile(dest)
+		want, _ := os.ReadFile(filepath.Join(r.rel, "v1.0.0", "tt-minecraftd-linux-amd64"))
+		if code != 0 || string(got) != string(want) || !strings.Contains(out, "replacing a v1.0.0 build that isn't the release's") {
+			t.Fatalf("code %d, kept the local build %t\n%s\n%s", code, string(got) == local, out, r.logText())
+		}
+		if !strings.Contains(r.logText(), "setup") {
+			t.Errorf("setup didn't run:\n%s", r.logText())
+		}
+	})
+
+	t.Run("a different build is moved out of the way by the new one, and kept", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		local := strings.ReplaceAll(strings.ReplaceAll(rigExe, "@BASH@", r.bashPath), "@TAG@", "v0.9.0") + "# hand build\n"
+		r.write(dest, local)
+		if err := os.Chmod(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out, code := r.run("--yes")
+		kept, _ := os.ReadFile(filepath.Join(r.old, "tt-minecraftd.old"))
+		if code != 0 || r.installed() != "v1.0.0" || string(kept) != local || !strings.Contains(out, "Old build ..: moves to /var/lib/tt-minecraftd/old-builds") {
+			t.Fatalf("code %d, installed %q, kept %t\n%s\n%s", code, r.installed(), string(kept) == local, out, r.logText())
+		}
+		if !strings.Contains(r.logText(), "retire-build "+dest+"\n") {
+			t.Errorf("the staged build didn't move the old one:\n%s", r.logText())
+		}
+		if left, _ := os.ReadDir(r.dest); len(left) != 1 {
+			t.Errorf("left %v", left)
+		}
+	})
+
+	t.Run("a failed move installs nothing and keeps the old build", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		r.write(dest, "#!/bin/sh\n# hand build\n")
+		r.noRetire = true
+		out, code := r.run("--yes")
+		got, _ := os.ReadFile(dest)
+		if code == 0 || string(got) != "#!/bin/sh\n# hand build\n" || strings.Contains(r.logText(), "setup") || !strings.Contains(out, "nothing was installed") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+		if left, _ := os.ReadDir(r.dest); len(left) != 1 {
+			t.Errorf("left %v", left)
+		}
+	})
+
+	t.Run("SHA256SUMS without this CPU's build stops before the prompt", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(filepath.Join(r.rel, "v1.0.0", "SHA256SUMS"), strings.Repeat("0", 64)+"  tt-minecraftd-linux-arm64\n")
+		out, code := r.run()
+		if code == 0 || r.installed() != "" || !strings.Contains(out, "doesn't list tt-minecraftd-linux-amd64") || strings.Contains(out, "Go ahead?") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
 		}
 	})
 
@@ -293,7 +465,7 @@ func TestInstallScript(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish(rigRelease{tag: "v1.0.0"})
 		out, code := r.run()
-		if code == 0 || r.installed() != "" || strings.Contains(r.logText(), "releases/download") || strings.Contains(r.logText(), "setup") {
+		if code == 0 || r.installed() != "" || strings.Contains(r.logText(), "/tt-minecraftd-linux-") || strings.Contains(r.logText(), "setup") {
 			t.Fatalf("empty answer went ahead: code %d\n%s\n%s", code, out, r.logText())
 		}
 		r.write(r.tty, "y\n")
@@ -307,8 +479,117 @@ func TestInstallScript(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish(rigRelease{tag: "v1.0.0"})
 		r.tty = filepath.Join(t.TempDir(), "gone")
-		if out, code := r.run(); code == 0 || r.installed() != "" {
+		if out, code := r.run(); code == 0 || r.installed() != "" || !strings.Contains(out, "Add --yes") {
 			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a build that won't run installs nothing and keeps the old one", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0", broken: true})
+		dest := filepath.Join(r.dest, "tt-minecraftd")
+		r.write(dest, "#!/bin/sh\n# hand build\n")
+		out, code := r.run("--yes")
+		got, _ := os.ReadFile(dest)
+		if code == 0 || string(got) != "#!/bin/sh\n# hand build\n" || strings.Contains(r.logText(), "setup") || !strings.Contains(out, "won't run on this box (exit 3)") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+		if strings.Contains(r.logText(), "retire-build") {
+			t.Errorf("moved the old build for one that won't run:\n%s", r.logText())
+		}
+		if left, _ := os.ReadDir(r.dest); len(left) != 1 {
+			t.Errorf("left %v", left)
+		}
+	})
+
+	t.Run("SHA256SUMS with upper-case hashes and CRLF", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		f := filepath.Join(r.rel, "v1.0.0", "SHA256SUMS")
+		b, _ := os.ReadFile(f)
+		var sums strings.Builder
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			sum, name, _ := strings.Cut(line, "  ")
+			sums.WriteString(strings.ToUpper(sum) + "  " + name + "\r\n")
+		}
+		r.write(f, sums.String())
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a web page in place of the binary is named as one", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(filepath.Join(r.rel, "v1.0.0", "tt-minecraftd-linux-amd64"), "<html>Sign in to the hotel wifi</html>\n")
+		out, code := r.run("--yes")
+		if code == 0 || r.installed() != "" || !strings.Contains(out, "came back as a web page") {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a web page in place of the release list isn't read as no releases", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(filepath.Join(r.rel, "releases.json"), "<html>Sign in to the hotel wifi</html>\n")
+		out, code := r.run("--yes")
+		if code == 0 || strings.Contains(out, "no stable release") || !strings.Contains(out, "isn't a release list") {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+	})
+
+	t.Run("a tag with a path in it is refused before it reaches a URL", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish()
+		r.write(filepath.Join(r.rel, "releases.json"), "[\n  {\n    \"tag_name\": \"v9.0.0/../../../other/repo\",\n    \"draft\": false,\n    \"prerelease\": false\n  }\n]\n")
+		out, code := r.run("--yes")
+		if code == 0 || !strings.Contains(out, "isn't a plain tag name") || strings.Contains(r.logText(), "/releases/download/") {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
+	t.Run("option values take any case, and errors have a blank line either side", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v0.9.0"}, rigRelease{tag: "v1.0.0-rc.1", pre: true})
+		if out, code := r.run("--release", "DEV", "--yes"); code != 0 || r.installed() != "v1.0.0-rc.1" {
+			t.Fatalf("code %d\n%s", code, out)
+		}
+		for _, args := range [][]string{{"--release"}, {"--release=nightly"}, {"--bogus"}} {
+			out, code := r.run(args...)
+			if code != 2 || !strings.HasPrefix(out, "\n[ ERROR: ") || !strings.HasSuffix(out, " ]\n\n") || r.logText() != "" {
+				t.Errorf("%v: code %d\n%q", args, code, out)
+			}
+		}
+		r.write(r.osRelease, "ID=nixos\n")
+		if out, _ := r.run("--yes"); !strings.HasPrefix(out, "\n[ ERROR: ") || !strings.HasSuffix(out, " ]\n\n") {
+			t.Errorf("refusal: %q", out)
+		}
+	})
+
+	// 2026-11-22: install -d ran on a folder that was there, and a 2775 one came out 2755 (2026112110300156).
+	t.Run("an existing folder keeps its mode, and a missing one is made", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		if err := os.Chmod(r.dest, 0o775|os.ModeSetgid); err != nil {
+			t.Fatal(err)
+		}
+		mode := func() os.FileMode {
+			fi, err := os.Stat(r.dest)
+			if err != nil {
+				return 0
+			}
+			return fi.Mode() & (os.ModePerm | os.ModeSetgid)
+		}
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" || mode() != 0o775|os.ModeSetgid {
+			t.Errorf("code %d, folder mode %v\n%s", code, mode(), out)
+		}
+		r = newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		if err := os.Remove(r.dest); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" || mode() != 0o755 {
+			t.Errorf("missing folder: code %d, folder mode %v\n%s", code, mode(), out)
 		}
 	})
 
@@ -333,6 +614,7 @@ func TestInstallScript(t *testing.T) {
 		for name, c := range map[string]struct{ osRelease, arch, want string }{
 			"NixOS":       {"ID=nixos\n", "x86_64", "NixOS isn't supported yet"},
 			"Fedora":      {"ID=fedora\nID_LIKE=\"rhel centos fedora\"\n", "x86_64", "only Debian"},
+			"Fedora hint": {"ID=fedora\n", "x86_64", "--any-distro skips this check"},
 			"no os file":  {"", "x86_64", "only Debian"},
 			"32-bit ARM":  {"ID=debian\n", "armv7l", "no build for CPU 'armv7l'"},
 			"Ubuntu":      {"ID=ubuntu\nID_LIKE=debian\n", "x86_64", ""},
@@ -359,6 +641,91 @@ func TestInstallScript(t *testing.T) {
 		}
 	})
 
+	t.Run("no systemd is refused before any download", func(t *testing.T) {
+		for _, args := range [][]string{{"--yes"}, {"--yes", "--any-distro"}} {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			r.have("docker", "nft")
+			if err := os.Remove(r.systemd); err != nil {
+				t.Fatal(err)
+			}
+			out, code := r.run(args...)
+			if code == 0 || !strings.Contains(out, "needs systemd") || r.logText() != "" || r.installed() != "" {
+				t.Errorf("%v: code %d\n%s\n%s", args, code, out, r.logText())
+			}
+		}
+	})
+
+	t.Run("--any-distro takes another distro once what setup needs is there", func(t *testing.T) {
+		for name, c := range map[string]struct {
+			have []string
+			want string
+		}{
+			"Podman, catatonit, nft": {[]string{"podman", "catatonit", "nft"}, ""},
+			"catatonit on PATH":      {[]string{"podman", "bin/catatonit", "nft"}, ""},
+			"Docker, nft":            {[]string{"docker", "nft"}, ""},
+			"Podman, no catatonit":   {[]string{"podman", "docker", "nft"}, "missing: catatonit"},
+			"no runtime":             {[]string{"catatonit", "nft"}, "missing: Podman and catatonit, or Docker. "},
+			"no nft":                 {[]string{"docker"}, "missing: nftables"},
+			"nothing":                {nil, "missing: Podman and catatonit, or Docker, nftables"},
+		} {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			r.write(r.osRelease, "ID=fedora\nID_LIKE=\"rhel centos fedora\"\n")
+			r.have(c.have...)
+			out, code := r.run("--yes", "--any-distro", "--", "--yes")
+			if c.want == "" {
+				if code != 0 || r.installed() != "v1.0.0" || !strings.Contains(r.logText(), "setup --yes\n") || !strings.Contains(out, "--any-distro installs nothing") {
+					t.Errorf("%s: code %d\n%s\n%s", name, code, out, r.logText())
+				}
+				continue
+			}
+			if code == 0 || !strings.Contains(out, c.want) || r.logText() != "" || r.installed() != "" {
+				t.Errorf("%s: code %d\n%s\n%s", name, code, out, r.logText())
+			}
+		}
+	})
+
+	t.Run("--any-distro still refuses NixOS", func(t *testing.T) {
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		r.write(r.osRelease, "ID=nixos\n")
+		r.have("docker", "nft")
+		if out, code := r.run("--yes", "--any-distro"); code == 0 || !strings.Contains(out, "NixOS isn't supported yet") || r.logText() != "" {
+			t.Fatalf("code %d\n%s\n%s", code, out, r.logText())
+		}
+	})
+
+	// 2026-11-22: it installed beside the package's binary, and setup's repair then moved that copy away (2026112110300078).
+	t.Run("the package's binary stops it before the plan", func(t *testing.T) {
+		for _, local := range []bool{false, true} {
+			r := newInstallRig(t, "curl")
+			r.publish(rigRelease{tag: "v1.0.0"})
+			r.have("tt-minecraftd")
+			dest := filepath.Join(r.dest, "tt-minecraftd")
+			if local {
+				r.write(dest, "#!/bin/sh\n# hand build\n")
+			}
+			out, code := r.run("--yes")
+			got, _ := os.ReadFile(dest)
+			if code != 1 || !strings.Contains(out, "Update it through the package manager") || strings.Contains(out, "Plan") || r.logText() != "" || local != (string(got) == "#!/bin/sh\n# hand build\n") {
+				t.Errorf("with a local copy %t: code %d\n%s\n%s", local, code, out, r.logText())
+			}
+			if left, _ := os.ReadDir(r.dest); len(left) != map[bool]int{false: 0, true: 1}[local] {
+				t.Errorf("left %v", left)
+			}
+		}
+		// Only a file counts, as with setup's boot.Bin.
+		r := newInstallRig(t, "curl")
+		r.publish(rigRelease{tag: "v1.0.0"})
+		if err := os.Mkdir(filepath.Join(r.sys, "tt-minecraftd"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := r.run("--yes"); code != 0 || r.installed() != "v1.0.0" {
+			t.Errorf("a folder at the package's path: code %d\n%s", code, out)
+		}
+	})
+
 	t.Run("no releases at all", func(t *testing.T) {
 		r := newInstallRig(t, "curl")
 		r.publish()
@@ -366,4 +733,86 @@ func TestInstallScript(t *testing.T) {
 			t.Fatalf("code %d\n%s", code, out)
 		}
 	})
+}
+
+// 2026-11-22: wget's --https-only let a redirect to plain http through (2026112110300169).
+// This runs fFetch with the host's own curl and wget, against a local TLS server.
+func TestInstallFetchRedirects(t *testing.T) {
+	defer testid.Line(t, "1a4z1d4")
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "plain\n") }))
+	defer plain.Close()
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		to := map[string]string{"/to-plain": plain.URL + "/x", "/to-plain-caps": "HTTP://" + strings.TrimPrefix(plain.URL, "http://") + "/x",
+			"/relative": "/ok", "/to-https": srv.URL + "/ok"}[r.URL.Path]
+		if to != "" {
+			w.Header().Set("Location", to)
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		fmt.Fprint(w, "ok\n")
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	ca := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc := filepath.Join(dir, "wgetrc")
+	if err := os.WriteFile(rc, []byte("ca_certificate = "+ca+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "install.bash"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fetcher := range []string{"curl", "wget"} {
+		t.Run(fetcher, func(t *testing.T) {
+			p, err := exec.LookPath(fetcher)
+			if err != nil {
+				t.Skip("no " + fetcher)
+			}
+			// #nosec G204 -- the host's own tool, asked its version
+			if v, _ := exec.Command(p, "--version").CombinedOutput(); !bytes.Contains(v, []byte("GNU Wget")) && !bytes.Contains(v, []byte("curl ")) {
+				t.Skip(fetcher + " isn't GNU Wget or curl")
+			}
+			for _, c := range []struct {
+				path   string
+				toFile bool
+				ok     bool
+			}{
+				{"/ok", false, true}, {"/relative", false, true}, {"/to-https", true, true},
+				{"/to-plain", false, false}, {"/to-plain", true, false}, {"/to-plain-caps", false, false},
+			} {
+				out := ""
+				if c.toFile {
+					out = filepath.Join(t.TempDir(), "got")
+				}
+				// #nosec G204 -- test runs the repo's own script
+				cmd := exec.Command(bash, "-c", `source "$1"; fetcher="$2"; fFetch "$3" ${4:+"$4"}`, "rig", script, fetcher, srv.URL+c.path, out)
+				cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "WGETRC=" + rc, "CURL_CA_BUNDLE=" + ca, "SSL_CERT_FILE=" + ca}
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &stdout, &stderr
+				err := cmd.Run()
+				got := stdout.String()
+				if c.toFile {
+					b, _ := os.ReadFile(out)
+					got = string(b)
+				}
+				if c.ok && (err != nil || got != "ok\n") {
+					t.Errorf("%s: %v, got %q\n%s", c.path, err, got, stderr.String())
+				}
+				if !c.ok && err == nil {
+					t.Errorf("%s: followed the redirect to plain http and exited 0, got %q\n%s", c.path, got, stderr.String())
+				}
+				if !c.ok && fetcher == "wget" && !strings.Contains(stderr.String(), "isn't https") {
+					t.Errorf("%s: doesn't say why\n%s", c.path, stderr.String())
+				}
+			}
+		})
+	}
 }

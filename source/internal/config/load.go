@@ -30,9 +30,9 @@ func (w Warning) String() string {
 
 // LoadFile parses an shcl file. Only a file that can't be read is an error.
 // Parse errors come back as warnings, since shcl repairs a bad line and
-// carries on. Its hints are dropped: the readers here say more about the
-// same lines, and a hint such as "did you mean a list" misleads for a key
-// that takes one value.
+// goes on. Its hints are dropped, but for a comment against text: the
+// readers here say more about the same lines, and a hint such as "did you
+// mean a list" misleads for a key that takes one value.
 func LoadFile(path string) (*shcl.Document, []Warning, error) {
 	text, err := os.ReadFile(path) // #nosec G304 -- the operator picks the path, with --config
 	if err != nil {
@@ -44,9 +44,19 @@ func LoadFile(path string) (*shcl.Document, []Warning, error) {
 		warns = append(warns, Warning{path, 0, "written for a newer shcl format than this build reads"})
 	}
 	for _, d := range doc.Diagnostics() {
-		if d.Severity == shcl.SeverityError {
+		switch {
+		case d.Severity == shcl.SeverityError:
 			warns = append(warns, Warning{path, d.Line, d.Message})
+		case d.Code == gluedCode:
+			warns = append(warns, Warning{path, d.Line, gluedText})
 		}
 	}
 	return doc, warns, nil
 }
+
+// shcl's hint for a '#' against text, as in "serverDir: /srv/games#2", which
+// reads as /srv/games. The one hint kept, since the value is quietly cut.
+const (
+	gluedCode = "H008"
+	gluedText = "a '#' against text starts a comment, so the value ends before it; quote the value if the '#' is part of it"
+)

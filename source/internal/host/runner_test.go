@@ -6,6 +6,9 @@ package host
 import (
 	"bytes"
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +16,7 @@ import (
 )
 
 func TestQuote(t *testing.T) {
-	defer testid.Line(t, "df5xc")
+	defer testid.Line(t, "1a3efsg")
 	got := Quote([]string{"chown", "-R", "--", "minecraftd:minecraftd", "/srv/a b", "it's", ""})
 	want := `chown -R -- minecraftd:minecraftd '/srv/a b' 'it'\''s' ''`
 	if got != want {
@@ -24,7 +27,7 @@ func TestQuote(t *testing.T) {
 // Under dry run a change prints and doesn't run, with sudo marked, while a
 // command that only looks still runs.
 func TestExecDryRun(t *testing.T) {
-	defer testid.Line(t, "df5xd")
+	defer testid.Line(t, "1a3efwm")
 	var out bytes.Buffer
 	e := &Exec{DryRun: true, Out: &out, Err: &out}
 	ctx := context.Background()
@@ -46,7 +49,7 @@ func TestExecDryRun(t *testing.T) {
 }
 
 func TestExecError(t *testing.T) {
-	defer testid.Line(t, "df5xe")
+	defer testid.Line(t, "1a3efzr")
 	var errOut bytes.Buffer
 	e := &Exec{Out: &errOut, Err: &errOut}
 	_, err := e.Run(context.Background(), Cmd{Args: []string{"sh", "-c", "echo oops >&2; exit 3"}})
@@ -61,10 +64,32 @@ func TestExecError(t *testing.T) {
 	}
 }
 
+// A Tty command's stderr still goes to the terminal, and to ErrCopy too, for
+// console to tell docker attach's detach from sudo's or docker's own exit 1.
+func TestExecTtyErrCopy(t *testing.T) {
+	defer testid.Line(t, "1a3jyc0")
+	term, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	keep := os.Stderr
+	os.Stderr = term
+	defer func() { os.Stderr = keep }()
+	var copied bytes.Buffer
+	e := &Exec{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}
+	_, err = e.Run(context.Background(), Cmd{Args: []string{"sh", "-c", "echo read escape sequence >&2; exit 1"}, Tty: true, ErrCopy: &copied})
+	os.Stderr = keep
+	shown, _ := os.ReadFile(term.Name())
+	if err == nil || copied.String() != "read escape sequence\n" || string(shown) != "read escape sequence\n" {
+		t.Errorf("err %v, copied %q, shown %q", err, copied.String(), shown)
+	}
+}
+
 // A command run as the service account goes through sudo -u, or runuser
 // when the tool is already root, since root may have no sudo.
 func TestExecAs(t *testing.T) {
-	defer testid.Line(t, "df5y0")
+	defer testid.Line(t, "1a3ehr0")
 	var out bytes.Buffer
 	e := &Exec{DryRun: true, Out: &out}
 	ctx := context.Background()
@@ -89,7 +114,7 @@ func TestExecAs(t *testing.T) {
 
 // QuietErr keeps stderr off the terminal and puts it in the error.
 func TestExecQuietErr(t *testing.T) {
-	defer testid.Line(t, "df5yf")
+	defer testid.Line(t, "1a3ek6w")
 	var errOut bytes.Buffer
 	e := &Exec{Err: &errOut, QuietErr: true}
 	_, err := e.Run(context.Background(), Cmd{Look: true, Args: []string{"sh", "-c", "echo oops >&2; echo more >&2; exit 3"}})
@@ -104,7 +129,7 @@ func TestExecQuietErr(t *testing.T) {
 
 // Quiet does the same for one command, such as a try with a fallback.
 func TestExecQuietCmd(t *testing.T) {
-	defer testid.Line(t, "df77r")
+	defer testid.Line(t, "1a3jm70")
 	var errOut bytes.Buffer
 	e := &Exec{Err: &errOut}
 	_, err := e.Run(context.Background(), Cmd{Quiet: true, Look: true, Args: []string{"sh", "-c", "echo denied >&2; exit 1"}})
@@ -114,7 +139,7 @@ func TestExecQuietCmd(t *testing.T) {
 }
 
 func TestExecStdin(t *testing.T) {
-	defer testid.Line(t, "df66j")
+	defer testid.Line(t, "1a3fcg8")
 	e := &Exec{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}
 	out, err := e.Run(context.Background(), Cmd{Args: []string{"cat"}, Stdin: []byte("table inet x\n")})
 	if err != nil || string(out) != "table inet x\n" {
@@ -124,5 +149,62 @@ func TestExecStdin(t *testing.T) {
 	e = &Exec{DryRun: true, Out: &printed}
 	if _, err := e.Run(context.Background(), Cmd{Args: []string{"install", "-T", "/dev/stdin", "/etc/x"}, Stdin: []byte("y")}); err != nil || printed.String() != "would run: install -T /dev/stdin /etc/x\n" {
 		t.Errorf("dry run printed %q, %v", printed.String(), err)
+	}
+}
+
+// NoPrompt puts -n on the sudo the runner adds, so a dry run's look never
+// asks for a password, and one sudo refuses says what it couldn't check.
+func TestExecNoPrompt(t *testing.T) {
+	defer testid.Line(t, "1a3jxzg")
+	dir := t.TempDir()
+	log := filepath.Join(dir, "sudo.log")
+	// Without SUDO_CACHED, -n refuses as a run-out timestamp does, and
+	// anything else would ask.
+	script := "#!/bin/sh\necho \"$*\" >> '" + log + "'\n" +
+		"if [ \"$1\" = -n ]; then [ -n \"$SUDO_CACHED\" ] || { echo 'sudo: a password is required' >&2; exit 1; }; shift; fi\n" +
+		"[ \"$1\" = -u ] && shift 3\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "sudo"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SUDO_CACHED", "")
+	ctx := context.Background()
+	var out, errOut bytes.Buffer
+	e := &Exec{DryRun: true, NoPrompt: true, Out: &out, Err: &errOut}
+	for _, c := range []Cmd{
+		{Look: true, Sudo: true, Args: []string{"podman", "ps"}},
+		{Look: true, As: "minecraftd", Args: []string{"ls"}},
+	} {
+		_, err := e.Run(ctx, c)
+		if !errors.Is(err, ErrNoPassword) || !strings.Contains(err.Error(), "couldn't check sudo -n ") {
+			t.Errorf("%v: err %v, want it to say what it couldn't check", c.Args, err)
+		}
+	}
+	if errOut.Len() != 0 || out.Len() != 0 {
+		t.Errorf("printed %q, stderr %q", out.String(), errOut.String())
+	}
+
+	t.Setenv("SUDO_CACHED", "1")
+	got, err := e.Run(ctx, Cmd{Look: true, Sudo: true, Args: []string{"sh", "-c", "echo hi; echo warn >&2"}})
+	if err != nil || string(got) != "hi\n" || errOut.String() != "warn\n" {
+		t.Errorf("cached: got %q, %v, stderr %q", got, err, errOut.String())
+	}
+	errOut.Reset()
+	_, err = e.Run(ctx, Cmd{Look: true, Sudo: true, Args: []string{"sh", "-c", "echo nope >&2; exit 3"}})
+	if err == nil || errors.Is(err, ErrNoPassword) || errOut.String() != "nope\n" {
+		t.Errorf("a failed look: %v, stderr %q", err, errOut.String())
+	}
+
+	e = &Exec{Out: &out, Err: &errOut}
+	if _, err := e.Run(ctx, Cmd{Sudo: true, Args: []string{"true"}}); err != nil {
+		t.Fatal(err)
+	}
+	logged, _ := os.ReadFile(log)
+	want := "-n podman ps\n-n -u minecraftd -- ls\n-n sh -c echo hi; echo warn >&2\n-n sh -c echo nope >&2; exit 3\ntrue\n"
+	if string(logged) != want {
+		t.Errorf("sudo got\n%s\nwant\n%s", logged, want)
+	}
+	if !NewExec(true).NoPrompt || NewExec(false).NoPrompt {
+		t.Error("NoPrompt doesn't follow dry run")
 	}
 }

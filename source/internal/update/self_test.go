@@ -46,7 +46,7 @@ func selfRig(t *testing.T, answers, newest string) (*rig, *fakeSelf) {
 // what to change on NixOS. While it's deferred (backlog 2026111318002865) a
 // plain update leaves it out.
 func TestSelf(t *testing.T) {
-	defer testid.Line(t, "df77m")
+	defer testid.Line(t, "1a3jktg")
 	ctx := context.Background()
 
 	r, f := selfRig(t, "y\n", "v1.0.0-alpha.2")

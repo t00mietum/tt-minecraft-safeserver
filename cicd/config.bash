@@ -39,6 +39,9 @@ NODE_SHA256_ARM64="013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35
 SHELLCHECK_VERSION="v0.11.0"
 SHELLCHECK_SHA256_AMD64="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
 SHELLCHECK_SHA256_ARM64="12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588"
+## The demo gif's font, the same release gitsby's demo uses.
+MONASPACE_VERSION="1.400"
+MONASPACE_SHA256="ab66d71be751495f679727332a3345597943bd4d7beebca03f5cde04bf994de7"
 MARKDOWNLINT_VERSION="$(sed -n 's/^ *"markdownlint-cli": "\(.*\)".*/\1/p' "${BASH_SOURCE[0]%/*}/container/markdownlint/package.json")"
 ## Without the container, the host's copies are used, and compared with these.
 TOOL_VERSIONS=(
@@ -72,10 +75,15 @@ FUZZ_TIME_LONG="5m"
 CODEQL_VERSION="2.27.4"
 CODEQL_SHA256="d79b33f86ec8b20af73d3456041349a2780c1081ee8c0eca624b9a25c5cb2e15"
 CODEQL_SUITE="codeql/go-queries:codeql-suites/go-security-and-quality.qls"
+## The modules are vendored into the copy, so their code is checked too. Results in them that were
+## looked at and let through are listed here, by rule, path and line, each with why.
+CODEQL_KNOWN="cicd/codeql-known.txt"
 
 ## Soak: rounds of the main actions before the first heap and goroutine sample, and again before
 ## the second. The tests skip outside the soak step.
 SOAK_ENV="TT_MINECRAFTD_SOAK"   ## soak.Env in source/internal/soak
+SOAK_PROFILE_ENV="TT_MINECRAFTD_SOAK_PROFILES"   ## soak.ProfileEnv
+SOAK_DIR="cicd/artifacts/soak"   ## the heap profiles, GFS-rotated
 SOAK_ROUNDS="100"
 SOAK_ROUNDS_LONG="1000"
 
@@ -123,7 +131,7 @@ fCpuJobs(){
 	local -n jobs_cpuJ="$1"
 	local -i cores=1 load100=0
 	local load="${3:-0}" frac=""
-	## Checked first, since arithmetic would run what a bad one holds.
+	## Checked first, since arithmetic would run what's in a bad one.
 	[[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] && cores="$2"
 	frac="${load#*.}"; [[ "${load}" == *.* ]] || frac=""; frac="${frac}00"
 	if [[ "${load%%.*}" =~ ^[0-9]+$ && "${frac:0:2}" =~ ^[0-9]+$ ]]; then load100=$(( 10#${load%%.*} * 100 + 10#${frac:0:2} )); fi

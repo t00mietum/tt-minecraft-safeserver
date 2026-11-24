@@ -1,0 +1,48 @@
+# The README's demo gif, for gen-demo-gif.py beside this, a copy of gitsby's.
+# script.txt is the plan; edit that, then this. demo.bash builds the made-up
+# install and the stand-ins first, as root in a throwaway container. Each step
+# types show=, runs run= for real, and shows the output. run= calls the
+# installed copy by name, so the output names it the way a user sees it. The
+# echo puts a blank line between the command and its output, as in gitsby's.
+#
+# Every step clears first, so a smooth scroll never has a scrollback to move.
+
+title = "tt-minecraftd"
+prog  = "tt-minecraftd"
+seed  = 11
+font  = ["Monaspace Argon SemiBold"]
+end_hold  = 1.6
+end_black = 3.0
+
+# Captions appear whole rather than typed, as in gitsby's demo.
+type_notes = false
+
+[[step]]
+clear = true
+note  = "The server, its players, and what the firewall turned away"
+show  = "{prog} status"
+run   = "echo; tt-minecraftd status"
+pause = 5.0
+
+[[step]]
+clear = true
+note  = "Unsafe settings stop a start, before anything runs"
+show  = "{prog} start --dry-run"
+run   = "echo; tt-minecraftd start --dry-run"
+pause = 5.5
+
+# Run as root already, so sudo is only typed.
+[[step]]
+clear = true
+note  = "repair puts the safe settings and the firewall back"
+show  = "sudo {prog} repair"
+run   = "echo; tt-minecraftd repair"
+pause = 5.0
+
+# The podman line is cut at the edge. Wrapped, the JVM flags bury the rest.
+[[step]]
+clear = true
+note  = "Now a start would go ahead, and shows what it would run"
+show  = "{prog} start --dry-run"
+run   = "echo; tt-minecraftd start --dry-run"
+pause = 5.0

@@ -4,6 +4,7 @@
 package repair
 
 import (
+	"context"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/firewall"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -30,7 +32,7 @@ func fakeNft(t *testing.T, there bool) {
 }
 
 func TestFirewallCheck(t *testing.T) {
-	defer testid.Line(t, "df66g")
+	defer testid.Line(t, "1a3fca0")
 	fakeNft(t, true)
 	var enabled, tables string
 	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
@@ -46,7 +48,7 @@ func TestFirewallCheck(t *testing.T) {
 	if err := os.WriteFile(h.ResolvConf, []byte("nameserver 192.168.1.1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rules := firewall.Rules(h.Cfg, []netip.Addr{netip.MustParseAddr("192.168.1.1")})
+	rules := firewall.ForConfig(firewall.Rules(h.Cfg, firewall.Local{DNS: []netip.Addr{netip.MustParseAddr("192.168.1.1")}}), h.ConfigPath)
 
 	// A new host: all 4 found, and fixed in order.
 	enabled = "disabled\n"
@@ -94,11 +96,34 @@ func TestFirewallCheck(t *testing.T) {
 	if got := look(t, h, FirewallCheck); len(got) != 2 {
 		t.Errorf("resolver changed: %q", got)
 	}
+	// So does a new IPv6 subnet on the LAN, which goes in the file.
+	if err := os.WriteFile(h.ResolvConf, []byte("nameserver 192.168.1.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := look(t, h, FirewallCheck); len(got) != 0 {
+		t.Errorf("resolver back: %q", got)
+	}
+	route := "20010db8000100020000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n"
+	if err := os.WriteFile(h.Routes, []byte(route), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixAll(t, h, f, FirewallCheck); !reflect.DeepEqual(got, []string{want[0], want[4]}) || !strings.Contains(string(f.Ran[0].Stdin), "fe80::/10, 2001:db8:1:2::/64 }") {
+		t.Errorf("subnet added: ran %q, wrote\n%s", got, f.Ran[0].Stdin)
+	}
+	if err := os.Remove(h.Routes); err != nil {
+		t.Fatal(err)
+	}
 
 	fakeNft(t, false)
+	if got := look(t, h, FirewallCheck); !reflect.DeepEqual(got, []string{"nftables isn't installed, so the firewall can't load; the distro's nftables package adds it"}) {
+		t.Errorf("no nft, no apt: %q", got)
+	}
+	wasInstalled := launch.Installed
+	launch.Installed = func(name string) bool { return name == "apt-get" }
 	if got := look(t, h, FirewallCheck); !reflect.DeepEqual(got, []string{"nftables isn't installed, so the firewall can't load; apt-get install nftables adds it"}) {
 		t.Errorf("no nft: %q", got)
 	}
+	launch.Installed = wasInstalled
 
 	// Off: the unit goes, and so does a table left behind.
 	fakeNft(t, true)
@@ -122,5 +147,78 @@ func TestFirewallCheck(t *testing.T) {
 	}
 	if _, err := os.Stat(h.RulesFile); err != nil {
 		t.Errorf("off removed the rules file: %v", err)
+	}
+}
+
+// There's one rules file and one table. A second config's repair leaves the
+// first one's alone while its unit is there, and says whose they are. Rules
+// that come out the same for both do for both.
+func TestFirewallOtherConfig(t *testing.T) {
+	defer testid.Line(t, "1a3jw44")
+	fakeNft(t, true)
+	h, f := testHost(t, "", "", func(c host.Cmd) ([]byte, error) {
+		switch c.Args[0] {
+		case "systemctl":
+			return []byte("enabled\n"), nil
+		case "nft":
+			return []byte("table inet tt_minecraftd\n"), nil
+		}
+		return nil, nil
+	})
+	h.Cfg.Firewall, h.Cfg.AllowFrom, h.Cfg.Egress, h.Cfg.GamePort, h.Cfg.JoinRateLimit = true, []string{"lan"}, "web", 25565, 20
+	if err := os.WriteFile(h.ResolvConf, []byte("nameserver 192.168.1.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := h.ConfigPath
+	local := firewall.Local{DNS: []netip.Addr{netip.MustParseAddr("192.168.1.1")}}
+	firstRules := firewall.ForConfig(firewall.Rules(h.Cfg, local), first)
+	for path, text := range map[string]string{h.RulesFile: firstRules, h.UnitFile: firewall.Unit()} {
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.ConfigPath = filepath.Join(filepath.Dir(first), "second.shcl")
+	if got := look(t, h, FirewallCheck); len(got) != 0 {
+		t.Errorf("same rules: %q", got)
+	}
+
+	h.Cfg.GamePort = 25566
+	got := look(t, h, FirewallCheck)
+	if len(got) != 1 || !strings.Contains(got[0], "is written for the config at "+first+", with other rules") || strings.HasSuffix(got[0], "[fix]") {
+		t.Errorf("other rules: %q", got)
+	}
+	h.Cfg.Firewall = false
+	var lines []string
+	Run(context.Background(), h, []Check{FirewallCheck}, false, func(state, text string) { lines = append(lines, state+" "+text) })
+	if want := []string{"OK tt-minecraftd firewall: " + h.RulesFile + " and tt-minecraftd-firewall.service are for the config at " + first + ", so they're left alone"}; !reflect.DeepEqual(lines, want) {
+		t.Errorf("off: %q", lines)
+	}
+	for _, on := range []bool{true, false} {
+		h.Cfg.Firewall = on
+		if ran := fixAll(t, h, f, FirewallCheck); len(ran) != 0 {
+			t.Errorf("firewall %v changed the first config's: %q", on, ran)
+		}
+	}
+	if have, err := os.ReadFile(h.RulesFile); err != nil || string(have) != firstRules {
+		t.Errorf("rules file changed: %v", err)
+	}
+
+	// Once the first turns its firewall off, the file it left is anyone's.
+	if err := os.Remove(h.UnitFile); err != nil {
+		t.Fatal(err)
+	}
+	h.Cfg.Firewall = true
+	if ran := fixAll(t, h, f, FirewallCheck); len(ran) != 4 || firewall.Owner(string(f.Ran[0].Stdin)) != h.ConfigPath {
+		t.Errorf("left behind: ran %q", ran)
+	}
+	// So is one from an older build, which names no config.
+	if err := os.WriteFile(h.UnitFile, []byte(firewall.Unit()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.RulesFile, []byte(firewall.StripOwner(firstRules)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ran := fixAll(t, h, f, FirewallCheck); len(ran) != 2 {
+		t.Errorf("older file: ran %q", ran)
 	}
 }

@@ -6,6 +6,7 @@
 package tree
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -36,6 +37,7 @@ func ToOperator(ctx context.Context, r host.Runner, c *config.Config) ([]string,
 
 func handOver(ctx context.Context, r host.Runner, trees []string, user, group string, toServer bool) ([]string, error) {
 	var warns []string
+	var errs []error
 	for _, t := range trees {
 		path, err := realTree(t)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -45,21 +47,54 @@ func handOver(ctx context.Context, r host.Runner, trees []string, user, group st
 		if err != nil {
 			return warns, err
 		}
-		if _, err := r.Run(ctx, host.Cmd{Args: []string{"chown", "-R", "--", user + ":" + group, path}, Sudo: true}); err != nil {
-			return warns, err
+		// The mode fix runs even when the ownership fix fails, so a tree
+		// isn't left open to other accounts.
+		if err := change(ctx, r, "chown", "-R", "--", user+":"+group, path); err != nil {
+			errs = append(errs, err)
 		}
 		if !toServer {
 			continue
 		}
-		if _, err := r.Run(ctx, host.Cmd{Args: []string{"chmod", "-R", "ug+rwX,o-rwx", "--", path}, Sudo: true}); err != nil {
-			return warns, err
+		if err := change(ctx, r, "chmod", "-R", "ug+rwX,o-rwx", "--", path); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return warns, nil
+	return warns, errors.Join(errs...)
 }
 
-// realTree follows links, so chown -R changes the tree and not just a link to
-// it, and the depth check sees where the link really goes.
+// change runs a recursive chown or chmod through sudo. A file that's gone by
+// the time the walk gets to it, as when the running server renames one,
+// isn't a failure, since there's nothing left of it to fix. Its messages are
+// read in the C locale. One in another language counts as a failure.
+func change(ctx context.Context, r host.Runner, args ...string) error {
+	var said bytes.Buffer
+	_, err := r.Run(ctx, host.Cmd{Args: args, Sudo: true, Quiet: true, ErrCopy: &said, Env: []string{"LC_ALL=C"}})
+	if err == nil {
+		return nil
+	}
+	var other []string
+	for line := range strings.Lines(said.String()) {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasSuffix(line, ": No such file or directory") {
+			other = append(other, line)
+		}
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(said.String()), "\n")
+	switch {
+	case said.Len() == 0:
+		return err
+	case len(other) == 0:
+		return nil
+	case other[0] == first: // err has it already
+		other = other[1:]
+	}
+	if len(other) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w; %s", err, strings.Join(other[:min(len(other), 3)], "; "))
+}
+
+// realTree follows links, so chown -R changes the tree and not only a link to
+// it, and the depth check sees where the link points.
 func realTree(t string) (string, error) {
 	if err := checkDepth(t); err != nil {
 		return "", err
@@ -73,9 +108,11 @@ func realTree(t string) (string, error) {
 			return "", fmt.Errorf("%s links to %s: %w", t, path, err)
 		}
 	}
-	if fi, err := os.Stat(path); err != nil {
+	fi, err := os.Stat(path)
+	if err != nil {
 		return "", err
-	} else if !fi.IsDir() {
+	}
+	if !fi.IsDir() {
 		return "", fmt.Errorf("tree %s isn't a folder", t)
 	}
 	return path, nil

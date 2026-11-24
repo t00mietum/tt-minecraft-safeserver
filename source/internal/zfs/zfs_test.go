@@ -32,7 +32,7 @@ import (
 // }
 //
 // func TestDoomed(t *testing.T) {
-// 	defer testid.Line(t, "df77n")
+// 	defer testid.Line(t, "1a3jkxm")
 // 	names := daily("20250101", "20261112")
 // 	foreign := []string{"manual", "20261112-230000_pre_other", "before-update", "2026111-220000_" + PostStop}
 // 	all := append(slices.Clone(foreign), names...)
@@ -96,7 +96,7 @@ func fakeZfs(snaps string, fail func(c host.Cmd) bool) *host.Fake {
 // As the operator first, which zfs allow lets through, else through sudo.
 // Root goes straight to it. Nothing is listed or pruned.
 func TestTake(t *testing.T) {
-	defer testid.Line(t, "df77p")
+	defer testid.Line(t, "1a3jm0r")
 	now := time.Date(2026, 11, 12, 11, 0, 0, 0, time.Local)
 	ctx := context.Background()
 	snap := "zfs snapshot -- tank/mc@20261112-110000_" + PreMove
@@ -144,7 +144,7 @@ func TestTake(t *testing.T) {
 
 // update --mc-version's snapshot is named for the move.
 func TestPreMove(t *testing.T) {
-	defer testid.Line(t, "df78j")
+	defer testid.Line(t, "1a3jpr8")
 	r := fakeZfs("", nil)
 	s := Snapper{Run: r, Dataset: "tank/mc"}
 	if _, err := s.Take(context.Background(), PreMove, time.Date(2026, 11, 12, 11, 0, 0, 0, time.Local)); err != nil {

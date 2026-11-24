@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package agent asks an AI agent where newer builds of approved jars are. The
+// Package agent asks an AI agent where newer builds of the server's jars are. The
 // agent only suggests; see design.md's Update agent for what's checked after.
 package agent
 
@@ -15,12 +15,12 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
-// Jar is what the agent is told about one approved jar.
+// Jar is what the agent is told about one jar.
 type Jar struct {
 	Path   string `json:"jar"` // under serverDir
 	About  string `json:"about,omitempty"`
@@ -103,11 +103,13 @@ func New(cfg *config.Config) (Asker, error) {
 		if cfg.AgentModel == "" {
 			return nil, fmt.Errorf("agent is %s, but agentModel isn't set", cfg.Agent)
 		}
+		home := vendorURL[cfg.Agent]
 		api := API{Kind: cfg.Agent, URL: cfg.AgentURL, Model: cfg.AgentModel, Key: getenv("TT_MINECRAFTD_AGENT_KEY")}
 		if api.URL == "" {
-			api.URL = map[string]string{"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1"}[cfg.Agent]
+			api.URL = home
 		}
-		if api.Key == "" {
+		// The vendor's own key is for the vendor, not a gateway agentURL names.
+		if api.Key == "" && sameHost(api.URL, home) {
 			api.Key = getenv(strings.ToUpper(cfg.Agent) + "_API_KEY")
 		}
 		return api, nil
@@ -115,11 +117,26 @@ func New(cfg *config.Config) (Asker, error) {
 	return nil, errors.New("no agent is set")
 }
 
+var vendorURL = map[string]string{"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1"}
+
+func sameHost(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	host := func(u *url.URL) string { return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".") }
+	return ua.Scheme == "https" && ua.Scheme == ub.Scheme && host(ua) == host(ub)
+}
+
 // getenv is a var so tests don't see the operator's keys.
 var getenv = os.Getenv
 
 const instructions = `You help a Minecraft server's update tool find newer builds of its plugins.
-The JSON at the end names the server's Minecraft version and the approved jars to look at.
+The JSON at the end names the server's Minecraft version and the jars to look at.
 
 For each jar, find the newest stable build that runs on Paper for that Minecraft version, from the plugin's own download page or API. Use only https.
 
@@ -157,9 +174,15 @@ func Prompt(q Question) string {
 }
 
 // Parse finds the answer in a reply, which may wrap it in prose or a code
-// fence.
+// fence. The question and the form in the instructions both have a jars
+// key, and a reply may quote either before it answers, so those are skipped
+// and the last other match wins.
 func Parse(reply string) (Answer, error) {
-	var last error
+	var (
+		found  *Answer
+		quoted bool
+		last   error
+	)
 	for i, tries := 0, 0; tries < 50; tries++ {
 		start := strings.IndexByte(reply[i:], '{')
 		if start < 0 {
@@ -171,26 +194,79 @@ func Parse(reply string) (Answer, error) {
 			Paper *PaperBuild   `json:"paper"`
 			Move  *[]MoveNote   `json:"moveReport"`
 		}
-		err := json.NewDecoder(strings.NewReader(reply[i:])).Decode(&probe)
-		if err == nil && (probe.Jars != nil || probe.Paper != nil || probe.Move != nil) {
-			a := Answer{Paper: probe.Paper}
-			if probe.Jars != nil {
-				a.Jars = *probe.Jars
-			}
-			if probe.Move != nil {
-				a.Move = *probe.Move
-			}
-			return a, nil
+		var raw json.RawMessage
+		dec := json.NewDecoder(strings.NewReader(reply[i:]))
+		err := dec.Decode(&raw)
+		if err == nil {
+			err = json.Unmarshal(raw, &probe)
 		}
-		if err != nil {
-			last = err
+		if err != nil || (probe.Jars == nil && probe.Paper == nil && probe.Move == nil) {
+			if err != nil {
+				last = err
+			}
+			i++
+			continue
 		}
-		i++
+		// Past the whole object, so a quoted question with many jars costs
+		// one try.
+		i += int(dec.InputOffset())
+		a := Answer{Paper: probe.Paper}
+		if probe.Jars != nil {
+			a.Jars = *probe.Jars
+		}
+		if probe.Move != nil {
+			a.Move = *probe.Move
+		}
+		if isQuestion(raw) || isForm(a) {
+			quoted = true
+			continue
+		}
+		found = &a
 	}
-	if last != nil {
+	switch {
+	case found != nil:
+		return *found, nil
+	case quoted:
+		return Answer{}, errors.New("the agent's reply only repeats the question or the answer's form")
+	case last != nil:
 		return Answer{}, fmt.Errorf("the agent's answer isn't the JSON asked for: %w", last)
 	}
 	return Answer{}, errors.New("the agent's answer has no list of jars in it")
+}
+
+// isQuestion tells whether obj is the question quoted back. It names the
+// Minecraft version, and none of its jars has a version or url, which the
+// answer's form always has.
+func isQuestion(obj []byte) bool {
+	var q struct {
+		Minecraft json.RawMessage              `json:"minecraftVersion"`
+		Jars      []map[string]json.RawMessage `json:"jars"`
+	}
+	if json.Unmarshal(obj, &q) != nil || q.Minecraft == nil {
+		return false
+	}
+	return !slices.ContainsFunc(q.Jars, func(j map[string]json.RawMessage) bool {
+		return j["version"] != nil || j["url"] != nil
+	})
+}
+
+// isForm tells whether a is the answer's form from the instructions, with
+// a <placeholder> for every jar and Paper version.
+func isForm(a Answer) bool {
+	var names []string
+	for _, s := range a.Jars {
+		names = append(names, s.Jar)
+	}
+	for _, m := range a.Move {
+		names = append(names, m.Jar)
+	}
+	if a.Paper != nil {
+		names = append(names, a.Paper.Version)
+	}
+	return len(names) > 0 && !slices.ContainsFunc(names, func(n string) bool {
+		n = strings.TrimSpace(n)
+		return len(n) < 2 || n[0] != '<' || n[len(n)-1] != '>'
+	})
 }
 
 // Checked sorts an answer by what can be told before anything is downloaded.
@@ -212,7 +288,7 @@ var (
 	hex128 = regexp.MustCompile(`^[0-9a-f]{128}$`)
 )
 
-// Check holds each suggestion to the jars asked about and to agentHosts. Its
+// Check tests each suggestion against the jars asked about and agentHosts. Its
 // text is cleaned first, since it ends up on the operator's terminal.
 func Check(a Answer, asked []Jar, hosts []string) Checked {
 	var c Checked
@@ -260,8 +336,8 @@ func Check(a Answer, asked []Jar, hosts []string) Checked {
 	return c
 }
 
-// CheckPaper holds the agent's Paper build to the version asked for and to
-// agentHosts. PaperMC always publishes a SHA-256, so one is needed. A nil
+// CheckPaper tests the agent's Paper build against the version asked for
+// and agentHosts. PaperMC always publishes a SHA-256, so one is needed. A nil
 // build with no error means the agent found none.
 func CheckPaper(a Answer, version string, hosts []string) (*PaperBuild, error) {
 	if a.Paper == nil {
@@ -353,22 +429,7 @@ func tidy(s Suggestion) Suggestion {
 // clean drops control characters and the ones that flip text direction, and
 // cuts s to limit bytes on a character boundary.
 func clean(s string, limit int) string {
-	s = strings.TrimSpace(strings.Map(func(r rune) rune {
-		switch {
-		case r < 0x20, r >= 0x7f && r < 0xa0,
-			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
-			return -1
-		}
-		return r
-	}, strings.ToValidUTF8(s, "")))
-	if len(s) <= limit {
-		return s
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "..."
+	return server.Cut(strings.TrimSpace(server.Clean(strings.ToValidUTF8(s, ""))), limit)
 }
 
 // Suggest asks about the jars in q, and checks the answer.

@@ -13,6 +13,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -44,14 +45,45 @@ const MaxJSON = 8 << 20
 // MaxJar caps a download, whatever size the API gives.
 const MaxJar = 512 << 20
 
+// AtSymlinkNoFollow is AT_SYMLINK_NOFOLLOW, which package syscall lacks.
+const AtSymlinkNoFollow = 0x100
+
+// OpenDir opens a folder for the *at calls.
+func OpenDir(dir string) (int, error) {
+	fd, err := syscall.Open(dir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, &fs.PathError{Op: "open", Path: dir, Err: err}
+	}
+	return fd, nil
+}
+
 // SHA256Hex is a hash as the APIs give it, once lower-cased.
 var SHA256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// http is a copy of the client that refuses a redirect from https to
+// anything else, since a jar's hash comes over the same channel as the jar.
+// The client's own redirect rule runs first, so its reason is the one given.
 func (c Client) http() *http.Client {
-	if c.HTTP == nil {
-		return &http.Client{Timeout: 10 * time.Minute}
+	base := c.HTTP
+	if base == nil {
+		base = &http.Client{Timeout: 10 * time.Minute}
 	}
-	return c.HTTP
+	own := *base
+	before := base.CheckRedirect
+	own.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if before != nil {
+			if err := before(req, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 { // Go's own limit, which setting this drops
+			return errors.New("too many redirects")
+		}
+		if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return errors.New("redirected away from https")
+		}
+		return nil
+	}
+	return &own
 }
 
 // Get is a GET that only an OK answers.
@@ -71,9 +103,18 @@ func (c Client) Get(ctx context.Context, url string) (*http.Response, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close() // the status is the error that matters
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
+		return nil, fmt.Errorf("%s: %s", url, Status(resp.StatusCode))
 	}
 	return resp, nil
+}
+
+// Status names an HTTP status by its code. Not resp.Status, whose text is
+// the server's own and can have escape codes.
+func Status(code int) string {
+	if text := http.StatusText(code); text != "" {
+		return fmt.Sprintf("%d %s", code, text)
+	}
+	return fmt.Sprint(code)
 }
 
 // JSON reads an API answer of up to MaxJSON into v.
@@ -126,19 +167,29 @@ func (c Client) Into(ctx context.Context, dirfd int, dir string, f File) error {
 
 // Staged is a download written beside the name it's for, under a temp name,
 // until Keep or Drop. Its folder's fd has to stay open until then.
+//
+// It stays root's, mode 0600, while it waits on checks and the operator's
+// yes, so the server account can't rewrite what was hashed. UID, GID and
+// Mode are what it gets at Keep, the folder's owner and group and 0660
+// unless changed.
 type Staged struct {
 	dirfd  int
 	dir    string
+	file   *os.File
+	dev    uint64
+	ino    uint64
 	Name   string
 	Temp   string
 	Size   int64
 	SHA256 string
 	SHA512 string
+	UID    int
+	GID    int
+	Mode   uint32
 }
 
 // Stage downloads url into the folder open as dirfd, under a temp name beside
-// name, with the folder's owner and group and mode 0660. More than limit bytes
-// is an error.
+// name. More than limit bytes is an error.
 func (c Client) Stage(ctx context.Context, dirfd int, dir, name, url string, limit int64) (*Staged, error) {
 	var st syscall.Stat_t
 	if err := syscall.Fstat(dirfd, &st); err != nil {
@@ -157,11 +208,11 @@ func (c Client) Stage(ctx context.Context, dirfd int, dir, name, url string, lim
 	if err != nil {
 		return nil, &fs.PathError{Op: "create", Path: dir + "/" + tmp, Err: err}
 	}
-	s := &Staged{dirfd: dirfd, dir: dir, Name: name, Temp: tmp}
-	file := os.NewFile(uintptr(fd), dir+"/"+tmp)
-	err = s.fill(file, fd, resp.Body, limit, st)
-	if cerr := file.Close(); err == nil {
-		err = cerr
+	s := &Staged{dirfd: dirfd, dir: dir, Name: name, Temp: tmp, UID: int(st.Uid), GID: int(st.Gid), Mode: 0o660}
+	s.file = os.NewFile(uintptr(fd), dir+"/"+tmp)
+	err = s.fill(resp.Body, limit)
+	if err == nil {
+		err = s.readOnly()
 	}
 	if err != nil {
 		s.Drop()
@@ -170,9 +221,29 @@ func (c Client) Stage(ctx context.Context, dirfd int, dir, name, url string, lim
 	return s, nil
 }
 
-func (s *Staged) fill(file *os.File, fd int, body io.Reader, limit int64, st syscall.Stat_t) error {
+// readOnly swaps the write handle for a read one on the same file, since a
+// file open for writing can't be run (selfupdate runs its --version).
+func (s *Staged) readOnly() error {
+	r, err := s.Open()
+	if err != nil {
+		return err
+	}
+	if err := s.file.Close(); err != nil {
+		_ = r.Close() // the write's error is the one to give
+		return err
+	}
+	s.file = r
+	return nil
+}
+
+func (s *Staged) fill(body io.Reader, limit int64) error {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(int(s.file.Fd()), &st); err != nil {
+		return err
+	}
+	s.dev, s.ino = st.Dev, st.Ino
 	sum256, sum512 := sha256.New(), sha512.New()
-	n, err := io.Copy(io.MultiWriter(file, sum256, sum512), io.LimitReader(body, limit+1))
+	n, err := io.Copy(io.MultiWriter(s.file, sum256, sum512), io.LimitReader(body, limit+1))
 	switch {
 	case err != nil:
 		return fmt.Errorf("downloading %s: %w", s.Name, err)
@@ -184,31 +255,69 @@ func (s *Staged) fill(file *os.File, fd int, body io.Reader, limit int64, st sys
 	s.Size = n
 	s.SHA256 = hex.EncodeToString(sum256.Sum(nil))
 	s.SHA512 = hex.EncodeToString(sum512.Sum(nil))
+	return s.file.Sync()
+}
+
+// Open gives the staged file, for reading. The server can write the folder,
+// so it could put a pipe or its own file in its place: O_NONBLOCK keeps the
+// open from waiting on a pipe, and only the file Stage wrote is given back.
+func (s *Staged) Open() (*os.File, error) {
+	name := s.dir + "/" + s.Temp
+	fd, err := syscall.Openat(s.dirfd, s.Temp, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	}
+	f := os.NewFile(uintptr(fd), name)
+	var st syscall.Stat_t
+	err = syscall.Fstat(fd, &st)
+	switch {
+	case err != nil:
+	case st.Mode&syscall.S_IFMT != syscall.S_IFREG:
+		err = fmt.Errorf("%s isn't a regular file", name)
+	case st.Dev != s.dev || st.Ino != s.ino:
+		err = fmt.Errorf("%s was replaced after it was downloaded", name)
+	}
+	if err != nil {
+		_ = f.Close() // only read from
+		return nil, err
+	}
+	return f, nil
+}
+
+// Keep gives the download its owner and mode, then renames it over the name
+// it's for. A file put in place of the one Stage wrote is refused.
+func (s *Staged) Keep() error {
+	err := s.SetOwner()
+	if err == nil {
+		err = syscall.Renameat(s.dirfd, s.Temp, s.dirfd, s.Name)
+		if err != nil {
+			err = &fs.PathError{Op: "rename", Path: s.dir + "/" + s.Name, Err: err}
+		}
+	}
+	if err != nil {
+		s.Drop()
+		return err
+	}
+	_ = s.file.Close() // only read from
+	return nil
+}
+
+// SetOwner gives the staged file UID, GID and Mode through its own handle,
+// once the temp name is checked to still be that file. Keep calls it again.
+func (s *Staged) SetOwner() error {
+	f, err := s.Open()
+	if err != nil {
+		return err
+	}
+	_ = f.Close() // only checked
+	fd := int(s.file.Fd())
 	if os.Geteuid() == 0 {
-		if err := syscall.Fchown(fd, int(st.Uid), int(st.Gid)); err != nil {
+		if err := syscall.Fchown(fd, s.UID, s.GID); err != nil {
 			return fmt.Errorf("chown %s: %w", s.Name, err)
 		}
 	}
-	if err := syscall.Fchmod(fd, 0o660); err != nil {
+	if err := syscall.Fchmod(fd, s.Mode); err != nil {
 		return fmt.Errorf("chmod %s: %w", s.Name, err)
-	}
-	return file.Sync()
-}
-
-// Open gives the staged file, for reading.
-func (s *Staged) Open() (*os.File, error) {
-	fd, err := syscall.Openat(s.dirfd, s.Temp, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: s.dir + "/" + s.Temp, Err: err}
-	}
-	return os.NewFile(uintptr(fd), s.dir+"/"+s.Temp), nil
-}
-
-// Keep renames the download over the name it's for.
-func (s *Staged) Keep() error {
-	if err := syscall.Renameat(s.dirfd, s.Temp, s.dirfd, s.Name); err != nil {
-		s.Drop()
-		return &fs.PathError{Op: "rename", Path: s.dir + "/" + s.Name, Err: err}
 	}
 	return nil
 }
@@ -216,6 +325,7 @@ func (s *Staged) Keep() error {
 // Drop removes the download.
 func (s *Staged) Drop() {
 	_ = syscall.Unlinkat(s.dirfd, s.Temp) // best effort; the caller has the error that matters
+	_ = s.file.Close()                    // closed already after a Keep
 }
 
 // TempName is a hidden name beside name, for writing before a rename.

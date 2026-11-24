@@ -19,7 +19,7 @@ import (
 // such as "openai http://127.0.0.1:11434/v1 qwen2.5:7b-instruct". Only the
 // answer's form is checked, since what a model finds varies.
 func TestLiveAgent(t *testing.T) {
-	defer testid.Line(t, "df76c")
+	defer testid.Line(t, "1a3jfxg")
 	spec := strings.Fields(os.Getenv("TT_MINECRAFTD_LIVE_AGENT"))
 	if len(spec) != 3 {
 		t.Skip("TT_MINECRAFTD_LIVE_AGENT isn't set")

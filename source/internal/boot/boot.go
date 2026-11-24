@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,42 +22,138 @@ import (
 )
 
 const (
+	// UnitName is the boot unit, and UnitFile is where setup writes it.
 	UnitName = "tt-minecraftd.service"
 	UnitFile = "/etc/systemd/system/" + UnitName
-	// Bin is where setup installs the tool, and what the unit runs.
-	Bin = "/usr/local/bin/tt-minecraftd"
+	// PkgBin is where the .deb and .rpm put the tool, as the FHS and Debian
+	// policy have a package do. The package step checks the build names it.
+	PkgBin = "/usr/bin/tt-minecraftd"
+	// LocalBin is a hand install's place: setup's copy, install.bash, and
+	// dogfood.
+	LocalBin = "/usr/local/bin/tt-minecraftd"
 	// stopMargin is past stopTimeout: stop's 30 seconds from SIGTERM to
 	// SIGKILL, and some to hand back after.
 	stopMargin = 45 * time.Second
 )
 
-// Command is the tool with its --config, when that isn't the default, in
-// systemd's quoting.
-func Command(configPath string) string {
+// Bins are the paths a unit may run the tool from, the package's first.
+var Bins = []string{PkgBin, LocalBin}
+
+// Bin is the tool the unit runs: the package's when it's installed, so the
+// unit runs what a package upgrade installs, else setup's copy. pkg stands
+// in for PkgBin, and empty means the real one.
+func Bin(pkg string) string {
+	if pkg == "" {
+		pkg = PkgBin
+	}
+	if fi, err := os.Stat(pkg); err == nil && fi.Mode().IsRegular() {
+		return PkgBin
+	}
+	return LocalBin
+}
+
+// Command is the tool at bin with its --config, when that isn't the
+// default, in systemd's quoting.
+func Command(bin, configPath string) string {
 	if configPath == "" || configPath == config.DefaultPath {
-		return Bin
+		return bin
 	}
 	if abs, err := filepath.Abs(configPath); err == nil {
 		configPath = abs
 	}
-	return Bin + " --config " + quote(configPath)
+	return bin + " --config " + quote(configPath)
 }
 
 // quote is one argument for an Exec line. systemd expands % specifiers and $
 // variables there, even inside quotes.
 func quote(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$")
-	return `"` + r.Replace(s) + `"`
+	return `"` + unitQuoter.Replace(s) + `"`
+}
+
+var unitQuoter = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$")
+
+// unquote undoes quote. false when s isn't something quote gives.
+func unquote(s string) (string, bool) {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return "", false
+	}
+	inner := s[1 : len(s)-1]
+	var b strings.Builder
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		switch {
+		case c == '\\' || c == '%' || c == '$':
+			if i+1 == len(inner) {
+				return "", false
+			}
+			next := inner[i+1]
+			if (c == '\\' && next != '\\' && next != '"') || (c != '\\' && next != c) {
+				return "", false
+			}
+			b.WriteByte(next)
+			i++
+		case c == '"':
+			return "", false
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String(), true
 }
 
 // ExecStart is the unit's ExecStart line, which also tells whose config the
-// unit serves.
-func ExecStart(configPath string) string {
-	return "ExecStart=" + Command(configPath) + " start --foreground"
+// unit runs.
+func ExecStart(bin, configPath string) string {
+	return "ExecStart=" + Command(bin, configPath) + " start --foreground"
 }
 
-// Unit is tt-minecraftd.service for the config at configPath.
-func Unit(c *config.Config, configPath string) string {
+// Owner is the config a unit's ExecStart runs, read back from what
+// ExecStart writes for any of Bins. false when there's no such line.
+func Owner(unit string) (string, bool) {
+	for line := range strings.Lines(unit) {
+		line = strings.TrimSpace(line)
+		rest, ok := "", false
+		for _, bin := range Bins {
+			if rest, ok = strings.CutPrefix(line, "ExecStart="+bin); ok {
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		if rest, ok = strings.CutSuffix(rest, " start --foreground"); !ok {
+			continue
+		}
+		if rest == "" {
+			return config.DefaultPath, true
+		}
+		if rest, ok = strings.CutPrefix(rest, " --config "); !ok {
+			continue
+		}
+		if path, ok := unquote(rest); ok {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// SameConfig says whether 2 config paths name the same file, the way
+// Command and ExecStart see them. Empty is the default config.
+func SameConfig(a, b string) bool {
+	abs := func(p string) string {
+		if p == "" {
+			return config.DefaultPath
+		}
+		if full, err := filepath.Abs(p); err == nil {
+			return full
+		}
+		return filepath.Clean(p)
+	}
+	return abs(a) == abs(b)
+}
+
+// Unit is tt-minecraftd.service for the config at configPath, run from bin.
+func Unit(c *config.Config, configPath, bin string) string {
 	var b strings.Builder
 	b.WriteString(`[Unit]
 Description=tt-minecraftd Minecraft server
@@ -74,8 +171,8 @@ After=network-online.target
 	b.WriteString(`
 [Service]
 Type=simple
-` + ExecStart(configPath) + `
-ExecStop=` + Command(configPath) + ` stop
+` + ExecStart(bin, configPath) + `
+ExecStop=` + Command(bin, configPath) + ` stop
 TimeoutStopSec=` + strconv.Itoa(int((c.StopTimeout+stopMargin)/time.Second)) + `
 
 [Install]
@@ -112,13 +209,22 @@ func Serves(ctx context.Context, r host.Runner, unitFile, configPath string) (bo
 	text, err := os.ReadFile(unitFile) // #nosec G304 -- the boot unit's path
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
-	} else if err != nil {
+	}
+	if err != nil {
 		return false, err
 	}
-	want := ExecStart(configPath)
+	// Either path, since a unit written before the package came keeps
+	// setup's copy until the next repair.
+	want := make([]string, 0, len(Bins))
+	for _, bin := range Bins {
+		want = append(want, ExecStart(bin, configPath))
+	}
 	found := false
 	for line := range strings.Lines(string(text)) {
-		found = found || strings.TrimSpace(line) == want
+		if slices.Contains(want, strings.TrimSpace(line)) {
+			found = true
+			break
+		}
 	}
 	if !found {
 		return false, nil

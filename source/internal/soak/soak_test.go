@@ -4,6 +4,9 @@
 package soak
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,7 +18,7 @@ func TestMain(m *testing.M) { testid.Main(m) }
 // A round that keeps a goroutine or some heap fails, and one that keeps
 // nothing past round N passes, even when it warms a cache first.
 func TestLeak(t *testing.T) {
-	defer testid.Line(t, "df78d")
+	defer testid.Line(t, "1a3jp8m")
 	const n = 50
 	var kept [][]byte
 	cache := map[int][]byte{}
@@ -46,5 +49,25 @@ func TestLeak(t *testing.T) {
 	}
 	if len(kept) != 2*n || len(cache) != n/2 {
 		t.Errorf("kept %d, cached %d", len(kept), len(cache))
+	}
+}
+
+// With ProfileEnv set, Check leaves a heap profile from each sample, for
+// pprof -base.
+func TestHeapProfiles(t *testing.T) {
+	defer testid.Line(t, "1a4jssw")
+	dir := t.TempDir()
+	t.Setenv(Env, "3")
+	t.Setenv(ProfileEnv, dir)
+	Check(t, func(int) error { return nil })
+	bin := strings.TrimSuffix(filepath.Base(os.Args[0]), ".test")
+	for _, which := range []string{"half", "double"} {
+		b, err := os.ReadFile(filepath.Join(dir, bin+"_TestHeapProfiles_"+which+".pb.gz"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(b, []byte{0x1f, 0x8b}) {
+			t.Errorf("%s: not a gzipped profile (%d bytes)", which, len(b))
+		}
 	}
 }

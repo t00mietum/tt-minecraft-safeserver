@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -32,9 +34,11 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/oldbuild"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	repairpkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/repair"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/settings"
 	setuppkg "github.com/t00mietum/tt-minecraft-safeserver/source/internal/setup"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/status"
@@ -42,7 +46,7 @@ import (
 )
 
 // version is set at release with -ldflags "-X main.version=...".
-var version = "v1.0.0-alpha.1"
+var version = "v1.0.0-beta.1"
 
 // defaultConfig is a var so tests don't read the host's real config.
 var defaultConfig = config.DefaultPath
@@ -51,6 +55,9 @@ const (
 	exitOK    = 0
 	exitError = 1
 	exitUsage = 2
+
+	// Most whole seconds that fit in a time.Duration.
+	maxWatchInterval = math.MaxInt64 / int64(time.Second)
 )
 
 type options struct {
@@ -63,7 +70,6 @@ type options struct {
 	warn       int
 	interval   int
 	check      bool
-	approve    bool
 	yes        bool
 	adopt      string
 	acceptEULA bool
@@ -106,7 +112,6 @@ var commands = []command{
 	{"repair", "Check the setup, and fix what's wrong", func(fs *flag.FlagSet, o *options) {
 		fs.BoolVar(&o.check, "check", false, "Only report, and change nothing. Doesn't need root")
 		fs.BoolVar(&o.check, "dry-run", false, "The same as --check")
-		fs.BoolVar(&o.approve, "approve-plugins", false, "Show each new or changed jar, and ask whether to approve it")
 	}},
 	{"setup", "Install the server, or adopt a server folder", func(fs *flag.FlagSet, o *options) {
 		if config.NativeMode {
@@ -124,7 +129,7 @@ var commands = []command{
 		// --self is deferred: packages and the install script update the binary (backlog 2026111318002865).
 		// fs.BoolVar(&o.parts.Self, "self", false, "Replace tt-minecraftd with its newest release from GitHub. On NixOS, say what to change")
 		fs.BoolVar(&o.parts.Paper, "paper", false, "Update Paper to the newest stable build of its Minecraft version")
-		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the approved plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
+		fs.BoolVar(&o.parts.Plugins, "plugins", false, "Update the plugins whose source is known, such as Geyser and Floodgate, and ask the update agent about the rest when agent is set")
 		fs.BoolVar(&o.parts.Image, "image", false, "Pull the newest build of the image's tag, check its Java, and pin its digest in the config")
 		fs.StringVar(&o.mcVersion, "mc-version", "", "Move Paper to Minecraft version `V`. Asks even with --yes, and takes a ZFS snapshot first")
 		fs.BoolVar(&o.yes, "yes", false, "Don't ask before changing things")
@@ -155,21 +160,36 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == retireCmd {
+		return failed(retireBuild(args[1:], stdout, stderr), stderr)
+	}
 	inv, code, done := prepare(args, stdout, stderr)
 	if done {
 		return code
 	}
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	if err := dispatch(ctx, inv, stdout); err != nil {
-		var code exitCode
-		if errors.As(err, &code) {
-			return int(code)
-		}
-		fmt.Fprintf(stderr, "tt-minecraftd: %v\n", err)
-		return exitError
+	return failed(dispatch(ctx, inv, stdout), stderr)
+}
+
+// failed shows err and gives the exit code for it.
+func failed(err error, stderr io.Writer) int {
+	if err == nil {
+		return exitOK
 	}
-	return exitOK
+	var code exitCode
+	if errors.As(err, &code) {
+		return int(code)
+	}
+	// Errors often name a file the server account named.
+	fmt.Fprintf(stderr, "tt-minecraftd: %s\n", server.CleanLines(err.Error()))
+	// The boot unit's start --foreground ends with the server's own code, so
+	// systemd sees a crash.
+	var exit launch.ExitError
+	if errors.As(err, &exit) && exit.Code > 0 && exit.Code < 256 {
+		return exit.Code
+	}
+	return exitError
 }
 
 func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
@@ -177,15 +197,14 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	if name == "status" || name == "watch" {
 		runner := host.NewExec(false)
 		runner.QuietErr = true
-		probe := status.NewProbe(runner, &inv.cfg, inv.pluginsFile())
+		probe := status.NewProbe(runner, &inv.cfg)
 		if name == "status" {
-			width, _ := terminal(stdout)
-			return probe.Take(ctx).Write(stdout, width)
+			return showStatus(ctx, probe, stdout)
 		}
 		return watch(ctx, probe, stdout, time.Duration(inv.opts.interval)*time.Second)
 	}
 	if name == "repair" {
-		return repair(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
+		return repair(ctx, inv, stdout, os.Geteuid() == 0)
 	}
 	if name == "setup" {
 		return setup(ctx, inv, os.Stdin, stdout, os.Geteuid() == 0)
@@ -198,7 +217,7 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 	}
 	runner := host.NewExec(inv.opts.dryRun)
 	runner.Out = stdout
-	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, PluginsFile: inv.pluginsFile(), Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, Sleep: time.Sleep}
+	kit := launch.Kit{Run: runner, Cfg: &inv.cfg, Out: stdout, Root: runner.Root, DryRun: inv.opts.dryRun, InUnit: inUnit()}
 	if name == "start" || name == "stop" {
 		served, err := bootServes(ctx, inv.configPath)
 		switch {
@@ -238,15 +257,19 @@ func dispatch(ctx context.Context, inv invocation, stdout io.Writer) error {
 var serverMode = func(ctx context.Context, c *config.Config) string {
 	runner := host.NewExec(false)
 	runner.QuietErr = true
-	mode, _ := status.NewProbe(runner, c, "").Mode(ctx)
+	mode, _ := status.NewProbe(runner, c).Mode(ctx) // can't tell: follow keeps runMode
 	return mode
 }
+
+// inUnit says whether this process runs inside the boot unit. A var so
+// tests don't depend on where they run.
+var inUnit = boot.InsideNow
 
 // bootServes says whether the boot unit is enabled for this config, from
 // outside the unit. Its own start --foreground and stop do the real work. A
 // var so tests don't read the host's units.
 var bootServes = func(ctx context.Context, configPath string) (bool, error) {
-	if boot.InsideNow() {
+	if inUnit() {
 		return false, nil
 	}
 	runner := host.NewExec(false)
@@ -256,8 +279,8 @@ var bootServes = func(ctx context.Context, configPath string) (bool, error) {
 
 // follow points stop, console, and cmd at a server that runs natively when
 // runMode names a container, or the other way round, as after start
-// --native. Without it, stop says it isn't running and hands the trees back
-// under it. Boxed already follows a container to the other runtime.
+// --native. Without it, stop says the server isn't running and hands the
+// trees back while it runs. Boxed already follows a container to the other runtime.
 func follow(ctx context.Context, c *config.Config, w io.Writer) {
 	mode := serverMode(ctx, c)
 	if mode == "" || (mode == "native") == (c.RunMode == "native") {
@@ -267,20 +290,25 @@ func follow(ctx context.Context, c *config.Config, w io.Writer) {
 	c.RunMode = mode
 }
 
-// pluginsFile is the approved jar list, beside the config, so a second
-// --config gets its own.
+// pluginsFile is plugins.shcl, the plugins' sources for update, beside the
+// config, so a second --config gets its own.
 func (inv invocation) pluginsFile() string {
 	return filepath.Join(filepath.Dir(inv.configPath), "plugins.shcl")
+}
+
+// sudoAndExe finds sudo and this binary, for asRoot and asRootAndWait.
+func sudoAndExe() (sudo, exe string, err error) {
+	if sudo, err = exec.LookPath("sudo"); err != nil {
+		return "", "", fmt.Errorf("this needs root, and there's no sudo: %w", err)
+	}
+	exe, err = os.Executable()
+	return sudo, exe, err
 }
 
 // asRoot runs the tool again through sudo with the same arguments, for setup,
 // update, and repair. A var so tests don't exec.
 var asRoot = func(args []string) error {
-	sudo, err := exec.LookPath("sudo")
-	if err != nil {
-		return fmt.Errorf("this needs root, and there's no sudo: %w", err)
-	}
-	exe, err := os.Executable()
+	sudo, exe, err := sudoAndExe()
 	if err != nil {
 		return err
 	}
@@ -309,6 +337,8 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 	// With no path to it, the copy to /usr/local/bin is left out.
 	exe, _ := os.Executable()
 	runner, accounts := setupSteps(inv)
+	// Tests give stand-ins for these through the Host; empty means the real ones.
+	bins := accounts(&inv.cfg)
 	s := &setuppkg.Setup{
 		Run:         runner,
 		Loaded:      &inv.cfg,
@@ -322,6 +352,9 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		In:          bufio.NewScanner(in),
 		Out:         w,
 		Exe:         exe,
+		PkgBin:      bins.PkgBin,
+		LocalBin:    bins.LocalBin,
+		OldBuilds:   bins.OldBuilds,
 		Accounts:    accounts,
 		Paper:       paperAPI,
 		Geyser:      geyserAPI,
@@ -329,8 +362,7 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 			again := inv
 			again.cfg = *c
 			again.opts.check = check
-			again.opts.approve = false
-			return repair(ctx, again, in, w, root)
+			return repair(ctx, again, w, root)
 		},
 		// setup asked already.
 		Update: func(ctx context.Context, c *config.Config) error {
@@ -342,6 +374,31 @@ func setup(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root 
 		},
 	}
 	return s.Do(ctx)
+}
+
+// retireCmd is left out of the help. install.bash runs it through sudo,
+// from the build it's about to install, so the build it replaces is kept
+// the same way setup and repair keep one. It copies rather than moves, so
+// install.bash's rename of the new build is the only change to the path,
+// and something is always there. See design.md, Boot.
+const retireCmd = "retire-build"
+
+// oldBuilds is a var so tests don't reach the real folder.
+var oldBuilds = oldbuild.Dir
+
+func retireBuild(args []string, w, errW io.Writer) error {
+	if len(args) != 1 || filepath.Base(args[0]) != "tt-minecraftd" || !filepath.IsAbs(args[0]) {
+		return errors.New(retireCmd + " takes the full path of one tt-minecraftd build")
+	}
+	to, warn, err := oldbuild.Keep(args[0], oldBuilds, time.Now())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Kept a copy of %s as %s.\n", args[0], to)
+	if warn != nil {
+		fmt.Fprintf(errW, "warning: %s\n", warn)
+	}
+	return nil
 }
 
 var userAgent = "tt-minecraftd/" + version + " (https://github.com/t00mietum/tt-minecraft-safeserver)"
@@ -396,6 +453,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		MCVersion: inv.opts.mcVersion,
 		Root:      root,
 	}
+	u.Running = func(ctx context.Context) (bool, error) { return launch.Running(ctx, u.Run, &inv.cfg) }
 	// Before sudo asks for a password.
 	if err := u.Check(); err != nil {
 		return err
@@ -410,6 +468,7 @@ func update(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 		}
 		u.Agent = a.Replay
 	case !agentOn || inv.opts.agentAnswer != "":
+		// Nothing to ask. An answer file goes on to the root run.
 	case root:
 		u.AgentNote = "the update agent isn't asked when update starts as root. Run update without sudo, and it asks the agent before it runs itself through sudo"
 	default:
@@ -458,24 +517,19 @@ func askThenRoot(ctx context.Context, u *updatepkg.Update, args []string) error 
 // runs as a child. Ctrl-C reaches both, and run's signal context keeps this
 // one waiting. A var so tests don't exec.
 var asRootAndWait = func(args []string) error {
-	sudo, err := exec.LookPath("sudo")
-	if err != nil {
-		return fmt.Errorf("this needs root, and there's no sudo: %w", err)
-	}
-	exe, err := os.Executable()
+	sudo, exe, err := sudoAndExe()
 	if err != nil {
 		return err
 	}
 	cmd := exec.Command(sudo, append([]string{"--", exe}, args...)...) // #nosec G204 -- this binary, with its own arguments
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	err = cmd.Run()
 	var exit *exec.ExitError
-	if err := cmd.Run(); errors.As(err, &exit) {
+	if errors.As(err, &exit) {
 		// The root run said what went wrong.
 		return exitCode(max(exit.ExitCode(), exitError))
-	} else if err != nil {
-		return err
 	}
-	return nil
+	return err
 }
 
 // exitCode is an exit code with nothing more to say.
@@ -488,19 +542,20 @@ func (e exitCode) Error() string { return "exit status " + strconv.Itoa(int(e)) 
 var repairSteps = func(inv invocation) (h *repairpkg.Host, before, after []repairpkg.Check) {
 	runner := host.NewExec(false)
 	runner.QuietErr = true
+	runner.NoPrompt = inv.opts.check
 	return repairpkg.NewHost(runner, &inv.cfg, inv.configPath), repairpkg.Before, repairpkg.After
 }
 
 // repair runs design.md's repair checks that are built so far. Each one prints
-// OK, FIXED, or FAILED. --approve-plugins asks on in. Fixing needs root, so
-// like setup it runs itself again through sudo.
-func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root bool) error {
+// OK, FIXED, or FAILED. Fixing needs root, so like setup it runs itself again
+// through sudo.
+func repair(ctx context.Context, inv invocation, w io.Writer, root bool) error {
 	if !inv.opts.check && !root {
 		return asRoot(inv.args)
 	}
 	failed := false
 	report := func(state, text string) {
-		fmt.Fprintf(w, "%-7s %s\n", state, text)
+		fmt.Fprintf(w, "%-7s %s\n", state, server.CleanLines(text))
 		failed = failed || state == "FAILED"
 	}
 	h, before, after := repairSteps(inv)
@@ -526,7 +581,7 @@ func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	for _, warn := range settings.Warnings(inv.cfg.ServerDir) {
 		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
-	repairPlugins(inv, in, w, report)
+	repairPlugins(inv, w, report)
 	repairpkg.Run(ctx, h, after, inv.opts.check, report)
 	if failed {
 		return errors.New("not everything is in place")
@@ -534,136 +589,62 @@ func repair(ctx context.Context, inv invocation, in io.Reader, w io.Writer, root
 	return nil
 }
 
-// repairPlugins reports jars that aren't approved, and with --approve-plugins
-// asks about each one. A refused jar moves to plugins-refused/. Running out of
-// answers leaves the rest as they are.
-func repairPlugins(inv invocation, in io.Reader, w io.Writer, report func(state, text string)) {
+// repairPlugins gives Geyser and Floodgate GeyserMC's source when
+// plugins.shcl has none for them, so update --plugins keeps them current.
+// Nothing else about a jar is checked since 2026111914293176.
+func repairPlugins(inv invocation, w io.Writer, report func(state, text string)) {
 	file := inv.pluginsFile()
-	approved, warns, err := plugins.ReadApproved(file)
+	_, warns, err := plugins.ReadSources(file)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		report("FAILED", "plugins: "+err.Error())
 		return
 	}
 	for _, warn := range warns {
-		fmt.Fprintf(w, "warning: %s\n", warn)
+		fmt.Fprintf(w, "warning: %s\n", server.Clean(warn.String()))
 	}
-	c, err := plugins.CheckJars(inv.cfg.ServerDir, approved, &plugins.Sums{})
+	jars, err := repairpkg.GeyserSources(inv.cfg.ServerDir, inv.cfg.OwnerTrees, file, geyserAPI.Source)
 	if err != nil {
 		report("FAILED", "plugins: "+err.Error())
 		return
 	}
-	if c.OK() {
-		report("OK", fmt.Sprintf("plugins: %d %s, all approved", c.Jars, plural(c.Jars, "jar")))
+	switch {
+	case len(jars) == 0:
+		report("OK", "plugin sources")
 		return
-	}
-	if !inv.opts.approve {
-		for _, name := range c.New {
-			report("FAILED", name+" isn't approved; repair --approve-plugins shows it and asks")
-		}
-		for _, name := range c.Changed {
-			report("FAILED", name+" changed since it was approved; repair --approve-plugins shows it and asks")
+	case inv.opts.check:
+		for _, j := range jars {
+			report("FAILED", j.Name+" has no source, so update --plugins skips it; repair gives it "+j.Source)
 		}
 		return
 	}
-
-	jars, err := plugins.Jars(inv.cfg.ServerDir)
-	if err != nil {
-		report("FAILED", "plugins: "+err.Error())
+	// A warning, not FAILED: sources only feed update --plugins.
+	var nk *plugins.NotKept
+	if err := plugins.SetSources(file, jars); errors.As(err, &nk) {
+		fmt.Fprintf(w, "warning: %s\n", server.Clean(nk.Error()))
+		return
+	} else if err != nil {
+		report("FAILED", "plugins: can't write "+file+": "+err.Error())
 		return
 	}
-	asked := make(map[string]bool, len(c.New)+len(c.Changed))
-	for _, name := range append(c.New, c.Changed...) {
-		asked[name] = true
-	}
-	answers := bufio.NewScanner(in)
-	var yes []plugins.Info
-	var left []string
 	for _, j := range jars {
-		if !asked[j.Name] {
-			continue
-		}
-		if len(left) > 0 {
-			left = append(left, j.Name)
-			continue
-		}
-		info, err := plugins.Describe(j)
-		if err != nil {
-			report("FAILED", j.Name+": "+err.Error())
-			continue
-		}
-		about := info.About
-		if about == "" {
-			about = "no plugin.yml"
-		}
-		state := "new"
-		if slices.Contains(c.Changed, j.Name) {
-			state = "changed"
-		}
-		fmt.Fprintf(w, "\n%s (%s)\n  sha256: %s\n  size:   %d bytes\n  date:   %s\n  says:   %s\n",
-			j.Name, state, info.SHA256, info.Size, info.Mod.Format("2006-01-02 15:04:05"), about)
-		// A changed jar keeps the source it has.
-		if p := geyser.Project(info.Name, info.About); state == "new" && p != "" {
-			info.Source = geyserAPI.Source(p)
-			fmt.Fprintf(w, "  source: %s\n", info.Source)
-		}
-		answer, ok := ask(answers, w, "Approve it? [y/n] ")
-		switch {
-		case !ok:
-			left = append(left, j.Name)
-		case answer:
-			yes = append(yes, info)
-		default:
-			dest, err := plugins.Refuse(inv.cfg.ServerDir, j, time.Now())
-			switch {
-			case err != nil:
-				report("FAILED", j.Name+" isn't approved: "+err.Error())
-			default:
-				report("FIXED", j.Name+" refused, and moved to "+dest)
-			}
-		}
-	}
-	fmt.Fprintln(w)
-	if len(yes) > 0 {
-		if err := plugins.Approve(file, yes); err != nil {
-			report("FAILED", "plugins: can't write the approved list: "+err.Error())
-			return
-		}
-		for _, j := range yes {
-			report("FIXED", j.Name+" approved")
-		}
-	}
-	for _, name := range left {
-		report("FAILED", name+" isn't approved; no answer")
+		report("FIXED", j.Name+" gets its updates from "+j.Source)
 	}
 }
 
-// ask reads y or n, and asks again on anything else. ok is false when the
-// answers ran out.
-func ask(answers *bufio.Scanner, w io.Writer, prompt string) (yes, ok bool) {
-	for {
-		fmt.Fprint(w, prompt)
-		if !answers.Scan() {
-			fmt.Fprintln(w)
-			return false, false
-		}
-		switch strings.ToLower(strings.TrimSpace(answers.Text())) {
-		case "y", "yes":
-			return true, true
-		case "n", "no":
-			return false, true
-		}
+// showStatus prints one reading. One cut short by Ctrl-C is all errors, so
+// it isn't shown.
+func showStatus(ctx context.Context, probe *status.Probe, w io.Writer) error {
+	width, _ := terminal(w)
+	rep := probe.Take(ctx)
+	if ctx.Err() != nil {
+		return fmt.Errorf("status: %w before the reading was done", launch.ErrInterrupted)
 	}
-}
-
-func plural(n int, word string) string {
-	if n == 1 {
-		return word
-	}
-	return word + "s"
+	return rep.Write(w, width)
 }
 
 // watch redraws status until Ctrl-C. On a terminal each redraw replaces the
-// last one; elsewhere they follow one another.
+// last one; elsewhere they follow one another. A reading cut short by Ctrl-C
+// isn't drawn, so the last whole one stays on the screen.
 func watch(ctx context.Context, probe *status.Probe, w io.Writer, every time.Duration) error {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
@@ -674,7 +655,11 @@ func watch(ctx context.Context, probe *status.Probe, w io.Writer, every time.Dur
 			b.WriteString("\x1b[H\x1b[2J")
 		}
 		fmt.Fprintf(&b, "\nEvery %s, until Ctrl-C. %s\n", every, time.Now().Format("15:04:05"))
-		if err := probe.Take(ctx).Write(&b, width); err != nil {
+		rep := probe.Take(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := rep.Write(&b, width); err != nil {
 			return err
 		}
 		if _, err := w.Write(b.Bytes()); err != nil {
@@ -785,17 +770,13 @@ func prepare(args []string, stdout, stderr io.Writer) (inv invocation, code int,
 		return usageErr("start: --debug and --foreground don't go together")
 	case o.warn < 0:
 		return usageErr("stop: --warn takes 0 or more seconds")
-	case o.approve && o.check:
-		return usageErr("repair: --approve-plugins and --check don't go together")
-	case name == "watch" && o.interval < 1:
-		return usageErr("watch: --interval takes 1 or more seconds")
+	case name == "watch" && (o.interval < 1 || int64(o.interval) > maxWatchInterval):
+		// The upper bound keeps Duration(n)*Second from overflowing, which makes NewTicker panic.
+		return usageErr("watch: --interval takes %d to %d seconds", 1, maxWatchInterval)
 	}
 	inv.opts = o
 	inv.args = args
-	inv.configPath = o.configPath
-	if inv.configPath == "" {
-		inv.configPath = defaultConfig
-	}
+	inv.configPath = cmp.Or(o.configPath, defaultConfig)
 
 	cfg, warns, err := loadConfig(o, name == "setup", stderr)
 	var pathErr *fs.PathError
@@ -820,10 +801,7 @@ func loadConfig(o options, setup bool, stderr io.Writer) (config.Config, []confi
 	if o.configPath != "" && !setup {
 		return config.Load(o.configPath, o.sets)
 	}
-	path := o.configPath
-	if path == "" {
-		path = defaultConfig
-	}
+	path := cmp.Or(o.configPath, defaultConfig)
 	cfg, warns, err := config.Load(path, o.sets)
 	if errors.Is(err, fs.ErrNotExist) {
 		// setup writes it, and reads it again itself on an existing install.
@@ -877,7 +855,8 @@ func writeAbout(w io.Writer) {
 
 tt-minecraftd runs a Paper Minecraft server for friends, locked down. The
 server runs in a container, or in a systemd sandbox, as its own account. Every
-start checks the safe settings and the plugin jars first.
+start checks the safe settings first, and plugin jars are read-only while it
+runs.
 
 Copyright © 2026 t00mietum. GPL v2 or later.
 https://github.com/t00mietum/tt-minecraft-safeserver

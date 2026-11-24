@@ -15,7 +15,7 @@
 ##		  quarter when its load is over half of them.
 ##	Syntax:
 ##		arm64-tests.bash SSH_TARGET BIN_DIR RUN_NAME STATE_DIR [VAR=value...]
-##		  BIN_DIR    holds the <package>.test binaries and a pkgdirs file of "<binary> <folder>" lines
+##		  BIN_DIR    has the <package>.test binaries and a pkgdirs file of "<binary> <folder>" lines
 ##		  STATE_DIR  gets "reached" once the box answers, and "rc" with this script's exit status
 ##		  VAR=value  passed to every test binary
 ##	Exit: 0 every test passed, 1 a test failed or the box broke off partway, 3 the box didn't answer.

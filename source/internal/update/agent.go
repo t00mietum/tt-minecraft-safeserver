@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/url"
 	"os"
 	"path"
@@ -22,8 +21,10 @@ import (
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/agent"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 )
 
 // AgentAnswer is what the operator's run got from the agent, handed to the
@@ -165,7 +166,7 @@ func (u *Update) question(asks []plugins.Approved) agent.Question {
 	return q
 }
 
-// agentStep is a newer build of an approved jar that the agent found, not
+// agentStep is a newer build of a jar in the tree that the agent found, not
 // yet downloaded.
 type agentStep struct {
 	jar   plugins.Approved
@@ -183,11 +184,11 @@ func (u *Update) agentSteps(asks []plugins.Approved, q agent.Question, ans agent
 	answered := make(map[string]bool, len(q.Jars))
 	for _, r := range c.Refused {
 		answered[r.Jar] = true
-		fmt.Fprintf(u.Out, "%-7s %s: the update agent's build is refused, since %s\n", "SKIPPED", r.Jar, r.Why)
+		fmt.Fprintf(u.Out, "%-7s %s: the update agent's build is refused, since %s\n", "SKIPPED", server.Clean(r.Jar), r.Why)
 	}
 	for _, s := range c.Current {
 		answered[s.Jar] = true
-		fmt.Fprintf(u.Out, "%-7s %s: the update agent found nothing newer. %s\n", "OK", s.Jar, s.Notes)
+		fmt.Fprintf(u.Out, "%-7s %s: the update agent found nothing newer. %s\n", "OK", server.Clean(s.Jar), s.Notes)
 	}
 	var steps []agentStep
 	for _, s := range c.Updates {
@@ -198,7 +199,7 @@ func (u *Update) agentSteps(asks []plugins.Approved, q agent.Question, ans agent
 	}
 	for _, j := range q.Jars {
 		if !answered[j.Path] {
-			fmt.Fprintf(u.Out, "%-7s %s: no answer from the update agent\n", "SKIPPED", j.Path)
+			fmt.Fprintf(u.Out, "%-7s %s: no answer from the update agent\n", "SKIPPED", server.Clean(j.Path))
 		}
 	}
 	return steps
@@ -224,7 +225,7 @@ func hostOf(address string) string {
 func (s agentStep) plan(dryRun bool) string {
 	f := s.found
 	var b strings.Builder
-	fmt.Fprintf(&b, "Update %s from %s to %s, which the update agent found on %s: ", s.jar.Name, s.old, f.Version, hostOf(f.URL))
+	fmt.Fprintf(&b, "Update %s from %s to %s, which the update agent found on %s: ", server.Clean(s.jar.Name), s.old, f.Version, hostOf(f.URL))
 	if kind, sum := s.hash(); kind != "" {
 		fmt.Fprintf(&b, "check its %s %s is on %s, download it, check the hash and the plugin name, and ask before using it.", kind, sum, f.HashFrom)
 	} else {
@@ -242,11 +243,20 @@ func (s agentStep) plan(dryRun bool) string {
 // maxHashPage caps a hash page. It's searched as is, not handed to the agent.
 const maxHashPage = 4 << 20
 
+// fetcher gets the agent's jars and hash pages, with redirects held to
+// agentHosts like the addresses themselves. The client is made once a run,
+// so its connections are shared.
 func (u *Update) fetcher() download.Client {
-	if u.Fetch.HTTP == nil {
-		return download.Client{HTTP: agent.PublicClient(10 * time.Minute), UserAgent: u.Fetch.UserAgent}
+	c := u.Fetch
+	if u.held == nil {
+		base := c.HTTP
+		if base == nil {
+			base = agent.PublicClient(10 * time.Minute)
+		}
+		u.held = agent.HoldTo(base, u.Cfg.AgentHosts)
 	}
-	return u.Fetch
+	c.HTTP = u.held
+	return c
 }
 
 // hashOnPage checks the hash the agent gave is on the page it named.
@@ -269,22 +279,19 @@ func (u *Update) hashOnPage(ctx context.Context, page, sum string) error {
 // openUnder opens the folder rel under serverDir without following links,
 // since the server account may own the tree.
 func openUnder(serverDir, rel string) (int, error) {
-	fd, err := syscall.Open(serverDir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	top, err := linksafe.Open(serverDir)
 	if err != nil {
-		return -1, &fs.PathError{Op: "open", Path: serverDir, Err: err}
+		return -1, err
 	}
-	for _, part := range strings.Split(rel, "/") {
-		if part == "" || part == "." {
-			continue
-		}
-		next, err := syscall.Openat(fd, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-		_ = syscall.Close(fd) // a folder, opened to read
-		if err != nil {
-			return -1, &fs.PathError{Op: "open", Path: filepath.Join(serverDir, rel), Err: err}
-		}
-		fd = next
+	if rel = strings.TrimSuffix(rel, "/"); rel == "" {
+		return top.Fd(), nil
 	}
-	return fd, nil
+	defer top.Close()
+	d, err := top.Walk(rel)
+	if err != nil {
+		return -1, err
+	}
+	return d.Fd(), nil
 }
 
 // claimedName is the plugin name the jar named name in dirfd says it is.
@@ -373,11 +380,11 @@ func (u *Update) getAgentPaper(ctx context.Context, s paperStep) (size int64, us
 func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	f := s.found
 	if u.DryRun {
-		fmt.Fprintf(u.Out, "would check %s's hash page, download %s over it, check it, and ask before using it\n", s.jar.Name, f.Version)
+		fmt.Fprintf(u.Out, "would check %s's hash page, download %s over it, check it, and ask before using it\n", server.Clean(s.jar.Name), f.Version)
 		return nil
 	}
 	failed := func(err error) error {
-		fmt.Fprintf(u.Out, "%-7s %s: %v; not used\n", "FAILED", s.jar.Name, err)
+		fmt.Fprintf(u.Out, "%-7s %s: %s; not used\n", "FAILED", server.Clean(s.jar.Name), server.Clean(err.Error()))
 		return nil
 	}
 	kind, sum := s.hash()
@@ -406,7 +413,7 @@ func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	case kind == "SHA-256" && got.SHA256 != sum, kind == "SHA-512" && got.SHA512 != sum:
 		err = fmt.Errorf("its %s doesn't match the one on its hash page", kind)
 	case oldName == "":
-		err = errors.New("the approved jar doesn't say which plugin it is, so the download can't be matched to it")
+		err = errors.New("the jar in the tree doesn't say which plugin it is, so the download can't be matched to it")
 	case newName != oldName:
 		err = fmt.Errorf("the download says it's %q, not %q", newName, oldName)
 	}
@@ -418,19 +425,16 @@ func (u *Update) getAgentJar(ctx context.Context, s agentStep) error {
 	if kind == "" {
 		fmt.Fprintln(u.Out, "  warning: its source publishes no hash, so only the plugin name was checked")
 	}
-	if !u.ask(fmt.Sprintf("Use it in place of %s? [y/n] ", s.jar.Name)) {
+	if !u.ask(fmt.Sprintf("Use it in place of %s? [y/n] ", server.Clean(s.jar.Name))) {
 		got.Drop()
-		fmt.Fprintf(u.Out, "%-7s %s: kept as it was\n", "SKIPPED", s.jar.Name)
+		fmt.Fprintf(u.Out, "%-7s %s: kept as it was\n", "SKIPPED", server.Clean(s.jar.Name))
 		return nil
 	}
 	if err := got.Keep(); err != nil {
 		return err
 	}
-	fmt.Fprintf(u.Out, "%-7s %s %s downloaded over %s\n", "FIXED", newName, f.Version, s.jar.Name)
-	// No source: the agent's address isn't one update knows how to follow.
-	if err := plugins.Approve(u.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: s.jar.Name}, SHA256: got.SHA256, Size: got.Size}}); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
-	}
-	fmt.Fprintf(u.Out, "%-7s %s approved\n", "FIXED", s.jar.Name)
+	// plugins.shcl isn't touched: the agent's address isn't a source update
+	// knows how to follow.
+	fmt.Fprintf(u.Out, "%-7s %s %s downloaded over %s\n", "FIXED", newName, f.Version, server.Clean(s.jar.Name))
 	return nil
 }

@@ -13,5 +13,6 @@ import (
 func TestMain(m *testing.M) {
 	// So start and stop never follow the host's own boot unit.
 	bootServes = func(context.Context, string) (bool, error) { return false, nil }
+	inUnit = func() bool { return false }
 	testid.Main(m)
 }

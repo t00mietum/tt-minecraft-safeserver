@@ -4,15 +4,22 @@
 package server
 
 import (
+	"errors"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"syscall"
 	"testing"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
-// A name or chat line can't hold escape codes or flip the text direction of
+// A name or chat line can't send escape codes or flip the text direction of
 // what the operator reads.
 func TestClean(t *testing.T) {
-	defer testid.Line(t, "df78h")
+	defer testid.Line(t, "1a3jpn4")
 	for _, c := range []struct{ in, want string }{
 		{"Alex", "Alex"},
 		{"Mal\x1b[2Jory\x7f\u0085", "Mal[2Jory"},
@@ -23,6 +30,176 @@ func TestClean(t *testing.T) {
 	} {
 		if got := Clean(c.in); got != c.want {
 			t.Errorf("Clean(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// watchOpens reports whether file was opened since the last call. inotify
+// sees every open but an O_PATH one.
+func watchOpens(t *testing.T, file string) func() bool {
+	t.Helper()
+	fd, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Close(fd) })
+	if _, err := syscall.InotifyAddWatch(fd, file, syscall.IN_OPEN); err != nil {
+		t.Fatal(err)
+	}
+	return func() bool {
+		buf := make([]byte, 4096)
+		seen := false
+		for {
+			n, err := syscall.Read(fd, buf)
+			if err != nil || n <= 0 {
+				return seen
+			}
+			seen = true
+		}
+	}
+}
+
+// OpenRegular refuses anything but a regular file before it opens it, so a
+// link to a device never runs the driver. A pipe stands in for the device,
+// since inotify shows whether it was opened.
+func TestOpenRegularChecksFirst(t *testing.T) {
+	defer testid.Line(t, "1a3jss4")
+	dir := t.TempDir()
+	fifo, plain := filepath.Join(dir, "fifo"), filepath.Join(dir, "plain")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain, []byte("text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	odd := []string{fifo, dir}
+	// A socket's path has to fit in sun_path.
+	if sock := filepath.Join(dir, "sock"); len(sock) < 100 {
+		l, err := net.Listen("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer l.Close()
+		odd = append(odd, sock)
+	}
+	for _, target := range append(odd, plain) {
+		if err := os.Symlink(target, target+".link"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opened := watchOpens(t, fifo)
+	for _, file := range odd {
+		for _, name := range []string{file, file + ".link"} {
+			f, err := OpenRegular(name)
+			if err == nil {
+				_ = f.Close()
+			}
+			if !errors.Is(err, ErrNotRegular) {
+				t.Errorf("%s: %v, want ErrNotRegular", name, err)
+			}
+		}
+	}
+	if opened() {
+		t.Error("the pipe was opened before its kind was checked")
+	}
+	for _, name := range []string{plain, plain + ".link"} {
+		f, err := OpenRegular(name)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		got, err := io.ReadAll(f)
+		_ = f.Close()
+		if err != nil || string(got) != "text" {
+			t.Errorf("%s read %q, %v", name, got, err)
+		}
+	}
+	if _, err := OpenRegular(filepath.Join(dir, "gone")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("missing file: %v", err)
+	}
+
+	// The watch itself sees an open.
+	f, err := os.OpenFile(fifo, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	if !opened() {
+		t.Error("inotify missed an open of the pipe")
+	}
+}
+
+// OpenLog follows no link below serverDir, since status runs as root and the
+// server account can put one in place of the log or its folder. serverDir
+// itself may be a link, as config allows.
+func TestOpenLogNoLinks(t *testing.T) {
+	defer testid.Line(t, "1a4z7n4")
+	base := t.TempDir()
+	secret := filepath.Join(base, "secret")
+	if err := os.WriteFile(secret, []byte("root only"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := filepath.Join(base, "srv")
+	if err := os.MkdirAll(filepath.Join(srv, "logs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenLog(srv); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("no log yet: %v, want not found", err)
+	}
+	if err := os.Symlink(secret, LogFile(srv)); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := OpenLog(srv); !errors.Is(err, ErrNotRegular) {
+		if err == nil {
+			_ = f.Close()
+		}
+		t.Errorf("latest.log a link: %v, want ErrNotRegular", err)
+	}
+	if err := os.Remove(LogFile(srv)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(srv, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(base, "other")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(other, "latest.log")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, filepath.Join(srv, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := OpenLog(srv); !errors.Is(err, linksafe.ErrLink) {
+		if err == nil {
+			_ = f.Close()
+		}
+		t.Errorf("logs a link: %v, want ErrLink", err)
+	}
+	if err := os.Remove(filepath.Join(srv, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(srv, "logs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LogFile(srv), []byte("a line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	top := filepath.Join(base, "top")
+	if err := os.Symlink(srv, top); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{srv, top} {
+		f, err := OpenLog(dir)
+		if err != nil {
+			t.Errorf("%s: %v", dir, err)
+			continue
+		}
+		got, err := io.ReadAll(f)
+		_ = f.Close()
+		if err != nil || string(got) != "a line\n" {
+			t.Errorf("%s read %q, %v", dir, got, err)
 		}
 	}
 }

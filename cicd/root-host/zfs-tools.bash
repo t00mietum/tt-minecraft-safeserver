@@ -1,6 +1,17 @@
 #!/bin/bash
-# zfs and zpool for root-host.bash --zfs, as root in the container. Nothing of
-# zfsutils may start: an import scan there would see this host's own pools.
+
+#  shellcheck enable=require-variable-braces  ## Every expansion braced: "${var}", not "$var".
+
+##	Purpose:
+##		- Installs zfs and zpool for root-host.bash --zfs, as root in the container.
+##		- Nothing of zfsutils may start: an import scan there would see this host's own pools.
+##	History: At bottom of script.
+
+##	Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
+##	Licensed under the GNU General Public License v2.0 or later. Full text at:
+##		https://spdx.org/licenses/GPL-2.0-or-later.html
+##	SPDX-License-Identifier: GPL-2.0-or-later
+
 set -euo pipefail
 
 units=(zfs-import-cache.service zfs-import-scan.service zfs-import.target zfs-mount.service
@@ -14,3 +25,7 @@ apt-get update -qq > /dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends zfsutils-linux > /dev/null
 rm /usr/sbin/policy-rc.d
 zfs version
+
+
+##	History:
+##		- 2026-11-12: Created.

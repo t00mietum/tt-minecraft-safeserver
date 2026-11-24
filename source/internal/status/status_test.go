@@ -5,8 +5,6 @@ package status
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -44,7 +42,7 @@ tcp   LISTEN 0 4096 *:19132 *:*
 udp   UNCONN 0 0   0.0.0.0:19132 0.0.0.0:*
 `
 
-// rig is a server tree, an approved list, and a fake host.
+// rig is a server tree and a fake host.
 type rig struct {
 	p       *Probe
 	r       *host.Fake
@@ -64,11 +62,6 @@ func write(t *testing.T, file, text string) {
 	}
 }
 
-func sum(text string) string {
-	s := sha256.Sum256([]byte(text))
-	return hex.EncodeToString(s[:])
-}
-
 func newRig(t *testing.T) *rig {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "srv", "server")
@@ -85,8 +78,6 @@ func newRig(t *testing.T) *rig {
 		fmt.Fprintf(&log, "[12:00:%02d INFO]: line %d\n", i, i)
 	}
 	write(t, filepath.Join(dir, "logs", "latest.log"), log.String())
-	list := filepath.Join(t.TempDir(), "plugins.shcl")
-	write(t, list, "jar: plugins/Geyser-Spigot.jar\n\tsha256: "+sum("geyser")+"\njar: plugins/floodgate.jar\n\tsha256: "+sum("floodgate")+"\njar: paper-26.3-244.jar\n\tsha256: "+sum("")+"\n")
 
 	cfg := config.Defaults()
 	cfg.RunMode = "docker"
@@ -109,7 +100,7 @@ func newRig(t *testing.T) *rig {
 	g.files = map[string]string{}
 	g.cgroup("4242", "/system.slice/docker-"+cid+".scope", 1<<30)
 	g.p = &Probe{
-		Run: g.r, Cfg: &cfg, PluginsFile: list,
+		Run: g.r, Cfg: &cfg,
 		ReadFile: func(f string) ([]byte, error) {
 			if s, ok := g.files[f]; ok {
 				return []byte(s), nil
@@ -157,7 +148,7 @@ func wantLines(t *testing.T, out string, want ...string) {
 }
 
 func TestStatusDocker(t *testing.T) {
-	defer testid.Line(t, "df5y7")
+	defer testid.Line(t, "1a3ejdw")
 	g := newRig(t)
 	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
 	out := g.text(t, 0)
@@ -172,7 +163,7 @@ func TestStatusDocker(t *testing.T) {
 		"Firewall:   on; run with sudo to see the drop counters",
 		"Whitelist:  3 players",
 		"Ops:        Steve, Evil[2J",
-		"Plugins:    3 jars, all approved",
+		"Plugins:    3 jars: plugins/Geyser-Spigot.jar, plugins/floodgate.jar, paper-26.3-244.jar", // was "3 jars, all approved" before 2026111914334569
 		"Boot unit:  enabled",
 		"Log:        "+filepath.Join(g.dir, "logs", "latest.log"),
 		"            [12:00:06 INFO]: line 6",
@@ -190,7 +181,7 @@ func TestStatusDocker(t *testing.T) {
 }
 
 func TestStatusNative(t *testing.T) {
-	defer testid.Line(t, "df5y8")
+	defer testid.Line(t, "1a3ejh0")
 	g := newRig(t)
 	g.p.Cfg.RunMode = "native"
 	g.p.Cfg.BindIP = "192.168.1.9"
@@ -210,9 +201,27 @@ func TestStatusNative(t *testing.T) {
 	}
 }
 
+// Geyser opens the Bedrock UDP socket only while a player joins, so no UDP
+// listener when idle reads as normal. A missing TCP listener still doesn't.
+func TestStatusBedrockIdle(t *testing.T) {
+	defer testid.Line(t, "1a3jsjw")
+	g := newRig(t)
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
+	g.replies["ss -H"] = "tcp   LISTEN 0 50  *:25565 *:*\n"
+	out := g.text(t, 0)
+	wantLines(t, out,
+		"Ports:      tcp *:25565 listening, 0 connections",
+		"            nothing listens on tcp 19132",
+		"            udp 19132 opens when a Bedrock player joins",
+	)
+	if strings.Contains(out, "nothing listens on udp") {
+		t.Errorf("idle UDP read as a fault:\n%s", out)
+	}
+}
+
 // Mode gives the server's mode from its cgroup, whatever runMode says.
 func TestProbeMode(t *testing.T) {
-	defer testid.Line(t, "df67y")
+	defer testid.Line(t, "1a3fgsr")
 	g := newRig(t)
 	if mode, err := g.p.Mode(context.Background()); mode != "" || err != nil {
 		t.Errorf("no server: %q, %v", mode, err)
@@ -231,7 +240,7 @@ func TestProbeMode(t *testing.T) {
 // As root, status shows the drop counters, and leaves out the ones the
 // config can't bump.
 func TestStatusFirewall(t *testing.T) {
-	defer testid.Line(t, "df67g")
+	defer testid.Line(t, "1a3ffe0")
 	g := newRig(t)
 	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
 	g.p.Root = true
@@ -270,7 +279,7 @@ func TestStatusFirewall(t *testing.T) {
 // Rootful Podman, which status can't ask without sudo. crun puts the server in
 // a cgroup under the container's scope.
 func TestStatusPodman(t *testing.T) {
-	defer testid.Line(t, "df64j")
+	defer testid.Line(t, "1a3f688")
 	g := newRig(t)
 	g.p.Cfg.RunMode = "podman"
 	g.replies["podman ps"] = "" // as without sudo
@@ -284,7 +293,7 @@ func TestStatusPodman(t *testing.T) {
 // Only a Paper server in a container that this tool started counts as the
 // server. Any other one is named, since start refuses to run beside it.
 func TestStatusOtherPaper(t *testing.T) {
-	defer testid.Line(t, "df652")
+	defer testid.Line(t, "1a3f7t8")
 	g := newRig(t)
 	g.replies["ps -eo"] = "    0 3001 3000 60 /sbin/docker-init -- /start\n    0 3002 3001 60 java -jar paper.jar\n" + boxedPs("/sbin/docker-init")
 	g.cgroup("3002", "/docker/"+cid, 1<<20)
@@ -320,7 +329,7 @@ func TestStatusOtherPaper(t *testing.T) {
 // Stopped, with an old script's server still up, a changed jar, and the
 // firewall and Bedrock off.
 func TestStatusStopped(t *testing.T) {
-	defer testid.Line(t, "df5y9")
+	defer testid.Line(t, "1a3ejm4")
 	g := newRig(t)
 	g.replies["ps -eo"] = "    0 811 1 99999 /usr/bin/java -Xmx4G -jar paper-26.3-244.jar --nogui\n"
 	g.replies["systemctl show tt-minecraftd.service"] = ""
@@ -339,7 +348,7 @@ func TestStatusStopped(t *testing.T) {
 		"Ports:      tcp *:25565 listening, 2 connections",
 		"Firewall:   off in the config",
 		"Ops:        none",
-		"Plugins:    4 jars, NOT all approved, so start refuses; new: plugins/new.jar; changed: plugins/floodgate.jar",
+		"Plugins:    4 jars: plugins/Geyser-Spigot.jar, plugins/floodgate.jar, plugins/new.jar, paper-26.3-244.jar", // was "NOT all approved" before 2026111914334569
 		"Boot unit:  not installed",
 	)
 	if g.pinged != "" || strings.Contains(out, "udp") || strings.Contains(out, "Players:") {
@@ -349,19 +358,18 @@ func TestStatusStopped(t *testing.T) {
 
 // A part that can't be read says why, and the rest still shows.
 func TestStatusBroken(t *testing.T) {
-	defer testid.Line(t, "df5ya")
+	defer testid.Line(t, "1a3ejq8")
 	g := newRig(t)
 	g.r.Reply = func(c host.Cmd) ([]byte, error) {
 		return nil, errors.New(c.Args[0] + ": permission denied")
 	}
-	g.p.PluginsFile = filepath.Join(t.TempDir(), "plugins.shcl")
 	write(t, filepath.Join(g.dir, "whitelist.json"), "{not json")
 	out := g.text(t, 30)
 	wantLines(t, out,
 		"Server:     can't list process",
 		"Ports:      can't list sockets",
 		"Whitelist:  can't read it: whi",
-		"Plugins:    no approved list a",
+		"Plugins:    3 jars: plugins/Ge", // was "no approved list" before 2026111914334569
 		"Boot unit:  can't ask systemd:",
 	)
 	for _, l := range strings.Split(out, "\n") {
@@ -374,7 +382,7 @@ func TestStatusBroken(t *testing.T) {
 // A tree this login can't read says why: the jar line says so rather than
 // that there's no paper.jar, and the trees say to log in again.
 func TestStatusTreeDenied(t *testing.T) {
-	defer testid.Line(t, "df74y")
+	defer testid.Line(t, "1a3jbdr")
 	if os.Geteuid() == 0 {
 		t.Skip("root reads the tree anyway")
 	}
@@ -403,17 +411,55 @@ func TestStatusTreeDenied(t *testing.T) {
 	}
 }
 
+// status runs with sudo, so a log link the server account planted mustn't
+// show what it points to, nor a logs folder that's a link.
+func TestStatusLogLink(t *testing.T) {
+	defer testid.Line(t, "1a4z7n5")
+	g := newRig(t)
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
+	secret := filepath.Join(t.TempDir(), "secret")
+	write(t, secret, "root only\n")
+	logs := filepath.Join(g.dir, "logs")
+	if err := os.RemoveAll(logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(logs, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, server.LogFile(g.dir)); err != nil {
+		t.Fatal(err)
+	}
+	out := g.text(t, 0)
+	if strings.Contains(out, "root only") || !strings.Contains(out, "Log:        can't read it: ") {
+		t.Errorf("latest.log a link:\n%s", out)
+	}
+	if err := os.RemoveAll(logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(secret), logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(secret, filepath.Join(filepath.Dir(secret), "latest.log")); err != nil {
+		t.Fatal(err)
+	}
+	out = g.text(t, 0)
+	if strings.Contains(out, "root only") || !strings.Contains(out, "Log:        can't read it: ") {
+		t.Errorf("logs a link:\n%s", out)
+	}
+}
+
 func TestTailFile(t *testing.T) {
-	defer testid.Line(t, "df5yb")
-	file := filepath.Join(t.TempDir(), "latest.log")
+	defer testid.Line(t, "1a3ejtc")
+	dir := t.TempDir()
+	file := server.LogFile(dir)
 	big := strings.Repeat("x", 100<<10) + "\nnext to last\nlast\r\n\n"
 	write(t, file, big)
-	got, err := tailFile(file, 3)
+	got, err := tailLog(dir, 3)
 	if err != nil || len(got) != 2 || got[0] != "next to last" || got[1] != "last" {
 		t.Errorf("tail = %q, %v; want the 2 short lines", got, err)
 	}
 	write(t, file, "")
-	if got, err := tailFile(file, 3); err != nil || len(got) != 0 {
+	if got, err := tailLog(dir, 3); err != nil || len(got) != 0 {
 		t.Errorf("empty log: %q, %v", got, err)
 	}
 }
@@ -421,7 +467,7 @@ func TestTailFile(t *testing.T) {
 // The server owns its tree, so a pipe or a device in place of a file it reads
 // mustn't hang status or feed it without end.
 func TestStatusHostileFiles(t *testing.T) {
-	defer testid.Line(t, "df5yh")
+	defer testid.Line(t, "1a3ekd4")
 	g := newRig(t)
 	for _, f := range []string{"ops.json", "logs/latest.log", "plugins/floodgate.jar"} {
 		path := filepath.Join(g.dir, f)
@@ -445,7 +491,7 @@ func TestStatusHostileFiles(t *testing.T) {
 	go func() { done <- g.text(t, 0) }()
 	select {
 	case out := <-done:
-		wantLines(t, out, "Plugins:    3 jars, NOT all approved, so start refuses; changed: plugins/Geyser-Spigot.jar, plugins/floodgate.jar")
+		wantLines(t, out, "Plugins:    3 jars: plugins/Geyser-Spigot.jar, plugins/floodgate.jar, paper-26.3-244.jar") // was "NOT all approved" before 2026111914334569
 		for _, w := range []string{"Whitelist:  can't read it:", "Ops:        can't read them:", "Log:        can't read it:"} {
 			if !strings.Contains(out, w) {
 				t.Errorf("lacks %q:\n%s", w, out)
@@ -453,5 +499,31 @@ func TestStatusHostileFiles(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("status hung on a pipe or a device")
+	}
+}
+
+// Jar names, the ping's version, and its player sample come from the server
+// account, so escape codes in them don't reach the terminal.
+func TestStatusCleansServerText(t *testing.T) {
+	defer testid.Line(t, "1a3jtf0")
+	g := newRig(t)
+	g.replies["ps -eo"] = boxedPs("/sbin/docker-init")
+	write(t, filepath.Join(g.dir, "plugins", "x\x1b]0;owned\x07.jar"), "bad")
+	g.p.Ping = func(_ context.Context, addr string) (server.PingReply, error) {
+		var r server.PingReply
+		r.Version.Name = "Paper\x1b[2J\u202e"
+		r.Players.Sample = append(r.Players.Sample, struct {
+			Name string `json:"name"`
+		}{"Ev\x1b]52;c;aGk=\x07il"})
+		return r, nil
+	}
+	out := g.text(t, 0)
+	if strings.ContainsAny(out, "\x1b\x07\r\u202e") {
+		t.Errorf("control characters in status:\n%q", out)
+	}
+	for _, want := range []string{"Paper[2J (", ": Ev]52;c;aGk=il", "plugins/x]0;owned.jar"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status lacks %q:\n%s", want, out)
+		}
 	}
 }

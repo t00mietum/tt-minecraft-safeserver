@@ -8,73 +8,69 @@ import (
 	"strings"
 	"syscall"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 )
 
-// Geyser's config, as the Spigot plugin keeps it. A missing one is wrong too:
-// Geyser's first start writes its defaults, with online mode logins on 19132,
-// and runs with them. Given only these keys, it keeps them and adds the rest.
+// Geyser's config folder for the Spigot plugin. A missing config is wrong
+// too: Geyser's first start writes its defaults, with online mode logins on
+// 19132, and runs with them. Given only these keys, it fills in the rest.
 var geyserDirs = []string{"plugins", "Geyser-Spigot"}
 
 const geyserFile = "config.yml"
 
-// geyserSetting is one key under Geyser's config, and how to tell its value.
-type geyserSetting struct {
-	path       []string
-	want       string
-	ignoreCase bool
-	missingOK  bool // Geyser's own default is the wanted value
+func exactly(want string) func(string) bool {
+	return func(have string) bool { return have == want }
 }
 
-func (s geyserSetting) ok(have string) bool {
-	if s.ignoreCase {
-		return strings.EqualFold(have, s.want)
-	}
-	return have == s.want
+func anyCase(want string) func(string) bool {
+	return func(have string) bool { return strings.EqualFold(have, want) }
 }
 
-func geyserSettings(c *config.Config, lines []string) []geyserSetting {
+func geyserSettings(c *config.Config, root *yaml.Node) []yamlKey {
 	addr := c.BindIP
 	if addr == "" {
 		addr = "0.0.0.0"
 	}
-	return []geyserSetting{
-		{path: []string{"bedrock", "address"}, want: addr},
-		{path: []string{"bedrock", "port"}, want: strconv.Itoa(c.BedrockPort)},
-		{path: geyserAuthPath(lines), want: "floodgate", ignoreCase: true},
+	port := strconv.Itoa(c.BedrockPort)
+	return []yamlKey{
+		{path: []string{"bedrock", "address"}, want: addr, ok: exactly(addr)},
+		{path: []string{"bedrock", "port"}, want: port, ok: exactly(port)},
+		{path: geyserAuthPath(root), want: "floodgate", ok: anyCase("floodgate")},
 		// Keep NetherNet on bedrockPort alone, TCP and UDP, as the firewall
 		// and the forward advice expect. See design.md, Bedrock players.
-		{path: []string{"bedrock", "transport"}, want: "nethernet", ignoreCase: true, missingOK: true},
-		{path: []string{"bedrock", "webrtc-port"}, want: "0", missingOK: true},
-		{path: []string{"bedrock", "clone-remote-port"}, want: "false", ignoreCase: true, missingOK: true},
+		{path: []string{"bedrock", "transport"}, want: "nethernet", ok: anyCase("nethernet"), missingOK: true},
+		{path: []string{"bedrock", "webrtc-port"}, want: "0", ok: exactly("0"), missingOK: true},
+		{path: []string{"bedrock", "clone-remote-port"}, want: "false", ok: isFalse, missingOK: true},
 	}
 }
 
 // geyserAuthPath finds auth-type for the layout the file is in. Geyser's
 // config-version 5 renamed remote to java, and before remote it sat at the top.
 // Geyser moves an old file to the new layout as it loads it.
-func geyserAuthPath(lines []string) []string {
-	if i, ok := yamlFind(lines, []string{"config-version"}); ok {
-		if v, err := strconv.Atoi(yamlValue(lines[i])); err == nil && v >= 5 {
+func geyserAuthPath(root *yaml.Node) []string {
+	if v := yamlLast(root, []string{"config-version"}); v != nil {
+		if n, err := strconv.Atoi(v.Value); err == nil && n >= 5 {
 			return []string{"java", "auth-type"}
 		}
 	}
-	if _, ok := yamlFind(lines, []string{"remote"}); ok {
+	if yamlLast(root, []string{"remote"}) != nil {
 		return []string{"remote", "auth-type"}
 	}
-	if _, ok := yamlFind(lines, []string{"auth-type"}); ok {
+	if yamlLast(root, []string{"auth-type"}) != nil {
 		return []string{"auth-type"}
 	}
 	return []string{"java", "auth-type"}
 }
 
 func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
-	name := strings.Join(append(geyserDirs[:len(geyserDirs):len(geyserDirs)], geyserFile), "/")
+	name := strings.Join(geyserDirs, "/") + "/" + geyserFile
 	d, there := top, true
 	for _, sub := range geyserDirs {
-		next, err := d.sub(sub)
+		next, err := d.Sub(sub)
 		if isNotExist(err) && fix {
-			next, err = d.mkdir(sub)
+			next, err = d.Mkdir(sub, nil)
 		}
 		if isNotExist(err) {
 			there = false
@@ -83,44 +79,26 @@ func scanGeyser(top dir, c *config.Config, fix bool) ([]Problem, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer next.close()
+		defer next.Close()
 		d = next
 	}
 	var text []byte
 	var st *syscall.Stat_t
 	if there {
 		var err error
-		text, st, err = d.read(geyserFile)
+		text, st, err = d.Read(geyserFile)
 		if err != nil && !isNotExist(err) {
 			return nil, err
 		}
 	}
-	lines := strings.Split(string(text), "\n")
-	var problems []Problem
-	for _, s := range geyserSettings(c, lines) {
-		key := strings.Join(s.path, ".")
-		value := s.want
-		if strings.Contains(value, ":") {
-			value = strconv.Quote(value) // an IPv6 address isn't a plain YAML scalar
-		}
-		i, found := yamlFind(lines, s.path)
-		if !found && s.missingOK {
-			continue
-		}
-		if !found {
-			problems = append(problems, Problem{File: name, Key: key, Want: s.want, Missing: true})
-			lines = yamlInsert(lines, s.path, value)
-			continue
-		}
-		have := yamlValue(lines[i])
-		if s.ok(have) {
-			continue
-		}
-		problems = append(problems, Problem{File: name, Key: key, Have: have, Want: s.want})
-		lines[i] = yamlSet(lines[i], value)
+	keysFor := func(root *yaml.Node) []yamlKey { return geyserSettings(c, root) }
+	if !fix {
+		problems, _, err := yamlScan(name, text, keysFor)
+		return problems, err
 	}
-	if !fix || len(problems) == 0 {
-		return problems, nil
+	problems, fixed, err := yamlFix(name, text, keysFor)
+	if err != nil || len(problems) == 0 {
+		return problems, err
 	}
-	return problems, d.write(geyserFile, []byte(strings.Join(lines, "\n")), st)
+	return problems, d.Write(geyserFile, fixed, st)
 }

@@ -22,41 +22,109 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 ## Issues
 
-- Bedrock LAN discovery
-	- ID: 2026111111065829
+- repair and setup can rewrite plugins.shcl in canonical form when adding sources
+	- ID: 2026112214545321
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-145437
+	- Opened by:
+	- Related IDs: 2026112110300260
+	- Incorrect behavior [Bug]: plugins.SetSources ignores SaveFileKeepLines' kept result, like update --image did. In a plugins.shcl where shcl merges a repeated key, adding Geyser's or Floodgate's source rewrites the whole file in shcl's own form, though its comment says the other lines stay byte for byte.
+	- Expected behavior [Bug]: SetSources checks ToTextKeepLines first, as pinImage now does, and refuses or says the file would be rewritten. repair reports it as FAILED, and setup's writeSources fails setup, so pick which.
+	- Estimated effort: Low
+	- Origin: Found while sweeping for 2026112110300260. Plausible, read only.
+	- Decisions: Leave plugins.shcl as it was and print a warning that names the source line to add by hand. Sources are optional and only feed update --plugins, so neither setup nor repair fails over it. repair reports it as a warning, through repair.Warning, not FAILED.
+		- repair prints a plain warning line rather than going through repair.Warning, since repairPlugins isn't a repair.Run check, and Warning reports FIXED, which would be wrong when nothing was written. repair still exits 0 for it.
+	- Closed reason: Done
+	- Actual cause [Bug]: SetSources ignored whether shcl could keep the file's lines. shcl's keep-lines save falls back to its own form after a merge, by design.
+	- Actual fix [Bug]: SetSources asks ToTextKeepLines before saving. When an existing file's lines can't be kept, it leaves the file as it was and returns plugins.NotKept, which names each source line to add by hand. setup and repair print that as a warning line and go on. design.md's Plugin jars says so.
+	- Test case: 1a4z974 (SetSourcesKeepsLines), 1a4z975 (repair), 1a4z976 (setup's writeSources)
+	- Verified: 1a4z974, 1a4z975 and 1a4z976 fail with the check taken out (file rewritten) and pass with it. 1a4j2j4, 1a4j1s4 and 1a3jgzw still pass, and so does the whole quick gate.
+	- Swept: SetSources' 2 callers, setup's writeSources (adopt, Bedrock download and sources steps) and main's repairPlugins. pinImage already checks. No other SaveFileKeepLines caller in source.
+	- Branch: nov22-2026112214545321
+	- Commit: 3659c8e
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261122-150047
+
+- setup's copy to /usr/local/bin leaves no binary if it stops between the move and the install
+	- ID: 2026112214220945
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-142209
+	- Opened by:
+	- Related IDs: 2026112110300130
+	- Incorrect behavior [Bug]: setup moves a different build out of /usr/local/bin with oldbuild.Retire, then runs sudo install for its own. An interrupt or a failed install between the two leaves no tt-minecraftd there.
+	- Expected behavior [Bug]: Keep a copy of the old build (oldbuild.Keep) and put the new one in place in one step, as install.bash now does.
+	- Estimated effort: Low
+	- Origin: f741e0d (2026111911125756), seen while fixing 2026112110300130. Plausible, read only.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-22: 1a3jzmm, 1a3f8wm and 1a4z5d8 fail on the old code, which ran the install straight onto /usr/local/bin after the move.
+	- Actual cause [Bug]: setup's copy moved the other build out with Retire and then ran install onto the path, so the path was empty between the two.
+	- Actual fix [Bug]: setup's copy keeps a copy of the other build with Keep, installs its own as .tt-minecraftd.new beside it, and renames that into place with mv -f -T, as install.bash does. A failed rename removes the staged file. The plan and output say "Keep a copy" and "Kept a copy". design.md's setup and Boot say so.
+	- Test case: 1a3jzmm, 1a3f8wm, 1a3jxs8, 1a4z5d8
+	- Swept: the 3 callers of Retire and Keep: retire-build (Keep since 11da1a9), setup's copy (now Keep), and repair check 15, which still moves, since there the build is in the way and nothing replaces it.
+	- Verified: 1a3jzmm, 1a3f8wm and 1a4z5d8 fail on the old code and pass with the fix. The quick gate's format, lint and tests pass for the touched areas, and CodeQL passes.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261122-143400
+	- Progress log:
+		- 2026-11-22: asserts updated for the change. 1a3f8wm, 1a3jxs8, 1a3jzmm and 1a4z5d8 expected install onto LocalBin, and now expect install to the staged name and then mv -f -T onto LocalBin. 1a3jzmm's plan line went from "Move the other build in ... to ..." to "Keep a copy of the other build in ... as ...", and it checks the old build is still in place rather than gone.
+	- Decisions:
+		- The staged name is the one install.bash uses, `.tt-minecraftd.new` beside the binary, so the rename stays on one filesystem.
+		- repair check 15 still moves the build, since there it's in the way of the package's and nothing takes its place.
+	- Commit: ce12629
+
+- Paper and Geyser downloads follow a redirect from https to plain http
+	- ID: 2026112213470980
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261122-134709
+	- Opened by:
+	- Related IDs: 2026112110300169
+	- Incorrect behavior [Bug]: `download.Client` uses Go's default redirect rule, which follows https to http. Paper's and Geyser's API answers and jars come through it, and the hash that checks a jar comes over the same channel.
+	- Expected behavior [Bug]: A redirect away from https fails the download, as install.bash's do and as the agent's fetch does.
+	- Origin: download.Client, found while fixing 2026112110300169. Not seen before. Plausible, read only.
+	- Sweep: every `download.Client` with a nil or plain HTTP client: paper, geyser, selfupdate, and update's Fetch outside agent.HoldTo.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-22: 1a4z47r, a TLS server answering 302 to a plain http one. The download followed it on the old code.
+	- Actual cause [Bug]: download.Client left the redirect rule to Go's default, which only counts hops.
+	- Actual fix [Bug]: Every download.Client request runs on a copy of its client that refuses a hop from https to anything else, after the client's own rule. A plain http server redirecting to plain http, as the tests' fake APIs do, still works.
+	- Decisions: 2026-11-22: The client's own rule runs first, so the agent's hold keeps its own reason ("isn't https"), which 1a3k0x8 checks.
+	- Test case: 1a4z47r (https to http fails, with and without the client's own rule; https to https and http to http still follow)
+	- Swept: paper, geyser and selfupdate build a download.Client, and update's Fetch is one, so all reach the rule through Client.Get, which Stage, Into and JSON use. agent.API never follows a redirect, and agent's fetch uses PublicClient, which refuses a hop away from https already.
+	- Branch: nov22-2026112213470980
+	- Commit: 94e467e
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (both https to http cases followed) and passes after.
+	- Closed: 20261122-141218
+	- Verified: 1a4z47r fails on the old download.go and passes now. The quick gate passes, CodeQL included.
+
+- Check TreeCapitator, leaf decay, and sleeping in game on Paper 26.3
+	- ID: 2026111412275150
 	- Type: Task
 	- Status: Waiting on signoff
-	- Priority: Avg
-	- Opened: 20261111-110658
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065711 2026111113015461
-	- Requirements:
-		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
-		- Fix `how-to-connect.md` if they don't.
-	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
-	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
-	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
-	- Actual effort: Avg
+	- Target version: v1.0.0-beta.1
+	- Opened: 20261114-122751
+	- Opened by: JC
 	- Progress log:
-		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
-		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
-		- Verified: df797 loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, df797 fails.
-		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
-		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
-	- Decisions:
-		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
-		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
-		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
-	- Stand-in: none (20261113). The remaining check is a real phone and console on the home Wi-Fi. df797 already covers the firewall side in a namespace.
-	- Test case: df797
-	- Branch: nov14-2026111111065829
-	- Commit: fb7097b
-	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
+		- 2026-11-07: Left open from the Paper 26.3 update, done before this repo. TreeCapitator 1.0 and AntiCreeper 5.1 have no updates but load. Sleeping uses the players_sleeping_percentage game rule, at 0, in place of OnePlayerSleep.
+		- 2026-11-17: Logs since 11-07 show TreeCapitator 1.0 enabled with only the legacy api-version warning, and no plugin errors. Chopping and sleeping still need a player in game.
+	- Needs hand testing: Chop a tree, watch leaves decay, and sleep with others awake.
+	- Stand-in: none (20261117). Only a player in the game can judge tree felling, leaf decay and the sleep vote.
 
-- Move shared code to tt-safeserver
+	- Move shared code to tt-safeserver
 	- ID: 2026111111303242
 	- Type: Task
 	- Status: Stalled
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261111-113032
 	- Opened by: t00mietum
@@ -76,6 +144,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Stalled
 		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261113-184851
 	- Opened by:
@@ -84,25 +153,3260 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- When a released Geyser answers LAN discovery on UDP 7551, decide whether to turn it on. It's off by default in Geyser's pull request, and it loosens the login check for LAN joins.
 		- If on: pin Geyser's LAN discovery settings, and treat its LAN join port as a game port.
 		- Let the server's answers from UDP 7551 reach the LAN addresses in `allowFrom`, ahead of the LAN drop.
-		- Turn df797's broadcast half around, and update design.md and how-to-connect.md.
+		- Turn 1a3jrsw's broadcast half around, and update design.md and how-to-connect.md.
+	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
+	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
+	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. 1a3jrsw and design.md are done.
 
-- First release
-	- ID: 2026111111070774
+- Container start mounts any host path that a plugin jar link points to
+	- ID: 2026112110300013
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: A link in `plugins/` named `*.jar` is resolved as root, and its real path is mounted read-only at the same path in the container. The server account can plant one while the server runs. At the next start it can read any host file or folder its own permissions allow, even one behind a parent folder it can't enter. Native start would chown the target to root and make it 0644, though native mode is off for now.
+	- Expected behavior [Bug]: start refuses a jar whose real path isn't a regular file inside a tree, as it does for `paper.jar`. design.md says a link that leads out of the trees stops start.
+	- Reproduced [Bug]: 2026-11-21: a launch test built the mount for a file link and a folder link with no error. A root host run read a host-only file in the container through `plugins/zz-host.jar`, a link to a folder in `/var/tmp`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 1. Detail in detail_backlog.md.
+	- Origin: `LockedJars` from 9058841, plugin pinning. Before 2b322c0 (2026111914293176) a new jar was refused until approved, so a planted link was never mounted. A regression of that removal. Not seen before. Confirmed.
+	- Sweep: every `LockedJars` caller, native `lockJars`, the Geyser extensions folder read as root, `update.treeJars` hashing through `plugins.Sum`, and `Unsourced` reading `plugin.yml` as root.
+	- Closed reason: Done
+	- Actual cause [Bug]: `LockedJars` took any `*.jar` entry after links, with no check of what it led to, so start mounted it and native start would chown it. `update` hashed it and `setup` and `repair` read it, all as root.
+	- Actual fix [Bug]: New `plugins.Within` takes a jar only when its real path is a regular file in `serverDir` or a tree in `ownerTrees`. `LockedJars` refuses any other, so both modes stop the start before anything runs. `update` skips such a jar and says why, and `Unsourced` skips it. design.md's Plugin jars says so.
+	- Test case: 1a4ytyw, 1a4ytyx, 1a4ytyy
+	- Verified: 1a4ytyw, 1a4ytyx and 1a4ytyy fail with `Within` taking any path, and with update's check taken out, and pass with the fix. 1a4ytyw covers links to a host file, a host folder, a linked extensions folder and a pipe, and a jar in a second tree still mounted. The quick gate passes.
+	- Swept: `LockedJars` callers: container `runArgs`, native `Start` (and so `lockJars`), repair's skip map. `plugins.Jars` callers: `update.treeJars` (now checked), `Unsourced` through `repair.GeyserSources` for setup and repair (now checked), status (lists names only, without sudo). The extensions folder: a link in its place is listed, and its jars are refused by `Within`.
+	- Branch: nov22-2026112110300013
+	- Commit: 371d384
+	- Acceptance signoff: Self-closed: reproduced, and the tests fail before the fix and pass after.
+	- Closed: 20261122-123613
+	- Decisions:
+		- A jar may lead into any tree in `ownerTrees`, not only `serverDir`, per the item's wording. Such a jar is already mounted with its tree, so the read-only mount over it changes nothing else. `paper.jar` still has to stay in `serverDir`.
+		- The kind is checked with `Lstat` on the resolved path, which opens nothing. A link to a folder or a pipe reports "not a regular file", one to a host file names where it leads.
+		- `update` and `Unsourced` skip such a jar rather than fail, so one planted link doesn't stop repair or setup. On the old code a link to a folder made repair's plugin sources step fail.
+		- Left alone: native `lockJars` still runs `chown` and `chmod` on the path rather than through a linksafe handle. The paths are now real paths of regular files in the trees, native mode is off, and swapping one between the check and the chown needs a process of the server account while the server is stopped.
+
+- A dotted key in spigot.yml turns BungeeCord on past the safe settings check
+	- ID: 2026112110300026
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `settings.bungeecord: true` written as one key passes start's check, even after a safe `settings:` section. Spigot's YAML reader splits keys on dots, so BungeeCord is on for that start. Spigot saves the file back nested, so the next start catches it.
+	- Expected behavior [Bug]: The check reads spigot.yml keys the way Spigot does, as design.md says.
+	- Reproduced [Bug]: 2026-11-21: a settings test (`settings_unsafe_reads_safe_zz_review_test.go`), where `Check` returns nothing for that line. The Spigot side is from Bukkit's `MemorySection.set` source, not a live start.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 2. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: 4 new 1a3jtbw rows (a dotted key, one after a safe section, one past the setting, one in flow style) fail on the old reader and pass now. 2 rows that should pass, a key beside the setting and dotted keys in paper-global.yml, pass on both. The quick gate passed.
+		- 2026-11-22: Verified on Paper 26.3-258: with `settings: bungeecord: false` and then `settings.bungeecord: true` in spigot.yml, Paper warned about BungeeCord and saved `bungeecord: true` under `settings:`.
+	- Origin: efca0a2, the fix for 2026111715274861 (Code review 20261117 item 4). A sibling that fix missed. Confirmed on the tool's side.
+	- Sweep: every key checked in spigot.yml. paper-global.yml and Geyser's config.yml use Configurate, which doesn't split keys.
+	- Closed reason: Done
+	- Actual cause [Bug]: `yamlCopies` matched one key name per level. Bukkit's YAML reader splits a key on its dots, so a top-level `settings.bungeecord` is a copy of the checked key.
+	- Actual fix [Bug]: In spigot.yml, a key with dots matches as many levels of the path as it has parts, and a fix edits that line in place. One that runs past the path makes the checked key a section, which counts as wrong, as a nested section already did. paper-global.yml and Geyser's file still match whole keys.
+	- Actual effort: Low
+	- Test case: 1a3jtbw (dotted key rows)
+	- Branch: nov22-2026112110300026
+	- Commit: 2128bb1
+	- Acceptance signoff: Self-closed: the new 1a3jtbw rows fail on the old reader and pass now, and Paper itself read the dotted key as on.
+	- Swept: settings.bungeecord is the only key checked in spigot.yml. yamlLast, yamlFind and yamlInsert serve only Geyser's keys. paper-global.yml and Geyser's config.yml are read by Configurate, which doesn't split keys.
+	- Closed: 20261122-125518
+	- Decisions:
+		- A dotted key that runs past the checked key, such as `settings.bungeecord.x`, counts as wrong, since Bukkit makes `bungeecord` a section, and a section already counts as wrong.
+		- Every copy has to be right, as before, so a dotted copy counts even when a later `settings:` section would replace it.
+
+- The safe settings check reads some server.properties lines differently from Java
+	- ID: 2026112110300039
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: Java ends a line at a lone CR, and the tool doesn't. The tool also joins the next line onto a comment that ends in a backslash, and Java never does. Either way a later `white-list=false`, `enable-rcon=true` or `online-mode` line is hidden from the check, and start passes.
+	- Expected behavior [Bug]: The check sees the same keys and values as Java's `Properties.load`.
+	- Reproduced [Bug]: 2026-11-21: `white-list=true\nmotd=hi\rwhite-list=false\n` and `white-list=true\n# old \\\nwhite-list=false\n` both pass the check, and JDK 25 reads `false` for both. A differential of 4000 generated files against `Properties.load` found only these 2 cases.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 3. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: the new 1a3eksm part and a new 1a3jp2c seed fail on the old reader and pass now. A differential of 20000 generated files against JDK 25's `Properties.load` found no difference in keys or values, and after white-list and server-ip were set in each, Java read the values set. FuzzProperties ran 90 s and FuzzFix 40 s, both clean. The quick gate passed.
+		- 2026-11-22: The first fuzz run found a regression in this fix: a blank guard line after a lone CR wrote as part of a CRLF. Fixed, and its input is a seed.
+		- 2026-11-22: FuzzProperties (1a3jp2c) expected a line end added to any file that doesn't end in LF. Now a file that ends in a lone CR is kept as it is too, since that CR is its last line end.
+	- Origin: 91ac8da, the first version. Not seen before. Confirmed.
+	- Sweep: `eula.go` uses the same parser. The file still has to write back byte for byte (FuzzProperties).
+	- Closed reason: Done
+	- Actual cause [Bug]: `parseProperties` split lines only on LF, and joined the next line onto any line that ended in an odd number of backslashes, comment lines included.
+	- Actual fix [Bug]: Lines end at LF, CR or CRLF, and each keeps its own line end, so the file still writes back byte for byte. A `#` or `!` starts a comment wherever the logical line is still empty, as Java reads it, and a comment never continues. A blank line put in after a last line ending in a backslash takes that line's own end.
+	- Actual effort: Low
+	- Test case: 1a3eksm (the Java line ends part), 1a3jp2c (2 new seeds)
+	- Branch: nov22-2026112110300026
+	- Commit: a6b45c1
+	- Acceptance signoff: Self-closed: the new 1a3eksm part fails on the old reader and passes now, and the reader matches JDK 25 over 20000 generated files.
+	- Swept: `eula.go` reads eula.txt through the same parser, so it reads it the same way now. Nothing else in the tree parses a properties file. FuzzProperties still checks the write-back byte for byte.
+	- Closed: 20261122-125542
+	- Decisions:
+		- The empty key isn't matched to Java for a last line of only a backslash, which Java reads one way or the other depending on its read buffer. No checked key is empty, and the differential leaves the empty key out.
+		- A malformed `\u` escape still reads here. Paper 26.3-258 refuses to start on such a file (checked 2026-11-22), so it can't run with the defaults.
+
+- The pre-push hook gates the main checkout's tree, not the commit being pushed
+	- ID: 2026112110300052
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: The hook runs the merge gate or the docs gate on whatever the main checkout holds. A broken commit pushed to main from another branch or worktree passes, and so does one with an uncommitted fix in the tree. `cicd.bash --merge-gate` exits 0 on a dirty tree and only skips the marker.
+	- Expected behavior [Bug]: The gate checks the commit being pushed, or the hook refuses.
+	- Reproduced [Bug]: 2026-11-21: the real hook with stand-in gates. With the checkout on A, a push of a broken B ran the gate on A and exited 0. Repro: `cli_prepush-pushed-commit_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 4. Detail in detail_backlog.md.
+		- 2026-11-22: Verified: 1a4yxpc failed on the old hook in 5 of its 7 cases and passes now. A real push to a local bare repo was refused from a checkout on another commit, and ran the stand-in gate from a linked worktree on the pushed one. The whole quick gate passed.
+		- 2026-11-22: 1a4q4vw's first case, a code commit with a docs edit left in the tree, now expects a refusal: was "merge", exit 0; now nothing, exit 1.
+	- Origin: bb4ab14, the first pipeline. A sibling of 2026112017593230, which fixed only the docs-only diff. Confirmed.
+	- Sweep: both gate calls in the hook.
+	- Closed reason: Done
+	- Actual cause [Bug]: The hook ran both gates on the checkout it lives in, whatever that held, and never compared it with the pushed commit.
+	- Actual fix [Bug]: A push to main is refused unless the worktree it runs from is on the pushed commit with a clean tree. The gates and the docs list come from that worktree, which may be a linked one. A commit a whole merge gate passed on still skips both gates.
+	- Branch: nov22-2026112110300052
+	- Commit: a46e364
+	- Test case: 1a4yxpc TestPrePushPushedCommit
+	- Swept: both gate calls sit behind the one tree check. The marker, the docs list and the diff read the push's worktree too.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261122-130323
+	- Decisions:
+		- Refused rather than running the gate in a throwaway checkout of the commit. The merge gate's container, root host and marker steps have never run from a fresh checkout, and a 14-minute run there would still idle the push.
+		- A clean tree is an empty `git status --porcelain`, untracked files included, the rule cicd.bash uses for the marker.
+		- The passed marker is read in the push's worktree and in the hook's own checkout, since a whole merge gate on a clean tree vouches for the commit wherever it ran.
+
+- A CICD step at the memory cap stops the whole run
+	- ID: 2026112110300065
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `mem-cap.bash` starts its scope without `-p OOMPolicy=continue`. With this box's default of `stop`, systemd ends the whole run once one step is killed at the cap. So the run never sees the exit 137 that `--help` promises, and cleanup gets only the stop timeout.
+	- Expected behavior [Bug]: The killed step exits 137 and the run goes on to report and clean up.
+	- Reproduced [Bug]: 2026-11-21: a scope with `MemoryMax=60M`. The child exited 137, then the parent shell got SIGTERM and the scope exited 143.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 5.
+		- 2026-11-22: Verified: a real user scope at 60M with `OOMPolicy=continue`, through `fMemScope`, let the shell go on after its child exited 137, and the scope exited 0. Without it the shell got SIGTERM and the scope exited 143. 1a4yyfc fails on the unfixed `mem-cap.bash` and passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Origin: bb4ab14. Not seen before. Confirmed.
+	- Sweep: the sister projects' copies of mem-cap.bash, which this project can't change.
+	- Actual cause [Bug]: A user scope takes systemd's default OOM policy, which here is `stop`. One process killed at the cap then stops the whole scope, the run's shell included.
+	- Actual fix [Bug]: `fMemScope` starts the scope with `-p OOMPolicy=continue`.
+	- Swept: `systemd-run` is called only in `mem-cap.bash` and in native mode's `runArgs`. Native mode's unit runs the server alone, so stopping it when its process is killed is right there. No copy of `mem-cap.bash` was found in the sister folders this session can read. Other sister projects with a copy need the same line.
+	- Branch: nov22-2026112110300065
+	- Commit: 21c4a70
+	- Test case: 1a4yyfc TestMemScopeOOMPolicy (the scope's systemd-run args, on a stand-in systemd-run)
+	- Closed: 20261122-130944
+
+- install.bash on a box with the package moves its own copy away, or makes setup fail
+	- ID: 2026112110300078
+	- Type: Bug
+	- Status: Closed
+		- For the refusal's wording and the README line.
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: install.bash never looks at a packaged `/usr/bin/tt-minecraftd`. On an existing install it copies the release to `/usr/local/bin`, runs setup, and setup's repair check 15 moves that copy to old-builds, while the script still says "Installed". On a new install setup skips the copy, the closing `repair --check` fails check 15, and the script says setup didn't finish.
+	- Expected behavior [Bug]: With the package there, install.bash stops before its plan and says to upgrade through the package manager.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 6. Detail in detail_backlog.md.
+		- Verified: 1a3jrx0 passes, and its new case fails with the check taken out (code 0, it went on to the release lookup). The quick gate passes, CodeQL included.
+		- 2026-11-22: Closed without a separate signoff, per the standing policy. The refusal names the package manager and the newer .deb or .rpm, and README says the same, which matches design.md's Boot section.
+	- Origin: 9d7cb3e, install script. The clash came with 0c9de06 (2026111715275041) and check 15's move in f741e0d (2026111911125756). Not seen before. Plausible, read only.
+	- Sweep: only install.bash. setup already guards its copy with `boot.Bin`.
+	- Swept: install.bash is the only hand install that skipped the check. setup's copy uses boot.Bin, and dogfood and the root host checks run on boxes without the package.
+	- Decisions:
+		- 2026-11-22: It stops right after the Linux check, before the network, so nothing is fetched for a box it won't install on. Only a file counts, as with boot.Bin, and the help and --version still work.
+		- 2026-11-22: installerVersion goes to 1.2.0, since a box it used to install on is now refused.
+	- Actual cause [Bug]: install.bash never checked for the package's binary, which setup and repair treat as the one to run.
+	- Actual fix [Bug]: install.bash stops before it looks up a release when /usr/bin/tt-minecraftd is a file, as setup's boot.Bin decides, and says to update through the package manager. Its help, README's install script section and design.md's Boot say so.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a3jrx0, "the package's binary stops it before the plan"
+	- Actual effort: Low
+	- Commit: 8248dbf
+	- Closed reason: Done
+	- Closed: 20261122
+
+- A new install that stops partway can't be run again as setup says
+	- ID: 2026112110300091
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: When a new install stops at a later step, such as a failed image pull or a missing nft, setup says to fix it and run setup again. By then it has put `paper.jar`, `eula.txt`, settings and Geyser in the server folder, so the second run refuses with "has files in it already; give --adopt".
+	- Expected behavior [Bug]: A second run goes on from a tree setup made itself, as design.md says, or the message names `--adopt`.
+	- Reproduced [Bug]: 2026-11-21: in the setup rig, with `podman pull` failing, and with nft missing and no apt.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 7.
+	- Origin: b21d65f, the first setup. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: A new install's tree looked the same as anyone's server folder with files in it, so the refusal that sends those to `--adopt` caught setup's own tree too.
+	- Actual fix [Bug]: A new tree gets a `.tt-minecraftd-setup` file right after it's made. A later new install goes on in a tree that has it, without `--adopt`, and keeps what's there. Setup takes the file away once the config is written.
+	- Test case: 1a4z2nr
+	- Verified: 1a4z2nr fails on the old code, where the second run is refused, after a failed firewall step and after a failed image pull. It passes with the fix. Taking out the mark's removal fails it too. The quick gate passes.
+	- Swept: `checkTree` is the one refusal of a tree with files in it. An adopted tree keeps needing `--adopt` on a second run, as before. The dry run writes and removes no mark.
+	- Branch: nov22-2026112110300091
+	- Commit: 8bda998
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and it does what design.md's setup already said.
+	- Closed: 20261122-135347
+	- Decisions: A mark in the tree rather than a new message, since design.md already said a setup that stops partway runs again as a new install.
+		- The mark is a plain file in the tree rather than beside the config, so a tree that's removed or replaced takes it along. A link there doesn't count.
+		- A resumed tree doesn't get the Floodgate key step an adopted one gets, since a tree setup made has no key until the server runs.
+
+- Geyser and Floodgate add-ons are taken for Geyser or Floodgate
+	- ID: 2026112110300104
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `geyser.Project` matches names that start with the project's name. GeyserExtras, GeyserSkinManager and GeyserModelEngine count as Geyser, and a Floodgate add-on as Floodgate. setup and repair then give them GeyserMC's source, and every `update --plugins` says to replace the add-on with Geyser by hand. `Installed` counts GeyserExtras as Geyser, so setup skips the real download.
+	- Expected behavior [Bug]: Only the real `Geyser-Spigot` and `floodgate` plugins match.
+	- Reproduced [Bug]: 2026-11-21: a geyser test over those names.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 8.
+		- 2026-11-22: Verified: 1a4z3bm fails on the old geyser.go (6 add-on names taken, and Installed counts add-ons) and passes with the fix. The geyser, setup, repair, update, plugins and cli tests pass, and so does the quick gate for geyser, setup and repair.
+	- Origin: 92e72ff and 9f30908. Not seen before. Confirmed.
+	- Against: design.md's rule that the file name and the `plugin.yml` name both start with the project's name.
+	- Closed reason: Done
+	- Actual cause [Bug]: `Project` and `Installed` matched any file name that starts with `geyser` or `floodgate`, and `Project` any claimed plugin name that does too. Add-ons are named that way.
+	- Actual fix [Bug]: A file name counts when it's the project's name and then anything but a letter or digit. `Project` wants the plugin name GeyserMC's own jar claims, `Geyser-Spigot` or `floodgate`, ignoring case. `Installed` drops a jar whose `plugin.yml` names another plugin, and still counts one with no readable `plugin.yml` by its name. `Latest` checks a download's name with the same rule. design.md's setup steps 7 and 8 and Plugin jars say so.
+	- Actual effort: Low
+	- Test case: 1a4z3bm (TestAddonsArentGeyser), with 1a3jgwr
+	- Branch: nov22-2026112110300104
+	- Closed: 20261122-140102
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, per the standing close policy.
+	- Swept: every caller of `Project` (`repair.GeyserSources`, which setup shares) and `Installed` (setup's `bedrockBuilds`, repair's `bedrockCheck`), and `Latest`'s own name check. update tells Geyser by its source, not its name.
+	- Decisions:
+		- The plugin name has to be GeyserMC's own, not only start with the project's name, since add-ons claim names like GeyserExtras. The data folders `plugins/Geyser-Spigot` and `plugins/floodgate` are named after it.
+		- `Installed` still counts a jar with no readable `plugin.yml` by its name, so setup keeps whatever jar a tree has, as before.
+		- An add-on given GeyserMC's source before this fix keeps it in `plugins.shcl`, and update still says to replace it by hand. The operator removes that source line.
+		- design.md's start-with rule, in the Against row, now says GeyserMC's own plugin names, since that rule is what let add-ons in.
+	- Commit: b6f6c15
+
+- Jar names from the server tree reach the terminal raw on the update agent path
+	- ID: 2026112110300117
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: A jar named with escape codes makes `update` print them raw in its "no answer from the update agent" line.
+	- Expected behavior [Bug]: Server text goes through `server.Clean`, as the other update lines do.
+	- Reproduced [Bug]: 2026-11-21: an update test with a jar named `Chunky\x1b]0;owned\x07.jar`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 9.
+		- 2026-11-22: Verified: 1a4z3r4 fails on the old agent.go (raw ESC, BEL and U+202E in the no-answer line) and passes with the fix, with and without --dry-run. The whole quick gate passes.
+	- Origin: cfd6be9. Reachable since 2b322c0 (2026111914293176), since the agent is now asked about every jar. Same class as 2026111715274877. Confirmed.
+	- Sweep: the other raw prints of the jar name in `update/agent.go`.
+	- Closed reason: Done
+	- Actual cause [Bug]: The agent path in `update/agent.go` printed tree jar names as read. The agent's own text is cleaned in `agent.Check`, so a jar it names with escape codes never matches the raw name, and that jar always gets the "no answer" line, which printed it raw.
+	- Actual fix [Bug]: Every jar name the agent path prints goes through `server.Clean`: the refused, nothing-newer and no-answer lines, the plan, the dry run line, the failed line and its error, the question, and the kept and downloaded lines. update's plan lines are cleaned where they're joined, so a new plan line is covered too.
+	- Actual effort: Low
+	- Test case: 1a4z3r4 (TestAgentJarNameCleaned)
+	- Branch: nov22-2026112110300104
+	- Closed: 20261122-140439
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and the Sweep sites are covered, per the standing close policy.
+	- Swept: every Fprintf, Sprintf and ask in `update/agent.go` that takes `r.Jar`, `s.Jar`, `j.Path` or `s.jar.Name`. Left alone: `newName` and the agent's fields, which `plugins.Claims` and `agent.Check` clean, and Paper build names, which `paper.Name` builds. In `update.go`, the skipped and Geyser lines already clean, and `pluginStep` names equal a checked GeyserMC build path.
+	- Decisions:
+		- Cleaned where printed, not in `plugins.Jars`, as 2026111715274877 decided, so names still match the files.
+		- A jar named with control characters can't be updated through the agent, since its cleaned answer never matches. That's left as is, since it only ever skips.
+	- Commit: 080f8fc
+
+- retire-build reports a failure after it moved the build, and install.bash then leaves no binary
+	- ID: 2026112110300130
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `oldbuild.Retire` returns the rotation's error even after the move worked. install.bash reads that as "nothing was installed" and removes its staged build, so `/usr/local/bin` has none. setup stops before its install, and repair says FAILED for a build it moved. Even with no error, an interrupt between install.bash's 2 renames leaves no binary.
+	- Expected behavior [Bug]: A failed rotation is a warning, and the moved build counts as kept.
+	- Reproduced [Bug]: 2026-11-21: install.bash's reaction, in its test rig. The Go trigger needs root. The root host check couldn't run it, since its image has no `chattr`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 10. Detail in detail_backlog.md.
+		- Verified: 1a4z53w, 1a3jzqr, 1a4z5a4 and 1a4z5d8 fail with the rotation's error returned as the error, and pass now. 1a3jrx0 passes with the rig's retire-build copying. The quick gate passes, CodeQL included.
+		- 2026-11-22: 1a3jzqr expected `Moved <bin> to <kept>.` and now expects `Kept a copy of <bin> as <kept>.`, with the build left in place. Its other checks are unchanged. The install rig's retire-build copies rather than moves.
+		- 2026-11-22: Root host check 1a3jztw failed after the change, since it expected retire-build to move the build. fOldBuild now checks the build is left in place and the "Kept a copy of" line, and keeps its folder owner, mode and 2-copy checks. shellcheck and the cli quick gate pass; the root host run is the round's.
+	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed for install.bash, Plausible for the trigger.
+	- Sweep: the 3 callers of `Retire`.
+	- Closed reason: Done
+	- Actual cause [Bug]: Retire gave the rotation's error as its own, after the move had already worked. install.bash's swap was 2 steps: retire-build moved the old build out, then a rename put the new one in.
+	- Actual fix [Bug]: Retire and the new Keep give a rotation that fails after the build is kept as a separate warning. retire-build prints it and exits 0, setup prints it and goes on, and repair reports FIXED with the warning, through a new repair.Warning. retire-build now uses Keep, which copies and leaves the old build in place, so install.bash's rename of the new build is the only change to the path. design.md's Boot says both.
+	- Test case: 1a4z53w (Retire and Keep with a failed rotation, and Keep leaving the build in place), 1a3jzqr (retire-build), 1a4z5a4 (repair check 15), 1a4z5d8 (setup's copy), 1a3jrx0 (install.bash)
+	- Swept: the 3 callers of Retire: retire-build (now Keep), setup's copy and repair check 15. setup's copy is still a move and then an install, so an interrupt there can leave no binary, filed as 2026112214220945.
+	- Branch: nov22-2026112213470980
+	- Commit: 11da1a9
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail with the rotation's error given back as an error, as before, and pass now.
+	- Closed: 20261122-142151
+	- Decisions:
+		- 2026-11-22: retire-build copies rather than moves, per the detail note's option. install.bash needs no change for it, and works the same with a build that still moves.
+		- 2026-11-22: The rotation failure is faked through oldbuild.FailRotate, since a real one needs chattr as root, which the root host image doesn't have.
+		- 2026-11-22: install.bash's message for a failed retire-build still says "couldn't move the old build out of the way", which 2026112110300429 quotes.
+
+- Retiring a build with an old mtime can prune it at once
+	- ID: 2026112110300143
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `Retire` names the moved build by its mtime and then rotates. A build older than the newest kept ones, such as a copy made with `cp -p`, is pruned in that same call. repair and setup still print "Moved ... to" a file that's gone.
+	- Expected behavior [Bug]: The build just moved is always kept, as design.md says.
+	- Reproduced [Bug]: 2026-11-21: `oldbuild_retire-prunes-itself_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 11.
+		- Verified: 1a4z4aw, from the review's repro test, fails on the old oldbuild.go and passes now. The quick gate passes, CodeQL included.
+	- Origin: f741e0d (2026111911125756). Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: Retire ran the plain rotation, which ranks every build by the time in its name and knew nothing of the one just moved.
+	- Actual fix [Bug]: Retire rotates with the name it just used held, so the build it moved always stays. design.md's Boot says so.
+	- Test case: 1a4z4aw (a build with an old mtime survives its own Retire, and an older build in its hour is still pruned)
+	- Swept: Retire is the only caller of the rotation outside tests. repair check 15, setup's copy and retire-build all go through Retire.
+	- Branch: nov22-2026112213470980
+	- Commit: 8a1ce19
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (the kept build was gone) and passes after.
+	- Closed: 20261122-141441
+
+- install.bash changes the mode of an existing /usr/local/bin
+	- ID: 2026112110300156
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `install -d -m 0755` runs on the folder even when it exists. A `root:staff 2775` folder from an older Debian becomes 2755, and the plan doesn't say so.
+	- Expected behavior [Bug]: The folder is made only when it's missing.
+	- Reproduced [Bug]: 2026-11-21: in the installer rig, a 0775 folder came out 0755.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 12.
+		- Verified: 1a3jrx0 passes, and its new case fails with the check taken out. The quick gate passes, CodeQL included.
+	- Origin: 9d7cb3e. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `install -d` sets the mode of a folder that's already there, not only of one it makes.
+	- Actual fix [Bug]: install.bash runs it only when /usr/local/bin is missing.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a3jrx0, "an existing folder keeps its mode, and a missing one is made"
+	- Swept: the only other `install -d` is setup's makeTree, which runs only for a new server tree. oldbuild makes its folder with os.MkdirAll, which leaves an existing one alone.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (a 2775 folder came out 2755) and passes after.
+	- Closed: 20261122-134329
+	- Commit: f8bd966
+
+- install.bash with wget follows an https redirect to plain http
+	- ID: 2026112110300169
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `wget --https-only` follows a redirect from https to http and exits 0. The script says redirects are https only too, which holds only for curl.
+	- Expected behavior [Bug]: Both download tools refuse a redirect to plain http, or the script doesn't claim it for wget.
+	- Reproduced [Bug]: 2026-11-21: a local TLS server answering 302 to a plain http one. wget printed the body, curl refused.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 13.
+		- Verified: 1a4z1d4 passes with curl 8 and GNU Wget 1.25 here, and with Wget 1.21.3 in the quick gate's image, which has no curl, so that arm skips there. It fails with the header check taken out. 1a3jrx0 passes under Bash 3.2 with busybox tools. The quick gate passes, CodeQL included.
+	- Origin: 3b7576c, the second code tidy. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: wget's `--https-only` applies only to links in a recursive run, so a plain download follows any redirect.
+	- Actual fix [Bug]: With wget, install.bash reads the response headers (`-S`) after the download, and a Location that isn't https fails it, with a note saying why. Callers already stop on a failed download, so nothing from it is used.
+	- Decisions:
+		- 2026-11-22: wget refuses rather than the claim being dropped, since the sums come over the same channel as the build. wget has no option to refuse the hop, so its request to the http address still goes out, and what comes back is thrown away.
+		- 2026-11-22: curl's refusal stays silent, as its other failures are.
+	- Branch: nov22-2026112110300078
+	- Test case: 1a4z1d4 (fFetch with the host's own curl and wget, against a local TLS server that redirects to plain http, to https, and to a relative path)
+	- Swept: install.bash's fFetch is the only wget download, and the only curl one in a script a user runs. install-dev.bash names them only in its usage. The Go download client follows any redirect, filed as 2026112213470980.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test failed before the fix (wget exited 0 with the plain http body) and passes after.
+	- Closed: 20261122-134645
+	- Commit: 1aa8a36
+
+- One unreadable jar stops setup --adopt and fails repair's plugin sources step
+	- ID: 2026112110300182
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `plugins.Unsourced` stops at the first jar it can't read, such as a dangling link or a folder named `*.jar`. `setup --adopt` then fails before its plan, and repair's step fails on every run.
+	- Expected behavior [Bug]: Such a jar is skipped with a warning, or only jars whose names match Geyser or Floodgate are read.
+	- Reproduced [Bug]: 2026-11-21: a dangling `plugins/Gone.jar` in a plugins test and in the setup rig.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 14.
+		- 2026-11-22: Since 371d384 (2026112110300013), `Within` already skips a dangling link and a folder named `*.jar`. A jar of another plugin that can't be read, such as one with mode 0000 under repair --check, still failed: 1a4z668 fails on the old code with "permission denied" and passes now.
+	- Origin: 2b322c0, now in 3b7576c. Not seen before. Confirmed.
+	- Actual cause [Bug]: `Unsourced` opened every jar in plugins/ to read its `plugin.yml`, and gave the first read error as its own.
+	- Actual fix [Bug]: `GeyserSources` has `Unsourced` read only jars with a Geyser or Floodgate file name, through the new `geyser.Named`, so another plugin's jar is never opened. A jar that's gone by the time it's read is skipped. design.md's Plugin jars says so.
+	- Decisions:
+		- Of the 2 fixes the item gives, the name filter, since it opens fewer files as root and needs no new warning path. A Geyser or Floodgate jar that can't be read still fails the step, since its source can't be judged and update --plugins then never updates it.
+	- Test case: 1a4z668 (dangling link, folder, unreadable jar beside a Geyser jar), 1a4ytyx
+	- Swept: `Unsourced` callers: `repair.GeyserSources`, which setup and repair's plugin sources step share, and the plugins tests. Other readers of every jar: `update.treeJars` already skips a jar it can't hash and says why, and `geyser.Installed` counts a jar whose `plugin.yml` can't be read by its name.
+	- Verified: 1a4z668 fails on the old code and passes with the fix. The folder and link cases passed on both. The unreadable case runs only as non-root, and ran that way.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-143900
+	- Commit: 23ae0ae
+
+- repair's ownership fix fails while Paper renames files, and skips the mode fix
+	- ID: 2026112110300195
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `tree.handOver` runs `chown -R` and then `chmod -R`, and stops at the first error. A file Paper renames during the walk makes chown exit 1, so repair says the fix failed and modes stay open to other accounts.
+	- Expected behavior [Bug]: A file that's gone by then doesn't fail the fix, and the mode fix still runs.
+	- Reproduced [Bug]: 2026-11-21: with a rename loop, coreutils 9.7 `chown -R` failed 46 of 60 runs. A root host run of repair under the same loop said the fix failed.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 15.
+		- 2026-11-22: 1a4z6cg runs the real `chown -R` and `chmod -R` on the test's own account while a loop renames files. On the old code it failed on its first runs with "No such file or directory", and it passes 100 runs now.
+	- Origin: 1099186. The other half of 2026112017592200, whose sweep covered the walks but not these commands. Confirmed.
+	- Actual cause [Bug]: coreutils exits 1 when a file it listed is gone before it gets to it, and `handOver` took that exit as the fix failing and returned before `chmod -R`.
+	- Actual fix [Bug]: `handOver` reads each command's messages in the C locale, and a run whose only errors are "No such file or directory" counts as done. `chmod -R` runs even when `chown -R` fails, and every tree is tried, with the errors joined. `host.Cmd` gets `Env`, and `ErrCopy` now gets stderr for every command, not only a Tty one. design.md's Tree ownership says so.
+	- Decisions:
+		- The messages are read rather than the tree walked again in Go, since the commands run through sudo and the caller may not be able to read the tree.
+		- A message in another language, as when sudo drops `LC_ALL`, counts as a failure, as before.
+		- A real failure's error keeps the runner's error and adds up to 3 of the other lines.
+	- Test case: 1a4z6cg
+	- Swept: `chown -R` and `chmod -R` in the source: only `handOver`, which `ToServer` and `ToOperator` share for start in both modes, stop, setup and repair's ownership check. Other recursive walks were covered by 2026112017592200.
+	- Verified: 1a4z6cg fails on the old code and passes 3 runs in a row with the fix. The launch, repair and tree tests pass. Only the non-root path ran, with no sudo between, so `LC_ALL` going through sudo wasn't run.
+	- Branch: nov22-2026112214220945
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-144000
+	- Commit: 264d080
+
+- status, watch and cmd as root print any file that latest.log links to
+	- ID: 2026112110300208
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `server.OpenRegular` follows links. design.md tells operators to run `status` with sudo, and then a `logs/latest.log` link the server account planted shows a root-only file on the operator's terminal.
+	- Expected behavior [Bug]: As root, files in the server tree open without following a link, as the other root reads do.
+	- Reproduced [Bug]: 2026-11-21: a root host run, where `sudo tt-minecraftd status` printed a 0600 file in `/root` through the link.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 16.
+		- 20261122: Verified: 1a4z7n4 and 1a4z7n5 fail with OpenLog following links as before, and pass with the fix. The whole quick gate passed.
+		- Swept: settings.ReadPlayers already reads through linksafe. The log follower and native start's two reads now use OpenLog. Container start reads the log through the runtime's logs, not the file. The other OpenRegular callers read jars, where paper.jar links to its build by design. Plugin jar links are 2026112110300013.
+	- Origin: ba0f959 and 80c5e6f. Same class as 2026111709090967. Confirmed.
+	- Sweep: `settings.ReadPlayers` for the whitelist and ops, the log follower in `launch/session.go`, and native `log()`.
+	- Closed reason: Done
+	- Actual cause [Bug]: status, the cmd answer wait and native start read latest.log through server.OpenRegular, which follows links, so a link in place of the log or the logs folder showed whatever it named.
+	- Actual fix [Bug]: new server.OpenLog opens serverDir, then logs and latest.log with no link followed, and refuses anything but a regular file. status, the log follower and native start's log reads use it. design.md's status section says so.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: 1bdbbfa
+	- Test case: 1a4z7n4, 1a4z7n5
+	- Acceptance signoff: Self-closed: 1a4z7n4 and 1a4z7n5 fail on the unfixed code and pass now.
+	- Closed: 20261122-144844
+	- Decisions:
+		- 20261122: no link is followed below serverDir in any mode, not only as root, so status shows the same with and without sudo. serverDir itself may still be a link, as config allows.
+		- 20261122: the regression tests run as a plain account, since the check doesn't depend on root. The root host repro zzrv001 isn't in checks.bash.
+
+- start and stop waits skip a last look at the deadline
+	- ID: 2026112110300221
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: Paper's Done line logged at 4.5 s of a 5 s `startTimeout` makes start say it didn't finish loading and exit 1. A server gone at 2.5 s of a 3 s `stopTimeout` gets a SIGTERM and a `stop --time 30` it doesn't need.
+	- Expected behavior [Bug]: One last look at the log and the process after the loop, before the error or the kill.
+	- Reproduced [Bug]: 2026-11-21: launch rig tests in `launch_jarlinks-waits_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 17.
+		- 20261122: Verified: 1a4z7n6 fails on the unfixed code (start says it didn't load, stop sends SIGTERM) and passes with the fix. 1a4q5y8 still passes. The whole quick gate passed.
+		- Swept: both waits are in Kit and shared by container and native modes. The countdown and cmd's answer wait don't end at a deadline with an error or a kill.
+		- 20261122: 1a3ej4g's slow foreground case feeds one more `active` unit state, 7 in place of 6, for the extra look. Its asserts are as before.
+	- Origin: 3a04d86. 2026112017592582 (nov20b) rewrote the loop and kept the gap. Confirmed.
+	- Sweep: `waitLoaded` and `waitStopped`, both modes.
+	- Decisions:
+		- 20261122: with a timeout of 0 each wait still looks once.
+	- Closed reason: Done
+	- Actual cause [Bug]: waitLoaded and waitStopped tested the deadline before each look, so the look after the last pause never ran.
+	- Actual fix [Bug]: each wait looks first and tests the deadline after, so the last pause, cut to end at the deadline, is followed by one more look of the log and the process.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: f691689
+	- Test case: 1a4z7n6
+	- Acceptance signoff: Self-closed: 1a4z7n6 fails on the unfixed code and passes now.
+	- Closed: 20261122-144844
+
+- Ctrl-C during a watch reading draws a screen of errors
+	- ID: 2026112110300234
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: A Ctrl-C while `watch` takes a reading redraws the screen with `context canceled` errors and "Memory: none in use", wiping the last good screen.
+	- Expected behavior [Bug]: watch exits and leaves the last reading on screen.
+	- Reproduced [Bug]: 2026-11-21: `cmd_watch-ctrlc_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 18.
+		- 20261122: Verified: 1a4z7n7 fails on the unfixed code (watch and status both draw the broken reading) and passes with the fix. 1a3eka0 still passes. The whole quick gate passed.
+		- Swept: status and watch are the only callers of Probe.Take.
+	- Origin: ba0f959. Not seen before. Confirmed.
+	- Sweep: a one-shot `status`.
+	- Decisions:
+		- 20261122: status cut short exits 1, as design.md's Commands has Ctrl-C end a wait with exit 1. watch keeps exit 0, since Ctrl-C is how it ends.
+	- Closed reason: Done
+	- Actual cause [Bug]: watch drew the reading even when Ctrl-C had ended its context partway, so every look that was cut short showed as an error.
+	- Actual fix [Bug]: watch checks the context after each reading and exits 0 without drawing one Ctrl-C cut short. A one-shot status cut short prints nothing and exits 1, saying it was interrupted. design.md's status and watch section says so.
+	- Actual effort: Low
+	- Branch: nov22-2026112110300208
+	- Commit: d39d187
+	- Test case: 1a4z7n7
+	- Acceptance signoff: Self-closed: 1a4z7n7 fails on the unfixed code and passes now.
+	- Closed: 20261122-144844
+
+- update's library removal checks for a running server long before it removes
+	- ID: 2026112110300247
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `Running` is asked before the plan and the "Go ahead?" prompt, which can wait any length of time. A server started in that window loses library jars it hasn't opened yet, which design.md says update avoids.
+	- Expected behavior [Bug]: update asks again right before it removes.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 19.
+	- Origin: 2b322c0 (2026111914293176). Not seen before. Plausible, read only.
+	- Closed reason: Done
+	- Actual cause [Bug]: update asked Running once, in lookup, before the plan and the prompt, and clearLibraries removed the jars later with no second look.
+	- Actual fix [Bug]: The look is now Update.mayRun, called in lookup so the plan leaves out a removal it would skip, and again in clearLibraries right before the rm. A server up by then gets the same SKIPPED line, and the update goes on. design.md's update says so.
+	- Test case: 1a4j2rc (new case: Running says no at lookup and yes at the removal)
+	- Swept: clearLibraries is update's only removal Running guards. paper.Prune keeps the build the server runs, so it needs no look. Running has one setter, main.go.
+	- Verified: 1a4j2rc fails with the second look taken out and passes with it. The whole quick gate passes.
+	- Branch: nov22-2026112110300247
+	- Commit: f00c6e4
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-145437
+
+- update --image can rewrite the whole config in canonical form
+	- ID: 2026112110300260
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: In a config where shcl merges a repeated key, `SaveFileKeepLines` falls back to canonical output. Keys come back lower-cased, a line is dropped, and `image` moves, though the code says the other lines stay byte for byte.
+	- Expected behavior [Bug]: update checks the `kept` result, and refuses or says plainly that the file was rewritten.
+	- Reproduced [Bug]: 2026-11-21: `update_pin_image_merge_zz_review_test.go`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 20. shcl friction: the fallback to canonical form is shcl's documented behavior.
+	- Origin: bf1ab06. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: pinImage ignored the kept result. shcl's keep-lines save falls back to canonical form after a merge, by design.
+	- Actual fix [Bug]: pinImage asks ToTextKeepLines before saving. When the lines can't be kept in a file that already exists, it leaves the file as it was and fails with the image line to set by hand, quoted. A new config is still written. design.md's update says so.
+	- Test case: 1a4z8mc
+	- Swept: plugins.SetSources has the same unchecked save, filed as 2026112214545321, since a refusal there changes what setup and repair do. Approve, the old third caller, is gone.
+	- Verified: 1a4z8mc fails with the check taken out (keys lower-cased, a line dropped) and passes with it. 1a3fg3w still passes, and so does the whole quick gate.
+	- Decisions: Refuse rather than write and warn, since the canonical form drops lines and comments the operator wrote, and the error gives the one line to set.
+	- Branch: nov22-2026112110300247
+	- Commit: b4ac6cc
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261122-145437
+
+- Negated root host checks pass when the command they look with can't run
+	- ID: 2026112110300273
+	- Type: Bug
+	- Status: Closed
+	- Needs local test suite run?: No
+	- Needs external testing: No
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `fJarsInContainer` passes with no container, since its write is negated. `fZfsNone` and `fZfsPool` pass when `zfs list` fails, since they test for empty output. `fNativeStart` runs `nsenter -t ""` when pgrep finds nothing.
+	- Expected behavior [Bug]: Each check fails unless the look itself worked.
+	- Reproduced [Bug]: 2026-11-21: with a stand-in sudo, 1a3jqxr and 1a3fh9c printed PASS. Repro: `roothost_negated-checks_repro.bash`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 21.
+		- 2026-11-22: Verified: 1a4z0h0 runs the changed checks from checks.bash with stub sudo, pgrep and systemctl. Its no-container, zfs-list-fails (both checks), no-server-process and nft-fails cases fail on the old checks and pass on the new ones. Its firewall-off table-gone case also fails on the old check, but only because the stub nft lists any table it's asked for. The review's repro now prints FAIL for 1a3jqxr and 1a3fh9c. 1a4q3sg still passes. Quick gate passed.
+		- Verified: 2026-11-22, root-host.bash passed 1a3fh00, 1a3fh68, 1a3fh9c, 1a3jwt0, 1a3fjew and 1a3jgsm, and root-host.bash --zfs passed 1a3jn00 and 1a3jqxr, on round branch nov22. 1a3fj2c skipped, since native mode is off.
+	- Origin: c076344, 684bd24 and 85d60ca. Same class as 2026112017592969, which fixed only `counter` and `before`. Confirmed.
+	- Actual cause [Bug]: These checks pass on a command failing or printing nothing, and a failure of the command they look with reads the same way.
+	- Actual fix [Bug]: Each one first sees its look work. fJarsInContainer and fNativeStart run a `test -f` in the container, or as the server, before the refusals, and fNativeStart needs a process ID from pgrep. A refusal goes through a new `refused`, which fails on podman exec's own exit codes, 125 to 127. fZfsPool and fZfsNone go through a new `none`, which fails when zfs list does. fFirewallOff reads `nft list tables` and fails when nft does.
+	- Decisions:
+		- A negated grep on a file goes through a new `lacks`, which fails when grep can't read the file, since grep exits 2 then. That covers the same gap in fNewInstall, fPodmanStart, fStopCancel and fAgentHandOff.
+		- fStopCancel reads the log through sudo, as `logged` does, since the server still runs then and a log op can't read would now fail the check.
+	- Swept: every `!` in checks.bash, and every `[[ -z "$(...)" ]]`. Left as they are: the `systemctl is-active` and `is-enabled` ones in fNativeStop, fBoot and fFirewallOff, since the checks before them need a working systemctl, `! getent group docker`, `! compgen`, fSameLogin's start, which has a `has` after it, and fFirewallOut's curl, whose counter must go up after it. `hist` and `newest` are used only by the commented-out ZFS checks.
+	- Branch: nov22-2026112110300286
+	- Commit: 7279d7c, a70748f
+	- Test case: 1a4z0h0 TestRootHostLooks
+	- Actual effort: Low
+	- Closed reason: Done
+	- Closed: 20261122
+
+- test-id.bash --check misses some call forms and counts a commented-out ID
+	- ID: 2026112110300286
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `--check` passes an uppercase or quoted ID in checks.bash, a call after `&&`, and a wrapper written `native () {`, each even when it repeats an ID. A Go test whose only ID line is commented out counts as having one. style_guide.md says `--check` refuses a missing, malformed or repeated ID.
+	- Expected behavior [Bug]: Any call it can't parse fails, and only a live `defer testid.Line` counts.
+	- Reproduced [Bug]: 2026-11-21: `--root` on a stand-in tree.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 22.
+		- 2026-11-22: Verified: 1a4z04g fails 10 of its 13 cases on the old test-id.bash and passes all on the new one. The 3 that pass on both are a wrapper whose forward sits in a `{ }` group and 2 controls: a call in a comment or string, and a live line with a trailing comment. 1a3jz1w and 1a4hwpm still pass, also with mawk as awk. `--list` on the real tree is the same as before. Quick gate passed.
+	- Origin: 259938d and c03326e. Not seen before. Confirmed.
+	- Actual cause [Bug]: The root host reader matched only a name at the start of a line, an ID of bare lowercase letters and digits, and a wrapper written `name()`, and skipped any line it couldn't read. The Go reader matched `defer testid.Line` anywhere on a line, a `//` one included.
+	- Actual fix [Bug]: The root host reader finds `check` and its wrappers in command position anywhere on a line, outside comments and quoted strings, and takes the first word after as the ID as written, so the form check refuses one it can't read. It finds wrappers in any function form, and wrappers of wrappers. The Go reader counts only a line that starts with `defer testid.Line`, outside a `/* */` block.
+	- Decisions:
+		- A quoted ID is refused rather than read, so there is one way to write it, as on the Go side.
+		- A wrapper of a wrapper is followed now, which reverses that call on 2026111715275346, since "any call it can't parse fails" covers it.
+		- The commented-out Go IDs, such as 1a3enbm, no longer count toward a repeat or `--new`. A new ID comes from the clock, so it can't meet an old one.
+	- Swept: test-id.bash is the only reader of test IDs in source, and cicd.bash calls it for `--check` and `--list`. The 8 commented-out Go tests have their `func` line commented out too, so none shows as having no ID.
+	- Branch: nov22-2026112110300286
+	- Commit: 8b29816
+	- Test case: 1a4z04g TestTestIDCallForms
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Actual effort: Low
+	- Closed: 20261122-132700
+
+- The startup lint check reports CLEAN for a failed or aborted run
+	- ID: 2026112110300299
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `--lint-check` drops `FAIL` lines, so a log with `[ FAILED: ... ]` and `[ CICD ABORTED ... ]` reads as CLEAN with exit 0.
+	- Expected behavior [Bug]: A failed or aborted run is reported as such.
+	- Reproduced [Bug]: 2026-11-21: a stand-in log.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 23.
+		- 2026-11-22: Verified: 1a4yynm fails on the unfixed `lint-report.bash` (a died, an aborted, and a test-failed log each read as CLEAN with exit 0, and an unfinished one was marked seen) and passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Origin: before 36903d7; 463c99d touched the line. Not seen before. Confirmed.
+	- Actual cause [Bug]: The report looked only for warning lines, and never at how the run ended. A failure line matches none of the warning forms.
+	- Actual fix [Bug]: `lint-report.bash` reports a log with `[ FAILED:`, `[ CICD ABORTED` or a step's FAIL line as FAILED, with those lines and any `--- FAIL:` test lines, and exits 1. A log with no closing `CI/CD: done.` line is UNFINISHED, and `--check` leaves it unmarked. `cicd.bash --help` says so.
+	- Decisions:
+		- `--- FAIL:` lines are shown with a failure but don't count as one alone, since a passing run's output could quote one.
+		- An unfinished log isn't marked seen, so a look taken while a run is going still reports how it ended. Its exit stays 0, since it may still pass.
+	- Swept: `lint-report.bash` is the only reader of the run logs (`grep -rn lint-report`). `cicd.bash --lint-check` execs it with `--check`. All 18 run logs on this box end with the closing line, and none has a `--- FAIL:` line.
+	- Branch: nov22-2026112110300065
+	- Commit: ef0faaa
+	- Test case: 1a4yynm TestLintReportRunResult (clean, warning, died, aborted, test-failed and unfinished stand-in logs)
+	- Closed: 20261122-131035
+
+- A code file renamed to a docs path reads as a docs-only push
+	- ID: 2026112110300312
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: The hook's `git diff --name-only` folds a rename into its new name, so `git mv main.go notes.md` runs only the docs gate.
+	- Expected behavior [Bug]: Both sides of a rename count.
+	- Reproduced [Bug]: 2026-11-21: `cicd_prepush-rename_repro.bash`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 24.
+		- 2026-11-22: Verified: 1a4yxwm failed on the old hook, where code moved to notes.md ran the docs gate, and passes now. The whole quick gate passed.
+	- Origin: 532c922. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: git diff finds renames by default and lists only the new name.
+	- Actual fix [Bug]: The docs-only check diffs with `--no-renames`, which lists the old path as deleted and the new one as added.
+	- Branch: nov22-2026112110300052
+	- Commit: 22a75f4
+	- Test case: 1a4yxwm TestPrePushRename
+	- Swept: the hook's diff is the only name-only diff in the repo.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261122-130334
+
+- A release run builds and sums files that aren't committed
+	- ID: 2026112110300325
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `fIsRelease` checks only the branch and the tag. An untracked `.go` file under `source/` goes into both release builds, which still match each other, so README's "a tag always builds to the same bytes" fails for that release.
+	- Expected behavior [Bug]: A release build refuses a tree with changes under `source`, `go.mod` or `go.sum`.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 25.
+		- 2026-11-22: Reproduced: 1a4yz24 fails on the unfixed `cicd.bash`, where a release build took an untracked `.go` file, an ignored one, and a changed `go.mod` and `config.bash`. It passes after. Quick gate passed.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Origin: cicd.bash release steps. Not seen before. Confirmed by 1a4yz24.
+	- Actual cause [Bug]: The build step builds the working tree, and nothing compared it with the tagged commit.
+	- Actual fix [Bug]: On a release, the build step refuses when `git status`, untracked and ignored files included, shows anything under `source`, `go.mod`, `go.sum` or `cicd/config.bash`, and names what differs.
+	- Decisions:
+		- `cicd/config.bash` is checked too, beyond the item's wording, since it holds the build flags `verify-release.bash` reads from the tag.
+		- Ignored files count, since go build takes every `.go` file in a folder whether git sees it or not. A wholly ignored folder is named as the folder.
+		- The check is in the build step rather than at the start of the run, since only the build reads those files, and a dev run never trips it.
+	- Swept: `fIsRelease` is read by the build step and the demo step. The demo records from the build step's binary, so the check in the build step covers both. The second build copies the same tree, so it's covered too.
+	- Branch: nov22-2026112110300065
+	- Commit: 4b80726
+	- Test case: 1a4yz24 TestReleaseRefusesDirtyTree (clean, untracked, ignored, `go.mod`, `config.bash`, a file elsewhere, and a dev build)
+	- Closed: 20261122-131421
+
+- cicd.bash --list prints every test ID whatever the run
+	- ID: 2026112110300338
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `--list --backlog-run-quick cli` and `--merge-gate --list` print the same 315 IDs, root host checks included. The help says it prints the test IDs the other options would run.
+	- Expected behavior [Bug]: The list follows the areas and steps, or the help says it's every ID.
+	- Reproduced [Bug]: 2026-11-21: both runs.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 26.
+		- 2026-11-22: Verified: 1a4yzbg fails on the unfixed scripts (the cli area listed tests from other packages and the root host checks) and passes after. 1a3jz1w and 1a4hwpm still pass. Quick gate passed. Counts now: 40 for the cli area, 301 for a whole quick gate, 323 for a merge gate, 0 for a gate with `--no-test`.
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Origin: 3b7576c. Not seen before. Confirmed.
+	- Actual cause [Bug]: The list step called `test-id.bash --list`, which had no way to narrow the list, and passed it nothing about the run.
+	- Actual fix [Bug]: `test-id.bash --list` takes `--in PATH` and `--go-name REGEX`. `cicd.bash --list` passes the areas' folders, a name filter for a run with only the fuzz or soak step, and `cicd/root-host` when either root host step runs.
+	- Decisions:
+		- The list follows the run, rather than the help saying it's every ID, since the help already promised that.
+		- Both root host steps list every root host check. The ZFS checks share `checks.bash` with the main ones, and nothing there marks which is which.
+		- The arm64 and race steps list every Go test, as they run every package.
+	- Swept: `test-id.bash --list` is called only by `cicd.bash --list` and 1a3jz1w, which still passes. The step list it reads is the one the run prints as Steps, after every `--no-<step>` flag.
+	- Branch: nov22-2026112110300065
+	- Commit: 408a7c2
+	- Test case: 1a4yzbg TestCicdListFollowsRun (cli area, merge gate, gate with no tests, fuzz and soak alone, root host checks alone)
+	- Closed: 20261122-131742
+
+- README's uninstall steps leave the minecraftd group and name a key a new config lacks
+	- ID: 2026112110300351
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: `userdel minecraftd` leaves the group when the operator is in it. The steps point to the config's image name, which a new config has only after an `update` pins it. "A package puts `tt-minecraftd` in `/usr/bin` and nothing else" misses the license file it also installs.
+	- Expected behavior [Bug]: The steps remove the group, name where the image is found, and the package line is true.
+	- Reproduced [Bug]: 2026-11-21: `userdel` in the CICD image, and `dpkg-deb -c` on the package.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 27.
+	- Origin: 4afd000 and ae42a4f. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The uninstall steps never removed the group, and named a key that only an update pins.
+	- Actual fix [Bug]: Step 5 adds groupdel with a note, step 4 says to list images and that config.shcl has the name after an update, and the package line names the license file.
+	- Branch: nov22-2026112110300351
+	- Commit: cc97d28
+	- Test case: none, README text only.
+	- Actual effort: Low
+	- Closed: 20261122-150507
+	- Acceptance signoff: Self-closed: mechanical doc fix.
+
+- design.md still describes the removed plugin check in places
+	- ID: 2026112110300364
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Incorrect behavior [Bug]: The Testing section says unit tests check "the plugin check against changed and new jars", and the folder-handle rule still covers "a refused jar". Both went with 2026111914293176 and 2026111918161429. There's also a doubled "the the".
+	- Expected behavior [Bug]: design.md describes the code as it is.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 28.
+	- Origin: Left by 2b322c0 and by the 2026111918161429 change. Not seen before. Confirmed by reading.
+	- Closed reason: Done
+	- Actual cause [Bug]: 2b322c0 and the 2026111918161429 change left the plugin check in the Testing section and the folder-handle rule.
+	- Actual fix [Bug]: Testing names the plugin jar list and the Geyser and Floodgate sources, the folder-handle rule names Geyser's plugins folder, and the doubled word is gone.
+	- Branch: nov22-2026112110300351
+	- Commit: 0390da3
+	- Test case: none, design.md text only.
+	- Actual effort: Low
+	- Closed: 20261122-150507
+	- Acceptance signoff: Self-closed: mechanical doc fix.
+
+- Accept a same-bytes build in /usr/local/bin only when root owns it and nobody else can write it
+	- ID: 2026112110300377
+	- Type: Enhancement
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- install.bash and setup's copy count a build as current by SHA-256 alone, a link to one included. Also require a regular file owned by root with no group or other write, since root runs it.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 29. Dogfood's `cp -f` makes such a file where `/usr/local/bin` is writable.
+		- Done: install.bash and setup's copy leave the build in place only when it has the same SHA-256 and is a regular file owned by root with no group or other write (`oldbuild.Current`, install.bash's `fRootOnly`). Otherwise they put the build back as root's. The release's own bytes aren't kept in the old-builds folder, since nothing is lost. design.md's setup and Boot, and README's install section, say so. installerVersion goes to 1.2.1.
+		- Verified: 1a4za6c passes. The 4 new 1a3jrx0 cases fail with install.bash's SHA-256-only check put back, and pass now, under Bash 3.2 with busybox tools too. 1a3jzmm's 3 new cases fail with setup's SHA-256-only check put back, and 2 fail when a same-bytes file is kept. The quick gate passes, CodeQL included.
+		- Not verified: a real root-owned file. The tests have no root, so their own uid stands in for root's (`oldbuild.RootUID`, install.bash's `rootUid`).
+	- Decisions:
+		- 2026-11-22: A file with the release's bytes but the wrong owner, mode or a link is written over with no copy kept, since a copy would only hold the same bytes.
+		- 2026-11-22: Running setup from `/usr/local/bin` itself no longer skips the copy on its own. It goes by the same rule, so a link or an operator-owned file there is replaced too.
+	- Swept: every same-build check on `/usr/local/bin`: setup's `copyTarget`, which also had a link-follow skip, and install.bash's `current`. repair check 15 compares against the package's binary and moves a different build, so it's left as is. `oldbuild.Same` has no other caller.
+	- Test case: 1a4za6c, 1a3jzmm, 1a3jrx0
+	- Branch: nov22-2026112110300377
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: the new cases fail on the old checks and pass now.
+	- Closed: 20261122-151149
+
+- Remove the code that plugin approval left with no caller
+	- ID: 2026112110300390
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- `paper.IsBuild`, and `plugins.Info.Size` and `Info.Mod`, which are set and never read. Comment out with the reason, per the house rule.
+		- Rename `pinnedDirs` and `ReadApproved`, which keep the approval-era names.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 30. Found by coverage (0%) and a scan for exported names with no outside caller.
+		- 2026-11-22: IsBuild, Info.Size and Info.Mod commented out with the reason. 1a3emz4 (TestDescribe) checked Size and Mod, and now checks only About and SHA256; its date setup is commented out.
+	- Closed reason: Done
+	- Test case: none new, since nothing changes behavior. The build and the plugins, paper, update, setup and cli tests cover the renamed callers.
+	- Verified: go vet and every package's tests pass, and so does the whole quick gate.
+	- Swept: every caller of ReadApproved and pinnedDirs in source, cicd and the docs. Only the commented-out tests and the backlog still name ReadApproved. paper.IsBuild had no caller and no test.
+	- Decisions: ReadApproved is now ReadSources and pinnedDirs is jarDirs. The test names TestReadApprovedList and FuzzReadApproved stay, since closed items name them by test ID and name. The Approved type keeps its name, since the item names only the two.
+	- Branch: nov22-2026112214545321
+	- Commit: 143d5de
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical.
+	- Closed: 20261122-150329
+
+- Refuse a config value that an unquoted # cuts short
+	- ID: 2026112110300403
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- `--set serverDir=/srv/games#2` gives `/srv/games` with no error, and the same line in the file gives no warning. setup and repair would then chown that other tree.
+		- `Set` refuses a value whose read-back differs from what was typed. A comment glued to a value in the file gets a warning.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 31. shcl friction: a `#` with no space before it starts a comment.
+		- 2026-11-22: Set refuses a value a comment would cut, glued or spaced, and names what it would read as. A comment right against a value in config.shcl or plugins.shcl gets a warning with its line, from shcl's own hint. design.md's Configuration model says so.
+		- Verified: 1a4zb2g and 1a4zb2h fail on the old code and pass with the change. The whole quick gate passes.
+	- Closed reason: Done
+	- Branch: nov22-2026112110300403
+	- Test case: 1a4zb2g, 1a4zb2h
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Swept: Config.Set is the one place an option is parsed, and config.LoadFile reads both config.shcl and plugins.shcl, so a glued comment warns in both.
+	- Closed: 20261122-151836
+	- Decisions:
+		- Set compares the line as typed against SetLiteral's form of the value, which drops a comment, so any cut is caught without a scan of shcl's quoting here.
+		- In the file only a glued comment warns, as the item asks. A spaced comment after a value is the usual form and stays quiet.
+	- Commit: 88d47a3
+
+- Cover status readings in a soak
+	- ID: 2026112110300416
+	- Type: Enhancement
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
+	- Requirements:
+		- Neither soak covers `status.Probe.Take`, the one loop that runs with no end, in `watch`. Add it, so a small leak per reading shows.
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 32.
+		- 2026-11-22: New soak in the status package: one Probe takes reading after reading of a running server, with the process table, cgroup memory, a real ping to a loopback stand-in, sockets, drop counters, player lists, jars, and a log that grows each round.
+		- Verified: 1a4zbf0 passed at 100 and 1000 rounds a half (heap and goroutines flat). A planted 12 kB kept per `Take` and a planted goroutine per ping each turned it red. The soak step ran it in the container with `--leakcheck --backlog-run-quick status`, and the whole quick gate passed.
+	- Decisions:
+		- The command's soak already took a reading each round, but of a stopped server with an empty stand-in host, so the ping, memory, counters and log parts never ran. The new soak covers the running path rather than widening that one.
+		- It soaks `Take` rather than `watch` itself, since watch's own loop only adds a buffer and a ticker per pass.
+	- Test case: 1a4zbf0 TestSoak in status
+	- Swept: `Take` has 2 callers, `showStatus` and `watch` in main.go. Both go through the same Probe.
+	- Branch: nov22-2026112110300416
+	- Commit: 2e8ebd0
+	- Acceptance signoff: Self-closed: clear intent, and the soak was watched to fail on a planted heap and goroutine leak.
+	- Closed: 20261122-152400
+
+- Publish v1.0.0-beta.1 with or before the install.bash that needs retire-build
+	- ID: 2026112110300429
 	- Type: Task
 	- Status: Stalled
-	- Priority: Avg
-	- Opened: 20261111-110707
-	- Opened by: t00mietum
-	- Prereq IDs: 2026111111065868, 2026111111070761
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261121-103000
+	- Opened by:
 	- Requirements:
-		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
-	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
-	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
+		- v1.0.0-alpha.1 has no `retire-build`. If dev's install.bash reaches main before beta.1 is published, replacing a build fails, safely, with "couldn't move the old build out of the way".
+	- Progress log:
+		- 2026-11-21: Code review 20261121 item 33.
+		- Held for: the v1.0.0-beta.1 release, which a backlog round doesn't publish.
+
+- Root host checks pass on an empty counter or line number
+	- ID: 2026112017592969
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261120-175929
+	- Opened by:
+	- Incorrect behavior [Bug]: In checks.bash, [[ "$(counter out_local)" -eq 0 ]] is true when nft or the python step fails and prints nothing, so 1a3fhnw passes its loopback half. 1a3fjbr's line number compare passes the same way when adopt.out has no source lines.
+	- Expected behavior [Bug]: counter and the line lookups fail unless they get a number.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/root-host/checks.bash, fStun and the adopt check.
+		- Verified: 1a4q3sg runs counter, fStun and before from checks.bash with a stub nft. Its nft-fails STUN case and no-source-lines adopt case fail on the old checks.bash and pass on the new one. The quick gate passed.
+		- Swept: every [[ -eq|-ne|-lt|-gt|-le|-ge ]] on a command substitution in cicd/root-host. fFirewallOut's 2 counter reads had the same gap and are fixed. The other 2 live ones read grep -c and wc -l, which always print a number.
+		- Verified: 2026-11-20, root-host.bash on nov20b passed 1a3fhjr, 1a3fhnw, 1a3fhs0 and 1a3fjbr, 16 PASS and 0 FAIL.
+	- Decisions: counter checks for a whole number before any arithmetic, which also keeps a stray value out of bash arithmetic.
+	- Needs external testing: No
+	- Reproduced [Bug]: 20261120, by 1a4q3sg: on the old checks.bash, fStun passed with nft failing, and the old adopt compare passed with no source lines.
+	- Origin: c076344 (counter) and 2b322c0 (the adopt compare). Not seen before. Confirmed.
+	- Actual cause [Bug]: A failed command substitution prints nothing, and [[ -eq ]] and [[ -lt ]] read an empty side as 0.
+	- Actual fix [Bug]: counter fails unless nft and python give a whole number, and its callers in fStun and fFirewallOut stop on that. The adopt check goes through a new before helper, which fails unless both lines are found.
+	- Actual effort: Low
+	- Branch: nov20b-2026112017592969
+	- Commit: fe0fb5e
+	- Test case: 1a4q3sg
+	- Closed reason: Done
+	- Closed: 20261120-185302
+
+- repair fails its tree check when Paper renames a file mid-walk
+	- ID: 2026112017592200
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261120-175922
+	- Opened by:
+	- Incorrect behavior [Bug]: While the server runs, Paper saves through temp files it renames, such as playerdata and level.dat_new. The walk lists one, Paper renames it, and the lstat behind d.Info gets ENOENT, which ends the whole walk with FAILED tree ownership.
+	- Expected behavior [Bug]: A file that's gone by the time it's looked at is skipped. Only a missing tree root is an error.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/repair/files.go, the WalkDir callback.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-20: a loop renaming 200 files in place made 1020 of 2000 walks fail on the old code, and none with the fix.
+	- Actual cause [Bug]: The walk's callback returned every error, so a file or folder gone between the listing and its lstat or read ended the whole walk.
+	- Actual fix [Bug]: The walk skips a file or folder that's gone by the time it's looked at. A missing tree root is still an error. plugins.Libraries, which update runs while the server may be up, skips a cache folder that's gone the same way.
+	- Test case: 1a4q4c8, 1a4q4fc
+	- Verified: 1a4q4c8 and 1a4q4fc fail on the old code and pass with the fix. Each of the walk's two skips was taken out alone, and 1a4q4c8 failed each time. The quick gate passes.
+	- Swept: every filepath.WalkDir in source. plugins.Libraries had the same failure on a folder gone mid-walk, fixed and pinned by 1a4q4fc. It reads no file info, so a renamed file never failed it. Left alone: launch's boxLinks runs at start before Paper does, and only warns on a folder it can't read.
+	- Branch: nov20b-2026112017592200
+	- Commit: b141647
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261120-182955
+	- Decisions:
+		- The skip applies whether or not the server runs, since a file that's gone has no owner or mode left to judge.
+		- Both walks call filepath.WalkDir through a package var, walkDir, so a test can take a file away between the listing and the look. That keeps the tests exact rather than racing a rename loop.
+
+- console.py can call a clean Ctrl-C detach a failure
+	- ID: 2026112017593367
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175933
+	- Opened by:
+	- Incorrect behavior [Bug]: pump returns at the pty's EIO, and waitpid with WNOHANG runs at once. The child closes its fds before it's a zombie, so a console that left can read as "console didn't leave on Ctrl-C" and 1a3fhjr flakes.
+	- Expected behavior [Bug]: waitpid is polled for about 2 s before it counts as a failure.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/root-host/console.py.
+		- Verified: 1a4q3wm's late-exit case fails on the old console.py and passes on the new one. Its control, a console that never exits, still fails with "console didn't leave on Ctrl-C" after 2 s. The quick gate passed.
+		- Swept: console.py is the only pty driver under cicd. Its other waits are the fixed pumps.
+		- Verified: 2026-11-20, root-host.bash on nov20b passed 1a3fhjr, 1a3fhnw, 1a3fhs0 and 1a3fjbr, 16 PASS and 0 FAIL.
+	- Needs external testing: No
+	- Reproduced [Bug]: 20261120, by 1a4q3wm: a stand-in console that closes the pty and exits half a second later fails on the old console.py.
+	- Origin: c076344 root host checks. Not seen before. Confirmed.
+	- Actual cause [Bug]: The pty's EIO comes when the child closes its fds, before it can be reaped, and console.py tried waitpid only once.
+	- Actual fix [Bug]: After the last pump, console.py polls waitpid every 50 ms for up to 2 s.
+	- Actual effort: Low
+	- Branch: nov20b-2026112017592969
+	- Commit: fe0fb5e
+	- Test case: 1a4q3wm
+	- Closed reason: Done
+	- Closed: 20261120-185302
+
+- pre-push reads a new branch's first push by the working tree
+	- ID: 2026112017593230
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175932
+	- Opened by:
+	- Incorrect behavior [Bug]: For an all-zero remote sha, fOnlyDocs diffs the pushed commit against the working tree. A first push of main from a tree with only doc edits reads as docs-only and skips the merge gate.
+	- Expected behavior [Bug]: A push that creates the branch always gets the merge gate.
+	- Reproduced [Bug]: 20261120. 1a4q4vw fails on the unfixed hook: a code commit with a docs edit left in the tree ran the docs gate.
+	- Actual cause [Bug]: With no old commit, fOnlyDocs ran `git diff --name-only <sha>`, which compares the commit with the working tree.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/hooks/pre-push.
+		- 20261120: Verified: 1a4q4vw fails on the unfixed hook and passes with the fix. 1a3jwx4 still passes, and the quick gate passed.
+	- Actual fix [Bug]: A push that makes the branch never reads as docs-only, so it gets the merge gate, unless the merge gate already passed on that commit.
+	- Branch: nov20b-2026112017593230
+	- Commit: d380fa7
+	- Test case: 1a4q4vw TestPrePushNewBranch
+	- Swept: the hook is the only place that reads an all-zero sha; the delete case (all-zero local sha) was already skipped.
+	- Decisions:
+		- A commit the merge gate already passed on still skips it on a first push, as for any other push.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261120-183409
+
+- Ctrl-C in cicd.bash skips its cleanup
+	- ID: 2026112017593100
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175931
+	- Opened by:
+	- Incorrect behavior [Bug]: The run log's tee gets the Ctrl-C and dies, so the EXIT trap's first write gets SIGPIPE. The run folder, container and volume cleanup are skipped until fSweepRuns 2 days later.
+	- Expected behavior [Bug]: The tee ignores INT and TERM, so cleanup runs.
+	- Reproduced [Bug]: 20261120. 1a4q4vx fails on the unfixed script: after SIGINT to the process group, the trap's cleanup never ran and the log ended at the last line before it.
+	- Actual cause [Bug]: The tee shared the run's process group and kept the default INT action.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. cicd/cicd.bash, the exec into tee. See the bash-traps skill.
+		- 20261120: Verified: 1a4q4vx fails on the unfixed script 3 of 3 times and passes with the fix 5 of 5. The quick gate passed, and ran it in the container.
+	- Actual fix [Bug]: The tee starts as `trap '' INT TERM; exec tee ...`, so it outlives the Ctrl-C and drains once the trap closes the output.
+	- Branch: nov20b-2026112017593230
+	- Commit: d380fa7
+	- Test case: 1a4q4vx TestRunLogCtrlC: the tee and EXIT trap lines copied out of cicd.bash, then SIGINT to the process group.
+	- Swept: no other `>(tee` in the repo. root-host.bash has no tee of its own output.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Closed: 20261120-183409
+
+- selfupdate's chmod of the staged build follows a link
+	- ID: 2026112017592840
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175928
+	- Opened by:
+	- Incorrect behavior [Bug]: ready calls Fchmodat on the staged name with no flags, so a link put there would be followed, though Install's doc says nothing follows links.
+	- Expected behavior [Bug]: chmod and chown go through the staged file's own handle.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/selfupdate/selfupdate.go. Harmless while update --self is deferred and the binary's folder is root-owned.
+	- Closed reason: Done
+	- Actual cause [Bug]: `ready` set the staged build's mode with `Fchmodat` on the temp name, which follows a link, and its owner by name too.
+	- Actual fix [Bug]: `download.Staged` gained `SetOwner`, the step `Keep` already ran: it checks the temp name is still the file `Stage` wrote, then sets owner and mode through that file's own handle. `ready` calls it, so a link or another file at the temp name is refused.
+	- Test case: 1a4q5em
+	- Verified: 1a4q5em fails on the old code (the link's target became 0750) and passes with the fix. 1a3jkm8 still passes, and the quick gate passes, CodeQL included. Only the non-root path ran.
+	- Swept: `grep -rn 'Fchmodat\|Fchownat\|os.Chmod\|os.Chown\|os.Lchown' source` finds no other chmod or chown by name in a folder another account can write. paper.go's `Fchownat` doesn't follow links, and the `os.Chmod` calls are under `/etc` or `/var/lib`.
+	- Decisions:
+		- checkVersion still runs the new build by path. The folder is root-owned, and `Keep` refuses a file swapped in at the temp name afterwards.
+	- Branch: nov20b-2026112017592840
+	- Commit: 613954c
+	- Acceptance signoff: Self-closed: 1a4q5em fails on the old code and passes now.
+	- Closed: 20261120-184000
+
+- linksafe's no-RENAME_NOREPLACE move checks the target by path
+	- ID: 2026112017592711
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175927
+	- Opened by:
+	- Incorrect behavior [Bug]: The fallback for a filesystem without RENAME_NOREPLACE checks the target with os.Lstat on the full path, which follows a parent link the server may have put in after the folder was opened.
+	- Expected behavior [Bug]: The check goes through the folder handle with O_PATH and O_NOFOLLOW, like the rest of the package.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/linksafe/linksafe.go. ZFS and ext4 both have the flag, so this path seldom runs.
+	- Closed reason: Done
+	- Actual cause [Bug]: `Move`'s fallback checked the new name with `os.Lstat` on the full path, so a folder swapped for a link after it was opened could hide a file that was there, and the rename then replaced it.
+	- Actual fix [Bug]: The check opens the name under the folder handle with O_PATH and O_NOFOLLOW (`existsAt`), so it sees the same folder the rename uses. O_PATH runs no driver for a device or pipe there.
+	- Test case: 1a4q5bg
+	- Verified: 1a4q5bg fails on the old code (the file was replaced) and passes with the fix. 1a3k0dm still passes, both arches vet, and the quick gate passes, CodeQL included.
+	- Swept: `Move` is the only fallback with a path check in linksafe. Its other calls all go through handles.
+	- Branch: nov20b-2026112017592840
+	- Commit: 613954c
+	- Acceptance signoff: Self-closed: 1a4q5bg fails on the old code and passes now.
+	- Closed: 20261120-184000
+
+- start and stop waits run past their timeouts
+	- ID: 2026112017592582
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175925
+	- Opened by:
+	- Incorrect behavior [Bug]: The start and stop waits loop startTimeout or stopTimeout times, each a 1 s pause plus 2 sudo commands. At 300 s with 100 to 200 ms of commands a pass, the wait is 330 to 360 s, while the messages say 300.
+	- Expected behavior [Bug]: Each wait ends at a deadline set once, from the clock.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/launch/kit.go.
+		- 20261120: Verified: 1a4q5y8 fails on the old loops (start waited 8s on a 5s timeout, stop 3.9s on 3s, with 300 ms looks) and passes with the fix. The quick gate passed, and race tests of launch.
+		- Swept: the countdown's pauses and cmd's answer wait count passes too, but they send or read a local file between pauses, not sudo looks, so they're left. Native foreground polls every 5 s with no deadline.
+	- Closed reason: Done
+	- Actual cause [Bug]: waitLoaded and waitStopped counted passes, one per second of the timeout, so each pass's sudo looks added to the wait.
+	- Actual fix [Bug]: each wait sets a deadline once and polls until it passes, and the last pause is cut to what's left. Under the tests' clock, the time asked of Sleep is the clock.
+	- Actual effort: Low
+	- Test case: 1a4q5y8
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: 1a4q5y8 fails on the old loops and passes now.
+	- Closed: 20261120-184803
+	- Decisions:
+		- 20261120: the end-of-wait message and the last check are as before. The last pass can run past the deadline by one look, no more.
+
+- A YAML alias to a safe value reads as a section
+	- ID: 2026112017592452
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175924
+	- Opened by:
+	- Incorrect behavior [Bug]: yamlCopies keeps the alias node itself, so settings.bungeecord: *f with f: &f false fails as a section. start refuses the safe file, and repair says to set it by hand.
+	- Expected behavior [Bug]: The copy's value is the alias target, as SnakeYAML reads it. Whether it can be edited in place is still judged on the alias node.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/settings/yaml.go, the level == len(path)-1 case.
+		- 20261120: Verified: 1a3jtbw's alias to false row fails on the old reader (check found settings.bungeecord, fix said to set it by hand) and passes now. The quick gate passed.
+		- Swept: yamlCopies is the only place a copy's value is taken. yamlLast and yamlChild already deref, and the Geyser reader goes through the same scan.
+	- Closed reason: Done
+	- Actual cause [Bug]: yamlCopies kept the alias node as the copy's value, and only a scalar counts as safe.
+	- Actual fix [Bug]: the copy's value is the alias target. Whether it can be edited in place is still judged on the node on the key's line, so an alias to a bad value is still left to set by hand.
+	- Actual effort: Low
+	- Test case: 1a3jtbw (alias to false row)
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: the new 1a3jtbw row fails on the old reader and passes now.
+	- Closed: 20261120-184803
+
+- repair's ufw check misses a DENY rule above the ALLOW
+	- ID: 2026112017592322
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261120-175923
+	- Opened by:
+	- Incorrect behavior [Bug]: ufwMissing reads only ALLOW IN and LIMIT IN rules. With 19132/tcp DENY IN above 19000:19200/tcp ALLOW IN, ufw drops Bedrock and the check says OK.
+	- Expected behavior [Bug]: Rules are read in order, first match wins, as ufw does, so a DENY IN or REJECT IN that covers the port first leaves it missing.
+	- Progress log:
+		- 2026-11-20: Found in a code tidy pass. source/internal/repair/hostfw.go. It only reports, so it's low.
+		- 20261120: Verified: 1a3eptg's 7 new rule sets: the 4 with a deny first fail on the old check (nothing reported) and pass now. The quick gate passed.
+		- Swept: ufwMissing is the only ufw reader. firewalld's --list-ports has no deny rules, so it keeps uncovered.
+	- Closed reason: Done
+	- Actual cause [Bug]: ufwMissing gathered every ALLOW IN and LIMIT IN port and ignored the rest, so a deny above them never counted.
+	- Actual fix [Bug]: rules are read in order and the first that matches a port wins. A DENY IN or REJECT IN from Anywhere blocks it. When that rule names only the port, the report keeps sudo ufw allow, which replaces it; otherwise it names the rule. design.md's repair check 10 says so.
+	- Actual effort: Low
+	- Test case: 1a3eptg
+	- Branch: nov20b-2026112017592582
+	- Commit: ee57760
+	- Acceptance signoff: Self-closed: 1a3eptg's new rule sets fail on the old check and pass now.
+	- Closed: 20261120-184803
+	- Decisions:
+		- 20261120: a deny counts only from Anywhere, since an allow's From column isn't read either. A deny from one address would otherwise report a port players can reach.
+		- 20261120: the IPv6 rules come after the IPv4 ones in ufw's list, so they decide only a port no IPv4 rule names. A rule only for IPv6 still counts, as before.
+		- 20261120: ufw allow replaces a rule that differs only in its action, so it's still the advice for a deny that names only the port. For a wider deny it would add a rule below it, so the report names the rule instead.
+
+- Remove plugins.Refuse and RefusedDir, which nothing calls now
+	- ID: 2026111918161429
+	- Type: Task
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261119-181614
+	- Opened by: JC
+	- Related IDs: 2026111914262600, 2026111914293176
+	- Requirements [Feature]: Remove plugins.Refuse and plugins.RefusedDir from source/internal/plugins/approve.go, and any docs that name plugins-refused/. Comment out their tests with the reason, per the never-delete rule.
+	- Estimated effort: Low
+	- Progress log:
+		- 2026-11-19: Kept only for the known-bad check, which found no usable list. t00mietum OKed removing them.
+		- 2026-11-20: Removed both. No doc names plugins-refused/ outside the backlog.
+	- Test case: none, since the removed code has no caller. 1a3en5c and 1a3js38 tested only Refuse and are commented out.
+	- Verified: build, vet and the quick gate on the plugins area pass.
+	- Decisions:
+		- The Refuse tests (1a3en5c, 1a3js38) are commented out with the reason, per the never-delete rule. The root host check covers linksafe.Mkdir elsewhere.
+		- 2026-11-19: t00mietum: keep 1a3en5c and 1a3js38 as comments.
+	- Swept: grep for Refuse, RefusedDir and plugins-refused in source, cicd, design.md and README.md finds only the commented tests and unrelated words.
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: mechanical removal of unused code.
+	- Closed: 20261120-022900
+
+- Trust the plugins an admin adds, with no approval step
+	- ID: 2026111914293176
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261119-142931
+	- Opened by: JC
+	- Related IDs: 2026111715275425, 2026111914262600
+	- Requirements [Feature]:
+		- An admin never has to look into a plugin or its hash. A jar they add, and a jar another plugin needs, counts as OK, unless it's on a public bad list (2026111914262600).
+		- `start`, `status` and `repair` stop checking jars against an approved list, and `start` no longer refuses a new or changed jar. `paper.jar` is the same.
+		- `repair --approve-plugins` and setup's approve step go. `plugins-refused/` is only for a jar on the bad list.
+		- `plugins.shcl` keeps only the optional `source` per jar, for `update --plugins`. setup and repair still give Geyser and Floodgate GeyserMC's source, without asking. update judges a jar up to date by the hash of the file on disk.
+		- Jars stay mounted read-only in container modes, since that costs the admin nothing.
+		- The update agent's finds still need a yes before they're installed, since that's new code from a lookup, not something the admin added.
+		- design.md's Summary, start, status, setup, update, repair, Plugin pinning, Update agent and Security, and README, say so. A Direction decisions entry records the reversal and the trade: a jar the server writes into `plugins/` while it runs would load at the next start.
+	- Progress log:
+		- 2026-11-19: t00mietum, after the plugin library answer: admins shouldn't have to investigate plugins or hashes. A plugin they add, or one another plugin needs, is OK unless it's on a public bad list.
+		- 2026-11-19: Split in 2: 2026111914334569 for start, status, repair, setup and the docs, and 2026111914334585 for update. The parent closes with the last child.
+		- 2026-11-19: Both children are worked and wait on the root host check: 2026111914334569 (bca9ac5) and 2026111914334585.
+		- 2026-11-19: No public bad list is readable without an account (2026111914262600), so no jar is checked against one.
+	- Decisions:
+		- This reverses the hash pinning chosen at the start of the project (9058841). The library pinning in 2026111715275425 goes with it.
+	- Test case: its children's: 2026111914334569: 1a4j16c, 1a4j19g, 1a4j1s4; 2026111914334585: 1a4j2j4, 1a4j2rc
+	- Closed: 20261119-151632
+	- Closed reason: Done
+
+- Stop checking jars against the approved list in start, status, repair and setup
+	- ID: 2026111914334569
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261119-143345
+	- Opened by:
+	- Parent ID: 2026111914293176
+	- Related IDs: 2026111715275425
+	- Requirements [Feature]: start, status and repair stop checking jars and paper.jar against the list, and start no longer refuses a new or changed jar. repair --approve-plugins and setup's approve step go. The library pinning from 2026111715275425 goes: start's removal, repair's prompt, and plugins.Libraries. plugins.shcl's sha256 is no longer needed. setup and repair give Geyser and Floodgate GeyserMC's source without asking. Jars stay read-only in container modes. design.md's Summary, start, status, setup, repair, Plugin pinning, Security and Direction decisions, and README, say so.
+	- Estimated effort: Avg
+	- Needs local test suite run?: No
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-19: start, status, repair and setup no longer read hashes. repair --approve-plugins, setup's approve step, start's library removal, repair's library prompt, and plugins.CheckJars and CheckLibraries are gone. A missing or bad sha256 in plugins.shcl is ignored. setup and repair give a Geyser or Floodgate jar with no source GeyserMC's, through the new plugins.SetSources and Unsourced. status lists the jars by name. design.md's Summary, start, status, setup, repair, Plugin jars (was Plugin pinning), Configuration model, Security and Direction decisions, and README, say so.
+		- Verified: 1a4j19g and 1a4j1s4 fail on 8bc0fd1 and pass with the change. The whole quick gate passes.
+		- Tests commented out, since approval went: 1a3ek3r, 1a4hxz8, 1a3jzy0, 1a3k014, 1a3en8g, 1a3jtj4, 1a3enbm, 1a4hxz9, 1a3jh30, 1a3jv4w, and root host check 1a3fhz8. The CheckJars asserts in 1a3emw0 and 1a3jsw8 are commented out too, and 1a3jt8r calls Jars in place of CheckJars.
+		- 2026-11-19 asserts updated for the change: 1a3ef0g keeps the jars with no or bad sha256, and drops the line 3 warning. 1a3jnw4 allows an empty hash. 1a3emw0's error text went from "can't be approved" to ", outside ". The plugin lines in 1a3ejdw, 1a3ejm4, 1a3ejq8, 1a3ekd4 and 1a3jtf0 list jar names, not approval. 1a3f8wm's list went from 3 entries to 2, 1a3f92w's from 4 to 2, 1a3jgzw lost paper.jar and the lookalike, and 1a3famw's hash went from cd x 32 to empty. 1a3fgww lists a Geyser jar, and 1a3jqe4 refuses on the whitelist, in place of an unapproved jar.
+		- Verified: root host check on nov19c passed 1a3fh00, 1a3fjbr and 1a3jgsm (run 20261119-151312_001, 16 PASS, 4 native SKIPs). Quick gate on nov19c passed too.
+	- Decisions:
+		- plugins.Approve stays, for update, until 2026111914334585. So do Libraries and IsLibrary, which that item needs, and Refuse, which the known-bad check (2026111914262600) needs.
+		- The names Approved and ReadApproved stay, to keep the churn down.
+		- An old list's sha256 is read and not checked, with no warning. A bad one warns and is ignored, and no longer drops the jar.
+		- status lists the jars by name, and opens none, since nothing is hashed now.
+		- repair's check 7 is now the Geyser and Floodgate sources. --check reports a missing one as FAILED, since update then never gets Geyser's next build, and Bedrock players need it current. repair adds it without asking.
+		- setup's plan lists only the Geyser and Floodgate jars that get a source, and no hashes. Other jars need no yes.
+		- repair lost its input reader, since it asks nothing now.
+		- Swept: CheckJars, CheckLibraries, clearLibraries, checkPlugins and approve-plugins across source, cicd, the root host checks, demo.bash, design.md and README. The approval left is in update and the agent, which is 2026111914334585's.
+	- Branch: nov19c-2026111914293176
+	- Test case: 1a4j16c, 1a4j19g, 1a4j1s4
+	- Commit: bca9ac5
+	- Closed reason: Done
+	- Closed: 20261119-151632
+	- Acceptance signoff: Self-closed: tests passed, per the standing close policy.
+
+- update: judge plugins by the file on disk, stop writing hashes, and clear plugin libraries
+	- ID: 2026111914334585
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261119-143345
+	- Opened by:
+	- Parent ID: 2026111914293176
+	- Related IDs: 2026111715275425
+	- Requirements [Feature]: update --plugins works on the jars in the tree, with their optional source from plugins.shcl, and calls a jar up to date by the hash of the file on disk. update, setup and the agent stop writing hashes to plugins.shcl. The agent's finds still need a yes. update --plugins, and a plain update, remove the plugins' libraries in libraries/ as runUser, with Paper's own left out by paper.jar's libraries.list, so Paper downloads fresh ones at the next start (2026111715275425's second answer). design.md's update, Update agent and Plugin pinning say so.
+	- Estimated effort: Avg
+	- Prereq IDs: 2026111914334569
+	- Needs local test suite run?: No
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-19: update --plugins works on the jars in plugins/ and its extensions folder, with their source from plugins.shcl, and calls one up to date by the hash of the file on disk. update and the agent no longer write to plugins.shcl, and plugins.Approve and IsLibrary are gone. update --plugins, and a plain update, remove the plugins' libraries from Paper's cache as runUser, after the plugins, with Paper's own left out. design.md's update, Update agent and Plugin jars say so.
+		- Verified: 1a4j2rc fails on bca9ac5 and passes with the change. 1a4j2j4 is new, for SetSources. The whole quick gate passes.
+		- Tests commented out: 1a3en28 (TestApprove), since Approve went. 1a4hxza now makes the list it appends to.
+		- 2026-11-19 asserts updated for the change: 1a3fdrw, 1a3jra8, 1a3fe28 and 1a3jgd4 lost their "approved" lines, and their list checks now want no list, or no hash. 1a3jgg8's order went from the list's to the folder's. 1a3jrdc's report says "the plugins", not "the approved plugins". 1a3fe28's gone jar no longer says "not in the server folder".
+		- Verified: root host check on nov19c passed 1a3fh00, 1a3fjbr and 1a3jgsm (run 20261119-151312_001, 16 PASS, 4 native SKIPs). Quick gate on nov19c passed too.
+	- Decisions:
+		- A jar plugins.shcl names that isn't in the tree is left out with no message, since it isn't a jar now.
+		- The removal is left out while the server may be running, through Update.Running, since a running Paper can still open a library it hasn't read yet. A failed look counts as running.
+		- It runs as runUser, per 2026111715275425's answer, and needs the tree's group write that start gives it. A failed rm fails the update after the rest is done.
+		- It's in the plan, so an update with only libraries to clear still asks first.
+		- Swept: every plugins.Approve and IsLibrary caller, in update, the agent, setup and the tests. treeJars feeds pluginLookup and movePlugins, the 2 readers of the list in update.
+	- Branch: nov19c-2026111914293176
+	- Test case: 1a4j2j4, 1a4j2rc
+	- Commit: 4eb03ec
+	- Closed reason: Done
+	- Closed: 20261119-151632
+	- Acceptance signoff: Self-closed: tests passed, per the standing close policy.
+
+- Pin or clear the jars Paper loads from plugins/.paper-remapped and libraries/
+	- ID: 2026111715275425
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Paper loads remapped copies of plugins from `plugins/.paper-remapped/`, and caches plugin libraries under `libraries/`. Both are in the tree the server can write, and neither is hashed, so code written there would outlast a restart past the pins.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 39. Detail in detail_backlog.md.
+		- 2026-11-19: Reproduced on Paper 26.3 build 256: a jar written over a plugin library in `libraries/` was loaded at the next start, with no download and no check. 26.3 makes no `plugins/.paper-remapped/`, since 26.1 dropped the remapper. Paperclip put back a changed server library and `versions/` jar from the hashes in `paper.jar`.
+		- 2026-11-19: start removes `libraries/` and `plugins/.paper-remapped/` after the hand-off, as the service account, in both modes. Paper then downloaded the library again, matching Maven Central's SHA-1. design.md's start and Plugin pinning sections say so.
+		- Verified: 1a3jzy0 and 1a3k014 fail with the removal taken out, with `.paper-remapped` left off the list, and with the removal run through plain sudo, and pass with the fix. The quick gate's format, tests and CodeQL pass, and so do vet, staticcheck, gosec, shellcheck and the test ID check. Its markdownlint step fails on backlog lines from round commit f741e0d, not this item.
+		- 2026-11-19: Asserts updated for the new rm line: 1a3egrr and 1a3ehv4 have it in their lists. Change counts went from 5 to 6 in 1a3eh24, 7 to 8 in 1a3ej1c, and 7 to 8 and 8 to 9 in 1a3ej4g.
+		- 2026-11-19: Per the answer, start no longer clears the whole cache. Library jars go on the approved list. start removes only the ones that aren't listed or don't match, and says how many, so Paper downloads just those. `repair --approve-plugins` lists them and asks once for all. Paper's own libraries are left out by `paper.jar`'s `META-INF/libraries.list`. `update --plugins` and the agent skip approved libraries. design.md's start, repair and Plugin pinning say so.
+		- 2026-11-19: Asserts back to their values before 6ca2410, since a rig with no library cache runs no rm now: 1a3egrr and 1a3ehv4 lose the rm line. Change counts went from 6 to 5 in 1a3eh24, 8 to 7 in 1a3ej1c, and 8 to 7 and 9 to 8 in 1a3ej4g.
+		- Verified: 1a3jzy0 fails with start's removal taken out, and with Paper's own libraries not left out. 1a4hxza fails with the update skip taken out. 1a4hxz8, 1a4hxz9, 1a3jzy0 and 1a3k014 pass, and so does the whole quick gate. On a real Paper 26.3 build 256 tree, after Paperclip set it up, all 104 of Paper's own libraries were left out and a planted jar was listed.
+		- 20261119: Second answer: too complicated. No approval step for libraries, and no download again at each start. Set back to Queued.
+		- 2026-11-19: The library pinning, start's removal, repair's prompt and plugins.CheckLibraries were taken out in 2026111914334569. update's library skips and the removal at update are left for 2026111914334585.
+		- 2026-11-19: update's library removal is in 2026111914334585, and its library skips are gone. Both parts of this item are covered there and in 2026111914334569, which have the tests now (1a4j2rc). 1a3jzy0, 1a3k014, 1a4hxz8 and 1a4hxz9 are commented out.
+	- Note: No. Paper's loader wasn't checked.
+	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
+	- Decisions:
+		- Superseded by the 20261119 answer below: Clear rather than pin or mount read-only. The running server writes plugin libraries, so pinning them would approve the server's own writes, and a read-only mount stops Paper adding a new plugin's libraries. Check: entry in questions.md, for the download at each start.
+		- Superseded by the 20261119 answer below: All of `libraries/` goes, not only the plugins' part. Paperclip checks its own part anyway and puts it back in about a second, so no list from `paper.jar` is needed.
+		- The rm runs as `runUser`, so a link in the tree reaches nothing that account couldn't change already. A link at `libraries` itself is removed, not followed (1a3jzy0).
+		- A failed removal stops the start before the launch, and hands the trees back (1a3k014).
+		- Left alone: code a plugin downloads into its own folder, which approving the plugin trusts it with. `cache/` and `versions/` are checked by Paperclip at every start.
+		- Swept: both launching start paths, `Boxed.Start` (shared by `--debug`, `--foreground` and the boot unit's `start --foreground`) and `Native.Start`. No other code launches Paper.
+		- 20261119 answer: do whatever makes the most sense without deleting and downloading again at every start. So the clearing at start goes, and one of the other ways replaces it, such as pinning the libraries' hashes and approving them through repair after the first download, or mounting libraries/ read-only.
+		- Pin, and clear only what isn't approved. A refusal at the second start, after Paper's own download at the first, would surprise. Removing unapproved jars keeps the server running and still drops anything the server wrote. Once approved, they stay. Check: entry in questions.md.
+		- Not read-only: Paperclip writes its own libraries there after each Paper update, and Paper adds a new plugin's.
+		- Paper's own libraries are left out by path, whatever their hash, since Paperclip puts back any that differ before Paper runs. That also keeps old Paper builds' libraries from needing approval; start removes them.
+		- repair asks once for all the libraries, since a plugin can need dozens, and they have no `plugin.yml` to tell them apart. `repair --check` doesn't report them, since start takes care of them.
+		- Approved libraries aren't locked read-only like plugins. One changed while the server runs fails its hash at the next start and is removed, and it was loaded before the change anyway.
+		- A link to a folder, or a link at `libraries` itself, is listed and can never be approved, so start removes it and doesn't follow it (1a3jzy0, 1a4hxz8).
+		- Left open: entries for libraries no longer on disk stay on the list, as old Paper builds do.
+		- Swept: both start paths call `clearLibraries`. Readers of the approved list that act per jar, `pluginLookup` and `movePlugins` in update, skip libraries (1a4hxza). status, setup and `CheckJars` list only `plugins.Jars`, which has no libraries.
+		- Superseded by the second answer below: the library pinning, the approval in repair, and start's removal of unapproved libraries.
+		- 20261119 second answer (t00mietum): way too complicated. No approval step for libraries, and nothing downloaded again at each start unless security needs it. Plugins update through `update`, not at each restart. A check for known-bad plugins is welcome if it's easy.
+		- So the library pinning goes: `plugins.Libraries` and its checks, start's `clearLibraries`, the repair prompt, and update's library skips. Start leaves `libraries/` alone.
+		- `update --plugins`, and a plain `update`, remove the plugins' libraries as `runUser` instead, Paper's own left out by `libraries.list`, so Paper downloads fresh ones at the next start. Code written there then lasts until the next update, not for good.
+		- design.md's start, repair, update and Plugin pinning say so. The known-bad check is its own item, 2026111914262600.
+		- 2026-11-19: Plugin approval as a whole goes too, in 2026111914293176. Work the two together, since both take out parts of the approved list.
+	- Branch: nov19-2026111715275425, nov19b-2026111715275425
+	- Commit: 6ca2410, 1cbed80
+	- Test case: 1a3jzy0, 1a3k014, 1a4hxz8, 1a4hxz9, 1a4hxza
+	- Closed reason: Superseded
+	- Superseded by ID: 2026111914334569, 2026111914334585
+	- Closed: 20261119-145511
+
+- Test IDs follow the clock plus a fixed-length counter, not the next-after-highest rule
+	- ID: 2026111911594103
+	- Type: Bug
+	- Status: Closed
+	- Priority: Low
+	- Opened: 20261119-115941
+	- Opened by:
+	- Estimated effort: Low
+	- Progress log:
+		- 2 workers on 2026-11-19 took IDs from the clock (dfh46, dfh4b) after reading the header, and had to renumber to 1a3jz1w and 1a3jz50.
+		- Make the header and any tooling match the rule in the project notes: the next free ID after the highest in use.
+		- 20261119: The header now says a new test takes the next free ID after the highest in use, not the clock, and where to look for the highest.
+		- Swept: the header was the only place in the repo that gave the clock rule, by a grep for clock, minutes, and Crockford under cicd, source, and project. The tool only checks form and repeats, never the clock, so it needed no change.
+		- 20261119: Per the answer, an ID is now 7 characters: the clock's minute in 5, then a 2-character counter. Every existing ID took 00, in the Go tests and checks.bash. `test-id.bash --new` prints the next free ID, and `--check` refuses any other length, root host checks included. style_guide.md says the same, and cicd.bash's log greps match 7 characters.
+		- Verified: 1a4hwpm fails all 3 of its cases on the old test-id.bash and passes on the new one. 1a3jz1w, with its IDs in the new form, fails all 4 on the old tool and passes on the new one. The quick gate passed, with the same 281 test lines as before the rename.
+		- Swept: the old rule was also in style_guide.md, missed by the first sweep, which skipped the repo root. Every `{5}` ID pattern in cicd, source and utility, and every test that names another test's ID (1a3jz1w, linksafe's 1a3k0kw), were moved. design.md and README.md name no IDs.
+		- 20261119: Second answer: the counter goes in before the Crockford step, at the base-10 minute. Set back to Queued.
+		- 20261119: An ID is now Crockford of minutes x 100 + counter, padded to 7. `test-id.bash --new` adds the counter at base 10 and tries 00 to 99. All 326 IDs in the tree and its git history, commented-out tests and root host checks included, were re-encoded the same way by a saved script, and the old-to-new list is in details.md. style_guide.md and the tool's header say the same.
+		- Verified: the new `new` case in 1a4hwpm (was 1a4hwpm) fails on the old test-id.bash, which gives a 5+2 ID, and passes on the new one. `test-id.bash --check` is clean, and the quick gate passed with 279 test lines.
+		- Swept: every `testid.Line` call, live and commented out, every `check` and `native` line in checks.bash, live and commented out, and the tests that name another test's ID (1a3jz1w, was 1a3jz1w). The script's `check` finds no old ID in any tracked file but the backlog. cicd.bash's log greps already match 7 characters.
+		- Old IDs in other items' rows and detail_backlog.md are left to child 2026111915090857.
+	- Decisions:
+		- The project rule wins over the CICD reset's test ID section, which says to take the time. Recorded as a Check: entry in questions.md.
+		- 20261119 answer: follow the clock rule, minutes since 2000-01-01 UTC in Crockford. Add a counter after it for more granularity, and keep the length the same for every ID, such as a 00 counter where none is needed. This reverses the next-after-highest call, so test-id.bash's header, its form check, and the project notes change to match.
+		- The existing IDs took 00 rather than staying at 5 characters, so every ID has one length. Old IDs in backlog rows and notes still match a plain grep of a run log, since the old ID is the start of the new one. Check: entry in questions.md.
+		- The counter is 2 Crockford characters, 1024 IDs a minute, and `--new` takes the lowest free one, so 2 workers in one minute get different IDs unless they run it before either commits. `--check` still catches that repeat.
+		- Root host check IDs are checked for form too, so a 5-character one is refused rather than left out of the list.
+		- Superseded by the second answer below: the counter as 2 Crockford characters after the minute's 5.
+		- 20261119 second answer (t00mietum): the counter comes before the Crockford step, at the last base-10 integer stage.
+		- So an ID is Crockford of minutes x 100 + counter, padded to 7 characters, which lasts until about 2650. The counter runs 00 to 99, 100 IDs a minute.
+		- Every existing ID is re-encoded the same way with its counter, so all IDs follow one rule. Backlog rows, style_guide.md and the project notes that name an ID get the new form, and the old-to-new map goes in details.md.
+		- The re-encode left the length at 7, so the form check stays as it was. A run of 100 IDs in one minute is the cap, against 1024 with the old counter.
+		- The re-encode ends the plain-grep match above: an old ID in a row no longer starts the new one, so those rows move to the new form (child 2026111915090857). The item stays open until that child closes.
+	- Test case: its children's: 2026111915090857: n/a: data edit. The tool's check shows no old ID left in backlog.md or detail_backlog.md.
+	- Branch: nov19c-2026111911594103
+	- Commit: 39fdb56
+	- Actual effort: Low
+	- Target version: v1.0.0-beta.1
+	- Closed: 20261119-151115
+	- Closed reason: Done
+
+- Old 5- and 7-character test IDs in backlog rows don't match run logs
+	- ID: 2026111915090857
+	- Type: Task
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261119-150908
+	- Opened by:
+	- Parent ID: 2026111911594103
+	- Estimated effort: Low
+	- Progress log:
+		- Every test ID was re-encoded on 2026-11-19, so a row that names an old ID, such as a Test case row on an open item, no longer matches a run log.
+		- Run the private re-encode tool over the backlog and the backlog detail file, with the 2026-11-19 map, the same list as under "Test ID re-encode" in details.md. It rewrites only known IDs, as whole words, 5-character ones as their 00 form. Then `check` the same files shows none left.
+		- Edits most items, so it needs a --note that every backlog edit is the round's, and `git add` of the backlog.
+		- 20261119: Ran the re-encode on backlog.md (1032 IDs) and detail_backlog.md (3). Verified: check reports none left.
+	- Closed reason: Done
+	- Closed: 20261119-151500
+	- Branch: nov19c-2026111915090857
+	- Actual effort: Low
+	- Test case: n/a: data edit. The tool's check shows no old ID left in backlog.md or detail_backlog.md.
+	- Acceptance signoff: Self-closed: mechanical.
+
+- Check plugins against a list of known-bad jars, if one is easy to use
+	- ID: 2026111914262600
+	- Type: Task
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261119-142626
+	- Opened by: JC
+	- Related IDs: 2026111715275425, 2026111914293176
+	- Requirements [Feature]:
+		- Look for a maintained list of malicious or known-bad Minecraft plugins, by hash or by name and version, that the tool could read without an account.
+		- If one exists and is easy to use, `start`, `update` and `repair` check the jars in the tree against it, and move a match to `plugins-refused/` with a message. With approval gone (2026111914293176), this is the only check on what a plugin is.
+		- If none is easy, close it with what was found.
+	- Progress log:
+		- 2026-11-19: From t00mietum's answer on plugin libraries: checking for known-dangerous plugins and removing them is welcome, if easily possible.
+		- 2026-11-19: No maintained list of bad plugins can be read without an account, so the tool has no such check, and no code changed.
+		- Found: MCAntiMalware's list on GitHub is 349 SHA-1 sums in a SQLite file, last changed in July 2024, and the scanner no longer downloads it. MalwareBazaar's hash lists and API need an abuse.ch key. SentinelCore's list isn't documented. The Fractureiser and PaperMC malware notes cover single outbreaks. The other tools found are scanners that read the code, not lists.
+		- Verified: the MCAntiMalware file was downloaded and read, and the MalwareBazaar export page says it needs a key.
+	- Closed reason: Done
+	- Decisions:
+		- The MCAntiMalware list wasn't used. Its own scanner dropped it, it misses everything since 2024, and an exact hash match misses any rebuilt jar, so it would catch little.
+		- design.md's Direction decisions entry now says there is no bad-list check, in place of planned.
+		- plugins.Refuse and RefusedDir stay unused. Taking them out is a separate call.
+	- Test case: none, since no code changed
+	- Actual effort: Low
+	- Branch: nov19c-2026111914262600
+	- Commit: 92f1fb7
+	- Acceptance signoff: Self-closed: the item says to close with what was found when no list is easy to use.
+	- Closed: 20261119-145947
+
+- Make a logged-in CLI subscription the recommended update agent kind
+	- ID: 2026111913431995
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261119-134319
+	- Opened by:
+	- Related IDs: 2026111715275517, 2026111210033649
+	- Estimated effort: Low
+	- Progress log:
+		- 20261119 answer on 2026111715275517: the most preferred option is a CLI run as the logged-in user, on that user's subscription, rather than an API at about 10 times the cost.
+		- Lead README, design.md and the config template with the command kind for that, and keep the API kinds as the fallback.
+		- Verified: 1a4hxcg and TestNewInstall pass. The quick gate passed, all areas. README's flags still unchecked against a live subscription.
+		- Swept: agent kinds listed in README's Update agent, design.md's kinds and settings row, and setup's configText, the only config setup writes. No other config template exists.
+		- Waiting on signoff for the README and design.md wording, and the comment block setup writes.
+	- Branch: nov19b-2026111913431995
+	- Test case: 1a4hxcg (setup's config leads with a commented command agent, which reads back once uncommented)
+	- Actual effort: Low
+	- Decisions:
+		- README leads with the subscription CLI and calls the API kinds the fallback. design.md lists command first, marked recommended.
+		- The config template is the file setup writes. It gets a commented-out Codex example only when agent isn't given, so nothing turns on unasked.
+	- Commit: 035c441
+	- Closed reason: Done
+	- Acceptance signoff: 20261119, closed in round nov19b. The order and fallback wording meet the answer on 2026111715275517, and 1a4hxcg checks the config hint.
+
+- repair counts a Paper started by hand as runUser as the tool's own
+	- ID: 2026111715275170
+	- Type: Bug
+	- Status: Closed
+		- Against a recorded decision, so it waits on the Check: entry in questions.md.
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: The check for other Paper servers counts any Paper under runUser's uid as ours. One started by hand, or by the old scripts, passes. status calls the same process another Paper server, since it checks the cgroup and the wrapper.
+	- Expected behavior [Bug]: repair tells them apart the way status does.
+	- Reproduced [Bug]: 2026-11-19: a Paper as runUser in a login session's cgroup passed the old check, with no finding.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 23. Detail in detail_backlog.md.
+		- Verified: 1a3jy5r fails on the old check, which found nothing for a hand-started Paper as runUser, and passes now. 1a3epqc passes with its process table in the new form. The quick gate passes.
+	- Origin: b42345a repair checks. Not seen before. Confirmed.
+	- Actual cause [Bug]: The check took any Paper under runUser's uid as the tool's own. status decides by the process's cgroup and the container's wrapper.
+	- Actual fix [Bug]: The check reads the same process table as status and calls `status.Others`, which uses status's own cgroup and wrapper test. A Paper as runUser outside the native unit, or in a container not under the wrapper, is reported.
+	- Decisions:
+		- `status.Others` is the one place both use, so the 2 can't drift apart again. `repair.Host.ReadFile` reads `/proc`, nil meaning the real one.
+		- A second Paper that looks like ours is reported too, as status does, since start runs only one.
+		- design.md's check 14 now says how it tells them apart.
+	- Against: 2026111111065763's "Other Paper servers are told apart by uid". The uid can't tell a hand-started Paper as runUser from ours.
+	- Sweep: other places that pick out the tool's own Paper.
+	- Swept: status goes through the same `sight`. start's `refuseOthers` and setup's `refuseRunning` refuse any Paper, whoever runs it, so the uid never mattered there. `grep -rn 'PaperProcs\|IsPaper\|RunningPaper' source` finds no other caller.
+	- Branch: nov19-2026111715275170
+	- Commit: 1466e71
+	- Test case: 1a3jy5r, 1a3epqc
+	- Closed reason: Done
+	- Closed: 20261119
+	- Acceptance signoff: 20261119, t00mietum: acceptable
+
+- Send the vendor API key only to the vendor's own host
+	- ID: 2026111715275517
+	- Type: Enhancement
+	- Status: Closed
+		- It narrows a recorded call and changes README's wording. A person checks the README lines and OKs the narrower key rule, per the Check entry in questions.md.
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: With no tool key set, the operator's `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes to whatever agentURL names, such as a third-party gateway.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 44. Detail in detail_backlog.md.
+		- Verified: 1a3k10c fails on the old code, where the vendor key went to OpenRouter, a look-alike host, a local server, and the other vendor's host, and passes now. 1a3jev4 still passes. The quick gate passed.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before.
+	- Test case: 1a3k10c, 1a3jev4
+	- Branch: nov19-2026111715275472
+	- Commit: aab781b
+	- Decisions:
+		- With no `TT_MINECRAFTD_AGENT_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` goes only when agentURL is https on that kind's own API host. A gateway or local server gets `TT_MINECRAFTD_AGENT_KEY` or no key, and a 401 already names that variable.
+		- design.md's key line and README's key line and OpenRouter example say so.
+	- Against: 2026111210033649's "The key is TT_MINECRAFTD_AGENT_KEY, else OPENAI_API_KEY or ANTHROPIC_API_KEY". The fallback now holds only for the vendor's own API.
+	- Swept: the key is read only in `agent.New`, by a grep for _API_KEY under source.
+	- Closed reason: Done
+	- Closed: 20261119
+	- Acceptance signoff: 20261119, t00mietum prefers a logged-in CLI subscription over any API kind, filed as 2026111913431995. The key change stays, since it's the safer default for the API kinds.
+
+- Add a README section on using the server after setup
+	- ID: 2026111715275532
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: README has no list of the everyday commands, doesn't say allowFrom defaults to the LAN only, and doesn't say where the config is. Someone setting up for friends outside the home is firewalled until they find the last bullet of how-to-connect.md. There's no uninstall section either.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 45. Detail in detail_backlog.md.
+		- Waiting on UAT: README wording is a matter of taste. Someone should read the new sections.
+	- Origin: Not seen before.
+	- Branch: nov19-2026111715275532
+	- Commit: 61984e5
+	- Test case: none, README text. Markdownlint and the quick gate pass.
+	- Actual effort: Low
+	- Closed reason: Done
+	- Closed: 20261119
+	- Acceptance signoff: 20261119, t00mietum: it's good
+
+- Move a replaced /usr/local/bin build to /var/lib/tt-minecraftd/old-builds, and rotate the old ones
+	- ID: 2026111911125756
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261119-111257
+	- Opened by:
+	- Related IDs: 2026111715275041
+	- Requirements [Feature]:
+		- When repair check 15 finds a different `/usr/local/bin/tt-minecraftd` ahead of the package's `/usr/bin/tt-minecraftd`, plain `repair` moves it to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime YYYYmmDD-HHMMSS>`, so it stops hiding the package's binary.
+		- The folder is made root-owned 0755 when missing. `/var` can be on another filesystem, so a failed rename falls back to copy, then remove.
+		- The files in `old-builds/` are GFS-rotated after each move, like the cicd demo renders.
+		- `repair --check` and `--dry-run` still only report it, and say where it would go.
+		- A symlink to the package's binary still passes, and isn't moved.
+		- install.bash and setup's copy do the same when they replace a different build in `/usr/local/bin`. The same build, by SHA-256, is left alone.
+		- design.md's setup, repair check 15, Boot and file paths, and README's Installing section, say so.
+	- Progress log:
+		- 2026-11-19: t00mietum's answer to the check 15 question: rename the copy and GFS rotate the old ones, rather than report it with `sudo rm`.
+		- Verified: 1a3jzb8 to 1a3jzqr, 1a3jxwc and 1a3jrx0 pass, and the quick gate passes, CodeQL included. 1a3jrx0 passes under Bash 3.2 with busybox tools too. Each new check failed with its part taken out: the move in repair, setup and install.bash, setup's SHA-256 skip, and each rotation rule.
+		- Not verified: the move and the folder as root. Only the non-root path ran here, and root host check 1a3jztw waits for the round's run.
+		- Verified: root host run 20261119-130556_002 on nov19 passed 1a3jztw, 17 PASS, native checks skipped.
+	- Decisions:
+		- 2026-11-19: The move keeps the build, which was the reason check 15 never removed it. Someone who put it there on purpose can copy it back.
+		- 2026-11-19: t00mietum widened it to install.bash and setup's copy, which wrote over the old build in place.
+		- 2026-11-19: `update --self` is Deferred. It gets the same move when it comes back.
+		- 2026-11-19: Moved from `tt-minecraftd_old_<mtime>` beside the binary to `/var/lib/tt-minecraftd/old-builds/tt-minecraftd.<mtime>` (t00mietum). Off PATH, on every distro, and a dot suffix is the usual form for a dated copy. `/var/backups` is Debian's only.
+		- 2026-11-19: install.bash has the build it's about to install do the move, with a hidden retire-build command, run through sudo from a staged copy beside the target. One Go version of the move and the rotation then serves all 3, and Bash 3.2 never needs one. The staged copy is renamed into place, so the swap is one step.
+		- 2026-11-19: Kept names stay tt-minecraftd.`<mtime>`, without the role suffix gfs-rotate.bash adds. The counts are its defaults: 10 newest, 4 hours, 5 days, 4 weeks, 4 months, 2 years, and the first. A build from the same second as a kept one gets .2, .3 and so on.
+		- 2026-11-19: A /usr/local/bin link to some file other than the package's has no build to keep, so check 15 still reports it with sudo rm. install.bash and setup write over a link as before.
+		- 2026-11-19: When the same build, by SHA-256, is in /usr/local/bin already, setup leaves out its copy, as install.bash already did.
+		- 2026-11-19: The folder is refused as root when it's a link, or someone other than root could write to it.
+		- 2026-11-19: 1a3jxwc: the expected text was "...; remove it with: sudo rm /usr/local/bin/tt-minecraftd" with no fix, and is now "...; repair moves it to /var/lib/tt-minecraftd/old-builds/tt-minecraftd.`<mtime>` [fix]". Its other checks are unchanged.
+		- 2026-11-19: 1a3f8wm and 1a3jxs8: setup's copy was "sudo install -m 0755 `<exe>` /usr/local/bin/tt-minecraftd", and is now "sudo install -m 0755 -o root -g root `<exe>` `<LocalBin>`", with LocalBin a stand-in path in the test.
+	- Needs local test suite run?: No
+	- Branch: nov19-2026111911125756
+	- Commit: 32e1415
+	- Test case: 1a3jzb8, 1a3jzec, 1a3jzhg (the move, the copy across filesystems, the rotation), 1a3jxwc (repair check 15), 1a3jzmm (setup's copy), 1a3jzqr (retire-build), 1a3jrx0 (install.bash), and root host check 1a3jztw
+	- Actual effort: Avg
+	- Swept: every write to /usr/local/bin/tt-minecraftd: repair check 15, setup's copy, install.bash, and cicd's dogfood step. Dogfood puts each dev build on the dev box and is left as it is. install-dev.bash doesn't install the tool. update --self is deferred, per Decisions.
+	- Closed reason: Done
+	- Closed: 20261119
+
+- cmd's stop and restart guard misses namespaced forms such as minecraft:stop
+	- ID: 2026111715275187
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: `checkCmd` accepts `minecraft:stop`, `bukkit:restart` and `execute run stop`. Each stops the server without handing the trees back, which design.md says cmd prevents.
+	- Expected behavior [Bug]: cmd refuses those forms too.
+	- Reproduced [Bug]: 2026-11-17: `checkCmd` passed each form in a test. Paper running them is Plausible.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 24. Detail in detail_backlog.md.
+		- 20261119: Verified: 1a3jy8w and 1a3enhw fail on the unfixed code (every namespaced and execute form was sent) and pass with the fix. The quick gate passed.
+	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed for the check.
+	- Sweep: other places that test a console command's name.
+	- Swept: `checkCmd` is the only guard on a console line. `cmd` in both modes goes through `Kit.command`, which calls it first. `console` is typed by hand, and `stop` there hands the trees back (design.md). The only other "stop" sent to the console is `stop`'s own.
+	- Actual cause [Bug]: `checkCmd` matched only the first word, as `stop` or `restart` with an optional slash.
+	- Actual effort: Low
+	- Actual fix [Bug]: `checkCmd` drops a `namespace:` prefix from the command name, and for `execute` and `return` also tries every word after a `run`. It splits on any whitespace. design.md's console and cmd section says so.
+	- Decisions:
+		- 20261119: every word after any `run` is tried, rather than parsing execute's grammar. It covers nested forms in one linear pass, and a player, score or chat text with `run stop` in it is refused rather than sent, which is the safe side.
+		- 20261119: aliases from Bukkit's `commands.yml` and plugins that run commands for the console aren't covered. Their names can't be known here.
+	- Branch: nov19-2026111715275187
+	- Commit: a7115f6
+	- Test case: 1a3jy8w, 1a3enhw
+	- Acceptance signoff: Self-closed: the tests fail on the old code and pass now, and the change only refuses more.
+	- Closed: 20261119-112650
+
+- watch --interval with a huge value panics
+	- ID: 2026111715275203
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `watch --interval 9300000000` overflows the duration, and the ticker panics with a stack trace and exit 2.
+	- Expected behavior [Bug]: A value that large is refused with a plain message.
+	- Reproduced [Bug]: 2026-11-17: ran a build with an empty config.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 25. Detail in detail_backlog.md.
+	- Origin: ba0f959 status and watch. Not seen before. Confirmed.
+	- Actual cause [Bug]: The option check only refused values under 1, so a count of seconds past what a duration holds overflowed in `time.Duration(n)*time.Second` and went negative, which `NewTicker` panics on.
+	- Actual fix [Bug]: `watch` refuses an `--interval` above 9223372036 seconds, the most a duration holds, with a usage message that gives the range and exit 2.
+	- Test case: 1a3egfc TestUsageErrors, with the case `watch --interval 9300000000`.
+	- Verified: the case panicked on the old code with "non-positive interval for NewTicker" and passes now. `go run ... watch --interval 9300000000` prints the message and exits 2. `cicd/cicd.bash --backlog-run-quick cli` passes.
+	- Swept: `interval` is the only duration built from an option count in the command (grep of `time.Duration(` and `interval` in source/cmd). `stop --warn` isn't a duration.
+	- Decisions:
+		- The cap is the overflow limit rather than a smaller sensible one such as a day, so no value that worked before is refused.
+	- Branch: nov19-2026111715275203
+	- Commit: 9329cf1
+	- Acceptance signoff: Self-closed: the case fails on the old code and passes now.
+	- Closed: 20261119-193000
+
+- console counts any exit 1 as a detach
+	- ID: 2026111715275221
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `attachDetached` treats any exit 1 as a detach. sudo exits 1 after failed password tries, and Docker exits 1 on its own errors. Either one prints that the server is still running and exits 0, though the operator never attached. cmd's own check also reads stderr.
+	- Expected behavior [Bug]: console counts a detach only from what Docker says on a detach.
+	- Reproduced [Bug]: 20261119, by 1a3ener: with any stderr, or none, an attach that exits 1 printed "Detached" and returned no error.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 26. Detail in detail_backlog.md.
+	- Origin: 5c5b023 console and cmd. Not seen before. Confirmed.
+	- Actual cause [Bug]: console ran attach on the operator's terminal and never saw its stderr, so it had only the exit code to go on.
+	- Actual effort: Low
+	- Verified: 1a3ener and 1a3jyc0 fail on the old code and pass with the fix. Under real Docker and rootless Podman, attach to a busybox container on a pty, with stderr through a pipe, detached on Ctrl-C with the container still up. Docker exited 1 and said "read escape sequence" on stderr; Podman exited 0.
+	- Decisions:
+		- `host.Cmd` has an `ErrCopy` writer that also gets a Tty command's stderr, which still goes to the terminal. `session` keeps the last 4 KB of it.
+		- console uses `detachedDocker`, the same test as `cmd`'s attach, so the 2 can't drift apart. `attachDetached` is gone.
+		- 20261119: 1a3ener's exit 1 case now writes "read escape sequence" on stderr. It was a bare exit 1, which counted as a detach.
+	- Against: 2026111111065750's "`docker attach` exits 1 after its detach keys, so that exit with the server still up counts as a detach". It now follows 2026111116104058's newer rule, which also needs the message on stderr.
+	- Sweep: other places that read an exit code as a detach.
+	- Swept: `grep -rn 'ExitCode()' source` finds only `detachedDocker`, and main's mapping of a failed command to its exit code. Native console and `start --debug` pass no detach test. Container `start --debug` doesn't count a detach.
+	- Actual fix [Bug]: console counts docker's exit 1 as a detach only with "read escape sequence" on stderr. sudo's and docker's own exit 1 are errors.
+	- Branch: nov19-2026111715275221
+	- Commit: 8804491
+	- Test case: 1a3ener, 1a3jyc0
+	- Acceptance signoff: Self-closed: reproduced, and the tests fail before and pass after.
+	- Closed: 20261119-113306
+
+- Two jar links to the same file give the same mount twice, and start fails
+	- ID: 2026111715275253
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: `LockedJars` drops duplicates only against paper.jar. With 2 plugin jars linking to one file, the same mount destination is passed twice, and Docker refuses it.
+	- Expected behavior [Bug]: Each file is mounted once.
+	- Reproduced [Bug]: 2026-11-19, by 1a3jyf4 on the old code: 2 plugin links to one jar gave that jar 3 read-only mounts in the create command.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 28. Detail in detail_backlog.md.
+	- Origin: ba09f6c docker mode start and stop. Not seen before. Confirmed.
+	- Actual cause [Bug]: `LockedJars` compared each jar's real path only with paper.jar's, not with the jars before it.
+	- Actual fix [Bug]: `LockedJars` keeps each real path once. Container start also mounts each tree once when 2 `ownerTrees` entries lead to one folder, the same fault in the same function.
+	- Swept: `LockedJars` callers: container start's mounts, native start's `ReadOnlyPaths`, and repair's skip map, which a repeat never hurt. `Boxed.runArgs` is the one place mounts are built, and its tree loop had the twin. Left alone: native `ReadWritePaths` with a repeated tree, since systemd is expected to take a path given twice (unverified).
+	- Test case: 1a3jyf4
+	- Verified: 1a3jyf4 fails on the old code, with 3 mounts of the jar and 3 of the tree, and passes with the fix. The quick gate passes.
+	- Branch: nov19-2026111715275253
+	- Commit: a1ce8e4
+	- Acceptance signoff: Self-closed: reproduced, and the test fails before and passes after.
+	- Closed: 20261119-113637
+
+- From a root shell, ownerAfterStop becomes root
+	- ID: 2026111715275300
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: With `SUDO_USER=root` or `USER=root`, ownerAfterStop defaults to root, so stop hands the trees to root, and repair offers to add root to the server group. design.md's table says the default is the operator unless that's root.
+	- Expected behavior [Bug]: The default skips root.
+	- Reproduced [Bug]: 2026-11-17: a test with `USER=root` and with `SUDO_USER=root` got root.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 31. Detail in detail_backlog.md.
+		- Verified: 1a3jyj8 fails on the old code with root from `SUDO_USER` or `USER`, and passes after. It fails too with the uid 0 lookup taken out. The quick gate passed.
+		- Swept: `operator` is the one place the default is made. Account already skipped root by uid. setup refuses an empty operator, repair skips the group check when it's empty, and stop leaves the trees with runUser, as design.md says. The root host checks run setup as the operator, not root.
+	- Origin: 715f9b3 config defaults, c076344. Not seen before. Confirmed.
+	- Actual cause [Bug]: The default took the first valid name from `SUDO_USER`, `USER` and the running account, and only the last one left root out.
+	- Actual fix [Bug]: Each of the three is skipped when it's root or another name for uid 0. design.md's table says root is skipped at each step.
+	- Decisions:
+		- A name that looks up to uid 0, such as `toor`, counts as root, as Account already did by uid. A name that can't be looked up isn't root.
+		- An `ownerAfterStop: root` set by hand is kept, since it's the operator's own call.
+	- Test case: 1a3jyj8
+	- Branch: nov19-2026111715275300
+	- Commit: bd0d0c1
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: reproduced, its test failed before the fix and passes after.
+	- Closed: 20261119-114006
+
+- A checked download can be changed by the folder's owner before it's renamed into place
+	- ID: 2026111715275315
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The hash is taken while the file is written, then the temp file is given to the folder's owner at 0660. It waits through the name check and the operator's yes. While the server runs, server code can rewrite it, and the changed bytes then replace the good jar. start refuses them later, so the good jar is lost but nothing runs.
+	- Expected behavior [Bug]: The temp file stays root-owned and 0600 until just before the rename.
+	- Reproduced [Bug]: 2026-11-19, by 1a3jync and 1a3jyrg on the old code: the staged jar was 0660 as soon as it was written, and a file put in its place was renamed over the good jar.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 32. Detail in detail_backlog.md.
+	- Origin: 9f30908, cfd6be9. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `download.Stage` gave the temp file the folder's owner and mode 0660 right after writing it, before the checks and the operator's yes. `Keep` renamed whatever file had the temp name by then.
+	- Actual fix [Bug]: The temp file stays root's at 0600 while it waits. `Keep` sets its owner and mode through its own handle just before the rename. `Open` and `Keep` refuse a file at the temp name that isn't the one `Stage` wrote. `Staged` gained `UID`, `GID` and `Mode`, which selfupdate sets to the old binary's.
+	- Decisions:
+		- A short race is left between `Keep`'s check of the temp name and the rename. A swap there only replaces a jar in a folder the server can already write, and start refuses it by hash.
+		- `Stage` swaps its write handle for a read one on the same file once written, since a file open for writing can't be run, and selfupdate runs the new build's --version.
+	- Swept: `download.Stage` callers: `Into` (paper, geyser), update/agent.go's 2 agent downloads, and selfupdate's `Install`, which now sets `Staged` mode and owner so `Keep` keeps them (1a3jkm8 fails without it). linksafe `Write` chowns just before its rename, with no check or wait between, so it's left alone.
+	- Test case: 1a3jync, 1a3jyrg
+	- Verified: 1a3jync and 1a3jyrg fail on the old code and pass with the fix. 1a3jkm8 fails when selfupdate doesn't set the new fields. The quick gate passes, CodeQL included. Only the non-root path ran.
+	- Branch: nov19-2026111715275315
+	- Commit: c9903e3
+	- Acceptance signoff: Self-closed: 1a3jync and 1a3jyrg fail on the old code and pass now.
+	- Closed: 20261119-114533
+	- Note: The root-only fchown is the same call as before, moved into `Keep`. Root host check 1a3jgsm's agent download goes through it.
+
+- IPv4-mapped addresses in allowFrom and bindIP load without a warning and never match
+	- ID: 2026111715275330
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: `allowFrom: [::ffff:10.0.0.1]` is kept as IPv6, goes in the IPv6 set, and never matches the IPv4 client. That client is blocked, with no warning. bindIP keeps the mapped form too.
+	- Expected behavior [Bug]: Mapped addresses are read as IPv4, or warned about.
+	- Reproduced [Bug]: 2026-11-17: a config probe kept the mapped form. The firewall side was read.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 33. Detail in detail_backlog.md.
+	- Origin: e3a0636 shcl config reader. Not seen before. Confirmed for config.
+	- Actual cause [Bug]: `checkAddr` and `checkAllow` kept an address or range in its IPv4-mapped IPv6 form. nft and Paper see an IPv4 client as IPv4, so a mapped entry in the IPv6 set matched nothing.
+	- Actual fix [Bug]: Both unmap. A mapped address is read as the IPv4 address, and a mapped range of /96 or narrower as the IPv4 range, so `::ffff:10.1.2.3/104` is `10.0.0.0/8`. bindIP goes through `checkAddr` too. design.md's allowFrom row says so.
+	- Test case: 1a3jyvm (config reads mapped forms as IPv4), 1a3jyyr (a config file's mapped allowFrom lands in the firewall's allow4 set)
+	- Verified: 1a3jyvm and 1a3jyyr fail on the old reader and pass with the fix. The quick gate passed.
+	- Swept: `netip.Parse` across `source`. Config's `loopback` uses `IsLoopback`, which already unmaps. The agent's `publicOnly` and the firewall's resolver read already unmap. firewall's `is4` and route reads take only checked config values or kernel output. `start --set` goes through the same setters.
+	- Branch: nov19-2026111715275330
+	- Commit: ff4ef78
+	- Acceptance signoff: Self-closed: its tests fail before and pass after, per the standing close policy.
+	- Closed: 20261119-114901
+	- Decisions:
+		- Unmap rather than warn, since a mapped entry has only one meaning here. A range wider than /96 isn't all IPv4, so it stays IPv6.
+
+- test-id.bash misses root host checks run through native, so their IDs can be reused
+	- ID: 2026111715275346
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The ID list only reads lines that start with `check`, so 1a3fjr8, 1a3fj2c, 1a3fj5g and 1a3fj8m aren't listed. A Go test that reuses one passes `--check`, and a check ID used twice in checks.bash is hidden too.
+	- Expected behavior [Bug]: Every test ID in checks.bash is listed and checked for reuse.
+	- Reproduced [Bug]: 2026-11-17: `--list` left them out, and a fake tree that reused 1a3fj2c passed `--check`.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 34. Detail in detail_backlog.md.
+		- 20261119: Verified: 1a3jz1w fails 3 of its 4 cases on the old test-id.bash and passes all 4 on the new one. The control, the real checks.bash with a free Go ID, passes on both. The quick gate passed, with 1a3jz1w in the container run too.
+		- Swept: `fRootChecks` is the only reader of checks.bash in test-id.bash, and test-id.bash the only ID reader. cicd.bash's `--list` and lint step call it. The commented-out ZFS checks 1a3jn34 to 1a3jncg aren't counted, as before, and no Go test uses those IDs.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Actual cause [Bug]: `fRootChecks` matched only lines that start with `check`, and the repeat check ran `sort -u` over its IDs before looking for repeats.
+	- Actual fix [Bug]: test-id.bash reads the names of the functions in checks.bash that hand their arguments to `check`, now only `native`, and counts calls through those too. Each call counts once, so a repeat within checks.bash fails `--check`.
+	- Decisions:
+		- The wrapper names come from checks.bash rather than a fixed list, so a new wrapper is counted without an edit here. A wrapper of a wrapper isn't followed.
+		- A commented-out call still doesn't count, to match the Go side, where only a live `func Test` counts.
+	- Test case: 1a3jz1w
+	- Branch: nov19-2026111715275346
+	- Commit: 056e08d
+	- Actual effort: Low
+	- Acceptance signoff: Self-closed: the test fails on the old code and passes now.
+	- Closed reason: Done
+	- Closed: 20261119-115315
+
+- A quick run leaves a stale SHA256SUMS beside new binaries in the release folder
+	- ID: 2026111715275362
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: The build step writes binaries into the release version's folder in every mode, but only the package step writes SHA256SUMS, and a quick run skips it. Dev builds then sit beside sums that don't match them.
+	- Expected behavior [Bug]: The sums are written with the binaries, or the stale file is removed.
+	- Reproduced [Bug]: Yes. 1a3jz50, on the unfixed cicd.bash, left the older run's SHA256SUMS beside the new binaries, and `sha256sum -c` failed on both.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 35. Detail in detail_backlog.md.
+		- 2026-11-19: Verified: 1a3jz50 fails on the unfixed cicd.bash and passes after. Quick gate passed.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Actual cause [Bug]: Only the package step wrote SHA256SUMS, so a run that built without packaging kept the older run's file.
+	- Actual fix [Bug]: The build step writes SHA256SUMS over the binaries it just built. The package step writes it again over every file in the folder. Both go through one function, `fReleaseSums`.
+	- Decisions:
+		- Sums are written rather than the file removed, so a quick or `--no-package` build can still be checked against them.
+		- After a build without the package step, packages from an older run stay in the folder but aren't listed in SHA256SUMS, since they hold an older build. They aren't removed, since the build step never deleted files before.
+	- Swept: SHA256SUMS is written only in cicd.bash's build and package steps (`grep -rn SHA256SUMS cicd`). verify-release.bash and install.bash only read one. Dogfood reads the binary, not the sums.
+	- Branch: nov19-2026111715275362
+	- Commit: 3abffeb
+	- Test case: 1a3jz50 TestReleaseSums (the build step as a quick run calls it, over an older run's SHA256SUMS and package; then the package step's sums)
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Closed: 20261119-115818
+
+- install-dev.bash --dir=~/path makes a folder named ~
+	- ID: 2026111715275377
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: Bash doesn't expand `~` after `--dir=`, so the path becomes a folder literally named `~` under the current folder. Cleaning that up with `rm -rf ~` would delete the home folder.
+	- Expected behavior [Bug]: A leading `~/` is read as the home folder, or refused.
+	- Reproduced [Bug]: 2026-11-17: `echo --dir=~/x` printed it unexpanded.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 36. Detail in detail_backlog.md.
+	- Origin: d701e7a dev install. Not seen before. Confirmed.
+	- Actual cause [Bug]: `fMain` took the `--dir` value as given, and a `~` that Bash didn't expand became a relative path under the working folder.
+	- Actual fix [Bug]: `~` and `~/path` are read as `$HOME` and `$HOME/path`, in both the `--dir=~/path` and `--dir ~/path` forms. Any other leading `~`, such as `~bob/x`, is refused with exit 2, as is a `~` with no full-path `$HOME`.
+	- Decisions:
+		- `~user` is refused rather than looked up, since the script has no portable lookup that works in the Bash 3.2 and busybox rig.
+	- Test case: 1a3js04 TestInstallDevScript, subtest "a leading ~ in --dir is the home folder, and ~user is refused"
+	- Verified: the subtest fails on the old script (the clone went into a folder named `~`) and passes now. shellcheck and the quick run's cli and lint areas pass.
+	- Swept: `install.bash` has no `--dir` or other path option. Its only other value options are `--release` and `--any-distro`, which aren't paths.
+	- Branch: nov19-2026111715275377
+	- Acceptance signoff: Self-closed: the subtest fails on the old script and passes now.
+	- Closed: 20261119-120600
+
+- start's link check gives a fix that can't work for a link out of the trees, and skips folders it can't read
+	- ID: 2026111715275408
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Incorrect behavior [Bug]: A link such as `world -> /etc/hostname` gets told it needs to point at `/etc/hostname`, which is where it points. A folder the operator can't read hides its links, and the check passes.
+	- Expected behavior [Bug]: A link out of the trees is called that, and a folder that can't be read is reported.
+	- Reproduced [Bug]: 2026-11-17: a test showed both.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 38. Detail in detail_backlog.md.
+	- Origin: 1b3d301 link fixes. Follows 2026111409374443. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: `launch.boxLinks` gave every link that failed in the container the same fix, its host target, even when that target was outside every mount. Its walk dropped the error for a folder it couldn't read.
+	- Actual fix [Bug]: A link whose target isn't in any mount is called a link out of the trees. A folder the walk can't read gives a start warning that names it, and the start goes on. design.md's Run modes says so.
+	- Swept: `filepath.WalkDir` in source: repair's `walkTree` returns the error rather than dropping it. Native start has no link check, by 2026111409374443's decision.
+	- Test case: 1a3jz84
+	- Verified: 1a3jz84 fails on the old code, with the old fix message and no warning, and passes with the fix. 1a3js9g and the quick gate's launch area pass.
+	- Branch: nov19-2026111715275408
+	- Commit: d9394b5
+	- Acceptance signoff: Self-closed: reproduced, and the test fails before and passes after.
+	- Closed: 20261119-120708
+	- Decisions:
+		- An unreadable folder is a warning, not a refusal, which keeps 2026111409374443's decision that the walk never stops a start that worked before.
+		- The out-of-trees message names where the link leads and no fix, since moving the target into a tree or adding a tree are both the operator's call.
+
+- Give linksafe tests of its own
+	- ID: 2026111715275441
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Link refusal at each step, the rename fallback, temp file cleanup on error, and Mkdir's chown are only tested through callers. Its coverage is 50 to 60 percent, and it's the code root relies on in the server tree.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 40. Detail in detail_backlog.md.
+		- 2026-11-20: The Move fallback's path lstat noted in Decisions was replaced by a check under the folder handle in 2026112017592711.
+	- Origin: Not seen before.
+	- Closed reason: Done
+	- Actual fix: linksafe has its own tests. They cover a link or a file at each step of Walk and Sub, Read refusing a link, a pipe, a folder and an oversized file, Write replacing a link rather than writing through it and leaving no temp file when the rename fails, Move never replacing on both the RENAME_NOREPLACE path and the EINVAL fallback, and Mkdir's mode and its refusal of a folder swapped for a link. 1a3k0kw runs Mkdir's and Write's chown as root in a user namespace, including the chown failure path. Each error path also checks that no handle is left open.
+	- Test case: 1a3k048, 1a3k07c, 1a3k0ag, 1a3k0dm, 1a3k0gr, 1a3k0kw
+	- Verified: all 6 pass, and the quick gate passes. Each was watched to fail: dropping Walk's close of a step, O_NOFOLLOW in Sub, Write's unlink of its temp file, the fallback's EEXIST, Mkdir's chown or its close on a failed chown, Mkdir's mode, and Read's O_NONBLOCK (hangs) each turn a test red. 1a3k0kw ran on the host with --map-auto, so it set an owner the test didn't have. In the gate's container it skips, since that has no user namespaces.
+	- Branch: nov19-2026111715275441
+	- Commit: 7ab8b2a
+	- Acceptance signoff: Self-closed: tests only, each watched to fail.
+	- Closed: 20261119-124430
+	- Decisions:
+		- renameat2 is now a package var, so 1a3k0dm can stand in for a filesystem that refuses RENAME_NOREPLACE. No filesystem here refuses it.
+		- Left alone: Move's fallback checks the new name with a path lstat, not through the folder handle, since package syscall has no Fstatat. A swap there only replaces a file in a folder the server can already write, per 2026111709090977's decision.
+
+- Keep the join rate limit working when its address set fills
+	- ID: 2026111715275456
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: The per-address sets hold 65536 addresses for 2 minutes. A flood of spoofed SYNs fills them, and then no new address is limited at all, so a real bot flood goes through.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 41. Detail in detail_backlog.md.
+	- Note: 2026-11-17: a size-2 set in a namespace limited only the first 2 addresses.
+	- Origin: 88f3d3f. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual effort: Low
+	- Test case: 1a3k0q0 (TestFloodSetFull), 1a3fbxg (TestRules)
+	- Verified: 1a3k0q0 fails with the new rules taken out, where the address past the full set got through over IPv4 and IPv6, and passes with them in. With only the IPv6 rule taken out it fails too. 1a3fbxg, 1a3jrsw and 1a3jvmg pass, and the quick gate passed. In the gate's container 1a3k0q0 skips like 1a3jrsw, since it has no nft, so the namespace run is from the host.
+	- Swept: both sets, flood4 and flood6, get the shared limit. They're the only dynamic sets with a limit. seek4 has no limit, and a full seek4 only drops a LAN answer.
+	- Branch: nov19-2026111715275456
+	- Commit: 3ba1fdb
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261119-125034
+	- Decisions:
+		- Addresses past the full set share a single bucket at joinRateLimit a minute, one for IPv4 and one for IPv6, counted in in_flood. A global limit over every new connection would hit addresses that already have their own bucket too, and dropping all of them would shut out every new player.
+		- The sets now keep an address for 1 minute, down from 2. Its bucket is full again by then, so nothing changes for that address, and a flood frees room twice as fast.
+		- A rules file written by an older build no longer matches, so start refuses until repair writes it again, as with any rules change.
+		- design.md's Firewall says so.
+
+- Hold the agent's download redirects to agentHosts
+	- ID: 2026111715275472
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152754
+	- Opened by:
+	- Requirements [Feature]: Only the agent's first URL is checked against agentHosts. A redirect can take the download to any public https host, while the plan says the jar was found on the first one.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 42. Detail in detail_backlog.md.
+		- Verified: 1a3k0x8 fails with the hold taken out, where the jar came through a redirect to a host not in agentHosts, and passes now. The quick gate passed.
+	- Note: No.
+	- Origin: 91a46c8. Not seen before. Confirmed by 1a3k0x8 on the old code.
+	- Closed reason: Done
+	- Test case: 1a3k0x8
+	- Branch: nov19-2026111715275472
+	- Commit: 262b7f4
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261119-130030
+	- Decisions:
+		- update's `fetcher`, the one path for the agent's jars and hash pages, holds each redirect to the same check as the first address: https, the usual port, no user name, a host in agentHosts. It copies whatever client it's given, so tests run the hold too.
+		- `fetch` still follows redirects to any public host, since it only reads pages for the agent.
+		- The default agentHosts adds GitHub's `release-assets`, `objects` and `raw` githubusercontent hosts, where github.com sends downloads. A config with its own list needs them for GitHub, and the error names the host.
+	- Swept: the 3 `fetcher` uses (hash page, agent jar, agent Paper) share the hold. Known sources' downloads have fixed hosts and aren't the agent's, so they're left alone.
+
+- Refuse NAT64 and 6to4 forms of LAN addresses in the agent's fetch, and don't tell the model which address was refused
+	- ID: 2026111715275500
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: fetch lets through NAT64 and 6to4 forms of LAN addresses and a few reserved ranges. A refused fetch tells the model the address a name resolved to, which design.md says the agent shouldn't learn.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 43. Detail in detail_backlog.md.
+		- Verified: 1a3k0t4 fails on the old check, where all 24 addresses passed and a refusal named 127.0.0.1, and passes now. The quick gate passed.
+		- 2026-11-19: 1a3jfdw `TestFetchOnlyReachesPublicAddresses` expects the refusal to say "doesn't lead to a public address", was "isn't a public address".
+	- Note: 2026-11-17: each address passed the check in a test.
+	- Origin: 91a46c8. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Test case: 1a3k0t4, 1a3jfdw
+	- Branch: nov19-2026111715275472
+	- Commit: 1d27f3b
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261119-130030
+	- Decisions:
+		- NAT64 (`64:ff9b::/96`) and 6to4 addresses are judged by the IPv4 address in them, so a public site over NAT64 still works. Teredo, the local-use NAT64 prefix, the old IPv4-compatible forms, and the reserved IPv4 and IPv6 ranges are refused outright.
+		- A failed fetch tells the agent only the kind of failure: refused, a failed lookup, or a connect error. Go's text with the resolved address, the resolver, or this host's own address is dropped. update's download errors go to the operator, and keep the address.
+	- Swept: `publicOnly` is the only outbound address check, by a grep for IsPrivate, IsGlobalUnicast and Dialer under source. update's agent downloads use the same dialer through `PublicClient`.
+
+- Have install.bash always install the binary owned by root
+	- ID: 2026111715275548
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152755
+	- Opened by:
+	- Requirements [Feature]: When `/usr/local/bin` or the old binary is writable by the user, it installs without sudo, and the file stays user-owned. setup's sudo run and the boot unit then run a file the operator account can change. repair doesn't check it.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 46. Detail in detail_backlog.md.
+		- Verified: 1a3jrx0's first case fails on the old script, 14 cases fail with the old sudo rule put back, and 2 with the owner left out. All pass now, under Bash 3.2 with busybox tools too, and the quick gate passes. The test has no root, so the owner itself isn't checked; install -o root is.
+		- Done: install.bash always installs through sudo unless it runs as root, with install -o root -g root, even where the folder or the old binary lets the operator write. setup's copy names the owner too.
+	- Note: No.
+	- Origin: 9d7cb3e install script. Not seen before. Confirmed by 1a3jrx0.
+	- Closed reason: Done
+	- Branch: nov19-2026111911125756
+	- Commit: 32e1415
+	- Test case: 1a3jrx0
+	- Actual effort: Low
+	- Swept: setup's copy now installs with -o root -g root too. cicd's dogfood step copies without sudo into a writable folder, but it's a dev-box step, not a user install.
+	- Acceptance signoff: Self-closed: 1a3jrx0 fails on the old script and passes now.
+	- Closed: 20261119-122525
+	- Decisions: 2026-11-19: A binary that's already current is left alone, even when the operator owns it. The next release replaces it with a root-owned one. Done with 2026111911125756, since both change how install.bash puts the binary in place.
+
+- start --dry-run says it would run sudo -v, then sudo asks for a password anyway
+	- ID: 2026111715275268
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: When `sudo -n true` fails, dry run only prints `sudo -v`. The next look, `sudo podman ps`, still runs, so sudo asks for a password at a point the plan doesn't mark.
+	- Expected behavior [Bug]: start --dry-run never asks for a sudo password. It prints sudo -v as a step, and its looks that need sudo use sudo -n, saying what it couldn't check when that fails.
+	- Reproduced [Bug]: 20261117: the built binary's start --dry-run, with a stand-in sudo whose sudo -n fails, printed would run: sudo -v and never ran it. 20261119: at 3923e56 the same run asked twice, at sudo -v and at sudo podman ps.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 29. Detail in detail_backlog.md.
+		- 20261117: Verified: 1a3jsfr fails on the unfixed code (sudo -v isn't a look) and passes with the fix. The built binary's start --dry-run ran sudo -v through the stand-in, and the unfixed build printed it. The quick gate passed, and race tests of launch and cli.
+		- 2026-11-19: t00mietum answered the signoff question: dry run never asks for a sudo password.
+		- 20261119: Verified: 1a3jxzg fails with the -n taken out, and with the password check taken out, and passes with both. 1a3jy2m fails with repair's NoPrompt line taken out. 1a3jsfr fails on 3923e56's sudo -v and passes now. The quick gate passed.
+		- 20261119: Verified: the built binary, with a stand-in sudo whose sudo -n fails, never asked in start, stop, setup or update --dry-run, nor in repair --check. start and stop printed would run: sudo -v, then stopped at sudo -n podman ps, saying they couldn't check it. setup and repair --check gave that line as FAILED for the image and tree checks.
+	- Origin: 3a04d86. Related to 2026111410134553. Confirmed.
+	- Actual cause [Bug]: dry run ran its sudo looks through plain sudo, which asks when no password is cached. 3923e56 also made sudo -v a look, so dry run asked there first.
+	- Actual effort: Low
+	- Actual fix [Bug]: under --dry-run and repair --check the runner puts -n on the sudo it adds, and a look sudo refuses says what it couldn't check and that sudo -v first lets it. sudo -v is a change again, so dry run prints it. design.md's dry run line and start step 2 say so.
+	- Branch: pkgpath
+	- Commit: 9cbfe94
+	- Test case: 1a3jxzg, 1a3jy2m, 1a3jsfr
+	- Acceptance signoff: Self-closed: t00mietum's answer settles the behavior, and the tests fail on the old code and pass now.
+	- Closed: 20261119-105905
+	- Decisions:
+		- 20261117: the launch rig's changes() keeps sudo -v in its list, though it's now a look, so each test's list still shows sudo asked up front. No assert changed. 1a3jsfr checks it's a look and on the terminal.
+		- Swept: kit.go's sudoUp is the only sudo -v. setup, update, and repair run themselves through sudo, and skip it under dry run.
+		- 2026-11-19: t00mietum's answer: no sudo prompt. Commit 3923e56 made sudo -v a look, which prompts in dry run, so that part is reversed. The decision on 2026111410134553 stands.
+		- 20261119: 1a3jsfr's assert on sudo -v changed from a look to not a look, undoing 3923e56. The rest of the test is as it was. The rig's changes() is back to changes only, and sudo -v is in it as one.
+		- 20261119: the -n goes in the runner (`host.Exec.NoPrompt`), not at each call, so a new sudo look gets it too. repair --check sets it, since --dry-run is its alias and it doesn't need root.
+		- 20261119: a sudo look refused under start or stop --dry-run ends the dry run with that error, rather than going on with a plan that rests on a guess (design.md's dry run line, 2026111715275137). setup and repair --check report it as a FAILED line and go on, as they do for any check.
+		- 20261119: sudo's refusal is told from the command's own failure by a first stderr line that starts with "sudo:" and names a password. Under another language it comes through as the plain error with sudo's line.
+		- Swept: every sudo look in non-test code goes through `host.Exec`: `firewall.Loaded`, `launch.ContainerState`, repair's image inspect, ufw and firewall-cmd reads, and update's image inspect and java run, which only run past the dry run. attach already used sudo -n. status, the run-mode follow, and the boot unit check run no sudo.
+
+- repair says ufw blocks players when a limit, allow-from or multiport rule lets them in
+	- ID: 2026111715275121
+	- Type: Bug
+	- Status: Closed
+		- Waits on a call about LIMIT IN, which reverses a recorded decision. Check: entry in questions.md. The Anywhere and port list parts need nothing more.
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: `ufw limit 25565/tcp`, `ufw allow from 192.168.0.0/16` and a rule for `19132,25565/tcp` each count as missing. repair exits 1, setup's final check fails, and the suggested command adds a duplicate rule.
+	- Expected behavior [Bug]: Those rule forms count as letting players in.
+	- Reproduced [Bug]: 2026-11-17: a test with that ufw output reported all 3 ports missing.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 20. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum signed off on counting LIMIT IN, which replaces the call on 2026111709090987.
+	- Origin: b42345a repair checks, a80d620 repair fixes. Related to 2026111709090987. Confirmed.
+	- Actual cause [Bug]: ufwMissing took only ALLOW IN lines, and covers read one port or one range.
+	- Actual fix [Bug]: LIMIT IN counts too, a To of Anywhere covers every port, and a port list is split on its commas.
+	- Against: 2026111709090987's decision that LIMIT IN rules don't count as open. ufw limit lets players in, and refuses only an address that connects 6 times in 30 s.
+	- Test case: 1a3eptg
+	- Verified: 1a3eptg fails on the old check for all 5 new rule sets and passes after. The quick gate passed.
+	- Swept: covers is shared with firewalld, whose --list-ports never gives Anywhere or a list. ufwMissing is the only ufw rule reader.
+	- Decisions:
+		- The From column isn't read, as before, so a rule that lets in only the LAN counts.
+		- A rule only for IPv6 still counts, as before. Looked at and left alone.
+		- design.md's repair check 10 says which ufw rules count.
+	- Branch: fixes-2026111715274925
+	- Commit: 5e52b19
+	- Closed reason: Done
+	- Acceptance signoff: 20261119, t00mietum, as chosen: LIMIT IN counts as letting players in.
+	- Closed: 20261119-103705
+
+- At a boot unit stop, both start --foreground and its ExecStop hand the trees back, and a slow hand-back can fail the unit
+	- ID: 2026111719172263
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-191722
+	- Opened by:
+	- Related IDs: 2026111715274978
+	- Incorrect behavior [Bug]: On systemctl stop, ExecStop's stop and start --foreground each run the hand-back once the server is down. When ExecStop ends first, systemd sends SIGTERM to start --foreground, which cuts its chown short and exits 1, so the unit ends as failed. A big tree makes that more likely.
+	- Expected behavior [Bug]: One hand-back, and a clean stop leaves the unit inactive, not failed.
+	- Reproduced [Bug]: 20261117: 1a3jx6g fails on the unfixed code, with the fake runner. Not seen on a real unit.
+	- Possible cause [Bug]: Kit.stop and Boxed.Start's --foreground end both call handBack. Inside the unit, one of them could leave it to the other, or start --foreground could finish its hand-back after SIGTERM.
+	- Progress log:
+		- 20261117: Found while fixing 2026111715274978.
+		- 20261117: Verified: 1a3jx6g fails on the unfixed code (start --foreground hands back inside the unit, and a SIGTERM in its wait with the server down fails it, in both modes) and passes with the fix. The quick gate passed, and race tests of launch and cli.
+		- Not run against a real systemd unit here. 1a3jqtm does that.
+		- 20261117: Verified: 1a3jqtm passed in a root host container on ca9d851, with the unit inactive and not failed after stop. The root host run itself is still to run.
+	- Needs local test suite run?: No. Passed 20261117.
+	- Actual cause [Bug]: Inside the boot unit, start --foreground handed back after the server's end, and so did ExecStop's stop. systemd sends SIGTERM to the unit once ExecStop is done, which cut start's chown short. A wait that SIGTERM cut short with the server down was also an error, and native mode's 5 s poll is nearly always in that wait.
+	- Actual effort: Low
+	- Actual fix [Bug]: Inside the boot unit, told by its cgroup, start --foreground leaves the hand-back to ExecStop's stop, in both modes. A SIGTERM in its wait with the server down is a clean stop, exit 0. Outside the unit nothing changes. design.md's Boot section says so.
+	- Branch: fixes-2026111719172263
+	- Commit: 99599e1
+	- Test case: 1a3jx6g, and the root host check 1a3jqtm
+	- Decisions:
+		- ExecStop's stop keeps the hand-back rather than start, since systemd runs ExecStop after every start, even when the server ended by itself, and only ExecStop finishes before the SIGTERM.
+		- A SIGTERM counts as clean only when the server is down. With it still up, start still fails.
+		- Swept: the hand-backs at start's end are container.go's foreground end and native.go's foreground loop, both changed. The --debug paths can't run in the unit. stop's hand-backs stay.
+	- Closed reason: Done
+	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed 1a3jwt0 and 1a3jqtm, with 1a3fjbr and 1a3jgsm after them, 4 native SKIPs.
+	- Closed: 20261117-204121
+
+- Root opens a device or pipe that a link in plugins/ points to, before it checks the file kind
+	- ID: 2026111715274815
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: The server account can make `plugins/x.jar` a link to a device such as `/dev/watchdog`. repair, setup, update and a boot start open it as root to hash it, and only check that it's a regular file afterwards. Opening a device runs its driver. With a hardware watchdog, an open and close without the stop byte can reboot the host, and with startAtBoot on that repeats at every boot. Any other device link makes start and repair fail with the driver's error.
+	- Expected behavior [Bug]: Root refuses anything in the tree that isn't a regular file before it opens it for reading.
+	- Reproduced [Bug]: 2026-11-17: a link to `/dev/tty` with no controlling terminal made `Sum` and `CheckJars` fail with the driver's own error. The watchdog reboot wasn't tried.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 1. Detail in detail_backlog.md.
+		- 2026-11-17: Reproduced by 1a3jss4 and 1a3jsw8 on the old code: a link to a pipe was opened, as inotify showed, and a link to a socket failed with the driver's ENXIO.
+	- Origin: ba0f959 status and watch, 9058841 plugin pinning. Not seen by an earlier round. Confirmed for the open, Plausible for the reboot. Same class as 2026111709090977, whose fix covered root writes but not reads.
+	- Sweep: Every caller of `plugins.Sums.Sum` and `plugins.Describe`: launch/kit.go, main.go repairPlugins, setup.go, update.go, status.go and update/agent.go.
+	- Actual cause [Bug]: `Sums.Sum`, `Describe` and `server.OpenRegular` opened the path to read, after links, and checked its kind only after the open.
+	- Actual fix [Bug]: `server.OpenRegular` opens with O_PATH, which runs no driver and doesn't wait on a pipe. It refuses anything but a regular file, then reopens that same inode through `/proc/self/fd` to read. `Sum` and `Describe` go through it, and `Describe` now takes the hash and the claims from one open. A jar that's a pipe, socket or device, or links to one, counts as changed rather than failing the check. design.md's Plugin pinning says so.
+	- Decisions:
+		- Links are still followed, as before. Only the kind of what they reach is judged, before the open.
+		- The reopen goes through `/proc/self/fd`, so a link swapped after the check can't change what's read. Without `/proc` the open fails, which refuses the jar.
+		- `ErrNotRegular` is now the server package's, and `plugins.ErrNotRegular` is the same value.
+	- Swept: every caller in the Sweep row goes through the fixed `Sum` or `Describe`, as do `server.OpenRegular`'s own callers (native start's old log, the log follower, status's log tail). Twins fixed in the same commit: native start's log read used `os.ReadFile`, which hangs on a pipe (1a3jszc), and `download.Staged.Open` had no O_NONBLOCK or kind check (1a3jt5m). `plugins.Jars` listed its folders with `filepath.Glob`, which stats and then opens the folder plainly, so a swap between the two could open a device. It now uses `os.ReadDir`, which opens with O_DIRECTORY, and 1a3jsw8 pins a linked extensions folder.
+		- Left alone: the O_NOFOLLOW opens in linksafe, update/agent.go `claimedName` and selfupdate `statAt` follow no link, and the server account can't make a device node in the tree. The container drops every capability, the native unit has none, and fs.protected_hardlinks plus `/dev` being its own filesystem stop a hard link. `geyser.Installed`, repair's `walkTree` and `boxLinks` read folders through `os.ReadDir`: on go1.26.2, `Installed` with plugins/ a link to a pipe returned an error at once rather than hanging.
+	- Test case: 1a3jss4, 1a3jsw8, 1a3jszc, 1a3jt5m
+	- Verified: 1a3jss4, 1a3jsw8, 1a3jszc and 1a3jt5m fail on the old code and pass with the fix. 1a3jss4 and 1a3jsw8 failed on the pipe open and the socket's driver error, and 1a3jszc and 1a3jt5m hung on a pipe until their 10 s limit. Breaking `Jars` to open the folder plainly turns 1a3jsw8 red. The quick gate passes. Only the non-root path ran.
+	- Branch: fixes-2026111715274815
+	- Commit: 23c4eb9
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now.
+	- Closed: 20261117-174657
+
+- geyser sets the mode of a new plugins folder through a link
+	- ID: 2026111715274830
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: When setup or repair makes `plugins/` for Geyser, `chownLike` sets mode 0770 with a call that follows links. If the server account swaps the new folder for a link first, root sets the link's target to 0770, which could be `/etc/passwd`. The chown just before it doesn't follow links.
+	- Expected behavior [Bug]: The mode is set through the folder handle, as `linksafe.Mkdir` does.
+	- Reproduced [Bug]: 2026-11-17: with `plugins` already a link to a 0644 file, `chownLike` left the file at 0770.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 2. Detail in detail_backlog.md.
+		- 2026-11-17: Reproduced by 1a3jt2g on the old code, with a hook at the same point: the server swapped the new plugins/ for a link to a 0644 file, and the file became 0770.
+	- Origin: 9f30908 setup gets geyser and floodgate. The sweep of 2026111709090977 listed geyser's plugins folder as safe and missed it. Confirmed.
+	- Sweep: selfupdate.go has the same call, in deferred code and a folder only root can write.
+	- Actual cause [Bug]: `chownLike` set the mode with `Fchmodat` on the folder's name after `Mkdirat`, and that call follows a link.
+	- Actual fix [Bug]: geyser's `Install` makes `plugins/` with `linksafe.Mkdir`, which opens the new folder without following a link and sets its owner and mode through that handle. `chownLike` is gone. `linksafe.Dir` gained `Fd`, for the download into the folder.
+	- Decisions:
+		- `linksafe.AfterMkdirat` is a test hook between the mkdir and the open, nil outside tests. It's exported since the geyser test is in another package.
+	- Swept: selfupdate.go's `Fchmodat` on its temp name is left, as the Sweep row says. paper.go's `Fchownat` doesn't follow links. `grep -rn 'Fchmodat\|os.Chmod\|os.Chown\|os.Lchown' source` finds no other path chmod or chown in the tree, only `plugins.shcl` and `update/image.go` under `/etc`.
+	- Test case: 1a3jt2g
+	- Verified: 1a3jt2g fails on the old code and passes with the fix, 1a3fahr still passes, and the quick gate passes. Only the non-root path ran. The root-only fchown is `linksafe.Mkdir`'s, which the root host check covers through `plugins.Refuse`.
+	- Branch: fixes-2026111715274815
+	- Commit: f7098de
+	- Acceptance signoff: Self-closed: 1a3jt2g fails on the old code and passes now.
+	- Closed: 20261117-174657
+
+- A serverDir with glob characters in its path skips every plugin check
+	- ID: 2026111715274846
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: `plugins.Jars` finds jars with a glob that reads `[`, `*` or `?` in serverDir as a pattern, so a serverDir such as `/srv/mc[1]` finds no jars. start then passes the jar check with 0 jars, and no jar gets a read-only mount. config allows such a path.
+	- Expected behavior [Bug]: Jars lists the folder without reading serverDir as a pattern.
+	- Reproduced [Bug]: 2026-11-17: an unapproved jar under `mc[1]/plugins` gave 0 jars and a passing check.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 3. Detail in detail_backlog.md.
+		- Verified: 1a3jt8r fails on 2369445, where `mc[1]`, `mc\x` and `[mc` found no plugin jars, and passes on 80c5e6f. The quick gate passes.
+	- Origin: 9058841 plugin pinning. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: Jars built a `filepath.Glob` pattern from serverDir, so its glob characters were read as a pattern.
+	- Actual fix [Bug]: Jars lists each pinned folder with `os.ReadDir` and matches only the file name against `*.jar`, from round commit 80c5e6f. This item adds the test.
+	- Test case: 1a3jt8r
+	- Branch: fixes-2026111715274846
+	- Acceptance signoff: Self-closed: 1a3jt8r fails on dev at 2369445 and passes now.
+	- Closed: 20261117-175601
+	- Decisions:
+		- Swept: no other `filepath.Glob` or `Match` on a path in `source/`. `paper.jar` goes through `EvalSymlinks`, and the read-only mounts come from Jars.
+		- Left alone: the .jar match stays case-sensitive, as Paper's `FileProviderSource` checks `endsWith(".jar")`.
+	- Commit: 51e34fd
+
+- The safe settings check misses proxy settings written in YAML flow style or as a repeated key
+	- ID: 2026111715274861
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: `proxies: {velocity: {enabled: true}}` passes the check, and so does `bungeecord: false` followed by `bungeecord: true`. The reader counts a key it can't find as safe, and keeps the first copy of a key. Paper's YAML reader reads flow style and keeps the last copy. design.md calls proxy forwarding the most common takeover.
+	- Expected behavior [Bug]: A settings file the reader can't follow counts as a problem, or the reader reads both forms the way Paper does.
+	- Reproduced [Bug]: 2026-11-17: both files passed `Check` in a test. Paper 26.3-253 read both as on.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 4. Detail in detail_backlog.md.
+		- Reproduced on Paper 26.3 build 253: with `bungeecord: false` then `bungeecord: true` in spigot.yml, Paper ran in BungeeCord mode and saved `true`. With `proxies: {velocity: {enabled: true, ...}}` in paper-global.yml, Paper read velocity as on, and turned it off only for the empty secret.
+		- Verified: 1a3jtbw fails on the old reader, which passed 5 of its 10 file shapes, wrote broken YAML for 1, and passed the unreadable and Geyser cases. It passes now. Real files from Paper 26.3-253 and Geyser 2.12.1-1304 parse, and Fix then Check on them is clean with spigot.yml and paper-global.yml unchanged. FuzzFix ran 90 s, 37k inputs, clean. The quick gate passes.
+		- 2026-11-19: t00mietum kept the YAML module and the hand-edit fallback as built, and asked not to get too hung up on the format of YAML files we don't control.
+	- Origin: 91ac8da safe server settings check on start. Not seen before. Confirmed.
+	- Sweep: The Geyser config reader in settings/geyser.go.
+	- Closed reason: Done
+	- Actual cause [Bug]: `yamlFind` read only block style and took the first copy of a key. A key it couldn't find counted as off. Paper's reader takes flow style, and keeps the last copy.
+	- Actual fix [Bug]: The Paper and Geyser YAML files are parsed with `go.yaml.in/yaml/v3`. Every copy of a checked key has to be right, through repeated sections, anchors and merges. A file that isn't YAML or holds 2 documents is an error. `repair` still edits only the key's line, checks the result again, and leaves a file it can't fix that way with an error saying to set it by hand. One YAML file failing no longer stops the others.
+	- Test case: 1a3jtbw, 1a3jp5g
+	- Branch: fixes-2026111715274846
+	- Acceptance signoff: Self-closed: 1a3jtbw fails on the old reader and passes now, and Paper itself read both settings as on.
+	- Decisions:
+		- A copy that isn't plain false, such as `yes`, `on` or a null, still counts as wrong, as before.
+		- A missing Paper YAML key is still fine, per design.md. A Geyser key counts as missing when the copy the reader takes has none, such as one only in an earlier repeated section.
+		- An alias or anchor on a checked key is left for the operator to fix, where the old fix overwrote the line.
+		- FuzzFix (1a3jp5g) said Fix never fails on a YAML file. Now Fix fails only on a YAML file it can't read or fix in place, leaves that file as it was, and when it passes Check finds nothing. Changed since an unreadable or flow-style file can't be fixed by editing lines, and writing it anyway would hide the setting.
+		- A new module, named in design.md's Software stack, which already expected one. Check: entry in questions.md.
+		- Swept: `scanYAML` and `scanGeyser` both go through `yamlScan` and `yamlFix`; `geyserAuthPath` reads the parsed file. `yamlNameVersion` in plugins/approve.go stays line-based, since plugin.yml names are only shown and used for update sources, and the hash is the check.
+	- Closed: 20261117-180920
+	- Commit: f74b64a
+
+- Text from the server tree and from download servers reaches the terminal with escape codes intact
+	- ID: 2026111715274877
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: Jar file names, the `paper.jar` link text, the ping's version name and player sample in status, the log tail of a server that died while loading, link paths in start's link check, and a download server's HTTP status text are all printed raw. The server account or a plugin controls most of them. An escape code can rewrite the line an operator is approving in `repair --approve-plugins`, or write to the clipboard. style_guide.md says such text goes through `server.Clean`.
+	- Expected behavior [Bug]: All of it goes through `server.Clean`, or names with control characters are refused where they're read.
+	- Reproduced [Bug]: 2026-11-17: tests showed raw ESC bytes in `CheckJars`, `paper.Current`, status output, start's log tail and a download error.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 5. Detail in detail_backlog.md.
+	- Origin: ba0f959, 9058841, 6d1da22, 3a04d86, 1b3d301 and 9f30908. Same class as 2026111311594944, which fixed player names and log lines. Confirmed.
+	- Sweep: plugins/check.go, paper.Current, status.go ping and plugin lines, launch/kit.go jar lines and log tail, launch/links.go, main.go repairPlugins, setup.go plan and approval lines, update.go plan, download.go and agent/api.go status errors.
+	- Closed reason: Done
+	- Actual cause [Bug]: Text read from the server tree, the ping, and HTTP status lines was printed as read. Only log lines, op names and plugin.yml claims went through `server.Clean`.
+	- Actual fix [Bug]: The places that print clean what they're given: status's `Report.Write` cleans every line, start's `Kit.say` cleans every text argument, and repair's report line and the error `run` prints are cleaned line by line through the new `server.CleanLines`. Repair's question, setup's and update's jar lines clean the names they show. `paper.Current` refuses a link text with control characters, and HTTP errors name the status by its code through `download.Status`, not the server's own reason text. design.md's update section says so.
+	- Swept: every site in the Sweep row. launch/links.go and setup.go's Describe error are returned errors, which `run` cleans. Twins: agent/fetch.go also printed `resp.Status`, start's settings warnings go through `Kit.say`, and update's approved-list warnings and skip lines print approved names. Left alone: settings.Warnings already cleans op names, config and tree warnings hold the operator's own paths, Paper and Geyser build names from the download APIs are checked against a name pattern, and update's `s.jar.Name` always equals a checked build path. `console` passes the terminal through by design.
+	- Test case: 1a3jtf0, 1a3jtj4, 1a3jtn8, 1a3jtrc, 1a3jtvg, 1a3jtym, 1a3jv1r, 1a3jv4w, 1a3jv80. 1a3jtj4 and 1a3jv4w are commented out since 2026111914334569, as start and repair no longer show jar names.
+	- Verified: all 9 fail on the old code and pass with the fix. With only the 4 print funnels added to the old code, 1a3jtf0, 1a3jtj4, 1a3jtn8, 1a3jv4w and 1a3jv80 pass, so each funnel holds by itself. The quick gate passes.
+	- Branch: fixes-2026111715274877
+	- Commit: 8f7239f
+	- Acceptance signoff: Self-closed: its tests fail on the old code and pass now, and every Sweep site is covered.
+	- Closed: 20261117-182413
+	- Decisions:
+		- Jar names stay as read, since they key the approved list and `Refuse` moves the file by its name. Cleaning happens where text is printed, not in `plugins.Jars`, so 2 files can't merge under one cleaned name.
+		- Cleaning goes in the few places output passes through (status, start, repair, `run`'s error line), so a new line there is covered without a sweep. Lines keep their breaks through `server.CleanLines`.
+		- `paper.Current` refuses rather than cleans, since `Target` is also the name update keeps when it prunes.
+
+- The firewall lets the server reach LAN hosts on IPv6 global addresses, and send multicast
+	- ID: 2026111715274893
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152748
+	- Opened by:
+	- Incorrect behavior [Bug]: The outbound LAN block covers only `fc00::/7` and `fe80::/10` for IPv6. On a home LAN with IPv6, the router, NAS and printers have global addresses on the host's own prefix. The server can reach them on 80 and 443 under egress `web`, and on any port under `open`. Under `open` it can also send multicast such as SSDP. design.md Security says the server can't open connections to the LAN.
+	- Expected behavior [Bug]: The host's on-link IPv6 prefixes, multicast and broadcast are blocked too, with the `seek4` answer kept ahead of that.
+	- Reproduced [Bug]: 2026-11-17: rendered rules loaded in a network namespace let a connect to a global address on the local prefix through, while a ULA was refused.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 6. Detail in detail_backlog.md.
+	- Origin: 88f3d3f firewall rules file and unit. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Cause [Bug]: The LAN set held only the ULA and link-local ranges for IPv6, and nothing dropped multicast or broadcast.
+	- Actual fix [Bug]: The rules add the host's on-link IPv6 prefixes to the LAN set, read from the kernel's IPv6 route list when the rules are written: routes with no gateway, not on loopback, and /32 or longer. Multicast and broadcast are dropped and counted as out_lan, after the seek4 answer.
+	- Test case: 1a3jvb4 (route list), 1a3jve8 (rendered rules), 1a3jvmg (rules from a namespace's own routes, loaded), 1a3fca0 (repair rewrites for a new subnet)
+	- Verified: 1a3jve8 and 1a3jvmg fail with the old rules and pass with the fix. In 1a3jvmg, sends to the LAN's global subnet, ff02::1, 224.0.0.251 and 255.255.255.255 are refused under egress open, and sends past a VPN-style 2000::/3 route and to the internet still go. The quick gate passed.
+	- Swept: firewall.Rules has 2 callers, repair's check and start's firewall.Matches, and both read the prefixes through firewall.ReadLocal. setup gets it through repair. allowFrom's inbound lan list is left alone, per design.md's Exposure.
+	- Branch: fixes-2026111715274893
+	- Commit: 46673e8
+	- Acceptance signoff: Self-closed: its tests failed before and pass after, per the standing close policy.
+	- Closed: 20261117-183929
+	- Decisions:
+		- Prefixes come from the route list rather than the host's addresses, so the on-link /64 of a DHCPv6 /128 address counts too.
+		- A route wider than /32 isn't a subnet, since a VPN can put much of the internet, or all of it, on its device with no gateway, and the server would lose IPv6.
+		- allowFrom's lan stays the private ranges, as design.md's Exposure says. Adding the subnets there would also let in others on a VPN's shared subnet.
+		- IPv4 on-link subnets aren't added, since a home LAN's IPv4 is private already.
+		- Multicast and broadcast get rules of their own rather than joining the LAN sets, since those sets also feed allowFrom's lan.
+		- design.md's Firewall says so.
+
+- start accepts any loaded firewall table, even one written for an older config
+	- ID: 2026111715274909
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `checkFirewall` only asks whether the table exists. After a change to allowFrom, egress, joinRateLimit, runUser or bedrock, or a `start --set` of one of them, start runs on the old rules with no warning. A new runUser isn't filtered outbound at all, and a newly on Bedrock port has no rate limit or loopback allowance.
+	- Expected behavior [Bug]: start compares the rules file with the rules the config gives, and refuses on a mismatch, naming repair.
+	- Reproduced [Bug]: 20261117: 1a3jvqm on the old check: a changed allowFrom, runUser or bedrock, a missing rules file, and a new subnet each let start go on to launch the server.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 7. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum kept the start check on the firewall rules file as built, refusing after an IPv6 prefix change until repair runs.
+	- Origin: 88f3d3f firewall rules file and unit. Not seen before. Plausible.
+	- Closed reason: Done
+	- Cause [Bug]: checkFirewall only asked nft whether the table was loaded.
+	- Actual fix [Bug]: start compares firewall.nft with the rules the config, the resolvers and the host's IPv6 subnets give, before the table check, and refuses naming repair. A subnet the file has and the host doesn't still passes.
+	- Test case: 1a3jvqm (start in both modes), 1a3jvhc (firewall.Matches)
+	- Verified: 1a3jvqm fails on the old check, where a changed allowFrom, runUser or bedrock, a missing file, and a new subnet each started the server, and passes after. The quick gate passed.
+	- Swept: both modes' Start and startUnit go through preflight; the launch rig writes a matching file; main's Kit uses the real files. repair's own check was already strict.
+	- Branch: fixes-2026111715274893
+	- Commit: 46673e8
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-183942
+	- Decisions:
+		- The file stands for the loaded table: the unit loads it, and repair reloads it whenever it writes it. Reading the table back would mean matching nft's own listing.
+		- A subnet the file has and the host doesn't passes, since the router's announcement can come after the boot unit's start. repair still writes the exact list.
+		- A new ISP prefix makes start refuse until repair runs. Check: entry in questions.md.
+		- design.md's start and repair say so.
+
+- repair on a second config removes or rewrites the main config's boot unit and firewall
+	- ID: 2026111715274925
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: There's one boot unit and one rules file for every config. `repair --config` on a second config with startAtBoot off disables and deletes the unit that runs the main config, and with it on rewrites the unit for the second config. The same repair rewrites the rules file with the second config's ports, or removes the table when its firewall is off. design.md says a second config starts and stops by itself.
+	- Expected behavior [Bug]: repair leaves a unit or rules file that belongs to another config alone, and says which config it belongs to.
+	- Reproduced [Bug]: 2026-11-17: a test wrote the unit for config A, then ran the boot check for config B, and its fix disabled and removed the unit.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 8. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum kept one config owning the boot unit and firewall as built, but said it's getting complex: keep it simple, and don't spend much development or run time checking third-party config files.
+	- Origin: cb5f7cf start at boot, 4b8af66 setup and repair install the firewall. Not seen before. Confirmed.
+	- Sweep: repair/boot.go and repair/firewall.go.
+	- Closed reason: Done
+	- Actual cause [Bug]: The boot and firewall checks took the one boot unit and the one rules file as this config's, whatever config wrote them.
+	- Actual fix [Bug]: firewall.nft names its config in a comment line, which start doesn't compare. repair leaves a boot unit whose ExecStart runs another config alone, and so does a rules file another config wrote while its unit is installed. It names that config, as OK when this config's setting is off, and as FAILED when it's on, unless the rules come out the same.
+	- Test case: 1a3jw10, 1a3jw44 (repair), 1a3jvtr (boot.Owner), 1a3jvxw (the rules file's config line)
+	- Verified: 1a3jw10 and 1a3jw44 fail on the old checks, where a second config removed the first's unit and firewall, and pass after. The quick gate passed.
+	- Swept: BootCheck and FirewallCheck are the only writers of the boot unit, firewall.nft and the firewall unit, and setup's steps 9 and 11 run them. start's firewall.Matches skips the line. bootServes still compares the exact ExecStart.
+	- Decisions:
+		- One config owns the boot unit and the firewall. Files named per config would need a table and units per config too. Check: entry in questions.md.
+		- A rules file with no config line, from an older build, counts as this config's, so the main config's next repair writes the line. One left by a config that turned its firewall off is anyone's.
+		- When a second config's rules come out the same as the file's, the file does for both and isn't rewritten.
+		- A unit with no ExecStart the tool wrote counts as this config's, as before.
+		- repair's Finding has a Note, shown as OK with its text, for what's left alone on purpose.
+		- 20261117: 1a3fca0's written-file assert now expects the config line, ForConfig(Rules(...)), where it expected Rules(...) alone. Nothing else in it changed.
+		- design.md's repair checks 9 and 13, Firewall, and Boot say so.
+	- Branch: fixes-2026111715274925
+	- Commit: 791c7c4
+	- Acceptance signoff: Self-closed: its tests failed before and pass after, per the standing close policy.
+	- Closed: 20261117-185127
+
+- The update agent's answer is ignored when the reply repeats the question first
+	- ID: 2026111715274941
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `agent.Parse` takes the first JSON object with a jars, paper or moveReport key. The question and the format sample both have a jars key. When a model restates the question before its answer, update prints that the agent found nothing newer for every jar and exits 0. When it restates the sample, every jar gets no answer.
+	- Expected behavior [Bug]: Parse skips a restated question or sample, or takes the last match.
+	- Reproduced [Bug]: 2026-11-17: a test reply that quoted the question before the answer gave 0 updates.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 9. Detail in detail_backlog.md.
+		- Verified: 1a3jehr and 1a3jr40 fail on the old Parse, with the question, the form, the whole prompt, or a draft first, and pass now. Taking out any of the 3 rules turns 1a3jehr red. The quick gate passed.
+		- Swept: paper and moveReport go through the same match, and 1a3jr40 quotes the whole prompt, jars included, before them. Live and Suggest are the only callers. FuzzParse's read-back still holds.
+	- Origin: 53a6bb3 agent config keys. Not seen before. Confirmed.
+	- Sweep: The same rule picks paper and moveReport.
+	- Closed reason: Done
+	- Actual cause [Bug]: Parse took the first object with a jars, paper or moveReport key. The prompt has 2 of its own: the question, when it lists jars, and the answer's form.
+	- Actual fix [Bug]: Parse skips the question, which names minecraftVersion and has no jar with a version or url, and the form, whose jar and Paper names are all `<...>` placeholders. The last other match wins. A reply with only those is an error. Each match is stepped over whole, so a quoted question with many jars costs one try.
+	- Branch: fixes-2026111715274941
+	- Test case: 1a3jehr, 1a3jr40
+	- Acceptance signoff: Self-closed: its tests fail before the fix and pass after, per the standing close policy.
+	- Closed: 20261117-190054
+	- Decisions:
+		- The question is told by minecraftVersion plus no jar with a version or url, so an answer with an extra minecraftVersion still reads. That keeps 2026111210033639's rule that unknown fields are ignored.
+		- The last match wins, for a draft followed by a fix, or a restatement that doesn't match exactly. The search still stops after 50 tries, and what it found by then stands.
+		- A reply that only repeats the question or the form is an error, rather than nothing newer for every jar.
+		- design.md's Update agent now says a quoted question or form is skipped and the last other answer is used.
+	- Commit: 529a418
+
+- Ctrl-C does nothing during a stop --warn countdown, then stop fails with the server still up
+	- ID: 2026111715274958
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: The warning wait is a plain sleep that ignores Ctrl-C. Ctrl-C 5 seconds into `stop --warn 300` waits about 4 minutes, then the next console send fails with "context canceled". Players were told the server stops, and it doesn't. Ctrl-C during `cmd` exits 0.
+	- Expected behavior [Bug]: Ctrl-C ends the countdown at once, tells players the stop is off, and exits 1.
+	- Reproduced [Bug]: 20261117. 1a3jwac, 1a3jwkr and 1a3ehbg fail on the unfixed code: stop waits out the countdown and fails with "context canceled" with nothing sent, cmd exits 0, and attach says it didn't detach in 15s.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 10. Detail in detail_backlog.md.
+		- 20261117: Verified: 1a3jwac, 1a3jwkr and 1a3ehbg fail on the unfixed code and pass with the fix. The quick gate passed, and race tests of launch and cli.
+		- Swept: every Kit.Sleep caller (countdown, waitLoaded, waitStopped, cmd, native foreground) now uses pause. Outside launch only soak.go sleeps, and agent/command.go already tells a deadline from a cancel. attach.go's Sweep line is fixed under this item.
+		- 1a3jwt0 is new in the root host check: SIGINT in stop --warn 60 must exit 1, put the stop-off line in the log, skip the save, and leave the container up. Not run yet.
+		- 20261117: The root host run on fixes failed 1a3jwt0. The check read latest.log as soon as stop exited, but Paper logs a console line on its next tick, 14 to 51 ms after it's typed. The check now waits up to 10 s for the stop-off line (ca9d851).
+		- Verified: in a root host container on ca9d851, 1a3jwt0 passed. Read the old way, right after stop exited, the stop-off line was missing in 2 of 3 runs, and there 2 s later.
+	- Origin: 3a04d86 native mode start and stop, 5c5b023 console and cmd. Not seen before. Confirmed.
+	- Sweep: attach.go reports a Ctrl-C as a detach timeout.
+	- Needs local test suite run?: No. Passed 20261117.
+	- Actual cause [Bug]: Every wait in launch went through Kit.Sleep, which main set to time.Sleep, so it ignored Ctrl-C. cmd returned nil on a done context. AttachConsole read any end of its own timeout context as a slow detach.
+	- Actual effort: Avg
+	- Actual fix [Bug]: Waits go through Kit.pause, which ends at Ctrl-C or SIGTERM. A countdown cut short says "The stop is off. The server stays up." to the players and exits 1, with the server and trees as they were. Ctrl-C in stop's save wait, cmd's answer wait, start's load wait, and attach exits 1 and says interrupted.
+	- Branch: fixes-2026111715274958
+	- Commit: d480072
+	- Test case: 1a3jwac, 1a3jwdg, 1a3jwkr, 1a3ehbg, and the root host check 1a3jwt0
+	- Decisions:
+		- Kit.Sleep stays as the tests' clock, and is nil outside tests. pause uses a timer and the context, which is a smaller change than giving Sleep a context.
+		- Exit 1, not 130, since design.md has 0, 1 and 2 only. design.md's Commands says Ctrl-C and SIGTERM end a wait.
+		- The stop-off line goes on a context of its own, capped at attach's 15 s, since Ctrl-C has ended the run's. A failed send is shown with the interrupt.
+		- Ctrl-C after the stop line is out leaves the server stopping, and says another stop hands the trees back.
+		- The test console now refuses a done context, as a real send does.
+		- The 1a3jwt0 check waits for the stop-off line, and stop doesn't wait for Paper to log it. Its job ends once the console has the line, as for the countdown lines.
+	- Closed reason: Done
+	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed 1a3jwt0 and 1a3jqtm, with 1a3fjbr and 1a3jgsm after them, 4 native SKIPs.
+	- Closed: 20261117-204121
+
+- At boot, a server slower to load than startTimeout gets stopped again
+	- ID: 2026111715274978
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `start --foreground` exits 1 when the load takes longer than startTimeout, 300 seconds by default, and says it's still running. systemd then runs ExecStop, which stops the server. So a big world or a slow host never comes up at boot. The container's exit code is also ignored, so a crash ends the unit as a clean exit.
+	- Expected behavior [Bug]: In foreground a slow load is a warning, and the run goes on to wait. The container's exit code becomes the tool's.
+	- Reproduced [Bug]: 20261117. 1a3jwgm and 1a3ej4g fail on the unfixed code: start --foreground exits 1 on a slow load in both modes, and a container exit of 137 or 1 comes back as success.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 11. Detail in detail_backlog.md.
+		- 20261117: Verified: 1a3jwgm and 1a3ej4g's new case fail on the unfixed code and pass with the fix. 1a3jwpw pins main's exit code. The quick gate passed, and race tests of launch and cli.
+		- Swept: native.go's foreground start takes the same warning. Native's other waitLoaded caller is plain start, which still fails. No other caller of wait or waitLoaded.
+		- 1a3jqtm now adds startTimeout: 1 with startAtBoot, expects the warning in the journal, and fails when the unit is failed after stop. That also checks that Paper's normal stop exits 0 in the container. Not run yet.
+		- 20261117: The root host run on fixes failed 1a3jqtm with 'the load wasn't slow'. The check piped journalctl into grep -q under pipefail. Podman leaves conmon in the unit's cgroup, so the unit's journal also holds Paper's output, and journalctl died of SIGPIPE after grep's match. The check now greps a copy of the journal, and shows the tool's own journal lines when it fails (ca9d851).
+		- A failed 1a3jqtm now stops the server and turns the unit off, so 1a3fjbr and 1a3jgsm don't fail after it, as they did in that run.
+		- Verified: in a root host container on ca9d851, setup and 1a3jqtm passed with the warning in the journal, and the old pipeline exited 141 on that journal 5 times of 5. With a failure put in after the unit started, the check left the unit removed and no server up. 1a3fjbr, 1a3fjew and 1a3jgsm passed after it.
+		- Swept: every pipe into grep -q in checks.bash. status and start --help now go to a file or a variable first. The podman ps, podman image ls, id and find pipes print a line or 2, and stay.
+	- Origin: 3a04d86 native mode start and stop, 58531cc podman mode. Not seen before. Confirmed.
+	- Sweep: native.go has the same timeout.
+	- Needs local test suite run?: No. Passed 20261117.
+	- Actual cause [Bug]: waitLoaded's timeout was an error in every start mode. Boxed.Start dropped what the runtime's wait printed.
+	- Actual effort: Avg
+	- Actual fix [Bug]: With --foreground, a slow load is a warning, and start goes on to wait for the server's end, in both modes. In container mode, start --foreground exits with the code wait prints when it isn't 0, after the hand-back. Plain start still exits 1 on a slow load.
+	- Branch: fixes-2026111715274958
+	- Commit: d480072
+	- Test case: 1a3jwgm, 1a3jwpw, 1a3ej4g, 1a3eh24, and the root host check 1a3jqtm
+	- Decisions:
+		- Only --foreground warns, since only the boot unit runs it and an exit there makes systemd stop the server. A plain start still says it's slow and exits 1, with the server up, as design.md says.
+		- The code is the last line of wait's output. Output that isn't a number is an error, never success. Codes outside 1 to 255 exit 1. design.md's exit codes line says start --foreground is the exception.
+		- Native passes no exit code, since its server runs inside tmux in a collected unit, and native mode is deferred.
+		- 1a3jqtm's boot run now loads past startTimeout every time, which still covers start and stop through the unit. The test rig's wait prints 0 by default.
+	- Closed reason: Done
+	- Verified: 20261117, root host run on fixes (cicd/cicd.bash with only the roothost step) passed 1a3jwt0 and 1a3jqtm, with 1a3fjbr and 1a3jgsm after them, 4 native SKIPs.
+	- Closed: 20261117-204121
+
+- A docs-only push to main skips the merge gate, but the gate's tests read design.md
+	- ID: 2026111715274995
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152749
+	- Opened by:
+	- Incorrect behavior [Bug]: `cicd/docs-only-paths` counts `project/design.md` as docs. The config tests parse its settings table, and markdownlint checks it. A push to main that only edits that table, or adds a lint error, goes through with no gate, and the next gate on main fails on code nobody touched.
+	- Expected behavior [Bug]: design.md isn't docs-only, or a docs-only push still runs markdownlint and the config tests.
+	- Reproduced [Bug]: 2026-11-18: 1a3jwx4 on the old hook: a push to main of only README.md, design.md or .markdownlint.jsonc ran no gate, and a failing gate couldn't stop it.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 12. Detail in detail_backlog.md.
+		- 2026-11-18: Verified: the whole quick gate passed with 1a3jwx4 and 1a3jx08 in it.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed by reading.
+	- Closed reason: Done
+	- Actual cause [Bug]: The hook let a docs-only push skip every check, but markdownlint reads every doc and the config tests read design.md's table.
+	- Actual fix [Bug]: A docs-only push to main runs the quick gate without CodeQL in place of the merge gate, and a failure stops the push. A commit a whole merge gate passed on still skips both. The docs list itself is unchanged.
+	- Branch: fixes-2026111715274995
+	- Commit: 0938fe2
+	- Test case: 1a3jwx4 TestPrePushGates: the real hook and docs list in a throwaway repo, with stand-in gates. It failed on the old hook and passes now.
+	- Swept: the hook has 2 ways past the merge gate, the docs list and the passed marker. 1a3jwx4 covers both, and a push to dev.
+	- Acceptance signoff: Self-closed: the test failed before and passes after.
+	- Decisions:
+		- Picked the quick gate on docs pushes over taking design.md off the list. markdownlint reads every doc, so taking out design.md alone would leave the same gap for the rest, and a test that reads another doc later needs no list change.
+		- CodeQL is left out, since it reads only Go. The quick gate took 55 s here with CodeQL, well under the roughly 300 s idle limit GitHub is reported to put on a push's connection.
+		- The passed-marker check now comes before the docs check, so a commit a whole merge gate passed on runs nothing.
+	- Closed: 20261117-193524
+
+- The reproducible-build check rebuilds from the same folder and cache, so it can't fail
+	- ID: 2026111715275010
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The second build uses the same source folder and the same Go cache, with only a different output folder, so it only links again. README says it builds twice from 2 folders. A build that isn't reproducible would still pass. Only verify-release.bash does a real rebuild.
+	- Expected behavior [Bug]: The second build runs from a copy of the tree at another path, with an empty cache.
+	- Reproduced [Bug]: 2026-11-17: `go build -x` run twice on a copy did no compiling the second time.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 13. Detail in detail_backlog.md.
+		- 2026-11-18: Verified: the build step passed alone with the fix. The fault check in the Test case row ran both ways.
+	- Origin: bb4ab14 cicd pipeline, README line d3387c1. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The second build ran from the same folder with the shared Go cache, so it only linked the first build's objects again.
+	- Actual fix [Bug]: The second build runs from a copy of source, go.mod and go.sum in the run folder, with an empty Go cache of its own. The step fails if that cache stays empty, since then the build didn't use it. The whole build step took 32 s here. README's line is true now and wasn't changed.
+	- Branch: fixes-2026111715274995
+	- Commit: 49ee587
+	- Test case: n/a: pipeline step, the build step's own check. Watched to fail: with -trimpath taken out of GO_BUILD_FLAGS, the new check failed with two different binaries, and the old one passed.
+	- Acceptance signoff: Self-closed: the check failed on a path-dependent build that the old check passed.
+	- Closed: 20261117-193445
+	- Decisions:
+		- The copy is the whole source folder, not only tracked files, so an untracked file the first build saw doesn't read as a reproducibility failure on a dev run.
+
+- The merge gate can pass while a step checked nothing
+	- ID: 2026111715275026
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The gate-passed marker is written even when the root host, ZFS, vulnerability, CodeQL or arm64 steps were skipped, or shellcheck and markdownlint fell back to a warning. The pre-push hook then skips the gate. Any govulncheck error that isn't a finding reads as offline and is skipped. The format step runs the host's gofmt, and with no gofmt on PATH it says clean. HEAD is read when the run ends, not when it starts.
+	- Expected behavior [Bug]: The marker needs every step to pass, apart from an arm64 skip, on the HEAD the run started with. Other govulncheck and gofmt errors fail their steps.
+	- Reproduced [Bug]: 2026-11-17: the format step's line with gofmt off PATH printed clean. 2026-11-18: on the old script, gofmt off PATH and a file gofmt can't parse each printed clean, a govulncheck load error read as offline, a missing markdownlint left Lint at PASS, and 1a3jx08 failed on every SKIP.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 14. Detail in detail_backlog.md.
+		- 2026-11-18: Verified, old then new: gofmt off PATH clean then FAIL; a file gofmt can't parse clean then FAIL; govulncheck with no network SKIP in both; a govulncheck load error SKIP then FAIL; markdownlint missing PASS then SKIP.
+		- 2026-11-18: Verified: a merge gate with steps off said why and left the marker alone. Only a whole merge gate writes it, so the next one before a push to main runs that path.
+	- Origin: bb4ab14 cicd pipeline, bca305e gate marker. Not seen before. Confirmed for gofmt, Plausible for the rest.
+	- Sweep: cicd/cicd.bash gate summary, vuln step and format step.
+	- Closed reason: Done
+	- Actual cause [Bug]: The marker check looked only at steps turned off, never at each step's result. The vuln step read every error but a finding as offline, and the format step ran the host's gofmt with its errors thrown away.
+	- Actual fix [Bug]: The marker is written only when every merge step is on and PASS, apart from an arm64 SKIP, with a clean tree on the commit the run started on. Otherwise the summary says which. gofmt runs in the image and its errors fail. govulncheck skips only when the database fetch fails, and any other error fails. A missing shellcheck or markdownlint makes Lint a SKIP.
+	- Branch: fixes-2026111715274995
+	- Commit: 8b5ee0b
+	- Test case: 1a3jx08 TestGateMarker: the marker rule from cicd.bash over every merge step, plus a dirty tree and a moved HEAD. It failed under the old rule and passes now. The format, vuln and lint cases ran through cicd.bash, old and new.
+	- Swept: every fSkip in cicd.bash counts against the marker now: lint, vuln, fuzz, soak, codeql, arm64, both root host steps, demo, dogfood and publish. The other || true sites only shape output; each verdict comes from an exit code.
+	- Acceptance signoff: Self-closed: each case failed before and passes after.
+	- Decisions:
+		- A missing govulncheck fails, as a missing staticcheck or gosec already did.
+		- A publishing run still rewrites with the host's gofmt, since the tree is read-only in the container.
+		- Tool version drift stays a warning. It's checked only without the container, and a shellcheck or markdownlint at another version still checks the files.
+	- Closed: 20261117-193506
+
+- The .deb and .rpm packages install to /usr/bin, but setup and the boot unit run /usr/local/bin
+	- ID: 2026111715275041
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: setup copies the binary to `/usr/local/bin`, which comes first on PATH and is what the boot unit runs. A later package upgrade replaces only `/usr/bin`, so the operator and the boot unit keep the old build. design.md names the packages as a way to update.
+	- Expected behavior [Bug]: A package install and upgrade change the binary that the operator and the boot unit run.
+	- Reproduced [Bug]: 20261117. The alpha.1 .deb puts the binary in /usr/bin, while setup's copy and the boot unit use /usr/local/bin, which comes first on PATH.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 15. Detail in detail_backlog.md.
+		- Verified: the build and package steps passed, and the .deb and .rpm list /usr/local/bin/tt-minecraftd. Each new check failed with its part put back to /usr/bin.
+		- Verified: a .deb upgrade from the alpha.1 package, over a copy an older setup left in /usr/local/bin, removed /usr/bin/tt-minecraftd and put the new build in /usr/local/bin, owned by the package.
+		- Not verified: the .rpm upgrade.
+		- Swept: boot.Bin, setup's copy, install.bash, the demo, and the root host checks all use /usr/local/bin. No /usr/bin path for the tool is left in cicd or source.
+		- 2026-11-19: t00mietum kept the packages putting the binary in /usr/local/bin as built.
+		- 2026-11-19: Reworked to the FHS design in Decisions. The lines above are about the replaced /usr/local/bin packages.
+		- Verified: 1a3jxp4, 1a3jxs8 and 1a3jxwc pass, and each fails with its part taken out: the package check in `boot.Bin`, setup's skip, and the PATH check in repair. 1a3jq7w and 1a3jvtr fail when a unit that runs `/usr/bin` isn't taken as this config's.
+		- Verified: the build and package steps passed in a throwaway clone, and the .deb and .rpm list /usr/bin/tt-minecraftd. The package step failed with its path put back to /usr/local/bin, with `boot.PkgBin` moved, and with install.bash's path set to /usr/bin.
+		- Not verified: setup and repair against a really installed package, which the root host checks don't do.
+		- Swept: every /usr/local/bin and `boot.Bin` use. `boot.Command`, `ExecStart`, `Unit`, `Owner` and `Serves` take either path. install.bash, dogfood, the demo, the root host checks and `update --self` are hand installs and keep /usr/local/bin.
+	- Origin: bb4ab14 cicd pipeline. Not seen before. Confirmed.
+	- Actual cause [Bug]: setup copied itself to /usr/local/bin even when the package's binary was in /usr/bin, and the boot unit ran only /usr/local/bin. That copy comes first on PATH, so a package upgrade never reached the operator or the unit.
+	- Actual fix [Bug]: The .deb and .rpm put it in /usr/bin. setup leaves its /usr/local/bin copy out when the package's binary is there. The boot unit runs the package's binary when it's there, and setup's copy otherwise. repair check 15 reports a /usr/local/bin copy that comes before the package's on PATH. The package step fails unless the build names the package's path and install.bash's, and nothing else. design.md's setup, repair and Boot say so.
+	- Branch: pkgpath
+	- Test case: 1a3jxp4 (which binary the unit runs), 1a3jxs8 (setup with and without the package), 1a3jxwc (the unit moves to the package's binary, and repair reports the copy), 1a3jq7w and 1a3jvtr (a unit on either path is this config's), and the package step's path checks in every full run.
+	- Actual effort: Low
+	- Decisions:
+		- The packages go in /usr/local/bin, against the FHS and Debian policy, since setup, install.bash, and the boot unit's recorded path all use it, and an upgrade from alpha.1 then removes its own /usr/bin copy. Check entry in questions.md.
+		- 2026-11-19: Reopened. t00mietum's answer asked for industry practice, meaning the FHS and Debian policy: a package owns /usr/bin/tt-minecraftd, and /usr/local/bin is only for hand installs. The /usr/local/bin pick is replaced.
+		- 2026-11-19: Design: the .deb and .rpm install /usr/bin/tt-minecraftd. install.bash, setup's copy and dogfood keep /usr/local/bin. setup skips its copy when the package's binary is there, the boot unit runs the binary that's installed, and repair flags a /usr/local/bin copy that shadows the package's on PATH.
+		- 2026-11-19: With both there, the unit runs the package's, since the package manager keeps it current and repair reports the other.
+		- 2026-11-19: repair's PATH check is its own check 15, FAILED with the command that removes the copy, and it never removes it, since someone may have put that build there on purpose. A symlink to the package's binary passes. Check entry in questions.md.
+		- 2026-11-19: `start` and `stop` take a unit on either path as this config's, so a unit from before the package came still goes through systemctl until repair rewrites it.
+		- 2026-11-19: t00mietum answered the check 15 entry: keep the copy and GFS rotate the old ones, in `/var/lib/tt-minecraftd/old-builds/`. Filed as 2026111911125756.
+	- Acceptance signoff: Self-closed: its tests pass, the design is t00mietum's, and the repair check's picks are a Check entry.
+	- Commit: 6404266, a1dae52
+	- Closed: 20261119-104932
+
+- The root host ZFS checks force-destroy any pool ZFS_POOL names, even one the name check refused
+	- ID: 2026111715275056
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: `fZfsPool` refuses a pool not named `ttmcss-test-*`, but the exit trap's `fZfsGone` runs `zpool destroy -f` on any name that exists. It runs in a privileged container that sees the host's pools. A hand run of checks.bash with ZFS_POOL set to a real pool would destroy it. root-host.bash checks the name, and checks.bash doesn't.
+	- Expected behavior [Bug]: fZfsGone refuses any pool not named `ttmcss-test-*`.
+	- Reproduced [Bug]: 20261117. A hand run of checks.bash with ZFS_POOL=tank ran zpool destroy -f tank twice, once at the end of the ZFS checks and once from the exit trap.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 16. Detail in detail_backlog.md.
+		- Verified: 1a3jx3c fails on the old checks.bash, with 2 destroys of tank, and passes on the new one. Its control shows a ttmcss-test-* pool still gets destroyed on the way out.
+		- Swept: root-host.bash checks the name before its own destroy. In checks.bash every zpool and zfs call runs after the gate at the top. zfs-tools.bash only installs.
+	- Origin: 684bd24 root-host --zfs. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: Only fZfsPool checked the name. fZfsGone, the exit trap, checked only that the pool existed.
+	- Actual fix [Bug]: checks.bash refuses a ZFS_POOL that isn't a ttmcss-test-* name before anything runs, and fZfsPool and fZfsGone both go through the same name check.
+	- Branch: fixes-2026111715275041
+	- Test case: 1a3jx3c
+	- Actual effort: Low
+	- Closed: 20261117-194121
+	- Commit: 2464337
+
+- how-to-connect's Bedrock whitelist example loses its quotes
+	- ID: 2026111715275073
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The shell strips the quotes in `tt-minecraftd cmd fwhitelist add "Some Gamertag"`, and cmd joins its words with spaces. Floodgate gets the gamertag as 2 words.
+	- Expected behavior [Bug]: The doc gives a form that reaches Floodgate quoted, or cmd quotes a word that has a space.
+	- Reproduced [Bug]: Yes, 20261117. Floodgate 2.2.5 on Paper 26.3 takes `fwhitelist add Some Gamertag` as extra arguments ("Invalid command syntax").
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 17. Detail in detail_backlog.md.
+	- Origin: 69af57e binary name. Not seen before. Plausible.
+	- Fixed: how-to-connect.md puts the whole command in single quotes, so the double quotes reach the server.
+	- Test case: none, a doc line
+	- Closed: 20261117-204500
+	- Acceptance signoff: Self-closed: on a real Paper 26.3 with Floodgate 2.2.5, `fwhitelist add "Some Gamertag"` was read as one name (a lookup was tried and the name wasn't found), and the unquoted form gave "Invalid command syntax". cmd sends one argument as is.
+	- Verified: both lines typed into the console of a throwaway Paper 26.3 with Floodgate 2.2.5. This skipped tt-minecraftd start and cmd; the code joins one argument unchanged.
+
+- update --paper deletes the build it replaced when paper.jar links to ./name or a full path
+	- ID: 2026111715275089
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152750
+	- Opened by:
+	- Incorrect behavior [Bug]: The keep list holds the link text, such as `./paper-26.3-249.jar`, which never equals a file name in the folder. So `paper.Prune` removes the build it was meant to keep, though the plan says the last 2 builds stay.
+	- Expected behavior [Bug]: Prune keeps the build paper.jar pointed to, however the link is written.
+	- Reproduced [Bug]: 2026-11-17: a test with `paper.jar -> ./paper-26.3-249.jar` removed both builds.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 18. Detail in detail_backlog.md.
+	- Origin: 6d1da22. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: update compared the link's text with file names, so only a link written as the bare name kept the build it replaced.
+	- Actual fix [Bug]: `paper.Current` gives the build's `Name` in `serverDir` when `paper.jar` leads to that same file, however the link is written, and update keeps that name.
+	- Swept: `paper.Prune` has the one caller. `Linked.Target` is now only shown, in update's gone-build plan line. plugins, status and start resolve `paper.jar` with `EvalSymlinks`, not its text.
+	- Test case: 1a3jxcr
+	- Verified: 1a3jxcr fails on the old code for `./name`, a full path, `../server/name` and a doubled slash, and passes with the fix. The quick gate passes.
+	- Branch: fixes-2026111715275089
+	- Commit: 9efc39f
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261117-201309
+	- Decisions:
+		- The kept name comes from the same file, by `os.SameFile`, not from cleaning the link text, so any path to it counts. A link to a same-named build outside `serverDir` doesn't keep the local one, as before.
+
+- repair makes a missing group but leaves the account's primary group wrong until the next run
+	- ID: 2026111715275105
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: With the account there and its group missing, repair makes the group and says nothing about the account's primary group. Only the next run finds it, so setup's final check fails.
+	- Expected behavior [Bug]: One run makes the group and moves the account to it.
+	- Reproduced [Bug]: 2026-11-17: a test with that passwd and group found only the missing group.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 19. Detail in detail_backlog.md.
+	- Origin: b42345a repair checks. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: The primary group check ran only when the group was already there.
+	- Actual fix [Bug]: With the group missing, repair also moves the account to it with usermod --gid, after groupadd.
+	- Test case: 1a3ep1g
+	- Verified: 1a3ep1g fails on the old check, which ran only groupadd, and passes after. The quick gate passed.
+	- Swept: setup's step 2 runs the same account check. A new account gets the group from useradd --gid.
+	- Branch: fixes-2026111715274925
+	- Commit: fd15d98
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-185140
+
+- setup --dry-run plans firewall rules that the real run can't write
+	- ID: 2026111715275137
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: With no nft and no apt-get, the dry run plans the rules and the unit. The real run fails because nftables isn't installed, and stops before it writes the config.
+	- Expected behavior [Bug]: The dry run reports the same failure as the real run.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 21. Detail in detail_backlog.md.
+	- Origin: 4b8af66. Related to 2026111714065925. Plausible.
+	- Closed reason: Done
+	- Actual cause [Bug]: the dry run planned the firewall step whenever nft was missing, even with no apt to install it.
+	- Actual fix [Bug]: the dry run plans it only when apt is set to install nftables. Otherwise it runs repair's firewall check, which reports the real run's FAILED line, and setup stops there.
+	- Swept: setup's other dry run steps. The account, boot unit and Floodgate key steps run the real look. Safe settings plan without a look, since a new tree has none to fail. Podman and catatonit with no apt are refused before the plan by `needApt`.
+	- Test case: 1a3jxfw
+	- Verified: 1a3jxfw fails on the old code, where the dry run planned the rules and ended at exit 0, and passes with the fix. 1a3fcd4, which plans the rules when apt is there, still passes. The quick gate passes.
+	- Branch: fixes-2026111715275089
+	- Commit: 4c9e4ec
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now.
+	- Closed: 20261117-201309
+
+- setup on an existing install doesn't refuse while the server runs
+	- ID: 2026111715275153
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152751
+	- Opened by:
+	- Incorrect behavior [Bug]: design.md says setup refuses while a Paper server runs. That check runs only for a new install. On an existing one, setup downloads Geyser and Floodgate into the live server's plugins folder as root, then runs repair and update.
+	- Expected behavior [Bug]: setup refuses on an existing install too, or design.md limits the rule to a new install.
+	- Reproduced [Bug]: No. Read only.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 22. Detail in detail_backlog.md.
+		- 2026-11-19: t00mietum kept setup refusing on an existing install while a server runs as built.
+	- Origin: b21d65f setup install steps. Not seen before. Plausible.
+	- Closed reason: Done
+	- Actual cause [Bug]: `refuseRunning` was called only on the new-install path.
+	- Actual fix [Bug]: setup on an existing install refuses while a Paper server runs, before the Geyser and Floodgate lookup, the question, repair and update. Dry run too, as on a new install.
+	- Swept: `refuseRunning` now runs on both paths of `Setup.Do`. `--adopt` with a config there is still refused first, by its own message.
+	- Test case: 1a3jxk0
+	- Verified: 1a3jxk0 fails on the old code, which downloaded Geyser and Floodgate and ran repair and update, and passes with the fix. The quick gate passes.
+	- Branch: fixes-2026111715275089
+	- Commit: a961659
+	- Acceptance signoff: Self-closed: its test fails on the old code and passes now, and it follows design.md's setup rule.
+	- Closed: 20261117-201309
+	- Decisions:
+		- Refuse on an existing install too, rather than limit design.md's rule to a new install, per the recorded setup decision that it never changes a tree under a live server. design.md lets `repair` and `update` run by themselves while it runs. A `Check:` entry is in questions.md.
+		- 20261117: 1a3f994's assert that an existing install runs no host command now allows the `ps` look. It was no commands, and is now only `ps`.
+
+- A start that fails after the hand-off leaves the trees with the service account
+	- ID: 2026111715275237
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: After the trees go to the service account, a failed create, start or load returns without handing them back, and the error doesn't say to run stop. `--debug` hands them back.
+	- Expected behavior [Bug]: start hands the trees back when it fails before the server is up, or the error says how to get them back.
+	- Reproduced [Bug]: 2026-11-17: a test made create fail. The chown to the service account ran, and no hand-back did.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 27. Detail in detail_backlog.md.
+		- 20261117: Verified: 1a3jx9m fails on the unfixed code (no hand-back after a failed create, start, load, or systemd-run, and no hint) and passes with the fix. The quick gate passed, and race tests of launch and cli.
+	- Origin: 6fb7ece container create and start. Not seen before. Confirmed.
+	- Sweep: native.go has the same path.
+	- Closed reason: Done
+	- Actual cause [Bug]: Start returned the error from create, start, the load wait, and in native mode the jar lock and systemd-run, with no hand-back after tree.ToServer.
+	- Actual effort: Low
+	- Actual fix [Bug]: After the hand-off, a failed start checks the server. When it's down, the trees go back. When it's up, or that can't be told, the error says they're still the service account's and stop hands them back. In both modes.
+	- Branch: fixes-2026111719172263
+	- Commit: 860ec34
+	- Test case: 1a3jx9m
+	- Acceptance signoff: Self-closed: reproduced, 1a3jx9m fails before the fix and passes after, and the sweep is answered.
+	- Closed: 20261117-200247
+	- Decisions:
+		- A slow load or a Ctrl-C in the load wait leaves the server up, so the trees stay, and those errors already say it's still running.
+		- No chown after Ctrl-C, since it would get the same SIGINT from the terminal. The error says stop hands them back.
+		- Inside the boot unit, start leaves the hand-back to ExecStop's stop, per 2026111719172263.
+		- Swept: native.go's jar lock, systemd-run, and load wait take the same step. Both --debug paths already hand back. repair's tree.ToServer isn't a start.
+
+- An API agent's key goes along when its URL redirects to another host
+	- ID: 2026111715275284
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152752
+	- Opened by:
+	- Incorrect behavior [Bug]: The API client follows redirects. On a 307 or 308 to another host, Go sends the POST again with custom headers, so the anthropic kind's `x-api-key` and the prompt go to the new host. Go also allows a redirect from https to http.
+	- Expected behavior [Bug]: The API client doesn't follow redirects.
+	- Reproduced [Bug]: 2026-11-17: a 307 from one test server to another delivered the key.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 30. Detail in detail_backlog.md.
+		- Verified: 1a3jw78 fails on the old client, where the other host got the key on 307, 308, and 302, and passes now, for both kinds, with and without a client passed in. The quick gate passed.
+		- Swept: post is the only request that sends a key, by a grep for Header.Set and SetBasicAuth under source. fetch and the download client send none. Their redirects are 2026111715275472's.
+	- Origin: 91a46c8 API agent kinds. Not seen before. Confirmed.
+	- Closed reason: Done
+	- Actual cause [Bug]: API.Ask used a client that follows redirects, or the caller's client as given. On a 307 or 308 Go sends the POST again with its custom headers, so x-api-key went to the new host. Go drops Authorization on a move to another host, but not x-api-key.
+	- Actual fix [Bug]: Ask uses its own copy of the client, which never follows a redirect. A 3xx is an error that says agentURL needs the new address.
+	- Decisions:
+		- A client passed in is copied, not changed, so the rule holds for any client, tests included.
+		- design.md's Update agent now says the key goes only to agentURL's host.
+	- Branch: fixes-2026111715274941
+	- Test case: 1a3jw78
+	- Acceptance signoff: Self-closed: its test fails before the fix and passes after, per the standing close policy.
+	- Closed: 20261117-190113
+	- Commit: 1fd93a9
+
+- README and design.md say things the code doesn't do
+	- ID: 2026111715275393
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-152753
+	- Opened by:
+	- Incorrect behavior [Bug]: README says `update --plugins` knows where to get Paper, which is `--paper`. README says start takes a ZFS snapshot when the world is on ZFS, but snapshots need zfsDataset set and only `update --mc-version` takes one now. design.md Software stack expects a YAML package, which go.mod doesn't have. design.md Testing leaves out the root host checks, fuzz, soak, race tests, CodeQL and the arm64 run.
+	- Expected behavior [Bug]: Each line says what the code does.
+	- Reproduced [Bug]: No. Read against the code.
+	- Progress log:
+		- 2026-11-17: Code review 20261117 item 37. Detail in detail_backlog.md.
+	- Origin: cfd6be9, d8add81, b097820. Not seen before. Confirmed by reading.
+	- Closed reason: Done
+	- Fixed: README names update --paper for Paper and says the start snapshot is for update --mc-version with zfsDataset set. design.md Testing lists the root host checks, fuzz, soak, race tests, CodeQL and arm64. The YAML line stays, since go.mod has go.yaml.in/yaml/v3.
+	- Test case: none, doc lines
+	- Acceptance signoff: Self-closed: mechanical doc fixes
+	- Closed: 20261117-200539
+
+- setup runs apt-get for catatonit on a box without apt
+	- ID: 2026111714065925
+	- Type: Bug
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Severity: Low
+	- Opened: 20261117-140659
+	- Opened by:
+	- Related IDs: 2026111713320657
+	- Incorrect behavior [Bug]: On a box with Podman, no catatonit, and no apt, setup's install step still runs apt-get install catatonit, and fails on the missing command. repair's catatonit and nftables messages also name apt-get.
+	- Expected behavior [Bug]: Without apt, setup stops before any change and says catatonit has to be installed first, as its runtime pick does for Podman itself.
+	- Reproduced [Bug]: 20261117, in setup's test rig: with Podman, no catatonit and no apt, setup asked to go ahead and ran apt-get update, the account steps, the tree, and the rest. `runMode=podman` with neither Podman nor apt did the same.
+	- Cause [Bug]: packages() checked for apt only for nftables, and nothing checked it before install.
+	- Actual fix [Bug]: setup stops before the plan when Podman or catatonit is missing and there's no apt-get, and says to install it first. repair's catatonit and nftables findings name apt-get only when it's there, and the distro's package otherwise.
+	- Test case: 1a3jsp0 (no apt: no catatonit, or Podman given, stops before any command or prompt; a missing nft alone still goes to the firewall step), 1a3fca0 and 1a3f654's repair asserts (hint with and without apt)
+	- Verified: 1a3jsp0 fails on the code before the fix, with every setup command run, and passes after. The backlog quick run passed.
+	- Swept: setup's packages(), pickRuntime() (already checked apt) and firewall step; repair's catatonit and nftables findings. No other apt-get call in Go code. design.md's setup section says so.
+	- Decisions:
+		- A missing nft without apt still stops setup at the firewall step, as design.md's step 9 says, rather than up front. Only the packages install would fail on are checked early.
+		- The check runs in dry runs too, since the install would fail the same way.
+		- 20261117: 1a3fca0's no-nft assert and the catatonit assert in repair's container test now expect "the distro's ... package adds it" with no apt-get, and keep the old apt-get text with apt-get there.
+	- Branch: nov17-2026111714065925
+	- Commit: 50f4429
+	- Acceptance signoff: Self-closed: its test failed before and passes after, per the standing close policy.
+	- Closed: 20261117-141400
+
+- Installers: Docker or Podman as a prerequisite, and an option for other distros
+	- ID: 2026111713320657
+	- Type: Enhancement
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070800, 2026111111070761, 2026111318335938
+	- Requirements:
+		- install-dev.bash treats Docker or Podman as a prerequisite, and installs one only when a flag asks it to try.
+		- It still prints the command that adds the account to the docker or podman group, rather than running it.
+		- install.bash and install-dev.bash get an option for distros they don't support, such as non-Debian ones. With it they install nothing through any package manager and only check that what they need is already there, such as docker.
+		- systemd stays a hard requirement.
+		- From t00mietum's answers on 20261117 to the Check entries for 2026111111070800 and 2026111318335938.
+	- Estimated effort: Avg
+	- Closed reason: Done
+	- Actual effort: Avg
+	- Branch: nov17-2026111713320657
+	- Commit: 5bbac35
+	- Test case: 1a3js04 (no docker or podman refused unless --install-docker; podman counts; group note when docker info fails; --any-distro), 1a3jrx0 (no systemd refused; --any-distro checks Podman and catatonit or Docker, and nftables; NixOS still refused)
+	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy. The option names are a Check: entry in questions.md.
+	- Closed: 20261117-140819
+	- Progress log:
+		- 2026-11-17: install-dev.bash refuses before any change when there's no docker or podman, unless --install-docker (docker.io through apt) or --no-docker. Both installers take --any-distro, which skips the distro check, installs nothing, and checks what's needed first. install.bash checks for systemd in every mode. README's Installing and Developing sections say so.
+		- Verified: 1a3jrx0 and 1a3js04 pass in the quick gate, and under Bash 3.2 with busybox tools. Both fail on the scripts before this change. Taking out the systemd check, the catatonit check, the docker info check, or the podman-docker check each fails them.
+		- 2026-11-17: 1a3js04's bare-box, prompt, no-sudo, and distro cases now give --install-docker or a stand-in docker, since a bare box is refused without one. Its folder-refusal case takes git away in place of docker, so the refusal still has to come before apt.
+		- Swept: setup's own apt use without apt is filed as 2026111714065925. No other script calls the installers.
+	- Decisions:
+		- install.bash checks for Podman plus catatonit, or Docker, and nftables under --any-distro, since those are what setup would get through apt. Podman is checked first, as setup picks it first.
+		- The systemd check (/run/systemd/system) runs in every mode of install.bash, since setup needs it everywhere. install-dev.bash doesn't check it, since building and testing don't need it.
+		- install.bash still refuses NixOS under --any-distro, since its /etc comes from its own config. install-dev.bash allows it, since nothing it does depends on the distro.
+		- install-dev.bash's --any-distro doesn't check the CA file, since its path is Debian's; a missing bundle shows as a failed clone.
+		- --install-docker installs docker.io, as the old default did. With only Podman, a note says cicd/cicd.bash calls docker, which podman-docker adds.
+		- The docker group command now also shows when docker was there already and docker info fails for this account, since cicd then runs on the box without saying so.
+
+- Refusing a plugin follows a link in the server tree
+	- ID: 2026111709090977
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: plugins.Refuse runs as root. A plugins-refused that's a link to a root-owned folder passes the mkdir (it exists), and the rename then moves a jar the server controls into the link's target. The jar's own path can go through a linked plugins folder too, and the lstat then rename check on the name can race.
+	- Expected behavior [Bug]: Refuse works from folder handles opened with O_NOFOLLOW, makes the folder with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/plugins/approve.go.
+		- 2026-11-17: Next, with 2026111709090967 and 2026111409374443, ahead of the move bugs. The fix is the same for all 3: folder handles opened without following links.
+		- Verified: 1a3js38 fails on the old code and passes with the fix, 1a3en5c still passes, and the quick gate passes. A trace on ZFS 2.3.9 showed renameat2 with RENAME_NOREPLACE taken, and EEXIST on the second move.
+		- The root-only chown of a new plugins-refused ran only in its non-root form here. The same call is the settings package's, which the root host check covers.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by 1a3js38 on the old code: a linked plugins-refused took the jar into the link's target, and a linked plugins/ let the jar be moved out of the folder it links to.
+	- Actual cause [Bug]: Refuse used path calls as root (stat, mkdir, lstat, rename), and each one follows a link the server account can plant.
+	- Actual fix [Bug]: Refuse opens serverDir, the jar's folder, plugins/ and plugins-refused/ as folder handles without following links, makes plugins-refused with mkdirat, and moves with renameat2 and RENAME_NOREPLACE, adding the time on EEXIST. The handle code moved out of the settings package into source/internal/linksafe, which settings now uses too.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: 1a3js38, 1a3en5c. Both are commented out since 2026111918161429, which removed Refuse.
+	- Acceptance signoff: Self-closed: 1a3js38 fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- A new plugins-refused is now mode 0770, per design.md's Tree ownership. It was 0750 less the umask.
+		- On a filesystem that refuses the RENAME_NOREPLACE flag (EINVAL), the move checks the name and does a plain rename. A race there only replaces a file in a folder the server can already write.
+		- Swept: every root write in the tree. paper.Point, paper.Prune, download, geyser's plugins folder and the settings package already use folder handles or unlink a name right under serverDir. tree.ToServer's chown -R doesn't follow links. update/image.go and setup's config are under /etc.
+
+- repair's Floodgate key fix follows a link in the server tree
+	- ID: 2026111709090967
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: repair checks plugins/floodgate/key.pem with lstat, then runs chmod o-rwx on the path as root. The server account can swap the file, or the floodgate folder, for a link in between, and root changes the mode of the link's target.
+	- Expected behavior [Bug]: the fix opens each part with O_NOFOLLOW from the server folder, checks it's a plain file, and changes the mode through that handle, as the settings package does.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/repair/files.go, bedrockCheck.
+		- 2026-11-17: Next, with 2026111709090977 and 2026111409374443, ahead of the move bugs. 2026111410134562 (the Floodgate key after setup --adopt) goes through the same fix.
+		- Verified: 1a3js6c fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-17: 1a3epe0 (TestBedrockCheck) expected the fix to run sudo chmod o-rwx on the key. It now expects no command, and the key at 0640, since the mode changes through the handle.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by 1a3js6c on the old code: with plugins/floodgate a link to another folder, repair offered and ran chmod o-rwx on the key in the link's target.
+	- Actual cause [Bug]: The check used lstat on the whole path, which follows a linked floodgate folder, and the fix ran chmod on the path later, as root.
+	- Actual fix [Bug]: The check and the fix each open plugins, floodgate and key.pem from serverDir without following links, check it's a plain file, and change the mode through that handle with fchmod. A link on the way is reported, with no fix.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: 1a3js6c, 1a3epe0
+	- Acceptance signoff: Self-closed: 1a3js6c fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- The fix keeps the key's other mode bits and clears only other accounts' access, the same as chmod o-rwx.
+		- Swept: bedrockCheck is the only repair fix that changes a file inside the tree by path. ownershipCheck goes through tree.ToServer and ToOperator, with chown -R on the real tree path.
+
+- start doesn't catch a link in the server tree that won't resolve in the container
+	- ID: 2026111409374443
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: High
+	- Opened: 20261114-093744
+	- Opened by:
+	- Incorrect behavior [Bug]: The container mounts each tree at its resolved path, so a link such as world -> .../worlds/current/world dangles inside it when current is itself a link. Paper may then make a new, empty world.
+	- Expected behavior [Bug]: start refuses, and names the link and the path it would need, or repair offers to point it at the resolved path.
+	- Progress log:
+		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
+		- 2026-11-17: Next, with the 2 newer link bugs 2026111709090977 and 2026111709090967.
+		- Verified: 1a3js9g fails on the old code and passes with the fix, and the quick gate passes.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by 1a3js9g on the old code: with world linked through worlds/current, itself a link, start went on and ran the container.
+	- Actual cause [Bug]: The container has only the trees, each at its real path, and nothing checked that the links in them still resolve there.
+	- Actual fix [Bug]: Container start walks each tree, resolves every link the way the container would, with only the mounts and the folders above them there, and refuses with the link and the real path to point it at. The container's working folder is now serverDir's real path too.
+	- Branch: nov17-2026111709090977
+	- Commit: f7b8dc6
+	- Test case: 1a3js9g
+	- Acceptance signoff: Self-closed: 1a3js9g fails on the old code and passes now.
+	- Closed: 20261117-134237
+	- Decisions:
+		- start refuses, the first of the 2 fixes the item gives. A repair fix that rewrites the operator's links was left out, since the right target isn't always the real path.
+		- A link that dangles on the host too is left alone, since the container didn't cause it. A link to a path in the image, such as /usr, counts as not resolving.
+		- A folder the walk can't read is skipped, so the check never stops a start that worked before for that reason alone.
+		- The check is in the container start path, so with the boot unit enabled its refusal shows in the journal, not on the terminal.
+		- serverDir given as a link set a working folder the container didn't have. It's the same kind of bug, so the fix is here.
+		- Native mode isn't checked. It sees the whole host read-only, apart from ProtectHome, and it's deferred.
+		- Swept: Boxed.runArgs is the one place mounts are built. Native's ReadWritePaths uses the same real paths.
+
+- install.bash keeps a dev build that has the release's version
+	- ID: 2026111410134543
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261114-101345
+	- Opened by:
+	- Incorrect behavior [Bug]: install.bash compares only the version string, so a dogfood build of the same version is kept, and setup then runs that older code.
+	- Expected behavior [Bug]: It compares the installed binary's SHA-256 with the release's SHA256SUMS, and replaces it when they differ.
+	- Progress log:
+		- 2026-11-14: Seen in the live move. A build from 2026-11-12 was left in place, and the release binary was installed by hand after setup.
+		- 2026-11-17: Verified: 1a3jrx0 fails on the unfixed script (the 2 new cases) and passes after, under Bash 5 and under Bash 3.2 with busybox tools. Quick gate passed.
+		- 2026-11-17: 1a3jrx0's 'current binary' and 'no at the prompt' cases checked the log for any releases/download fetch. They now check for the binary's fetch only, since SHA256SUMS is fetched before the plan.
+		- Swept: install-dev.bash installs no release binary. update --self (deferred) also goes by version, but it only moves to a newer release, so a local build is kept there by design.
+	- Closed reason: Done
+	- Reproduced [Bug]: Yes. 1a3jrx0's new case, with a local build that reports the release's version, kept it on the unfixed script.
+	- Actual cause [Bug]: The installed binary counted as current when its --version matched the release tag.
+	- Actual fix [Bug]: install.bash fetches the release's SHA256SUMS before its plan, and leaves the binary alone only when its SHA-256 matches. Otherwise it downloads, checks, and replaces it. The plan says when it replaces a build with the release's version.
+	- Branch: nov17-2026111410134543
+	- Commit: 153ab6f
+	- Test case: 1a3jrx0 (a local build with the release's version is replaced; SHA256SUMS without this CPU's build stops before the prompt)
+	- Acceptance signoff: Self-closed: clear intent, test fails before the fix and passes after.
+	- Closed: 20261117-134702
+	- Decisions:
+		- SHA256SUMS is fetched before the plan and prompt, so the plan can say whether the binary is current. It's a read, so 'Nothing was changed' still holds after a no.
+		- README's update line now says it replaces a binary that doesn't match the newest release's SHA256SUMS, rather than an older binary.
+
+- repair counts an outgoing ufw rule as opening the game port
+	- ID: 2026111709090987
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261117-090909
+	- Opened by:
+	- Incorrect behavior [Bug]: ufwMissing takes any line with ALLOW, so an ALLOW OUT or ALLOW FWD rule for 25565 hides the warning that players can't reach the server.
+	- Expected behavior [Bug]: only ALLOW IN rules count.
+	- Progress log:
+		- 2026-11-17: Found in a code tidy pass. source/internal/repair/hostfw.go.
+		- Verified: 1a3eptg fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-19: replaced by 2026111715275121, signed off: repair now counts a LIMIT IN rule as letting players in.
+	- Decisions:
+		- LIMIT IN rules still don't count as open, as before.
+		- Swept: ufwMissing is the only ufw rule reader. firewalld's --list-ports gives only inbound ports.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by 1a3eptg on the old code: with only ALLOW OUT and ALLOW FWD rules for the game ports, the check reported nothing.
+	- Actual cause [Bug]: ufwMissing took the port spec of any line with ALLOW in it, whatever the direction after it.
+	- Actual fix [Bug]: Only a line whose action is ALLOW IN counts. ufw status verbose always names the direction.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: 1a3eptg
+	- Acceptance signoff: Self-closed: 1a3eptg fails on the old code and passes now.
+	- Closed: 20261117-135211
+
+- status says nothing listens on the Bedrock UDP port, which is normal while no Bedrock player is on
+	- ID: 2026111412275169
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261114-122751
+	- Opened by:
+	- Incorrect behavior [Bug]: Geyser opens its NetherNet UDP socket only during a join, so status reads like a fault when idle.
+	- Expected behavior [Bug]: status says the UDP port opens per join, or checks only the TCP signaling port.
+	- Actual cause [Bug]: status printed the same line for every port with no listener, Bedrock UDP included.
+	- Actual fix [Bug]: With no Bedrock UDP listener, status says the port opens when a Bedrock player joins. A listener still shows as before, and a missing TCP listener still says nothing listens. design.md updated.
+	- Test case: 1a3jsjw
+	- Branch: nov17-2026111412275169
+	- Commit: 4f32385
+	- Needs hand testing: No
+	- Stand-in: none (20261117). The wording is a matter of taste.
+	- Decisions:
+		- Kept the UDP line, worded as normal when idle, rather than dropping UDP from status. A listener during a join still shows.
+		- The claim that Geyser opens UDP only per join wasn't checked here. A throwaway server on 20261111 listed UDP right after start, so the line stays factual either way.
+		- Swept: the Bedrock UDP port is the only per-join socket status reads. The game port and Bedrock TCP keep the nothing listens line.
+	- Verified: 1a3jsjw fails without the change and passes with it. Quick gate passed.
+	- Closed reason: Done
+	- Acceptance signoff: Self-closed 20261117 under the standing close policy. The line is plain, true whether or not Geyser holds UDP open, and 1a3jsjw pins it.
+	- Closed: 2026-11-17
+
+- repair --check fails while the server runs on files the server writes as 0600
+	- ID: 2026111412081476
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261114-120814
+	- Opened by:
+	- Incorrect behavior [Bug]: With the server running, the check fails on level.dat, player data, spark temp files and Geyser's nethernet/identity.pem. Java creates temp files as 0600 whatever the umask, and Paper saves by temp file and rename.
+	- Expected behavior [Bug]: The running check flags only files other accounts can reach, or the wrong owner. Modes tighter than ug+rwX pass.
+	- Progress log:
+		- 2026-11-14: Seen on b23 after the move. Nothing other accounts can read.
+		- Verified: 1a3epaw fails on the old code and passes with the fix, and the quick gate passes.
+		- 2026-11-17: 1a3epaw's two mode asserts expected "with modes other than ug+rwX,o-rwx" and now expect "other accounts can reach", the new message.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by 1a3epaw on the old code: with the server running, a 0600 temp file, a 0700 folder and a 0400 file in it were reported as 4 files with the wrong modes.
+	- Actual cause [Bug]: The running check wanted every file at least ug+rw and every folder ug+x, so any tighter mode failed.
+	- Actual fix [Bug]: While the server runs, the check flags only files other accounts can reach, plus the wrong owner as before. Its message says so.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: 1a3epaw
+	- Acceptance signoff: Self-closed: 1a3epaw fails on the old code and passes now.
+	- Closed: 20261117-135211
+	- Decisions:
+		- A tighter mode can keep the operator's group out of a file while the server runs. That is left alone, since Java and Paper make such files on every save, and start hands the trees over with ug+rwX again.
+		- design.md's repair section says only access for other accounts counts.
+		- Swept: walkTree is the only mode check on the trees. start's handover still sets ug+rwX,o-rwx.
+
+- setup --adopt leaves the Floodgate key readable by others, and its own check then fails
+	- ID: 2026111410134562
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261114-101345
+	- Opened by:
+	- Incorrect behavior [Bug]: On an adopted tree, plugins/floodgate/key.pem stayed 0644, and setup ended with its repair --check failing on it. repair fixed it.
+	- Expected behavior [Bug]: setup sets the key's mode before its check, as repair does.
+	- Closed reason: Done
+	- Reproduced [Bug]: 2026-11-17, by 1a3jscm on the old code: after setup --adopt, a 0644 key stayed 0644. The linksafe change to repair's key fix (1b3d301) didn't reach setup.
+	- Actual cause [Bug]: setup hands an adopted tree to the operator with chown only, and none of its steps ran repair's Floodgate key fix before the final check.
+	- Actual fix [Bug]: On an adopted tree with bedrock on, setup runs the Floodgate key part of repair's check, with its fix, after the Geyser and Floodgate step. A dry run shows it as a PLAN line.
+	- Branch: nov17-2026111709090987
+	- Commit: b47b787
+	- Test case: 1a3jscm
+	- Acceptance signoff: Self-closed: 1a3jscm fails on the old code and passes now.
+	- Closed: 20261117-135211
+	- Verified: 1a3jscm fails with the new step taken out and passes with it, and the quick gate passes. The key goes through the same handle-based fchmod as repair, so a link on the way is refused.
+	- Decisions:
+		- repair exports FloodgateKeyCheck, the key part of its Geyser and Floodgate check, so setup doesn't report jars it may not have downloaded yet in a dry run.
+		- design.md's setup step 7 says so.
+		- Swept: a new tree has no key yet, and setup on an existing install runs repair, which has the fix already.
+
+- start's sudo -v asks for a password where a NOPASSWD rule sits beside password rules
+	- ID: 2026111410134553
+	- Type: Bug
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Low
+	- Opened: 20261114-101345
+	- Opened by:
+	- Incorrect behavior [Bug]: sudo -v needs every matching sudoers rule to be NOPASSWD, so it asks even where sudo -n true works. Without a terminal, start fails.
+	- Expected behavior [Bug]: Try sudo -n true first, then sudo -v.
+	- Progress log:
+		- 2026-11-14: Seen in the live move on b23. sudo tt-minecraftd start worked around it.
+		- Verified: 1a3jsfr fails with the sudo -n try taken out, and passes with it in. Quick gate passed.
+		- Not tried against a real sudoers file with mixed rules, since that needs root.
+	- Closed reason: Done
+	- Actual cause [Bug]: start asked for sudo with sudo -v alone, which prompts unless every matching sudoers rule is NOPASSWD.
+	- Actual fix [Bug]: start tries sudo -n true first, quietly and without the terminal, and runs sudo -v only when that fails. design.md updated.
+	- Test case: 1a3jsfr
+	- Branch: nov17-2026111412275169
+	- Commit: 4f32385
+	- Acceptance signoff: Self-closed: the fix is what the item asked for, and 1a3jsfr passes.
+	- Closed: 20261117-135809
+	- Decisions:
+		- sudo -n true is a look, so --dry-run runs it too, and prints sudo -v only when it fails.
+		- 20261117: 1a3f620 TestFindContainer skips the first 3 commands, not 2, since start now runs sudo -n true first.
+		- Swept: kit.go's sudoUp is the only sudo -v. Every start, stop, console and boot path goes through it. attach's sudo -n relies on it as before.
+
+- Keep the server's DNS name current when the home address changes
+	- ID: 2026111412275159
+	- Type: Task
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Opened: 20261114-122751
+	- Opened by: JC
+	- Requirements: The plain record players connect to follows the home WAN address, as the domain's own record already does.
+	- Progress log:
+		- 2026-11-08: The hourly DDNS job updates only the domain's own record, and its API can't change a plain record, so the game name goes stale when the address changes. A fix needs the DNS host's REST API.
+		- Held for: an API key from the DNS host.
+		- 2026-11-14: The 2 old per-edition names can be deleted, since a phone has joined through the shared name.
+		- 2026-11-17: The DNS host's API key is in hand, so it's no longer held.
+		- 2026-11-17: The DDNS job now sets the game name's A record through the API after each address update, only when the address differs. Its first hourly run found the record and left it unchanged.
+	- Decisions: After each address update, the DDNS job also sets the game name's A record through the DNS host's REST API.
+	- Decided against: A CNAME from the game name to the domain. The domain has an IPv6 record for another host that can't be deleted, so IPv6 clients, often phones, would reach the wrong host (2026-11-17).
+	- Test case: n/a: the job is outside this repo. A live run sent the current address and left the record as it was.
+	- Acceptance signoff: Self-closed: the live update returned 200, and the record read back the same.
+	- Closed: 20261117-110300
+
+- Let the server answer Bedrock LAN discovery through the firewall
+	- ID: 2026111708582431
+	- Type: Enhancement
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261117-085824
+	- Opened by: t00mietum
+	- Parent ID: 2026111318485184
+	- Requirements: Let the server's answers from UDP 7551 reach the LAN addresses in allowFrom, ahead of the LAN drop.
+	- Decisions: Only an address and port that broadcast to 7551 in the last 10 seconds get an answer from 7551. Clients broadcast from any port, so a plain rule on the source port would let the server send anything to the whole LAN.
+	- Branch: lan-discovery
+	- Verified: 2026-11-17: 1a3jrsw gets the 7551 broadcast answer with the rules loaded, and an unasked send from 7551 to a LAN host is refused. It failed on the old rules. 1a3fbxg checks the rules with nft for every mix. Quick gate passed.
+	- Test case: 1a3jrsw, 1a3fbxg
+	- Acceptance signoff: Self-closed: its tests failed before and pass after.
+	- Closed: 20261117-085824
+
+- Bedrock LAN discovery
+	- ID: 2026111111065829
+	- Type: Task
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261111-110658
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065711 2026111113015461
+	- Requirements:
+		- Check that phones and consoles on the LAN see the server under LAN Games, with Geyser listening on all addresses.
+		- Fix `how-to-connect.md` if they don't.
+	- Waits on 2026111113015461, which settles how current Geyser uses the Bedrock port.
+	- From 2026111113015461: check how NetherNet finds LAN games, since it may not be the old UDP broadcast on 19132, and whether BedrockConnect consoles still work once clients drop RakNet.
+	- Needs hand testing: On the home Wi-Fi with the firewall on, a phone and a console: the server doesn't show under Friends, LAN Games, and the phone joins by the home address and port 19132.
+	- Actual effort: Avg
+	- Progress log:
+		- 2026-11-13: The server doesn't show under LAN Games on any device. Bedrock 26.60 and later look only with a broadcast to UDP 7551, every 2 seconds, and Geyser 2.12.1 doesn't listen there. Geyser issue 6853 and pull request 6896 are open on it. The old RakNet search on 19132 is off with `transport` pinned to `nethernet`.
+		- BedrockConnect added NetherNet in 1.72.0, so consoles that use it should still join. That's from its release notes, not a join. It has open issues on Switch 2.
+		- Verified: 1a3jrsw loads the rules in a throwaway network namespace with a LAN client. The server's answers to broadcasts on 19132 and 7551 are dropped and counted in `out_lan`, while a unicast probe gets its answer. Without the rules all 3 get answers. With an allow rule put in, 1a3jrsw fails.
+		- design.md says LAN Games doesn't work yet, and why the firewall drops broadcast answers. how-to-connect.md has Bedrock players at home add the server by address, and consoles use BedrockConnect.
+		- Follow-up 2026111318485184 (Stalled) holds the firewall and Geyser settings until Geyser answers LAN discovery.
+	- Decisions:
+		- The firewall isn't changed. Nothing in the server answers LAN discovery today, so letting the answers out would open a hole for nothing.
+		- how-to-connect.md stays generic: it says LAN Games doesn't list the server yet, without naming Geyser.
+		- Swept: every LAN Games and broadcast mention in README.md, design.md, and how-to-connect.md. design.md's host networking reason stays, since 7551 is a broadcast too.
+	- Stand-in: none (20261113). The remaining check is a real phone and console on the home Wi-Fi. 1a3jrsw already covers the firewall side in a namespace.
+	- Test case: 1a3jrsw
+	- Branch: nov14-2026111111065829
+	- Commit: 98949af
+	- Verified: 2026-11-17: 1a3jrsw passes. The live firewall has allowFrom any, input policy accept, and egress web, so a server packet that starts a flow is dropped to the internet as it is to the LAN. The phone that joined over the internet on 2026-11-14 got in that way, so a LAN phone that adds the server by address goes the same path.
+	- Acceptance signoff: Self-closed: LAN Games can't list the server until Geyser answers on 7551, which 2026111318485184 holds. The join by address is pinned by 1a3jrsw and the live internet join.
+	- Closed: 20261117-084849
+	- 2026-11-12: Check LAN discovery with the firewall on. A reply to a broadcast probe may not match as a reply, so the rules could drop it.
 
 - Move the first server over
 	- ID: 2026111111070787
 	- Type: Task
-	- Status: Stalled
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -113,36 +3417,24 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Whitelist the current players right after setup, Java ones with `whitelist add` and Bedrock ones with `fwhitelist add`, since Geyser moves to Floodgate logins. Closes 2026111111065671.
 		- Java and Bedrock players join, and a player who isn't whitelisted is refused. This is the Bedrock join check left from 2026111113015461.
 		- Retire the old start, stop, and manage scripts after it runs clean.
+	- Needs hand testing: An account that isn't whitelisted is refused.
+	- Test case: repair --check as root (all OK), a status ping to the home domain from outside, and 1a3ekkc, 1a3ekpg and 1a3ekg8 for the whitelist
+	- Verified: 2026-11-17: The live server.properties has white-list, enforce-whitelist and online-mode on. 1a3ekkc, 1a3ekpg and 1a3ekg8 pass, so start refuses and repair fixes a server with the whitelist off. Floodgate logins go through the same Java whitelist.
+	- Acceptance signoff: Self-closed: the refusal is Paper's own whitelist check, which the safe settings check keeps on at every start.
+	- Closed: 20261117-084849
 	- 2026-11-14: Held for t00mietum to run the live move on b23. It needs root and the live server, which a round never touches. Steps are in details.md.
-
-- CICD gaps: record a CLI demo gif for the README
-	- ID: 2026111311485862
-	- Type: Task
-	- Status: Stalled
-	- Priority: Low
-	- Opened: 20261113-114858
-	- Opened by:
-	- Parent ID: 2026111219111143
-	- Related IDs: 2026111111065868
-	- Progress log:
-		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
-		- 2026-11-13: The demo step renders a CLI gif from the linux/amd64 build in the default and long runs, not in quick. It runs as root in the build container with no network, on a made-up install (made-up players, a stand-in plugin), and shows --version, status, and start --dry-run refusing unsafe settings. ImageMagick draws each screen and gifsicle joins them, so no display is used.
-		- Each render goes to the artifacts folder, GFS-rotated. Only a release run (main, at the version's tag) copies it to assets/demo.gif, and publish commits it. README's image line is commented out until then.
-		- Held for: the first release run, which draws assets/demo.gif. Then uncomment README's image line.
-		- Verified: the step passed in a run of the build and demo steps. In a throwaway clone on main with the version tag, it wrote assets/demo.gif and publish committed it and pushed to a stand-in remote.
-	- Branch: nov13-2026111311485862
-	- Commit: b6f08c5, dd12fc9
-	- Test case: n/a: pipeline step; checked by a run of it, and on a stand-in release clone.
-	- Decisions:
-		- Drawn from text with ImageMagick rather than recorded from a terminal on a virtual display, so no window can open and no display number is shared.
-		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
-		- Skipped without the build container, since it writes under /etc and /srv.
-		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
+	- 2026-11-14: The release is out, and a move script is staged for a by-hand run, as details.md says. setup --adopt was checked as a dry run first.
+	- 2026-11-14: Moved with setup --adopt on v1.0.0-alpha.1. The server runs in Podman as minecraftd, with the firewall table loaded. Java answers from the internet and the LAN. Details and the one config line left for a hand copy are in details.md.
+	- 2026-11-14: The old server scripts are archived and trashed. 3 more past players were whitelisted.
+	- 2026-11-14: A Bedrock phone joined over the internet with a Floodgate login and its whitelisted UUID, into the existing world.
+	- 2026-11-14: The phone session ended because the player left. The bindIP line is in the config, and a root repair --check passes but for the 0600 false alarm.
 
 - Live server has the whitelist off while it's open to the internet
 	- ID: 2026111111065671
 	- Type: Bug
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-beta.1
 	- Prereq IDs: 2026111111070787
 	- Severity: Critical
 	- Opened: 20261111-110656
@@ -162,23 +3454,61 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-12: `auth-type` is `online`, so the Bedrock player is whitelisted by a Java name for now. The move to `floodgate` needs an `fwhitelist` entry, noted in the private migration steps.
 		- 2026-11-12: Put off until the move, by t00mietum. setup turns the whitelist on, so the players get added right after it. The live server wasn't running on 2026-11-11 or today; it's open only while the old scripts run it.
 		- 20261112-091429: The server won't be run again until the move to tt-minecraft-safeserver is complete.
+		- 2026-11-14: setup turned on white-list and enforce-whitelist. Both players were already on the list, the Bedrock one by Floodgate UUID, which Floodgate logins now use.
+	- Test case: repair --check safe settings OK as root, and whitelist list after the move
+	- Closed: 2026-11-14
 
-- start doesn't catch a link in the server tree that won't resolve in the container
-	- ID: 2026111409374443
-	- Type: Bug
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261114-093744
+- First release
+	- ID: 2026111111070774
+	- Type: Task
+	- Status: Closed
+	- Closed reason: Done
+	- Priority: Avg
+	- Opened: 20261111-110707
+	- Opened by: t00mietum
+	- Prereq IDs: 2026111111065868, 2026111111070761
+	- Requirements:
+		- Publish `v1.0.0-alpha.1` on GitHub, with Linux builds for amd64 and arm64 and a checksum file that `update --self` can read.
+	- Test case: verify-release.bash v1.0.0-alpha.1 (both binaries MATCH), and SHA256SUMS checked against a public download
+	- Closed: 2026-11-14
+	- 2026-11-12: The release needs the layout update --self reads: tt-minecraftd-linux-amd64 and tt-minecraftd-linux-arm64 as plain binaries, built with `-X main.version=<tag>`, plus `SHA256SUMS`. Run `update --self` against it once it's out.
+	- 2026-11-14: Held for t00mietum's go-ahead to publish. A public release goes to main and GitHub, which a round doesn't do on its own. install.bash (2026111111070761) is in, so nothing else blocks it.
+	- 2026-11-14: Published as a pre-release, with both binaries, 4 packages, and SHA256SUMS. main was cut from dev after a merge gate passed. verify-release.bash wasn't executable, so README and the notes now say bash before it, and dev has the mode fixed.
+
+- CICD gaps: record a CLI demo gif for the README
+	- ID: 2026111311485862
+	- Type: Task
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-alpha.1
+	- Priority: Low
+	- Opened: 20261113-114858
 	- Opened by:
-	- Incorrect behavior [Bug]: The container mounts each tree at its resolved path, so a link such as world -> .../worlds/current/world dangles inside it when current is itself a link. Paper may then make a new, empty world.
-	- Expected behavior [Bug]: start refuses, and names the link and the path it would need, or repair offers to point it at the resolved path.
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111111065868
 	- Progress log:
-		- 2026-11-14: Found while planning the live move. The move script points world at the resolved folder by hand.
+		- CLI only. The default run renders it, and a GFS rotation keeps old renders in check.
+		- 2026-11-13: The demo step renders a CLI gif from the linux/amd64 build in the default and long runs, not in quick. It runs as root in the build container with no network, on a made-up install (made-up players, a stand-in plugin), and shows --version, status, and start --dry-run refusing unsafe settings. ImageMagick draws each screen and gifsicle joins them, so no display is used.
+		- Each render goes to the artifacts folder, GFS-rotated. Only a release run (main, at the version's tag) copies it to assets/demo.gif, and publish commits it. README's image line is commented out until then.
+		- Held for: the first release run, which draws assets/demo.gif. Then uncomment README's image line.
+		- Verified: the step passed in a run of the build and demo steps. In a throwaway clone on main with the version tag, it wrote assets/demo.gif and publish committed it and pushed to a stand-in remote.
+		- 2026-11-14: The first render warned about runMode native, which is off now. demo.bash uses podman, and the gif was drawn again from the released amd64 binary. README shows it.
+	- Branch: nov13-2026111311485862
+	- Commit: b6f08c5, dd12fc9
+	- Test case: the demo step (PASS in the release run), and its frames checked by eye
+	- Decisions:
+		- Drawn from text with ImageMagick rather than recorded from a terminal on a virtual display, so no window can open and no display number is shared.
+		- A made-up install in the container rather than a real server, so the demo needs no network and shows nobody's data. ss, systemctl and nft are stand-ins there.
+		- Skipped without the build container, since it writes under /etc and /srv.
+		- assets/demo.gif is in docs-only-paths, so a push that only updates it skips the merge gate.
+	- Closed: 2026-11-14
 
 - CICD reset: CICD process gaps
 	- ID: 2026111219111143
 	- Type: Task
-	- Status: Queued
+	- Status: Closed
+	- Closed reason: Done
+	- Target version: v1.0.0-alpha.1
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -197,12 +3527,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-13: Other hosts are done, in 2026111219111126 (the arm64 step).
 		- 2026-11-13: Each gap left is its own child: fuzz 2026111311485816, soak 2026111311485831, CodeQL 2026111311485847, demo gif 2026111311485862, the README line on reproducible builds 2026111311485876, and shellcheck and markdownlint in the image 2026111311485890. Profiling stays skipped. Fuzz, the lint tools, soak, and CodeQL are done. The README line waits on signoff, and the demo gif is Stalled until the first release.
 	- Branch: nov13
-	- Test case: n/a: pipeline step.
+	- Test case: its children's: 2026111311485862: the demo step (PASS in the release run), and its frames checked by eye; 2026111311485816: 1a3jnnw FuzzParse, 1a3jns0 FuzzRead, 1a3jnw4 FuzzReadApproved, 1a3jnz8 FuzzClaims, 1a3jp2c FuzzProperties, 1a3jp5g FuzzFix. Their seeds run with the plain tests.; 2026111311485831: 1a3jp8m TestLeak checks that the soak catches a kept goroutine or heap and passes a warmed cache. 1a3jpbr and 1a3jpew are the 2 soaks, TestSoak in launch and in the command.; 2026111311485847: n/a: pipeline step. Watched to fail on 2 real results, and on a wrong bundle sum.; 2026111311485876: n/a: a README line and a helper script, checked by hand against a container build. The claim itself is pinned by the build step's twice-built check.; 2026111311485890: n/a: pipeline step. Watched to fail: a planted shellcheck finding and a planted markdownlint finding each failed the lint step in the container.
+	- Closed: 20261114-100444
 
 - A push to main loses its connection while the pre-push merge gate runs
 	- ID: 2026111409494415
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261114-094944
 	- Opened by:
@@ -214,19 +3546,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Installer tests fail on the arm64 box
 	- ID: 2026111409374434
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261114-093744
 	- Opened by:
 	- Possible cause [Bug]: The arm64 step copied only source and project to the box, and both tests read the scripts from the repo root.
 	- Progress log:
 		- 2026-11-14: Failed the merge gate before the first push to main. arm64-tests.bash now sends install.bash and install-dev.bash too. Both tests failed in that gate run and pass in the arm64 step since.
-	- Test case: df798, df799 on vmDebARM64 (the arm64 step)
+	- Test case: 1a3jrx0, 1a3js04 on vmDebARM64 (the arm64 step)
 
 - update with no part named stops at the image's Java lookup when PaperMC is down
 	- ID: 2026111318335938
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261113-183359
 	- Opened by:
@@ -236,19 +3570,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual fix [Bug]: With agent set, a failed Java lookup skips --image with a SKIPPED line, and the rest goes on. --image named alone still stops with the error, and without agent nothing changed.
 	- Actual effort: Low
 	- Branch: nov14-2026111318335938
-	- Test case: df796
+	- Test case: 1a3jrpr
 	- Acceptance signoff: Self-closed: its test passes, per the standing close policy.
 	- Closed: 20261113-183959
 	- Decisions:
 		- 20261113: Skip with a note rather than keep the current image's Java as the floor, since that needs the old image on disk and another container run, and skipping changes nothing. Logged as a Check: entry.
 		- 20261113: Only with agent set, since without it a failed PaperMC or plugin source lookup stops the update by design. --image alone still fails, so asking for only that part never ends quietly with nothing done.
 		- Swept: imageLookup is the only Java caller; paperVersion's NewestVersion fallback runs only with no paper.jar, where a failed Paper lookup still stops the update per 2026111210034308. design.md's update and Update agent and README's Update agent say this now.
-	- Verified: df796 fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
+		- 20261117: t00mietum confirmed the call. The answer also asked for an installer option on other distros, filed as its own item.
+	- Verified: 1a3jrpr fails on the unfixed code, and fails with the --image-alone or the agent check taken out; passes with the fix. Quick gate passed on both temp folders.
 
 - Connect the service to an AI agent to update the game programs and add-ons
 	- ID: 2026111207010610
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-070106
 	- Opened by: t00mietum
@@ -270,13 +3606,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Its jars and hash pages must come from a host in `agentHosts`, and the hash must appear on the page the tool fetches itself.
 		- 20261113: Scope, approval, and key handling kept as picked. New coded sources wait: Modrinth and Hangar (2026111117404480) is Deferred, and the agent covers those jars. PaperMC and GeyserMC stay as code, since their hashes need no trust.
 		- 20261113: The agent work goes first. 2026111210034308 is raised to High, ahead of Bedrock LAN and the NixOS module.
-	- Test case: its children's: 2026111210034308: df790, df791, df792, df793, df794, df795; 2026111210033639: df75x, df75y, df75z, df760, df761, df762, df763, df764, df765, df5wt, df5ww, df5x2, df5x6; 2026111210033649: df766, df767, df769, df76a, df76b, df761, df76c (skipped without `TT_MINECRAFTD_LIVE_AGENT`); 2026111210034298: df76h, df76j, df76k, df76m, df76n (root host)
+	- Test case: its children's: 2026111210034308: 1a3jr40, 1a3jr74, 1a3jra8, 1a3jrdc, 1a3jrgg, 1a3jrkm; 2026111210033639: 1a3jeem, 1a3jehr, 1a3jemw, 1a3jer0, 1a3jev4, 1a3jey8, 1a3jf1c, 1a3jf4g, 1a3jf7m, 1a3ee18, 1a3ee7g, 1a3eet8, 1a3ef6r; 2026111210033649: 1a3jfar, 1a3jfdw, 1a3jfm4, 1a3jfq8, 1a3jftc, 1a3jev4, 1a3jfxg (skipped without `TT_MINECRAFTD_LIVE_AGENT`); 2026111210034298: 1a3jgd4, 1a3jgg8, 1a3jgkc, 1a3jgpg, 1a3jgsm (root host)
 	- Closed: 20261113-183543
 
 - update
 	- ID: 2026111111065803
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -286,7 +3623,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Update Paper from the PaperMC API, within the same Minecraft version unless asked.
 		- Update plugins that have a known source, and approve the new jars.
 		- Refresh the pinned container image.
-	- Test case: its children's: 2026111117302963: df78j, df78k, df78m, df78n; 2026111117302995: df77g, df77h, df77j, df77k, df77m, df671, df65m; 2026111117302950: df66x, df66y, df66z, df670, df671; 2026111117302973: df672, df671; 2026111117302985: df67p, df67q, df67r, df67s, df671; 2026111117404480: none named
+	- Test case: its children's: 2026111117302963: 1a3jpr8, 1a3jpvc, 1a3jpyg, 1a3jq1m; 2026111117302995: 1a3jke0, 1a3jkh4, 1a3jkm8, 1a3jkqc, 1a3jktg, 1a3fdz4, 1a3f9jg; 2026111117302950: 1a3fdjm, 1a3fdnr, 1a3fdrw, 1a3fdw0, 1a3fdz4; 2026111117302973: 1a3fe28, 1a3fdz4; 2026111117302985: 1a3fg0r, 1a3fg3w, 1a3fg70, 1a3fga4, 1a3fdz4; 2026111117404480: none named
 	- Closed: 20261113-182023
 	- Prereq moved from the Core commands parent to its Docker mode child, which is all this needs to start.
 	- 2026-11-12: repair's missing paper.jar message already says update --paper gets one, so that flag makes it true.
@@ -296,7 +3633,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Update agent: Paper fallback and the --mc-version report
 	- ID: 2026111210034308
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100343
 	- Opened by:
@@ -320,8 +3658,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261113: When PaperMC's lookup fails and agent is set, the agent is asked for Paper's newest stable build of the known version. Its build is held to agentHosts and a SHA-256, the hash has to be on its hash page, and the download has to be a Paper server jar for that version. It needs its own yes, even with `--yes`, then it's approved and `paper.jar` points at it.
 		- 20261113: Before `--mc-version`, the agent says which approved plugins have a build for the new version. The report is shown after the plan, before the move's question, and changes nothing.
 		- 20261113: Everything goes to the agent in one question per run. `update --paper` now asks the agent as the operator too, and the hand-off file holds the Paper and report answers.
-		- Verified: df790 to df795 pass, and so does the quick gate on both temp folders, plus race tests on update, agent, and paper. Each fails with its check taken out: the own yes, the Paper jar check, its version, the SHA-256 match, the hash page, the agent's version and host checks, the replay's version and hash match, the quiet operator lookup, the report shown and asked, and `--paper` going to the agent.
-	- Test case: df790, df791, df792, df793, df794, df795
+		- Verified: 1a3jr40 to 1a3jrkm pass, and so does the quick gate on both temp folders, plus race tests on update, agent, and paper. Each fails with its check taken out: the own yes, the Paper jar check, its version, the SHA-256 match, the hash page, the agent's version and host checks, the replay's version and hash match, the quiet operator lookup, the report shown and asked, and `--paper` going to the agent.
+	- Test case: 1a3jr40, 1a3jr74, 1a3jra8, 1a3jrdc, 1a3jrgg, 1a3jrkm
 	- Branch: nov14-2026111210034308
 	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
 	- Closed: 20261113-183424
@@ -329,7 +3667,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Release-install script
 	- ID: 2026111111070761
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110707
 	- Opened by: t00mietum
@@ -346,21 +3685,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- curl or wget, since minimal Debian often has only wget. The answer comes from /dev/tty when the script arrives on a pipe.
 		- MIT, as helper scripts usually are, rather than the project's GPL.
 		- Tested by sourcing it with the install folder, os-release, and terminal paths pointed at a stand-in, on a PATH with stand-in curl, wget, uname, and sudo. No test-only option in the script.
+		- 20261117: t00mietum confirmed system only. User install filed as a Deferred item.
 	- 2026-11-12: Use the same release layout update --self reads (2026111117302995): per-arch binaries and SHA256SUMS.
 	- 2026-11-14: install.bash at the repo root finds the newest release through the GitHub API, checks the binary for this CPU against SHA256SUMS, installs it as /usr/local/bin/tt-minecraftd (through sudo when needed), and runs tt-minecraftd setup. It states its plan and asks first, and --yes skips that. README's Installing section has the curl and wget one-liners.
 	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note.
-	- Verified: df798 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the hash check, the version sort, the no answer at the prompt, the NixOS refusal, or the temp cleanup each fails it.
+	- Verified: 1a3jrx0 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the hash check, the version sort, the no answer at the prompt, the NixOS refusal, or the temp cleanup each fails it.
 	- Verified: against the live API with no release yet, it says there's no stable release to install yet.
 	- Branch: nov14-2026111111070761
 	- Commit: d63a876
-	- Test case: df798
+	- Test case: 1a3jrx0
 	- Acceptance signoff: Self-closed: tested against a stand-in release. A run against the real first release is part of 2026111111070774.
 	- Closed: 20261113-190056
 
 - Dev-environment install script
 	- ID: 2026111111070800
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-110708
 	- Opened by: t00mietum
@@ -376,20 +3717,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- golang-go is installed when there's no Go 1.21 or newer, since those fetch the version go.mod asks for. When apt's Go is still older, such as bookworm's 1.19, it finishes the rest and fails at the end with where to get a newer Go.
 		- No --release or --target options. It always clones main, and installs nothing outside apt and the clone.
 		- MIT, like install.bash. Tested the same way: sourced with os-release, the terminal, and the CA file pointed at stand-ins, on a PATH with stand-in uname, sudo, apt-get, git, go, and docker.
+		- 20261117: t00mietum's answer to the Check entry: Docker or Podman should be a prerequisite, with a flag to try installing it. Printing the group command is OK. Follow-up filed as its own item.
 	- Branch: nov14-2026111111070800
 	- Commit: 337a7a0
-	- Test case: df799 TestInstallDevScript
+	- Test case: 1a3js04 TestInstallDevScript
 	- Needs a look at README's new Developing section, and at the docker default (see the Check: entry in questions.md).
 	- 2026-11-14: install-dev.bash at the repo root installs what's missing of git, ca-certificates, golang-go, and docker.io through apt (through sudo when needed), then clones main into ./tt-minecraft-safeserver or --dir. It states its plan and asks first, and --yes skips that. A re-run skips what's there and leaves an existing clone alone. It ends by printing how to build and run cicd/cicd.bash --gate. README's new Developing section has the curl and wget one-liners.
 	- Debian and its derivatives only for now. NixOS was deferred on 2026-11-13, so the script refuses it with a short note, as install.bash does.
-	- Verified: df799 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the module check on an existing folder, the final Go version check, the no answer at the prompt, the NixOS refusal, the no-sudo refusal, the git check, or the Go floor each fails it.
+	- Verified: 1a3js04 passes in the quick gate, and under Bash 3.2 with busybox tools. Taking out the module check on an existing folder, the final Go version check, the no answer at the prompt, the NixOS refusal, the no-sudo refusal, the git check, or the Go floor each fails it.
 	- Closed: 20261113-190843
 	- 2026-11-14: Closed under the standing close policy. Docker by default fits the gate's container, and the 3 calls are in questions.md as Check entries.
 
 - Simplify: defer native mode, update --self, and NixOS; snapshot only before a version move
 	- ID: 2026111318002875
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261113-180028
 	- Opened by: t00mietum
@@ -403,17 +3746,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 20261113: `update --self` is commented out at its entry points: the flag, setup's leaving it out, and main's wiring. A plain update leaves it out. The self-update code and its tests stay.
 		- 20261113: There was no NixOS code outside `--self`, so nothing else changed for it. design.md marks NixOS, native mode, and `--self` as deferred.
 		- 20261113: ZFS: only `update --mc-version` snapshots. Start and stop snapshots and the prune are commented out. The root host's ZFS run checks that start and stop take none, in place of the 4 old checks.
-		- Verified: quick gate passes. With the constant on, the config, setup, and command tests pass and `--native` shows; with native let through while it's off, df5ww and df5xk fail. df78z fails with a snapshot put back into stop.
-		- Verified: root host run passes, with the 4 native checks shown as SKIP. The ZFS run passes df780 and df78y, and the test pool is gone after.
+		- Verified: quick gate passes. With the constant on, the config, setup, and command tests pass and `--native` shows; with native let through while it's off, 1a3ee7g and 1a3egfc fail. 1a3jr0w fails with a snapshot put back into stop.
+		- Verified: root host run passes, with the 4 native checks shown as SKIP. The ZFS run passes 1a3jn00 and 1a3jqxr, and the test pool is gone after.
 	- Branch: simplify
-	- Test case: df78z, df78y (root host), df5ww, df5xk, df65e, df77p, df77m, df671
+	- Test case: 1a3jr0w, 1a3jqxr (root host), 1a3ee7g, 1a3egfc, 1a3f8zr, 1a3jm0r, 1a3jktg, 1a3fdz4
 	- Acceptance signoff: Self-closed: each part does what was asked, and its tests pass.
 	- Closed: 20261113-181530
 
 - TestSetup and TestUpdate reach the host's own runner and account files
 	- ID: 2026111312221899
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261113-122218
 	- Opened by:
@@ -429,14 +3773,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual fix: A shared test helper, noHostRunner, gives setup and update a stand-in runner and stand-in account files, empties PATH, and makes launch.Installed false. TestSetup, TestUpdate, TestUpdateAgent and the soak use it, and each fails unless setup and update took the stand-in runner.
 	- Branch: nov13-2026111312221899
 	- Commit: 0c0eb6c
-	- Test case: df65m TestSetup, df671 TestUpdate, df76m TestUpdateAgent, df78f TestSoak
+	- Test case: 1a3f9jg TestSetup, 1a3fdz4 TestUpdate, 1a3jgpg TestUpdateAgent, 1a3jpew TestSoak
 	- Acceptance signoff: Self-closed: the intent was clear, and the tests were watched to fail.
 	- Closed: 20261113-125955
 
 - Player names and log lines shown to the operator keep text-direction characters
 	- ID: 2026111311594944
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261113-115949
 	- Opened by:
@@ -444,7 +3789,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- settings.printable and the log reader drop control characters only. A name in whitelist.json or ops.json, which the server account can write, can hold a right-to-left override and change how the line reads. The plugin and agent text cleaners drop these as well.
 		- Sweep: settings/players.go printable, server/log.go, launch/console.go.
-		- 2026-11-13: Verified: df78h and df78g failed on the old Clean and op warnings, and pass after. The backlog quick run passed.
+		- 2026-11-13: Verified: 1a3jpn4 and 1a3jpj0 failed on the old Clean and op warnings, and pass after. The backlog quick run passed.
 		- Swept: every server.Clean caller, which is status's names and log tail and cmd's answer lines, plus the op warnings. launch/console.go refuses the operator's own line rather than showing server text, and quotes it with %q, which escapes these characters, so it stays as it is. config.go's trim isn't shown to the operator.
 	- Decisions:
 		- Right-to-left text itself, and the marks U+200E, U+200F and U+061C, are kept. Only the characters that override or isolate direction for the rest of a line are dropped, as in the plugin and agent cleaners.
@@ -452,14 +3797,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual fix: server.Clean also drops the embedding, override and isolate characters, U+202A to U+202E and U+2066 to U+2069, the same set the plugin and agent cleaners drop. The op warnings use server.Clean in place of their own copy.
 	- Branch: nov13-2026111312221899
 	- Commit: 4ccf48f
-	- Test case: df78h TestClean, df78g TestWarningsDirection
+	- Test case: 1a3jpn4 TestClean, 1a3jpj0 TestWarningsDirection
 	- Acceptance signoff: Self-closed: the intent was clear, and both tests failed before the fix and pass after.
 	- Closed: 20261113-125955
 
 - CICD reset: other hosts and VMs
 	- ID: 2026111219111126
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -473,7 +3819,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-13: A new arm64 step builds the linux/arm64 test binaries and runs them on the arm64 test box, through the host lock's wrap, which wakes the VM and puts it back. It runs in the default, long, quick, full, and merge gate runs. `--no-remote` and `--no-arm64` skip it, and the run header names the box.
 		- Verified: the step through cicd.bash ran all 176 Go test IDs on the box, 175 passing and the live agent test skipped as it does here, in about 35 s. The box went back to paused, and its work folder was removed.
 		- Verified: with the VM tool missing, an unknown box, and the box held by another caller past the wait, the step showed SKIP and the run passed. A missing test binary on the box made the box's run exit 1. A TERM mid-run left the box paused, its folder gone, and nothing running there.
-		- On the box, df66c's nft check takes its no-namespace branch, as it says in its log line.
+		- On the box, 1a3fbxg's nft check takes its no-namespace branch, as it says in its log line.
 	- Decisions:
 		- The box runs the test binaries the build container makes, from a copy of `source` and `project`, rather than building there, since the box is emulated and slow.
 		- Tests run as the box's plain test account, not the admin one, since that one has passwordless sudo.
@@ -489,7 +3835,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: fuzz the parsers that read operator and download input
 	- ID: 2026111311485816
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -503,7 +3850,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Verified: each of those seeds failed before its fix and passed after. Each target fuzzed 20 to 30 s on the host with nothing found. The step passed in the container at 5 s per target, and a planted panic in Parse failed it, printed the failing input, and left the tree clean.
 		- Swept: the agent's own cleaner already drops the same characters and cuts on a character boundary. settings.printable and the log reader don't; filed as its own bug.
 	- Branch: nov13-2026111219111143
-	- Test case: df787 FuzzParse, df788 FuzzRead, df789 FuzzReadApproved, df78a FuzzClaims, df78b FuzzProperties, df78c FuzzFix. Their seeds run with the plain tests.
+	- Test case: 1a3jnnw FuzzParse, 1a3jns0 FuzzRead, 1a3jnw4 FuzzReadApproved, 1a3jnz8 FuzzClaims, 1a3jp2c FuzzProperties, 1a3jp5g FuzzFix. Their seeds run with the plain tests.
 	- Closed: 20261113-115949
 	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
 	- Decisions:
@@ -514,7 +3861,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: add a soak test
 	- ID: 2026111311485831
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -535,14 +3883,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- It loops in the test process against stand-ins rather than a real server, since a heap and goroutine count only mean something inside one process, and a real start needs root and about 20 s.
 		- Slack is 1 MiB or a tenth of the heap, and 2 goroutines. At 100 rounds that catches about 10 KB or one goroutine kept per round.
 	- Branch: nov13-2026111311485831
-	- Test case: df78d TestLeak checks that the soak catches a kept goroutine or heap and passes a warmed cache. df78e and df78f are the 2 soaks, TestSoak in launch and in the command.
+	- Test case: 1a3jp8m TestLeak checks that the soak catches a kept goroutine or heap and passes a warmed cache. 1a3jpbr and 1a3jpew are the 2 soaks, TestSoak in launch and in the command.
 	- Closed: 20261113-121709
 	- Acceptance signoff: Self-closed: the intent was clear, the step ran, and it was watched to fail.
 
 - CICD gaps: run CodeQL from a pinned local CLI
 	- ID: 2026111311485847
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -571,7 +3920,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: README doesn't say release builds are reproducible
 	- ID: 2026111311485876
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261113-114858
 	- Opened by:
@@ -594,7 +3944,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD gaps: shellcheck and markdownlint run from the host
 	- ID: 2026111311485890
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261113-114858
 	- Opened by:
@@ -615,10 +3966,40 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- amd64 and arm64 both have pins, so the image still builds on an arm64 box.
 		- The image grows from 1.44 GB to 1.67 GB, most of it Node.
 
+- CICD gaps: CodeQL skips the modules, the soak keeps no heap profile, the root host steps check a host build, and the demo misses the gif rules
+	- ID: 2026111918554301
+	- Type: Task
+	- Status: Closed
+	- Target version: v1.0.0-beta.1
+	- Priority: Avg
+	- Opened: 20261119-185543
+	- Opened by:
+	- Parent ID: 2026111219111143
+	- Related IDs: 2026111311485847, 2026111311485831, 2026111311485862
+	- Progress log:
+		- CodeQL reports only on code under its source root, so the 3 modules weren't checked. The step now vendors them into its copy and turns on the extractor's vendor option.
+		- The soak compared the heap at rounds N and 2N but kept no profile of what grew.
+		- The root host steps built their own binary with this box's Go, not the pinned one, and their image had no run label. --keep-temp didn't reach them.
+		- The demo gif was 820x518 with no typing, scroll, window, prompt colors, or black end, and had no plan file.
+		- Verified: the quick gate passed, with CodeQL over the vendored modules. The build, root host, ZFS and demo steps passed in one run. The soak step kept both soaks' profiles, and pprof -base read them.
+	- Decisions:
+		- CodeQL found 10 results in the YAML module and none in the rest. 8 are behind a round-trip check CodeQL doesn't read as a bound, and 2 cut an int only on 32-bit targets, which aren't built. They're listed with their reasons in `cicd/codeql-known.txt`, and any other result still fails the step. An entry that stops matching prints a warning.
+		- The demo is drawn by a copy of gitsby's gif script, unchanged, with Monaspace Argon SemiBold from its pinned release in the build image, so it looks and moves like gitsby's demo. No `--version` scene, since it needs no demo. Per t00mietum, 2026-11-20. This replaces a first try with tukfs-hash's script and JetBrains Mono.
+		- Renders stay in the gitignored artifacts folder, not the private tree, so a fresh clone can render one. Only a release run updates `assets/demo.gif`, as before.
+		- No dogfood run script. The tool runs itself through sudo, and the boot unit runs the `/usr/local/bin` copy that the dogfood step installs. A versioned copy in `~/.local/bin` would come first on the operator's PATH and differ from what the boot unit runs.
+		- Release files keep `amd64` in their names rather than `x86_64`, since `v1.0.0-alpha.1` published that scheme and its links shouldn't change. It's also Debian's name for the arch. OKed by t00mietum on 2026-11-20, for this project.
+	- Branch: cicd-fixup
+	- Closed reason: Done
+	- Test case: 1a4jssw for the soak's profiles. The rest are pipeline steps: CodeQL failed when a known entry was moved off its line and named the stale entry, both root host steps passed on the run's release build, and the demo step passed with its frames checked by eye.
+	- Acceptance signoff: Self-closed: each step was watched to fail and to pass. The gif follows the CICD process's gif rules, and README's copy changes only at the next release.
+	- Closed: 20261119-190400
+	- Commit: ed59063
+
 - update --mc-version
 	- ID: 2026111117302963
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
@@ -629,7 +4010,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- 20261113: `update --mc-version V` moves Paper to the newest stable build of V. A move asks once, even with `--yes`, then snapshots `zfsDataset` before anything changes. A version older than the one `paper.jar` is on is refused.
-		- Verified: df78j, df78k, df78m, and df78n pass, and so does the quick gate on both temp folders, plus race tests on the 4 packages. Each fails with its check taken out: `--yes` covering the move, the snapshot, the refusal of an older version, the new kind in the prune's pattern, the check before sudo, and a pre-release sorting before its release.
+		- Verified: 1a3jpr8, 1a3jpvc, 1a3jpyg, and 1a3jq1m pass, and so does the quick gate on both temp folders, plus race tests on the 4 packages. Each fails with its check taken out: `--yes` covering the move, the snapshot, the refusal of an older version, the new kind in the prune's pattern, the check before sudo, and a pre-release sorting before its release.
 	- Decisions:
 		- `--mc-version` goes with `--paper`, so it needs that part or no part named. With no part named, the image check reads Java for the new version.
 		- For a move, one question replaces "Go ahead?", and `--yes` doesn't skip it. A dry run asks nothing.
@@ -642,14 +4023,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `paperVersion` (the image's Java check) follows the new version; setup's Update step passes no `--mc-version`; `zfs.Take` and `Doomed` both go through the one `ours` pattern.
 		- 20261113: Kept as picked. One question is clearer than 2, and refusing a move back is safer than a warning, since the snapshot is the way back.
 	- Branch: nov13-2026111117302963
-	- Test case: df78j, df78k, df78m, df78n
+	- Test case: 1a3jpr8, 1a3jpvc, 1a3jpyg, 1a3jq1m
 	- Acceptance signoff: Self-closed: its tests pass, per the standing close policy.
 	- Closed: 20261113-131000
 
 - Start at boot
 	- ID: 2026111111065816
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -660,11 +4042,11 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `setup` and `repair` install or remove the unit to match the config.
 	- Needs local test suite run?: No
 	- Actual effort: Avg
-	- Test case: df78p, df78q, df78r, df78s, df78t, df78v, df78w, and the root host check df78x
+	- Test case: 1a3jq4r, 1a3jq7w, 1a3jqb0, 1a3jqe4, 1a3jqh8, 1a3jqmc, 1a3jqqg, and the root host check 1a3jqtm
 	- Branch: nov13-2026111111065816
 	- 20261113: The boot unit is `source/internal/boot`. `repair` check 13 (`repair.BootCheck`) writes and enables it, or disables and removes it, and setup runs it as step 11, after the image pull. `start` and `stop` go through `systemctl` when it is enabled for their config.
 	- Verified: each new test fails with its part taken out, and passes with it in. The unit passes `systemd-analyze verify`, apart from the firewall unit missing here.
-	- Not run yet: the real systemd and sudo path, which is the root host check df78x.
+	- Not run yet: the real systemd and sudo path, which is the root host check 1a3jqtm.
 	- Decisions:
 		- The unit runs `/usr/local/bin/tt-minecraftd`, with `--config` when the config is not the default, quoted for systemd. `Type=simple`, `WantedBy=multi-user.target`, and `TimeoutStopSec` is `stopTimeout` plus 45 s. design.md updated.
 		- Start and stop go through `systemctl` only when the unit is enabled and its ExecStart names this config. Inside the unit, found by cgroup, they do the work. design.md updated.
@@ -674,12 +4056,13 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: both modes check `Boot` right after refusing other servers, and stop is shared in `Kit.stop`. setup on an existing install gets check 13 through `repair.After`. `status.BootUnit` and `setup.BinPath` now come from `boot`. Main tests stub `bootServes` in TestMain.
 		- 20261113: Kept as picked. `systemctl start` returning at once is what systemd users expect. `disable` without `--now` never stops a server someone is playing on.
 	- Closed: 20261113
-	- Verified: 20261113, df78x passed in the round's --backlog-run-full (root host checks step), with all 13 steps passing.
+	- Verified: 20261113, 1a3jqtm passed in the round's --backlog-run-full (root host checks step), with all 13 steps passing.
 
 - CI/CD pipeline
 	- ID: 2026111111065868
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -697,7 +4080,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: containers
 	- ID: 2026111219111113
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -707,7 +4091,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- This is a sweeping override: it supersedes any earlier decision that conflicts with it.
 	- Progress log:
 		- `cicd/cicd.bash` runs format-adjacent Go steps in the image built from `cicd/container/`. Every tool version and the Go image digest sit in `cicd/config.bash`.
-		- The container run found a test that depended on the umask, and fixed it (df5zf).
+		- The container run found a test that depended on the umask, and fixed it (1a3epaw).
 		- The root host check keeps its own privileged container, since it needs systemd and a real sudo.
 	- Branch: cicd
 	- Test case: n/a: pipeline step. Watched to fail: a test failure in the container turned the run red.
@@ -715,7 +4099,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: temp files and safe removal
 	- ID: 2026111219111139
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -731,7 +4116,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: container cleanup
 	- ID: 2026111219111152
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -747,7 +4133,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: CPU and priority
 	- ID: 2026111219111165
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -763,7 +4150,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: standard flags
 	- ID: 2026111219111178
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -781,7 +4169,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: step output
 	- ID: 2026111219111191
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -797,7 +4186,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: a test for every Done item
 	- ID: 2026111219111104
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -814,7 +4204,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: test IDs
 	- ID: 2026111219111117
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-191111
 	- Opened by:
@@ -831,7 +4222,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - CICD reset: version line
 	- ID: 2026111219111130
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261112-191111
 	- Opened by:
@@ -843,12 +4235,13 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Build number is the commit's minutes since 2000-01-01 UTC in lowercase Crockford base 32. The build stamps the commit time and a release flag; a plain `go build` reads the commit time Go recorded.
 		- A release is a build on main whose HEAD carries the version's tag.
 	- Branch: cicd
-	- Test case: df785 and df786
+	- Test case: 1a3jnfm and 1a3jnjr
 
 - setup --adopt approves Geyser and Floodgate with no source
 	- ID: 2026111210364791
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261112-103647
 	- Opened by:
@@ -860,8 +4253,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual fix [Bug]: setup and `repair --approve-plugins` give a new jar in `plugins/` GeyserMC's source when its file name and its `plugin.yml` name both start with `geyser` or `floodgate`. The source shows in the list before the question.
 	- Actual effort: Low
 	- Progress log:
-		- Verified: df76p, df76q, and df76r pass, and the gate passes on both temp folders. df76q and df76r fail with the fix taken out, and df76q fails when a changed jar's source gets replaced.
-		- Verified: the root host check passes all 18. df68e now checks the GeyserMC sources after `setup --adopt`, and df76n that the agent isn't asked about Geyser or Floodgate. Both fail with the fix taken out.
+		- Verified: 1a3jgwr, 1a3jgzw, and 1a3jh30 pass, and the gate passes on both temp folders. 1a3jgzw and 1a3jh30 fail with the fix taken out, and 1a3jgzw fails when a changed jar's source gets replaced.
+		- Verified: the root host check passes all 18. 1a3fjbr now checks the GeyserMC sources after `setup --adopt`, and 1a3jgsm that the agent isn't asked about Geyser or Floodgate. Both fail with the fix taken out.
 	- Decisions:
 		- Fixed in setup, not by name in update, so the approved list says where each jar comes from, as on a new install.
 		- The plugin name a jar claims has to match too, so a jar only named like Geyser doesn't get replaced by GeyserMC's. `geyser.Project` holds the rule.
@@ -869,13 +4262,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `repair --approve-plugins` does the same, so a Geyser jar put in by hand follows GeyserMC too. design.md updated in both places.
 		- Swept: every `plugins.Approve` caller. setup's downloads already pass the source, update's keep it, and the agent's jars get none by design. An entry approved before this fix stays without a source; the live server hasn't been adopted yet.
 	- Branch: r1112b
-	- Test case: df76p, df76q, df76r, df68e and df76n (root host)
+	- Test case: 1a3jgwr, 1a3jgzw, 1a3jh30, 1a3fjbr and 1a3jgsm (root host). 1a3jh30 is commented out since 2026111914334569, as repair gives the source without asking.
 	- Closed: 20261112-104958
 
 - Container start says only permission denied before a new login
 	- ID: 2026111209291851
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261112-092918
 	- Opened by:
@@ -886,21 +4280,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-12: Left open by 2026111207565307. Container start on a tree the server still owns, such as after a crash, by a login without the server's group yet, fails at the safe settings read with a bare permission denied. The login check runs after that step in container mode.
 		- 20261112: A refused read in start's safe settings or plugin check gives the login group reason, to log in again or the `gpasswd` line. Its whitelist and ops warnings now come after the settings read, so they don't print twice before the error.
-		- Verified: df74x fails without the change and passes with it.
+		- Verified: 1a3jbam fails without the change and passes with it.
 	- Decisions:
 		- The reason is given on a refused read, not checked up front as in native start. Container start doesn't need the group when the tree is the operator's, which is the usual case.
 		- A refused read with the group in this login keeps the plain error, since the group isn't the cause then.
 		- Swept: native start checks the group first, `cmd` checks it before sending, and `repair`, `setup`, and `update` read the tree as root.
 	- Actual fix [Bug]: container start's refused tree reads say to log in again, or give the `gpasswd` line.
 	- Branch: r1112b
-	- Test case: df74x
-	- Acceptance signoff: Self-closed: df74x passes, per the standing close policy.
+	- Test case: 1a3jbam
+	- Acceptance signoff: Self-closed: 1a3jbam passes, per the standing close policy.
 	- Closed: 20261112-093323
 
 - Commands fail for the operator until a new login after setup
 	- ID: 2026111207565307
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -913,7 +4308,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Low
 	- Progress log:
 		- 20261112: Native `start` and `cmd` check the login's groups first. Without the server's group they stop before changing or sending anything, and say to log in again, or give the `gpasswd` line when the account isn't in the group at all. Container `start` warns once the server is up, since only `cmd` and `status` read the tree there.
-		- Verified: df68g fails with the check taken out and passes with it. df68j, in setup's login on the root host check, fails the same way and passes with it, and all 17 root host checks pass.
+		- Verified: 1a3fjj0 fails with the check taken out and passes with it. 1a3fjr8, in setup's login on the root host check, fails the same way and passes with it, and all 17 root host checks pass.
 	- Decisions:
 		- A plain message, not reads through sudo. design.md has the operator read logs through the group, and root reads in a tree the server owns could follow a link it planted. design.md's Tree ownership says so now.
 		- `start --debug` and root skip the check, since neither reads the tree as the operator. A group that can't be looked up is left to the steps that need it, as before.
@@ -921,14 +4316,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `stop`, `console`, and native `stop`'s countdown go through sudo or tmux as the account, and container `start` reads the log through the runtime. `status` already says why a part can't be read, apart from 2026111118183922.
 	- Actual fix [Bug]: native `start` and `cmd` refuse without the server's group in this login, and say to log in again. Container `start` warns.
 	- Branch: r1112b
-	- Test case: df68g, df68h, df68j
-	- Acceptance signoff: Self-closed: df68j passed in the root host check on b23.
+	- Test case: 1a3fjj0, 1a3fjn4, 1a3fjr8
+	- Acceptance signoff: Self-closed: 1a3fjr8 passed in the root host check on b23.
 	- Closed: 20261112-092846
 
 - update --self
 	- ID: 2026111117302995
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
@@ -939,7 +4335,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-12: `update --self` reads the release list, picks the newest release past this build, checks the binary for this arch against the release's `SHA256SUMS`, runs its `--version`, and renames it over the running binary with the old one's owner, group, and mode. On NixOS, or from the Nix store, it prints the newer version and the flake update to run. A plain `update` includes it.
-		- Verified: df77g, df77h, df77j, df77k, df77m, and the new lines in df671 and df65m pass. Taking out the hash check, the pre-release rule, the `--version` check, the NixOS case, setup's leaving it out, or the server folder exception each fails a test.
+		- Verified: 1a3jke0, 1a3jkh4, 1a3jkm8, 1a3jkqc, 1a3jktg, and the new lines in 1a3fdz4 and 1a3f9jg pass. Taking out the hash check, the pre-release rule, the `--version` check, the NixOS case, setup's leaving it out, or the server folder exception each fails a test.
 		- Verified: against the live GitHub API, with no release yet, `update --self --dry-run` says `v1.0.0-alpha.1` is the newest.
 	- Decisions:
 		- Release files are `tt-minecraftd-linux-amd64` and `tt-minecraftd-linux-arm64` as plain binaries, plus `SHA256SUMS` in `sha256sum`'s format. The First release and the install script follow it. The build's `--version` has to name the tag, so the release sets `main.version` to it. Filed as a Check in questions.md.
@@ -951,14 +4347,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every `Parts` literal, setup's call to update, the help text, and design.md's update and CLI lines.
 		- 20261113: Release layout kept. The release step already writes these names and `SHA256SUMS`, and `verify-release.bash` reads the same layout.
 	- Branch: r1112b
-	- Test case: df77g, df77h, df77j, df77k, df77m, df671, df65m
+	- Test case: 1a3jke0, 1a3jkh4, 1a3jkm8, 1a3jkqc, 1a3jktg, 1a3fdz4, 1a3f9jg
 	- Acceptance signoff: Self-closed: tested against a stand-in release server, with a real swap of a binary on disk. A run against the real first release is part of 2026111111070774.
 	- Closed: 20261112-105801
 
 - ZFS snapshots on start and stop
 	- ID: 2026111112264283
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-122642
 	- Opened by: t00mietum
@@ -970,10 +4367,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- 20261112: `start` takes the snapshot in both modes right before the trees change hands, and `stop` takes one once the server is down, before they go back. Each one is followed by a prune, which destroys what the schedule drops in one `zfs destroy`.
-		- Verified: df77n to df77r pass, and df77q fails with `stop`'s snapshot taken out. The `zfs list` form that the prune reads checked against zfs 2.3.9.
+		- Verified: 1a3jkxm to 1a3jm70 pass, and 1a3jm3w fails with `stop`'s snapshot taken out. The `zfs list` form that the prune reads checked against zfs 2.3.9.
 		- `setup` offering `zfs allow` is 2026111211050654. Until then the sudo fallback covers it.
 		- 20261112: The root host check takes `--zfs`, which runs setup and then 5 checks on a throwaway file-backed pool, destroyed on the way out: the server's tree on its own dataset, `start`'s snapshot through sudo, `stop`'s after the save and before the hand-back, a prune that drops only the tool's own in one comma-list destroy, and with `zfs allow` the operator taking and pruning without sudo.
-		- Verified: df780 to df784 pass in podman mode, and the pool is gone from the host after. df782 fails with `stop`'s snapshot moved after the hand-back, and df783 with the prune split into one destroy per snapshot.
+		- Verified: 1a3jn00 to 1a3jncg pass in podman mode, and the pool is gone from the host after. 1a3jn68 fails with `stop`'s snapshot moved after the hand-back, and 1a3jn9c with the prune split into one destroy per snapshot.
 	- Decisions:
 		- Each zfs change runs as the operator first, then through sudo. That uses whatever `zfs allow` grants, by user, group, or set, with no parsing of its output. The first try's error stays off the terminal.
 		- The snapshot comes after the "already running" checks, so a refused start leaves none. A failed snapshot refuses the start. At `stop` the trees go back anyway, and the error is shown.
@@ -981,17 +4378,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The prune runs after `stop`'s snapshot too, and a failed prune only warns. Days, weeks, and months count only those that have a snapshot, so a server left off for months keeps its history. Weeks are ISO weeks, and the time in the name counts, not the clock.
 		- design.md's ZFS snapshots says all of this now.
 		- Swept: both modes' `start` snapshot before `tree.ToServer`. `Kit.stop` is the one path that hands back after stopping a running server. setup and repair hand off without stopping one.
-		- The host check runs in podman mode only. Native mode shares `Kit.snapshot` and `Kit.stop`, and df77n covers its `start` order.
+		- The host check runs in podman mode only. Native mode shares `Kit.snapshot` and `Kit.stop`, and 1a3jkxm covers its `start` order.
 		- `--zfs` is its own run, not part of every root host run, since its pool lives in the host's kernel while it runs.
 	- Branch: r1112b
-	- Test case: df77n, df77p, df77q, df77r, df780, df781, df782, df783, df784
-	- Acceptance signoff: Self-closed: df780 to df784 pass in the root host check with `--zfs`, per the standing close policy.
+	- Test case: 1a3jkxm, 1a3jm0r, 1a3jm3w, 1a3jm70, 1a3jn00, 1a3jn34, 1a3jn68, 1a3jn9c, 1a3jncg. Since 2026111318002875, start and stop take no snapshot: 1a3jkxm and 1a3jn34 to 1a3jncg are commented out, 1a3jm3w was removed with its file, and 1a3jqxr checks that none is taken.
+	- Acceptance signoff: Self-closed: 1a3jn00 to 1a3jncg pass in the root host check with `--zfs`, per the standing close policy.
 	- Closed: 20261112-111928
 
 - Update agent: config keys, answer format, and the command kind
 	- ID: 2026111210033639
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100336
 	- Opened by:
@@ -1003,9 +4401,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Avg
 	- Actual effort: Avg
 	- Progress log:
-		- Verified: df75x to df765 pass, and so do the config tests with the new keys. The gate passes on both temp folders.
-		- Verified: df75z, df764, and df760 fail with the host check, the root refusal, or the text cleaning taken out.
-		- 2026-11-12: df763's size cap failed at first, since the reply buffer was embedded and the copy went past the cap through its `ReadFrom`. Fixed before the commit.
+		- Verified: 1a3jeem to 1a3jf7m pass, and so do the config tests with the new keys. The gate passes on both temp folders.
+		- Verified: 1a3jemw, 1a3jf4g, and 1a3jer0 fail with the host check, the root refusal, or the text cleaning taken out.
+		- 2026-11-12: 1a3jf1c's size cap failed at first, since the reply buffer was embedded and the copy went past the cap through its `ReadFrom`. Fixed before the commit.
 	- Decisions:
 		- The code is `source/internal/agent`. `Suggest` builds the question, asks, reads the JSON, and checks it. The download and hash page checks are 2026111210034298's.
 		- The answer is found inside prose or a code fence, since CLIs often wrap it. Unknown fields are ignored.
@@ -1014,15 +4412,16 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `command` refuses to run as root, runs in an empty temp folder in its own process group, gets 15 minutes, and its reply is capped at 1 MiB.
 		- `agentURL` can't hold a user or key, and takes plain `http` only to localhost or a loopback address. `agentHosts` takes host names, lower-cased. Its default lists the Hangar, Modrinth, GitHub, GeyserMC, and PaperMC hosts, with their API and CDN names.
 		- The keys do nothing until 2026111210034298 uses them. `openai` and `anthropic` say they aren't built yet, until 2026111210033649.
-		- Swept: design.md's settings table matches the config's keys (df5x2) and the `agent` default (df5x6).
+		- Swept: design.md's settings table matches the config's keys (1a3eet8) and the `agent` default (1a3ef6r).
 	- Branch: r1112b
-	- Test case: df75x, df75y, df75z, df760, df761, df762, df763, df764, df765, df5wt, df5ww, df5x2, df5x6
+	- Test case: 1a3jeem, 1a3jehr, 1a3jemw, 1a3jer0, 1a3jev4, 1a3jey8, 1a3jf1c, 1a3jf4g, 1a3jf7m, 1a3ee18, 1a3ee7g, 1a3eet8, 1a3ef6r
 	- Closed: 20261112-100929
 
 - Update agent: OpenAI and Anthropic APIs, with fetch
 	- ID: 2026111210033649
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100336
 	- Opened by:
@@ -1033,10 +4432,10 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Avg
 	- Actual effort: Avg
 	- Progress log:
-		- Verified: df766, df767, df769, df76a, and df76b pass, against stand-in API servers and pages. The gate passes on both temp folders.
-		- Verified: df767, df766, and df76b fail with the public address check, the redirect check, the https check, the fetch cap, the page cleanup, or the root refusal taken out.
-		- 2026-11-12: df761 `TestNewPicksTheKind` expects `openai` and `anthropic` to say `agentModel` isn't set, was "isn't built yet". It also checks the default URLs and where the key comes from.
-		- Verified: df76c against a local Ollama with `qwen2.5:7b-instruct`: the conversation, its answer, and the checks ran end to end in 66 s. That model said Chunky has no build for 1.21.4, which it does, so a small local model may not be enough to rely on.
+		- Verified: 1a3jfar, 1a3jfdw, 1a3jfm4, 1a3jfq8, and 1a3jftc pass, against stand-in API servers and pages. The gate passes on both temp folders.
+		- Verified: 1a3jfdw, 1a3jfar, and 1a3jftc fail with the public address check, the redirect check, the https check, the fetch cap, the page cleanup, or the root refusal taken out.
+		- 2026-11-12: 1a3jev4 `TestNewPicksTheKind` expects `openai` and `anthropic` to say `agentModel` isn't set, was "isn't built yet". It also checks the default URLs and where the key comes from.
+		- Verified: 1a3jfxg against a local Ollama with `qwen2.5:7b-instruct`: the conversation, its answer, and the checks ran end to end in 66 s. That model said Chunky has no build for 1.21.4, which it does, so a small local model may not be enough to rely on.
 	- Decisions:
 		- One `API` type covers both kinds. The base URL includes `/v1`, so `agentURL` for a local Ollama is `http://127.0.0.1:11434/v1`, the same as its OpenAI docs. The defaults are `https://api.openai.com/v1` and `https://api.anthropic.com/v1`.
 		- The key is `TT_MINECRAFTD_AGENT_KEY`, else `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. With none, no key header is sent, for a local server. A 401 or 403 names the variable, and never shows the key.
@@ -1047,13 +4446,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The API calls themselves don't go through the public address check, since a local server is on loopback.
 		- Swept: both kinds go through `runTool` and `post`, and `API.Ask` and `Command.Ask` both refuse root.
 	- Branch: r1112b
-	- Test case: df766, df767, df769, df76a, df76b, df761, df76c (skipped without `TT_MINECRAFTD_LIVE_AGENT`)
+	- Test case: 1a3jfar, 1a3jfdw, 1a3jfm4, 1a3jfq8, 1a3jftc, 1a3jev4, 1a3jfxg (skipped without `TT_MINECRAFTD_LIVE_AGENT`)
 	- Closed: 20261112-101356
 
 - update --plugins asks the update agent
 	- ID: 2026111210034298
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-100342
 	- Opened by:
@@ -1069,9 +4469,9 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-12: `update` asks the agent as the operator, writes its answer to a file only the operator can read, runs itself through sudo with that file, and removes it after. The root run checks the answer again. A dry run asks and shows the plan as not checked; a run started as root skips it with a note.
 		- 2026-11-12: Each jar the agent found has its hash checked on the hash page first, then is downloaded beside the old one, checked for size, hash, and plugin name, and needs its own yes. A failed check is reported and the rest go on.
 		- 2026-11-12: README's Update agent section has example configs for the API kinds and `agentCommand` lines for Codex and Gemini CLI. design.md notes the hand-off file and the kept file name.
-		- Verified: df76h, df76j, df76k, and df76m pass, and so does the gate on both temp folders. Each fails with its check taken out: the hash page, the hash, the plugin name, the own yes, the replay's hash match, the failed lookup going to the agent, the temp folder removal, and the hidden flag.
-		- Verified: root host check df76n passes with the other 18: `update` as the operator asks a command agent, the answer reaches the run through real sudo, the temp folder is gone after, and a run started as root says it skipped the agent.
-		- 2026-11-12: df76n first found the agent asked about Paper's own approved build. Paper's builds are now left to `--paper`; df76h fails without that.
+		- Verified: 1a3jgd4, 1a3jgg8, 1a3jgkc, and 1a3jgpg pass, and so does the gate on both temp folders. Each fails with its check taken out: the hash page, the hash, the plugin name, the own yes, the replay's hash match, the failed lookup going to the agent, the temp folder removal, and the hidden flag.
+		- Verified: root host check 1a3jgsm passes with the other 18: `update` as the operator asks a command agent, the answer reaches the run through real sudo, the temp folder is gone after, and a run started as root says it skipped the agent.
+		- 2026-11-12: 1a3jgsm first found the agent asked about Paper's own approved build. Paper's builds are now left to `--paper`; 1a3jgd4 fails without that.
 	- Decisions:
 		- The hand-off file sits in its own temp folder, named by a hidden `--agent-answer`. sudo runs as a child rather than replacing the process, so the operator's run can remove the file after; the root run's exit code passes through.
 		- The root run uses an answer only for jars both runs asked about with the same hash, and runs `agent.Check` on it again.
@@ -1083,13 +4483,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `Into`'s callers in `paper` and `geyser` pass their tests; `about` and `Claims` share one reader; `update`'s other callers (setup's Update step) run as root and get the note.
 		- 20261113: The kept file name stays. One entry per plugin means a stale jar can't load beside the new one, and an agent's find never rewrites the approved list's names.
 	- Branch: r1112b
-	- Test case: df76h, df76j, df76k, df76m, df76n (root host)
+	- Test case: 1a3jgd4, 1a3jgg8, 1a3jgkc, 1a3jgpg, 1a3jgsm (root host)
 	- Closed: 20261112-103705
 
 - cmd sometimes misses its answer right after a start
 	- ID: 2026111207565308
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1104,7 +4505,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Low
 	- Progress log:
 		- 20261112: Only lines from the server thread count for `cmd`'s waits. The rest are still shown. design.md says so.
-		- Verified: df753 fails without the change and passes with it. All 17 root host checks pass with it in 2 runs, df685 and df68c included.
+		- Verified: 1a3jbxc fails without the change and passes with it. All 17 root host checks pass with it in 2 runs, 1a3fhfm and 1a3fj5g included.
 	- Decisions:
 		- Count lines by the thread in latest.log's line, not by sending a marker command after the line. A marker would put an unknown command in the log, and in the console of anyone attached.
 		- A line with no thread, such as a message's second line, goes with the line before it. A log with no thread names at all counts every line, as before.
@@ -1112,14 +4513,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `logFollow` is only read by `cmd`; native and container start wait for Paper's Done line by its text.
 	- Actual fix [Bug]: `cmd` waits on the server thread's lines only, and shows the rest.
 	- Branch: r1112b
-	- Test case: df753, df754
-	- Acceptance signoff: Self-closed: df753 passes and the root host check passes, per the standing close policy.
+	- Test case: 1a3jbxc, 1a3jc0g
+	- Acceptance signoff: Self-closed: 1a3jbxc passes and the root host check passes, per the standing close policy.
 	- Closed: 20261112-094325
 
 - Podman warns the input isn't a TTY on every start from a script
 	- ID: 2026111207565309
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1132,22 +4534,23 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Low
 	- Progress log:
 		- Verified: under rootless Podman 5.4.2, `run -d -i -t` with stdin from `/dev/null` warns, and `create -i -t` then `start` doesn't. The container still has a terminal and open stdin, and `attach` under Podman and Docker took a line and detached on Ctrl-C.
-		- Verified: df682 fails on the old code with the warning, and passes with the fix. All 17 root host checks pass, console and cmd under rootful Podman included.
-		- 20261112: df5xp now expects `create` and `start` in place of `run --detach`. df5xs and df5z4 read the `create` line, and df5xs's debug case expects `run` with no `--detach`.
+		- Verified: 1a3fh68 fails on the old code with the warning, and passes with the fix. All 17 root host checks pass, console and cmd under rootful Podman included.
+		- 20261112: 1a3egrr now expects `create` and `start` in place of `run --detach`. 1a3eh24 and 1a3en8g read the `create` line, and 1a3eh24's debug case expects `run` with no `--detach`.
 	- Decisions:
 		- Container `start` makes the container with `create` and then runs `start`, under both runtimes, so the flags and the steps stay the same for each. `--debug` keeps `run`, on the operator's terminal. A failed `start` leaves a created container, as a failed `run` did, and the next `start` removes it. design.md updated.
 		- Not a pty for Podman's stdin, nor a filter on its stderr, since `create` and `start` need neither.
 		- Swept: the only other runtime `run` is `update --image`'s version check, which has no `-i -t`.
 	- Actual fix [Bug]: container `start` runs `create` and then `start` in place of `run --detach`.
 	- Branch: r1112b
-	- Test case: df5xp, df5xs, df682
-	- Acceptance signoff: Self-closed: df682 passes in the root host check, per the standing close policy.
+	- Test case: 1a3egrr, 1a3eh24, 1a3fh68
+	- Acceptance signoff: Self-closed: 1a3fh68 passes in the root host check, per the standing close policy.
 	- Closed: 20261112-095714
 
 - status says no paper.jar when it can't read the folder
 	- ID: 2026111118183922
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-181839
 	- Opened by:
@@ -1161,21 +4564,22 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Low
 	- Progress log:
 		- 20261112: The Version line says it can't read `paper.jar`, and why, as the whitelist line does. A missing one still says no paper.jar. When any read of the tree is refused and the login doesn't have `runGroup` yet, the trees section says to log in again, or gives the `gpasswd` line.
-		- Verified: df74y fails without the change and passes with it.
+		- Verified: 1a3jbdr fails without the change and passes with it.
 	- Decisions:
 		- The group reason shows once, under the trees, not on each line that couldn't be read. It shows only after a refused read, since a login without the group reads a tree the operator owns. design.md updated.
 		- It uses `launch.GroupProblem`, the check native start and `cmd` use, now exported.
 		- Swept: the whitelist, ops, plugin jar, and log reads all mark a refused read. The approved list is in `/etc`, not the tree, so it doesn't.
 	- Actual fix [Bug]: the Version line says `paper.jar` can't be read and why, and the trees say to log in again.
 	- Branch: r1112b
-	- Test case: df74y
-	- Acceptance signoff: Self-closed: df74y passes, per the standing close policy.
+	- Test case: 1a3jbdr
+	- Acceptance signoff: Self-closed: 1a3jbdr passes, per the standing close policy.
 	- Closed: 20261112-093323
 
 - plugins.shcl keys come back lower case after an approve
 	- ID: 2026111118053419
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-180534
 	- Opened by:
@@ -1184,20 +4588,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Low
 	- Progress log:
 		- 2026-11-12: Found while building update --image. Also shcl friction: SaveFile always writes the canonical form.
-		- 20261112: Approve loads and saves with the keep-lines calls, so the operator's other lines stay byte for byte. Verified: df5z2 now has a mixed-case key in its list, and fails on the old save and passes on the new.
+		- 20261112: Approve loads and saves with the keep-lines calls, so the operator's other lines stay byte for byte. Verified: 1a3en28 now has a mixed-case key in its list, and fails on the old save and passes on the new.
 	- Actual effort: Low
 	- Decisions:
 		- Same calls as `update --image`. A changed value may still come back quoted.
 		- Swept: `Approve` is the only `SaveFile` in `plugins`; `update --image` already used keep-lines.
 	- Branch: r1112b
-	- Test case: df5z2
-	- Acceptance signoff: Self-closed: df5z2 passes, per the standing close policy.
+	- Test case: 1a3en28. Commented out since 2026111914334585, which removed Approve.
+	- Acceptance signoff: Self-closed: 1a3en28 passes, per the standing close policy.
 	- Closed: 20261112-135900
 
 - setup's apt install fails on a fresh host
 	- ID: 2026111207565300
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1207,13 +4612,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 20261112, in the root host check, on a fresh Debian trixie.
 	- Actual fix [Bug]: `apt-get update` runs before the install, only when there's something to install.
 	- Branch: root-host
-	- Test case: df67t, df680
+	- Test case: 1a3fgd8, 1a3fh00
 	- Closed: 20261112-075653
 
 - Firewall breaks Geyser's STUN lookup
 	- ID: 2026111207565301
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: High
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1224,13 +4630,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual cause [Bug]: NetherNet sends empty UDP packets from `bedrockPort` to itself over loopback, on 127.0.0.1 and ::1. The loopback drop caught them.
 	- Actual fix [Bug]: The server's own `gamePort` and `bedrockPort` are allowed on loopback, ahead of the drop. Other loopback ports are still dropped. design.md updated.
 	- Branch: root-host
-	- Test case: df67w, df687
+	- Test case: 1a3fgkg, 1a3fhnw
 	- Closed: 20261112-075653
 
 - stop hands the trees back under a native server when runMode names a container
 	- ID: 2026111207565302
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: High
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1240,13 +4647,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 20261112, in the root host check.
 	- Actual fix [Bug]: `stop`, `console`, and `cmd` read the server's mode from the process table, as `status` does, and switch between native and container when it differs from `runMode`, and say so. Podman to Docker is still `Boxed`'s. design.md updated.
 	- Branch: root-host
-	- Test case: df67x, df67y, df68c, df68d
+	- Test case: 1a3fgpm, 1a3fgsr, 1a3fj5g, 1a3fj8m
 	- Closed: 20261112-075653
 
 - repair removes the stopped container that keeps the crash log
 	- ID: 2026111207565303
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1259,13 +4667,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Only a stopped container under the runtime `runMode` doesn't name gets removed, as after a `runMode` change. The crash log reason wasn't weighed when check 11 was written. design.md updated.
 		- 20261112: OKed by t00mietum, over going back to removing it under either runtime.
 	- Branch: root-host
-	- Test case: df5zh, changed to expect no removal; df689
+	- Test case: 1a3eph4, changed to expect no removal; 1a3fhw4
 	- Closed: 20261112-075653
 
 - setup lists the jars to approve only after Go ahead
 	- ID: 2026111207565304
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Avg
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1275,13 +4684,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 20261112, in the root host check, with `setup --adopt`.
 	- Actual fix [Bug]: The list prints with the plan.
 	- Branch: root-host
-	- Test case: df67z, df68e
+	- Test case: 1a3fgww, 1a3fjbr
 	- Closed: 20261112-075653
 
 - stop leaves the trees with runUser when USER isn't set
 	- ID: 2026111207565305
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Severity: Low
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1290,13 +4700,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Reproduced [Bug]: 20261112, in the root host check.
 	- Actual fix [Bug]: The operator falls back to the account running the tool, unless that's root, so the boot unit still leaves the trees alone. design.md updated.
 	- Branch: root-host
-	- Test case: df67v
+	- Test case: 1a3fggc
 	- Closed: 20261112-075653
 
 - Hand tests that need root, as a script
 	- ID: 2026111207565306
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261112-075653
 	- Opened by:
@@ -1311,13 +4722,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The checks after setup run in a new login, since the group setup adds counts from the next login, as setup says.
 		- Not part of the gate yet. The CI/CD item can run it in the full run.
 	- Branch: root-host
-	- Test case: df680, df681, df682, df683, df684, df685, df686, df687, df688, df689, df68a, df68b, df68c, df68d, df68e, df68f
+	- Test case: 1a3fh00, 1a3fh34, 1a3fh68, 1a3fh9c, 1a3fhcg, 1a3fhfm, 1a3fhjr, 1a3fhnw, 1a3fhs0, 1a3fhw4, 1a3fhz8, 1a3fj2c, 1a3fj5g, 1a3fj8m, 1a3fjbr, 1a3fjew. 1a3fhz8 is commented out since 2026111914334569, as start no longer checks jars.
 	- Closed: 20261112-075653
 
 - Current Geyser needs TCP on the Bedrock port too
 	- ID: 2026111113015461
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-130154
 	- Opened by:
@@ -1332,7 +4744,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-11: design.md, how-to-connect.md, and `status` give `bedrockPort` as TCP and UDP. `start` checks, and `repair` sets, Geyser's `transport`, `webrtc-port`, and `clone-remote-port`, so NetherNet stays on `bedrockPort`. A `bedrockPort` equal to `gamePort` warns and moves.
-		- Verified: df5yy, df5yz, and the new df5y7 line each fail with the change taken out, and pass with it in.
+		- Verified: 1a3emnr, 1a3emrw, and the new 1a3ejdw line each fail with the change taken out, and pass with it in.
 		- 20261111: Verified: a throwaway Paper 26.3-249 server with Geyser 2.12.1 and `bedrockPort` 19199, started by `start`, listened on 19199 over TCP and UDP, and `status` listed both. Geyser's log showed built-in signaling on that port, and STUN answers from 3478 and 19302.
 		- 20261112: In the root host check, with the firewall on, Geyser's STUN lookup got no answer, since the loopback drop caught NetherNet's packets to its own port. Fixed under 2026111207565301, and STUN now answers with the firewall on.
 	- Stand-in: none (20261111). A Bedrock join needs a real client, and none runs here.
@@ -1341,19 +4753,20 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The 3 pinned keys are fine when missing, since Geyser's defaults for them are right. Signaling `mode` isn't pinned.
 		- The firewall item gets a design change: with `bedrock` on and `egress` `web`, outbound UDP to 3478 and 19302 is allowed for STUN. Filed as a Check in questions.md.
 		- Tunnels, the server's dropped connection checks, and `joinRateLimit` against server list pings went under Needs more thought in design.md.
-		- 20261111: df5y7 `TestStatusDocker` also expects `tcp *:19132 listening, 0 connections`, and the shared `ss` reply gained that listener. Old: only the UDP line.
+		- 20261111: 1a3ejdw `TestStatusDocker` also expects `tcp *:19132 listening, 0 connections`, and the shared `ss` reply gained that listener. Old: only the UDP line.
 		- Swept: every `bedrockPort` and `udp` use in source and docs; `status` is the only code that names a protocol. The firewall isn't built yet.
 		- 20261111: The Check picks stand: TCP and UDP on `bedrockPort`, and STUN allowed out under `egress` `web`. Both follow Geyser's own defaults, and need no new key.
 	- Actual fix [Bug]: Docs and `status` say TCP and UDP. Geyser's NetherNet port settings are pinned, and `bedrockPort` can't be `gamePort`.
 	- Branch: r1111
-	- Test case: df5yy, df5yz, df5y7, df67w, df687
+	- Test case: 1a3emnr, 1a3emrw, 1a3ejdw, 1a3fgkg, 1a3fhnw
 	- Acceptance signoff: Self-closed: the ports, the pinned keys, and the STUN lookup check out with the firewall on. A real Bedrock join is part of design.md's live test on the real server, done in 'Move the first server over'. OKed by t00mietum 20261112.
 	- Closed: 20261112-075653
 
 - Core commands
 	- ID: 2026111111065711
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -1368,7 +4781,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Refuse to start when an old copy of the server is running under any account.
 	- From 2026111111065697: parse `--set KEY=VALUE` and `--native` into `config.Option` and pass them to `config.Load`. Settle what `stop` does when `ownerAfterStop` is empty, as it can be from the boot unit, and whether a missing default config file is an error. `Load` returns the read error for now.
 	- Split into 4 children: 2026111112162268 (CLI, runner, tree hand-off), 2026111112163174 (Docker mode), and 2026111112163393 (status and watch) are done, and 2026111112163284 (native mode) waits on a hand test.
-	- Test case: its children's: 2026111112162268: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn; 2026111112163174: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz; 2026111112163284: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6; 2026111112163393: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
+	- Test case: its children's: 2026111112162268: 1a3efsg, 1a3efwm, 1a3efzr, 1a3eg2w, 1a3eg60, 1a3eg94, 1a3egc8, 1a3egfc, 1a3egjg, 1a3egnm; 2026111112163174: 1a3egrr, 1a3egvw, 1a3egz0, 1a3eh24, 1a3eh58, 1a3eh8c, 1a3ehbg, 1a3ehhr, 1a3ehmw; 2026111112163284: 1a3ehr0, 1a3ehv4, 1a3ehy8, 1a3ej1c, 1a3ej4g, 1a3ej7m, 1a3ejar; 2026111112163393: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3ejtc, 1a3ejxg, 1a3ek0m, 1a3ek3r, 1a3ek6w, 1a3eka0, 1a3ekd4. 1a3ek3r is commented out since 2026111914334569.
 	- 20261111: children 2026111112163284 wait on UAT, and the rest are closed
 	- 20261112: the children that waited on UAT passed the root host check, and are closed.
 	- Acceptance signoff: Self-closed: all children closed.
@@ -1377,7 +4790,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: native mode start and stop
 	- ID: 2026111112163284
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: start and stop a throwaway Paper server in native mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, the jars can't be written or swapped, and `systemctl show tt-minecraftd-server` lists the sandbox settings. Beside it, `status` and `watch` show it in native mode, `console` takes a typed command and detaches on Ctrl-C with the server up, and `cmd list` prints the player count.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1402,17 +4816,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `--debug` attaches to tmux. A detach leaves the server and its trees as they are; an exit hands them back. `--foreground` checks the unit every 5 seconds.
 		- Console lines go through `tmux send-keys` as the service account, with `sudo -u`, or `runuser` when root. `host.Cmd` has an `As` field for it, which `console` and `cmd` can use too.
 		- Docker and native share the start and stop steps through `launch.Kit`. Docker's tests pass unchanged.
-		- 20261111: `TestMissingConfig` (df5xn) no longer expects `start --native --dry-run` to say it isn't built. `status` still does.
+		- 20261111: `TestMissingConfig` (1a3egnm) no longer expects `start --native --dry-run` to say it isn't built. `status` still does.
 		- Swept: every sudo goes through `host.Cmd`; both modes refuse others, count down, and hand back through `Kit`.
 	- Branch: r1111
-	- Test case: df5y0, df5y1, df5y2, df5y3, df5y4, df5y5, df5y6, df68b, df68c, df68d
+	- Test case: 1a3ehr0, 1a3ehv4, 1a3ehy8, 1a3ej1c, 1a3ej4g, 1a3ej7m, 1a3ejar, 1a3fj2c, 1a3fj5g, 1a3fj8m
 	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
 	- Closed: 20261112-075653
 
 - Podman, Docker, and native modes
 	- ID: 2026111115090766
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-150907
 	- Opened by: t00mietum
@@ -1433,7 +4848,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Split into 3 children: 2026111116104049 (runtimes through sudo) waits on a hand test, 2026111116104058 (console input through attach) is done, and 2026111116104067 (status without sudo) waits on a hand test.
 	- Decisions:
 		- Taken from `tt-monerod-safeserver`, where t00mietum set the 3 modes. The launchers are shared parts, so the Podman code gets written here first and moves to `tt-safeserver` with the rest.
-	- Test case: its children's: 2026111116104049: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh; 2026111116104058: df5xw; 2026111116104067: df5y7, df5y8, df5y9, df5ya, df64j, df652
+	- Test case: its children's: 2026111116104049: 1a3f5yw, 1a3f620, 1a3f654, 1a3f688, 1a3ee7g, 1a3ee18, 1a3eph4; 2026111116104058: 1a3ehbg; 2026111116104067: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3f688, 1a3f7t8
 	- 20261111: children 2026111116104049 2026111116104067 wait on UAT, and the rest are closed
 	- 20261112: the children that waited on UAT passed the root host check, and are closed.
 	- Acceptance signoff: Self-closed: all children closed.
@@ -1442,7 +4857,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Run modes: Podman and Docker through sudo
 	- ID: 2026111116104049
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: under rootful Podman, start a throwaway Paper server and stop it with `stop --warn 10`, with the operator out of the `docker` group. It loads, the jars can't be written, and `sudo podman ps` shows the container. Then set `runMode` to `docker` and check that `stop` finds a container that Podman started.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1469,17 +4885,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `repair` reports a missing `catatonit` with the command that adds it, and doesn't install it, since `setup` does that. It looks where Podman does, then on PATH.
 		- `status` still asks `runMode`'s runtime without sudo, so under rootful Podman it says the server isn't running. Child 2026111116104067 fixes that.
 		- `setup`'s runtime pick is written into design.md's setup section, for the setup item to build.
-		- 20261111: asserts that changed with the new default or with sudo: df5xa and df5ww use `lxc` as the bad mode, and df5wt and df5ww read `image`; df5xm and df5xn expect `podman`, not `docker`; df5yg expects "not running in podman mode"; df5xk uses `runMode=lxc`; df5xp, df5xs, df5xv, and df5z6 expect `sudo docker ...` and the extra `sudo -v` and lookup.
+		- 20261111: asserts that changed with the new default or with sudo: 1a3efk8 and 1a3ee7g use `lxc` as the bad mode, and 1a3ee18 and 1a3ee7g read `image`; 1a3egjg and 1a3egnm expect `podman`, not `docker`; 1a3eka0 expects "not running in podman mode"; 1a3egfc uses `runMode=lxc`; 1a3egrr, 1a3eh24, 1a3eh8c, and 1a3ener expect `sudo docker ...` and the extra `sudo -v` and lookup.
 		- Swept: every runtime call in `launch`, `repair`, and `status` names the runtime from the config or the lookup; no `"docker"` literal is left in non-test code. design.md has no Docker-only wording left, apart from the console and `cmd` lines, which the console child changes.
 	- Branch: r1112
-	- Test case: df64f, df64g, df64h, df64j, df5ww, df5wt, df5zh, df682, df683, df689
+	- Test case: 1a3f5yw, 1a3f620, 1a3f654, 1a3f688, 1a3ee7g, 1a3ee18, 1a3eph4, 1a3fh68, 1a3fh9c, 1a3fhw4
 	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
 	- Closed: 20261112-075653
 
 - Run modes: status without sudo
 	- ID: 2026111116104067
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: beside the throwaway Paper server under rootful Podman, run `status` without sudo. It says the server runs in podman mode, with its account, time up, and memory.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1491,7 +4908,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `status` and `watch` tell the modes apart without sudo, such as from the process table, and find a container under either runtime.
 	- Actual effort: Low
 	- Progress log:
-		- Verified: df64j and df652 fail on the old code and pass on the new.
+		- Verified: 1a3f688 and 1a3f7t8 fail on the old code and pass on the new.
 		- Verified: the built `status`, without sudo, found a stand-in server in a rootful Docker container and in a rootless Podman one, named the mode, and read the memory.
 		- 20261112: Verified in the root host check: beside the server under rootful Podman, `status` without sudo said podman mode, as minecraftd, with the time up and memory.
 	- Decisions:
@@ -1500,17 +4917,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- A mode other than `runMode`'s is shown, with what `runMode` says.
 		- A stopped container no longer shows, since only the runtime knows of it. design.md updated.
 		- The account comes from the uid, since `ps` cuts long names. The time up is the process's age.
-		- 20261111: asserts that changed: df5y9 expects "not running in docker mode", without "the container is exited", and "as root" for the old script's server; df5ya expects "can't list process"; df5y8 expects the test's own account, not minecraftd; df64j checks a `runMode` mismatch in place of a container with no user, since `ps` always gives a uid.
+		- 20261111: asserts that changed: 1a3ejm4 expects "not running in docker mode", without "the container is exited", and "as root" for the old script's server; 1a3ejq8 expects "can't list process"; 1a3ejh0 expects the test's own account, not minecraftd; 1a3f688 checks a `runMode` mismatch in place of a container with no user, since `ps` always gives a uid.
 		- Swept: `Probe` serves only `status` and `watch`; `start` and `repair` still find other servers through `server.PaperProcs`, which now uses the same `server.IsPaper`.
 	- Branch: r1112
-	- Test case: df5y7, df5y8, df5y9, df5ya, df64j, df652, df684
+	- Test case: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3f688, 1a3f7t8, 1a3fhcg
 	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
 	- Closed: 20261112-075653
 
 - setup
 	- ID: 2026111111065776
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -1523,7 +4941,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- On an existing install, run `repair` and then `update`.
 	- 2026-11-12: The runtime pick for setup is written up in design.md's setup section.
 	- Split into 3 children: 2026111116415175 (install steps and `--adopt`) waits on a hand test, 2026111116415186 (Paper) and 2026111116415196 (Geyser and Floodgate) are done. Running `update` after `repair` comes with 2026111111065803, and the firewall and boot unit steps with 2026111111065789 and 2026111111065816.
-	- Test case: its children's: 2026111116415175: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n; 2026111116415186: df65p, df65q, df65r, df65d, df65f, df65j; 2026111116415196: df65x, df65y, df65z, df65d, df65f, df65r
+	- Test case: its children's: 2026111116415175: 1a3f8wm, 1a3f8zr, 1a3f92w, 1a3f960, 1a3f994, 1a3f9c8, 1a3f9fc, 1a3f9jg, 1a3f9nm; 2026111116415186: 1a3f9rr, 1a3f9vw, 1a3f9z0, 1a3f8wm, 1a3f92w, 1a3f9c8; 2026111116415196: 1a3faem, 1a3fahr, 1a3famw, 1a3f8wm, 1a3f92w, 1a3f9z0
 	- 20261111: children 2026111116415175 wait on UAT, and the rest are closed
 	- 2026-11-12: The firewall step is in, as step 9, through 2026111117135246.
 	- 20261112: the children that waited on UAT passed the root host check, and are closed.
@@ -1533,7 +4951,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - setup: install steps and --adopt
 	- ID: 2026111116415175
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway host or VM with Podman, run `setup`, then `setup --adopt` on a copy of a server folder. The account, group, tree, `eula.txt`, safe settings, approved list, image, `/usr/local/bin` copy, and config are there, and `paper.jar` links to a downloaded build, and `repair --check` is clean.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1566,14 +4985,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `loadConfig` has the one caller; `HasCatatonit` serves both repair's check and setup's package pick.
 		- 20261111: The Check picks stand: the config is written last, a `serverDir` with files in it needs `--adopt`, and setup refuses while a server runs.
 	- Branch: r1112
-	- Test case: df65d, df65e, df65f, df65g, df65h, df65j, df65k, df65m, df65n, df680, df68e
+	- Test case: 1a3f8wm, 1a3f8zr, 1a3f92w, 1a3f960, 1a3f994, 1a3f9c8, 1a3f9fc, 1a3f9jg, 1a3f9nm, 1a3fh00, 1a3fjbr
 	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
 	- Closed: 20261112-075653
 
 - Firewall
 	- ID: 2026111111065789
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -1588,7 +5008,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Waits on 2026111113015461, which settles whether the Bedrock port needs TCP too.
 	- From 2026111113015461: allow `bedrockPort` over TCP as well as UDP, and with `bedrock` on and `egress` at `web`, outbound UDP to ports 3478 and 19302 for STUN, per design.md.
 	- Split into 3 children: 2026111117134046 (rules file, unit, and the `start` check), 2026111117135246 (`setup` and `repair`), and 2026111117135258 (`status` counters). The first and third are done, and the second waits on signoff.
-	- Test case: its children's: 2026111117134046: df66c, df66d, df66e, df66f; 2026111117135246: df66g, df66h, df66j; 2026111117135258: df67g, df67h, df5y7
+	- Test case: its children's: 2026111117134046: 1a3fbxg, 1a3fc0m, 1a3fc3r, 1a3fc6w; 2026111117135246: 1a3fca0, 1a3fcd4, 1a3fcg8; 2026111117135258: 1a3ffe0, 1a3ffh4, 1a3ejdw
 	- 20261111: children 2026111117135246 wait on UAT, and the rest are closed
 	- 20261112: the children that waited on UAT passed the root host check, and are closed.
 	- Acceptance signoff: Self-closed: all children closed.
@@ -1597,7 +5017,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Firewall: setup and repair manage it
 	- ID: 2026111117135246
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway host or VM, `sudo tt-minecraftd setup`, then `repair --check` is clean, `nft list table inet tt_minecraftd` shows the rules, and `sudo systemctl restart nftables` leaves the table loaded. As the service account, `curl http://127.0.0.1` and a connection to a LAN address fail and bump `out_local` and `out_lan`. With `firewall: off`, `sudo tt-minecraftd repair` removes the unit and the table.
 	- Stand-in: 20261112, the root host check (`cicd/root-host/root-host.bash`, a throwaway Debian with systemd and a real sudo).
 	- Priority: High
@@ -1612,7 +5033,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-11: `repair`'s check 9 is `repair.FirewallCheck`, between the Bedrock and ufw checks. setup runs it as step 9, after approving jars and before the image pull, and adds nftables to its apt packages when `nft` is missing.
-		- Verified: df66g, df66h, and df66j each fail with their part taken out, and pass with it in. The unit text passes `systemd-analyze verify`, and `install -D -T /dev/stdin` writes into a folder it makes.
+		- Verified: 1a3fca0, 1a3fcd4, and 1a3fcg8 each fail with their part taken out, and pass with it in. The unit text passes `systemd-analyze verify`, and `install -D -T /dev/stdin` writes into a folder it makes.
 		- 20261112: Verified in the root host check: setup loaded the table and enabled its unit, and `systemctl restart nftables` left it loaded. The service account's connections to loopback, the LAN, and port 22 out were dropped and counted, and HTTPS out worked. With `firewall: off`, `repair` removed the unit and the table.
 		- Found there: the loopback drop broke Geyser's STUN lookup. Fixed under 2026111207565301.
 	- Decisions:
@@ -1623,14 +5044,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- With `firewall` off, `systemctl disable --now` deletes the table through the unit's `ExecStop`. The rules file stays, per design.md.
 		- Swept: `repair.After` is the only check list; setup's existing-install path gets the check through `repair`. ufw and firewalld are still only read.
 	- Branch: r1112
-	- Test case: df66g, df66h, df66j, df681, df687, df688, df68f
+	- Test case: 1a3fca0, 1a3fcd4, 1a3fcg8, 1a3fh34, 1a3fhnw, 1a3fhs0, 1a3fjew
 	- Acceptance signoff: Self-closed: passed in the root host check on b23 at root-host c076344.
 	- Closed: 20261112-075653
 
 - repair sends a missing server folder to setup, which only runs repair again
 	- ID: 2026111117095694
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-170956
 	- Opened by:
@@ -1642,20 +5064,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The server folder check gave the new-install advice whether or not a config was there.
 	- Actual effort: Low
 	- Progress log:
-		- Verified: df5ze fails on the old message and passes with the fix. The gate passes on both temp folders.
+		- Verified: 1a3ep7r fails on the old message and passes with the fix. The gate passes on both temp folders.
 	- Decisions:
 		- The message changes, and setup stays as it is. With a config there, it says to set `serverDir` in it, or to move it aside and run setup again. With no config, the old message stays, since setup is a new install then.
 		- Setup making an empty `serverDir` on an existing install wouldn't help, since the server needs `paper.jar` and the rest, which only the new-install path sets up.
 		- Swept: `repair`'s other messages that name setup. "no config ... setup writes one" is true, since setup is a new install then. The Geyser one is true since 2026111117052190, and doesn't show with `serverDir` missing. The defaults warning in `main.go` is for a missing config too.
 	- Actual fix [Bug]: with a config there, `repair`'s missing-server-folder message says to set `serverDir`, or to move the config aside and run setup again.
 	- Branch: r1112
-	- Test case: df5ze
+	- Test case: 1a3ep7r
 	- Closed: 20261111-171207
 
 - Check Geyser's first config against the next start
 	- ID: 2026111117052206
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-170522
 	- Opened by:
@@ -1666,8 +5089,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- 2026-11-11: With no `config.yml`, Geyser 2.12.1 build 1300's first start on Paper 26.3-249 wrote `java.auth-type: online` and ran with it, so the next `start` refused. Its address and port were Geyser's own, `0.0.0.0` and 19132, not `bindIP` and `bedrockPort`.
 		- With `bedrock` on, a missing Geyser `config.yml` is now wrong, and the safe settings fix writes one with only `bedrock.address`, `bedrock.port`, and `java.auth-type`, making `plugins/` and `plugins/Geyser-Spigot/` when missing. Setup's safe settings step writes it before the first start.
 		- Verified: on a throwaway tree, a first start with that file, both with defaults and with `bindIP` 127.0.0.1 and `bedrockPort` 19555, listened where the config says, kept the 3 keys, and filled in Geyser's other settings. `start`'s check passed after the first start and after a second one.
-		- Verified: df67a and the new df5yx lines fail with the change taken out, and pass with it in.
-		- 20261111: df5yx `TestGeyserSkipped` expects 3 missing keys with no `config.yml`, was none. df5yk and df5ym run with `bedrock` off, since they check `server.properties` only.
+		- Verified: 1a3fev8 and the new 1a3emjm lines fail with the change taken out, and pass with it in.
+		- 20261111: 1a3emjm `TestGeyserSkipped` expects 3 missing keys with no `config.yml`, was none. 1a3ekkc and 1a3ekpg run with `bedrock` off, since they check `server.properties` only.
 	- Decisions:
 		- The fix goes in the safe settings, not in `start`, since `start` only checks and `repair` fixes, as for a missing `server.properties`. Setup and `repair` both get it.
 		- A missing file is wrong whether or not the Geyser jar is there, since setup writes the safe settings before it downloads Geyser. Setup and `repair` report a missing jar on their own.
@@ -1675,13 +5098,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The file holds only the 3 keys, with no `config-version`. Geyser took it as current and added the rest of its layout, including the 3 NetherNet keys with the wanted values.
 		- Swept: `scanGeyser` is the only reader of Geyser's file, shared by `Check` and `Fix`. The Paper YAML files stay fine when missing, since each of their keys defaults to off. Floodgate's config pins no keys.
 	- Branch: r1112
-	- Test case: df67a, df5yx
+	- Test case: 1a3fev8, 1a3emjm
 	- Closed: 20261111-174957
 
 - repair sends a missing Geyser to setup, which only runs repair again
 	- ID: 2026111117052190
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-170521
 	- Opened by:
@@ -1694,7 +5118,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Low
 	- Progress log:
 		- 2026-11-12: On an existing install with `bedrock` on, setup looks up a missing Geyser or Floodgate, shows it in the plan, downloads and approves it, and then runs `repair`. design.md's setup says so.
-		- Verified: df66b fails on the old setup code and passes with the fix. The gate passes on both temp folders.
+		- Verified: 1a3fbtc fails on the old setup code and passes with the fix. The gate passes on both temp folders.
 	- Decisions:
 		- Setup gets the jars, rather than repair naming another command, since `update --plugins` only updates jars it already knows, and design.md's setup step 7 already covers the download. `repair`'s message stays as it was, and is now true.
 		- The lookup comes before the question, and a failed one stops setup before `repair`, as on a new install.
@@ -1702,13 +5126,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `bedrockBuilds` and `getBedrock` are shared by both paths, and the plan line moved to `planBedrock`. Of `repair`'s messages that send the operator to setup, the missing `serverDir` one has the same problem, filed as 2026111117095694.
 	- Actual fix [Bug]: setup's existing-install path installs a missing Geyser or Floodgate before `repair`.
 	- Branch: r1112
-	- Test case: df66b
+	- Test case: 1a3fbtc
 	- Closed: 20261111-170934
 
 - staticcheck: unused values in repair tests
 	- ID: 2026111116281098
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Low
 	- Opened: 20261111-162810
 	- Opened by: t00mietum
@@ -1722,7 +5147,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Core commands: Docker mode start and stop
 	- ID: 2026111112163174
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: start and stop a throwaway Paper server in Docker mode, with the EULA accepted by hand. It loads, `stop --warn 10` counts down and saves, and the jars can't be written.
 	- Priority: High
 	- Opened: 20261111-121631
@@ -1750,14 +5176,15 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The safe settings, plugin, and firewall steps of `start` come with their own items. ZFS snapshots had none, so 2026111112264283 is filed.
 		- Swept: every container command uses `launch.Container`; `start` and `stop` both hand back through `tree.ToOperator`.
 	- Branch: r1111
-	- Test case: df5xp, df5xq, df5xr, df5xs, df5xt, df5xv, df5xw, df5xy, df5xz
+	- Test case: 1a3egrr, 1a3egvw, 1a3egz0, 1a3eh24, 1a3eh58, 1a3eh8c, 1a3ehbg, 1a3ehhr, 1a3ehmw
 	- Closed: 20261111-181653
 
 - Core commands: status and watch
 	- ID: 2026111112163393
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
 		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
+	- Closed reason: Done
 	- Needs hand testing: run `status` and `watch` beside the throwaway Paper server from the Docker and native hand tests. Version, players, memory, ports, and the log tail show, and Ctrl-C ends `watch`.
 	- Priority: High
 	- Opened: 20261111-121633
@@ -1781,17 +5208,18 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The approved list is read from beside the config, so a second `--config` gets its own. design.md updated.
 		- A part that can't be read says why, and the rest still shows. Exit 0, since `status` ran. A failed command's stderr goes into its line, not over the screen, through `host.Exec.QuietErr`.
 		- No color yet. design.md allows it on a terminal only, and nothing needs it.
-		- 20261111: `TestMissingConfig` (df5xn) no longer expects `status` to say it isn't built. It checks the config path `status` reads beside instead.
+		- 20261111: `TestMissingConfig` (1a3egnm) no longer expects `status` to say it isn't built. It checks the config path `status` reads beside instead.
 		- Swept: every file read from the tree goes through `openRegular` or `Sums.Sum`; both modes judge "running" through the same calls as `start`, `launch.ContainerState` and `launch.UnitUp`.
 	- Branch: r1111
-	- Test case: df5y7, df5y8, df5y9, df5ya, df5yb, df5yc, df5yd, df5ye, df5yf, df5yg, df5yh
+	- Test case: 1a3ejdw, 1a3ejh0, 1a3ejm4, 1a3ejq8, 1a3ejtc, 1a3ejxg, 1a3ek0m, 1a3ek3r, 1a3ek6w, 1a3eka0, 1a3ekd4. 1a3ek3r is commented out since 2026111914334569, which removed CheckJars.
 	- Closed: 20261111-181653
 
 - console and cmd
 	- ID: 2026111111065750
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
 		- The native mode part moved to 2026111112163284's hand test, since it needs that server.
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway Paper server, in each mode, `console` shows the console, typed commands work, and Ctrl-C leaves it running. `cmd list` prints the player count.
 	- Priority: High
 	- Opened: 20261111-110657
@@ -1818,13 +5246,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: both modes' console and cmd go through `Kit.session` and `Kit.command`; `status`, native start, and `cmd` all name the log through `server.LogFile`.
 		- 20261111: Kept after the Check: Ctrl-C detaches in both modes, `cmd stop` and `cmd restart` are refused, and `cmd` keeps its wait times.
 	- Branch: r1111
-	- Test case: df5z6, df5z7, df5z8
+	- Test case: 1a3ener, 1a3enhw, 1a3enn0
 	- Closed: 20261111-181653
 
 - Run modes: console input through attach
 	- ID: 2026111116104058
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Needs hand testing: on a throwaway Paper server under Podman, then Docker, with the operator out of the `docker` group: `cmd list` prints the player count, `stop --warn 10` counts down in the chat and stops it, and `console` detaches on Ctrl-C with the server still up.
 	- Priority: High
 	- Opened: 20261111-161040
@@ -1846,16 +5275,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Docker's exit 1 counts as a detach only with "read escape sequence" on stderr. Podman exits 0. An attach that ends before reading the line is an error.
 		- One line may take 15 s at most, attach and detach included. Attach's copy of the console is read and dropped, so it can't block on a full pty.
 		- `Boxed` sets its console once it knows the runtime, so `stop` and `cmd` follow a container found under the other one.
-		- `TestDockerConsole` (df5xw) is now `TestAttachConsole` under the same ID, since the API write is gone. It still checks that the line arrives with a carriage return, that a control character is refused, and the dry run.
+		- `TestDockerConsole` (1a3ehbg) is now `TestAttachConsole` under the same ID, since the API write is gone. It still checks that the line arrives with a carriage return, that a control character is refused, and the dry run.
 		- Swept: `stop`, `cmd`, and the countdown all send through `Kit.Console`; nothing reads `DOCKER_HOST` or the Docker socket now.
 	- Branch: r1112
-	- Test case: df5xw
+	- Test case: 1a3ehbg
 	- Closed: 20261111-181653
 
 - setup: download Paper
 	- ID: 2026111116415186
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
@@ -1867,7 +5297,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: against the live API, the newest release was 26.3, build 249, and the 55 MB jar it downloaded matched the API's SHA-256, with `paper.jar` linked to it.
-		- Verified: df65q and df65r fail with the stable filter or the hash check taken out, and pass with them in.
+		- Verified: 1a3f9vw and 1a3f9z0 fail with the stable filter or the hash check taken out, and pass with them in.
 	- Decisions:
 		- The API is PaperMC's Fill v3 at `fill.papermc.io`. The old v2 API is deprecated.
 		- A new tree gets the newest release that has a stable build. Release candidates and versions with only beta builds are skipped.
@@ -1877,13 +5307,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- The code is `source/internal/paper`, for `update --paper` to reuse. Keeping the last 2 builds is left to update.
 		- Swept: nothing else downloads yet, and `plugins.Jars` already follows the `paper.jar` link.
 	- Branch: r1112
-	- Test case: df65p, df65q, df65r, df65d, df65f, df65j
+	- Test case: 1a3f9rr, 1a3f9vw, 1a3f9z0, 1a3f8wm, 1a3f92w, 1a3f9c8
 	- Closed: 20261111-165545
 
 - setup: Geyser and Floodgate
 	- ID: 2026111116415196
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-164151
 	- Opened by:
@@ -1897,8 +5328,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-11: With `bedrock` on, setup gets the newest Geyser and Floodgate builds from GeyserMC's download API before the plan, downloads them into `plugins/`, checks each SHA-256, and approves them with their source.
 		- Verified: the live API's latest Geyser 2.12.1 build 1300 and Floodgate 2.2.5 build 141 Spigot jars, fetched from the version and build address, match the API's SHA-256.
-		- Verified: df65x, df65y, df65z, df65d, df65f, and df65r each fail with their check taken out, and pass with it in.
-		- 20261111: df65d `TestNewInstall` expects 3 approved jars, was 1. df65f `TestAdopt` expects 4, was 2, and finds `paper.jar` anywhere in the list. Both now get Geyser and Floodgate too.
+		- Verified: 1a3faem, 1a3fahr, 1a3famw, 1a3f8wm, 1a3f92w, and 1a3f9z0 each fail with their check taken out, and pass with it in.
+		- 20261111: 1a3f8wm `TestNewInstall` expects 3 approved jars, was 1. 1a3f92w `TestAdopt` expects 4, was 2, and finds `paper.jar` anywhere in the list. Both now get Geyser and Floodgate too.
 		- 2026-11-12: Geyser's config is now written before its first start, through 2026111117052206. Only Floodgate's is left to its first start.
 	- Decisions:
 		- The download, size cap, and hash check moved from `source/internal/paper` to `source/internal/download`, which `paper` and the new `source/internal/geyser` share. Paper's behavior is the same.
@@ -1911,13 +5342,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `repair`'s Geyser and Floodgate check now uses `geyser.Installed`, so setup and repair agree on what counts as installed.
 		- Swept: `paper.Install` and `geyser.Install` both go through `download.Client.Into`; `repair` and setup share `geyser.Installed`; the only other `plugins.Approve` callers pass no source.
 	- Branch: r1112
-	- Test case: df65x, df65y, df65z, df65d, df65f, df65r
+	- Test case: 1a3faem, 1a3fahr, 1a3famw, 1a3f8wm, 1a3f92w, 1a3f9z0
 	- Closed: 20261111-170548
 
 - Firewall: rules file, its unit, and the start check
 	- ID: 2026111117134046
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-171340
 	- Opened by:
@@ -1929,7 +5361,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- 2026-11-11: `source/internal/firewall` renders `firewall.nft` and the unit. Both modes' `start` refuse without the table, after the plugin check.
-		- Verified: each rendered mix passes `nft -c`. A file loaded for real in a network namespace dropped and counted the account's connection to loopback, and let its DNS to 127.0.0.53 through. df66c fails on a v4 match against a v6 set, and df66f fails with the start check taken out.
+		- Verified: each rendered mix passes `nft -c`. A file loaded for real in a network namespace dropped and counted the account's connection to loopback, and let its DNS to 127.0.0.53 through. 1a3fbxg fails on a v4 match against a v6 set, and 1a3fc6w fails with the start check taken out.
 	- Decisions:
 		- The account is matched by name, so the file reads plainly. nft looks it up at load, after `setup` has made it.
 		- The output hook only jumps to the account's rules on a uid match. A packet with no socket, such as IPv6 neighbor discovery, has no uid, so a `!=` match would have let it reach the LAN drop.
@@ -1942,13 +5374,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `start` says `repair` loads the table, which comes with 2026111117135246.
 		- Swept: both modes' `Start` call `checkFirewall`; every start test's fake host answers the table list.
 	- Branch: r1112
-	- Test case: df66c, df66d, df66e, df66f
+	- Test case: 1a3fbxg, 1a3fc0m, 1a3fc3r, 1a3fc6w
 	- Closed: 20261111-172010
 
 - Firewall: drop counters in status
 	- ID: 2026111117135258
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-171352
 	- Opened by:
@@ -1961,20 +5394,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Low
 	- Progress log:
 		- 2026-11-11: `firewall.Counters` reads the table's counters from `nft -j list counters inet`. As root, `status` shows them on 2 lines, dropped in and dropped out. Otherwise it says sudo shows them. design.md updated.
-		- Verified: df67g and df67h pass, and both fail with the table match taken out. df67h parses nft's own answer, with the rules loaded in a network namespace and with none.
+		- Verified: 1a3ffe0 and 1a3ffh4 pass, and both fail with the table match taken out. 1a3ffh4 parses nft's own answer, with the rules loaded in a network namespace and with none.
 	- Decisions:
 		- All inet counters are listed, not the table's, since nft answers that the same way when the table is gone. No counters of ours means the table isn't loaded, and `status` says `repair` loads it.
 		- Packet counts only. `in_refused` is left out with `allowFrom` `any`, and `out_web` with `egress` `open`, since neither can count anything then.
-		- 20261111: df5y7 `TestStatusDocker` expects `Firewall:   on; run with sudo to see the drop counters`. Old: `drop counters not set up yet`.
+		- 20261111: 1a3ejdw `TestStatusDocker` expects `Firewall:   on; run with sudo to see the drop counters`. Old: `drop counters not set up yet`.
 		- Swept: `status` was the only place that said "not set up yet"; `firewall.Loaded` is still the only other reader of the table.
 	- Branch: r1112
-	- Test case: df67g, df67h, df5y7
+	- Test case: 1a3ffe0, 1a3ffh4, 1a3ejdw
 	- Closed: 20261111-175414
 
 - update: the command, and --paper
 	- ID: 2026111117302950
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-173029
 	- Opened by:
@@ -1986,7 +5420,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: against the live API, `update --dry-run` on a tree at Paper 26.3 build 244 planned the move to build 249.
-		- Verified: df66x, df66y, df66z, df670, and df671 each fail with their check taken out, such as the kept build, the approval, or the update after repair, and pass with it in.
+		- Verified: 1a3fdjm, 1a3fdnr, 1a3fdrw, 1a3fdw0, and 1a3fdz4 each fail with their check taken out, such as the kept build, the approval, or the update after repair, and pass with it in.
 	- Decisions:
 		- The code is `source/internal/update`, and reuses `paper.API` and the approval setup does.
 		- The version and build come from the name `paper.jar` links to. A plain `paper.jar` is refused with how to rename it, since swapping a link over it would delete the only copy. design.md updated.
@@ -1997,13 +5431,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- On an existing install setup asks once, then runs `repair` and `update` without asking again. Update runs even when a repair check failed, since a missing `paper.jar` is one update fixes, and both errors are returned.
 		- Swept: setup's new-install path and update share `paper.API` and `plugins.Approve`; `asRoot`'s message now fits both callers.
 	- Branch: r1112
-	- Test case: df66x, df66y, df66z, df670, df671
+	- Test case: 1a3fdjm, 1a3fdnr, 1a3fdrw, 1a3fdw0, 1a3fdz4
 	- Closed: 20261111-173642
 
 - update --plugins
 	- ID: 2026111117302973
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-173029
 	- Opened by:
@@ -2013,24 +5448,25 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Actual effort: Avg
 	- Progress log:
 		- Verified: against the live GeyserMC API, `update --dry-run` on an approved Geyser jar with an old hash planned the move to Geyser 2.12.1 build 1300.
-		- Verified: df672 fails with the file name check, the up-to-date check, or the missing jar check taken out, and passes with them in.
-		- 2026-11-12: df672 failed about 1 run in 10, since its rig approved the jars in map order, so Floodgate was sometimes looked up before Geyser and the failed lookup named Floodgate. The rig now approves them in a fixed order. Update itself follows the approved list's order.
-		- Verified: df672 failed 1 of 10 runs before the fix, and passed 25 runs in a row after it. The gate passes on both temp folders.
+		- Verified: 1a3fe28 fails with the file name check, the up-to-date check, or the missing jar check taken out, and passes with them in.
+		- 2026-11-12: 1a3fe28 failed about 1 run in 10, since its rig approved the jars in map order, so Floodgate was sometimes looked up before Geyser and the failed lookup named Floodgate. The rig now approves them in a fixed order. Update itself follows the approved list's order.
+		- Verified: 1a3fe28 failed 1 of 10 runs before the fix, and passed 25 runs in a row after it. The gate passes on both temp folders.
 	- Decisions:
 		- A jar is up to date when its approved hash is the source's newest, since GeyserMC's jar names have no version in them. The old version shown is what the jar's own `plugin.yml` says.
 		- A newest build with another file name is skipped with a note, since both jars would load. So is an approved jar that's gone from the tree, so update never adds one back.
 		- Only GeyserMC's `latest` sources are known. Modrinth and Hangar have no jars with a source yet, so they're 2026111117404480. Other sources are listed as skipped.
 		- Paper and the plugins are looked up first and share one plan and one question.
 		- design.md updated.
-		- Swept: update and setup share `geyser.API`, `plugins.Approve` keeps the source, and `TestUpdate` (df671) checks the new flag.
+		- Swept: update and setup share `geyser.API`, `plugins.Approve` keeps the source, and `TestUpdate` (1a3fdz4) checks the new flag.
 	- Branch: r1112
-	- Test case: df672, df671
+	- Test case: 1a3fe28, 1a3fdz4
 	- Closed: 20261111-174008
 
 - update --image
 	- ID: 2026111117302985
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-173029
 	- Opened by:
@@ -2039,7 +5475,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `--image` pulls the newest base image, checks that its `java -version` is new enough for this Paper, and pins its digest in the config.
 	- Actual effort: Avg
 	- Progress log:
-		- Verified: df67q fails with the Java check or the per-arch digest skip taken out, and passes with them in.
+		- Verified: 1a3fg3w fails with the Java check or the per-arch digest skip taken out, and passes with them in.
 		- Verified: with the live PaperMC API and eclipse-temurin:25-jre, under both Podman and Docker without sudo, the pull, the Java check, and the pin all worked, and both runtimes pinned the same digest.
 	- Decisions:
 		- The Java needed comes from the PaperMC API's version info (`java.version.minimum`), for the version the server runs after this update. `paper.API` gained `Java`.
@@ -2052,18 +5488,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- design.md's update section has the details.
 		- Swept: `PaperSource` has the one real implementation; the test fakes in update and main got `Java`. setup's own `PaperSource` doesn't need it.
 	- Branch: r1112
-	- Test case: df67p, df67q, df67r, df67s, df671
+	- Test case: 1a3fg0r, 1a3fg3w, 1a3fg70, 1a3fga4, 1a3fdz4
 	- Closed: 20261111-180421
 
 - Native start misses the new latest.log when its inode is reused
 	- ID: 2026111113354106
 	- Type: Bug
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: Avg
 	- Opened: 20261111-133541
 	- Opened by:
 	- Related IDs: 2026111112163284, 2026111111065750
-	- Incorrect behavior [Bug]: TestNativeStart (df5y1) fails with TMPDIR on an ext4 folder: start waits out startTimeout though the new latest.log has the Done line.
+	- Incorrect behavior [Bug]: TestNativeStart (1a3ehv4) fails with TMPDIR on an ext4 folder: start waits out startTimeout though the new latest.log has the Done line.
 	- Expected behavior [Bug]: start sees the new log on any file system.
 	- Reproduced [Bug]: 2026-11-11, on HEAD 2076b3a, with TMPDIR on ext4. Passes on ZFS.
 	- Possible cause [Bug]: Native.log tells the old log from the new one with os.SameFile. ext4 hands a removed file's inode to the next new file, so the new log looks like the old one. Log4j's rollover deletes latest.log, so a real server could hit it too.
@@ -2071,20 +5508,21 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Estimated effort: Low
 	- Actual effort: Low
 	- Progress log:
-		- Verified: on ext4, df5y1 and df5zp fail on the old code and pass with the fix. The gate passes with the default TMPDIR and with TMPDIR on ext4.
+		- Verified: on ext4, 1a3ehv4 and 1a3eq0r fail on the old code and pass with the fix. The gate passes with the default TMPDIR and with TMPDIR on ext4.
 	- Decisions:
 		- Hold the old log open until the server has loaded, so its inode can't go to the new file. Then `os.SameFile` is sound on any file system. A size or time check would still guess.
 		- `cmd`'s follower holds the file it read last, until the command ends.
 		- Swept: `os.SameFile` is used only in `Native.log` and `logFollow.next`, and both are fixed.
 	- Actual fix [Bug]: `Native` keeps `latest.log` open from before the launch until loaded; `logFollow` keeps its last file open.
 	- Branch: r1111
-	- Test case: df5y1, df5zp
+	- Test case: 1a3ehv4, 1a3eq0r
 	- Closed: 20261111-133909
 
 - Config reader for shcl in Go
 	- ID: 2026111111065684
 	- Type: Task
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110656
 	- Opened by: t00mietum
@@ -2104,13 +5542,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every key in the table has a setter and a test line; both files go through the one `LoadFile`.
 		- 20261111: The Check picks stand: jars named by their path, a key set twice with 2 values using neither, and a list with a bad item dropped whole.
 	- Branch: r1111
-	- Test case: df5wt, df5wv, df5ww, df5wx, df5wy, df5wz, df5x0, df5x1, df5x2, df5x3, df5x4, df5x5
+	- Test case: 1a3ee18, 1a3ee4c, 1a3ee7g, 1a3eeam, 1a3eedr, 1a3eegw, 1a3eem0, 1a3eeq4, 1a3eet8, 1a3eexc, 1a3ef0g, 1a3ef3m
 	- Closed: 20261111-120826
 
 - Config defaults and overrides
 	- ID: 2026111111065697
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110656
 	- Opened by: t00mietum
@@ -2132,13 +5571,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: every default in design.md's table that's written as a value is checked against the code by a test. The derived ones have their own cases.
 		- 20261111: The Check picks stand: `--set KEY=VALUE`, the pinned `eclipse-temurin:25-jre` image, and Paper's recommended `jvmArgs`.
 	- Branch: r1111
-	- Test case: df5x6, df5x7, df5x8, df5x9, df5xa, df5xb
+	- Test case: 1a3ef6r, 1a3ef9w, 1a3efd0, 1a3efg4, 1a3efk8, 1a3efpc
 	- Closed: 20261111-121403
 
 - Core commands: CLI, command runner, and tree hand-off
 	- ID: 2026111112162268
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-121622
 	- Opened by: t00mietum
@@ -2159,13 +5599,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: both flag passes share `commonFlags`; every chown goes through `tree.handOver`.
 		- 20261111: Kept after the Check: `--dry-run` still runs the commands that only look, the rules for a missing config, and `stop` with `ownerAfterStop` empty.
 	- Branch: r1111
-	- Test case: df5xc, df5xd, df5xe, df5xf, df5xg, df5xh, df5xj, df5xk, df5xm, df5xn
+	- Test case: 1a3efsg, 1a3efwm, 1a3efzr, 1a3eg2w, 1a3eg60, 1a3eg94, 1a3egc8, 1a3egfc, 1a3egjg, 1a3egnm
 	- Closed: 20261111-122043
 
 - Safe server settings
 	- ID: 2026111111065724
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -2191,13 +5632,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: both modes call the check through `Kit`; `status` and the warnings share one player reader.
 		- 20261111: Kept after the Check: `proxy-protocol` off, and a missing `server.properties` counted as unsafe. `repair` no longer refuses without root, and runs itself through sudo instead, see 2026111111065763.
 	- Branch: r1111
-	- Test case: its children's: 2026111112554261: df5yv, df5yw, df5yx
+	- Test case: its children's: 2026111112554261: 1a3emcc, 1a3emfg, 1a3emjm
 	- Closed: 20261111-130256
 
 - Safe server settings: Geyser config
 	- ID: 2026111112554261
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-125542
 	- Opened by: t00mietum
@@ -2217,13 +5659,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- All addresses is written as `0.0.0.0`, Geyser's own default. An IPv6 address is quoted. `auth-type` compares without case.
 		- Swept: `Check` and `Fix` share one scan, so `start` through `Kit` and `repair` both get it. The Floodgate config and `key.pem` mode are left to the repair item, per design.md.
 	- Branch: r1111
-	- Test case: df5yv, df5yw, df5yx
+	- Test case: 1a3emcc, 1a3emfg, 1a3emjm
 	- Closed: 20261111-130203
 
 - Plugin pinning
 	- ID: 2026111111065737
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -2246,16 +5689,17 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- `plugins-refused/` takes the owner of `plugins/`. A name already there gets the time added.
 		- The name and version come from `paper-plugin.yml`, `plugin.yml`, or `extension.yml`, read up to 64 KiB, with control characters dropped.
 		- `--approve-plugins` with `--check` is a usage error. No `--yes` for it, since the point is a person looking at each jar.
-		- 20261111: the status tests' approved list gained the Paper build, and their jar counts went from 2 to 3 and from 3 to 4 (df5y7, df5y9, df5yh), since `paper.jar` is now counted.
+		- 20261111: the status tests' approved list gained the Paper build, and their jar counts went from 2 to 3 and from 3 to 4 (1a3ejdw, 1a3ejm4, 1a3ekd4), since `paper.jar` is now counted.
 		- Swept: every reader of jars goes through `plugins.Jars` (`CheckJars`, `lockedJars`, `repair`); both modes call `Kit.checkPlugins`; status reads the list through the same path as `start`.
 	- Branch: r1111
-	- Test case: df5z0, df5z1, df5z2, df5z3, df5z4, df5z5
+	- Test case: 1a3emw0, 1a3emz4, 1a3en28, 1a3en5c, 1a3en8g, 1a3enbm. Plugin approval is gone since 2026111914334569: 1a3en28, 1a3en5c, 1a3en8g and 1a3enbm are commented out.
 	- Closed: 20261111-131704
 
 - repair
 	- ID: 2026111111065763
 	- Type: Feature
-	- Status: Done
+	- Status: Closed
+	- Closed reason: Done
 	- Priority: High
 	- Opened: 20261111-110657
 	- Opened by: t00mietum
@@ -2267,7 +5711,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-11: `repair` runs design.md's checks 1 to 8, 10, 11, 12, and 14 in order, around the safe settings and plugin steps. Each one prints OK, FIXED, or FAILED, and `--check` fixes nothing.
 		- Verified: each new test fails with its check broken, and passes with it in place.
-		- 20261111: Verified: df5ys fails with the old refusal put back, and with `--dry-run` taken out, and passes with both in.
+		- 20261111: Verified: 1a3em64 fails with the old refusal put back, and with `--dry-run` taken out, and passes with both in.
 	- Decisions:
 		- Checks 9 and 13 come with the Firewall and Start at boot items, which list `repair` managing them. There's no rules file or boot unit to check yet.
 		- Checks are a list in `source/internal/repair`, each with a look and an optional fix per finding, per design.md. Every fix is a command through the runner.
@@ -2283,8 +5727,19 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- Swept: `refuseOthers` and `status` still go through `RunningPaper`, which now uses `PaperProcs`; both modes' jar locks use `LockedJars`.
 		- 20261111: Without root and without `--check`, `repair` runs itself again through sudo, as `setup` and `update` do. It used to refuse. `--dry-run` is the same as `--check`. design.md listed a `--yes` for it, which is gone, since its only questions are per jar.
 	- Branch: r1111, repair-sudo
-	- Test case: df5za, df5zb, df5zc, df5zd, df5ze, df5zf, df5zg, df5zh, df5zj, df5zk, df5zm, df5zn
+	- Test case: 1a3env8, 1a3enyc, 1a3ep1g, 1a3ep4m, 1a3ep7r, 1a3epaw, 1a3epe0, 1a3eph4, 1a3epm8, 1a3epqc, 1a3eptg, 1a3epxm
 	- Closed: 20261111-133545
+
+- install.bash: install for one user, without root
+	- ID: 2026111713320666
+	- Type: Feature
+	- Status: Deferred
+	- Priority: Low
+	- Opened: 20261117-133206
+	- Opened by:
+	- Related IDs: 2026111111070761
+	- Requirements:
+		- An install into the user's own folders, beside the system install. t00mietum on 20261117: system only is OK for now, and user setup can be a deferred item.
 
 - update --self
 	- ID: 2026111318002865
@@ -2353,6 +5808,77 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- MCXboxBroadcast, when this gets picked up. It needs a spare Microsoft account, never the main one.
 		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
 
+- Code review 20261121: observations not filed
+	- ID: 2026112110300442
+	- Type: Task
+	- Status: Canceled
+	- Opened: 20261121-103000
+	- Opened by:
+	- Decided against: `gfs-rotate.bash` against `oldbuild.Rotate`. Both keep the same files, and the script is used only on CICD's own folders.
+	- Decided against: The gap between `download.Staged.Keep`'s check and its rename. update refuses while the server runs, so nothing of the server account's is running then.
+	- Decided against: A config path with a newline breaking the unit's ExecStart. The operator picks the path.
+	- Decided against: Old build names stamped under a different TZ, or in a DST overlap. At most an hour off in the rotation.
+	- Decided against: `Rotate` pruning hand-placed `tt-minecraftd.*` files. The folder is the tool's, and a test pins it.
+	- Decided against: selfupdate not retiring the old build. It's deferred, and design.md says it gets the move when it comes back.
+	- Decided against: install.bash's release list parse leaning on GitHub's pretty-printed JSON. It matches the API today.
+	- Decided against: ufw's v6-only allow counted for IPv4. A test pins it as meant.
+	- Decided against: `plugins.Libraries` keyed to the old `paper.jar`. Paperclip writes its own libraries back from its jar.
+	- Decided against: `rm -f` in the library removal. It runs as runUser on full paths after `--`.
+	- Decided against: The native ownership fix handing locked jars back to runUser. Native mode is off, and the unit keeps them read-only.
+	- Decided against: `linksafe.OpenFile` opening without O_PATH. The container drops all capabilities, and a FIFO opened with O_NONBLOCK is harmless.
+	- Decided against: A backslash in a jar name making `SetSources` refuse the batch. Too contrived.
+	- Decided against: A folder swap after `Mkdir`'s mkdirat. The server can only swap in a folder it could already reach.
+	- Decided against: Hard links in the tree. `protected_hardlinks` limits them to files the server can already reach.
+	- Decided against: Geyser `auth-type` with no `config-version`, both top-level and under `java:`. Crafted only, and offline logins on an online-mode Java server let nobody in.
+	- Decided against: `config-version` written as hex or `5.0`, `!!str false`, and mixed-case `FaLsE`. Contrived, or Paper falls back to its default of false.
+	- Decided against: `agent.Check` cutting `sha256` and `url` to length before it checks them. The download hash check still refuses a wrong one.
+	- Decided against: The GitHub content hosts in `agentHosts`. Same class as the hostile agent on github.com, decided on 2026111715280984.
+	- Decided against: Each jar hashed 2 or 3 times a run. Plugin jars are small.
+	- Decided against: `extraArgs` able to override the safe settings. It's the root-owned config's choice, per design.md.
+	- Decided against: `agent/live_test.go` not driving the `command` kind. Test only.
+	- Decided against: The 401 hint naming only `TT_MINECRAFTD_AGENT_KEY`. Cosmetic.
+	- Decided against: Firewall asymmetry between IPv4 and IPv6. A namespace probe of 18 targets under `egress: web` with Bedrock on gave the same answer for both.
+	- Decided against: Spoofing into `seek4`. It takes a LAN accomplice, and only UDP from 7551 gets through.
+	- Decided against: Global IPv6 LAN clients refused under `lan`, public on-link IPv4 subnets not blocked, and NAT64 not in `lan6`. design.md sets those ranges.
+	- Decided against: start refusing after a new ISP IPv6 prefix until repair. That's the design's rule.
+	- Decided against: `LogThread`'s greedy match on chat text, and a late answer to an async command being cut off. False negatives only, and design.md counts only server-thread lines.
+	- Decided against: Podman's `stopping` or `paused` state counting as not running. Only happens by hand.
+	- Decided against: The CodeQL CSV loop and a last line with no newline. CodeQL ends every row with one.
+	- Decided against: `CICD_FUZZ_TIME` or `CICD_SOAK_ROUNDS` weakening a merge gate that still writes its marker. Deliberate operator overrides.
+	- Decided against: `fGoTestRun` not failing on 0 passed lines. Areas are checked against real folders, and test-id.bash finds missing IDs.
+	- Decided against: Small uncapped `docker run --rm` helper calls on the cache volume. Tiny and short-lived.
+	- Decided against: `fSweepRuns` removing a kept `--zfs` run folder while the pool is imported. ZFS holds the file open.
+	- Decided against: verify-release.bash not clearing `go env -w` settings. An odd setup.
+	- Decided against: Lint leads `agent.go` badCond, `launch/links.go` nilerr, `settings/yaml.go` nilnil, and the hugeParam notes. Each is meant, or costs nothing.
+	- Decided against: The 2026-11-18 line length directive. MD013 is off, and no other width is set in the repo.
+
+- Code review 20261117: observations not filed
+	- ID: 2026111715280984
+	- Type: Task
+	- Status: Canceled
+	- Opened: 20261117-152809
+	- Opened by:
+	- Decided against: Unchecked Close in plugins/approve.go, plugins/check.go, repair/files.go and update/agent.go. Each file is only read.
+	- Decided against: The unused uid and gid starting values in linksafe.go. Both branches set them.
+	- Decided against: No unit test for paper.fchownatNoFollow. It doesn't follow the temp link, and the root host check covers paper.jar.
+	- Decided against: linksafe.Write keeping setuid and setgid bits from the old file. The new file has the old file's owner, so nothing is gained.
+	- Decided against: chmod -R in the tree hand-off following a link. It's given the resolved real tree, and its parents aren't writable by the server.
+	- Decided against: The RCON drop skipped when a game port is 25575. That's needed, and a test pins it.
+	- Decided against: Rate limiting per IPv6 address rather than per /64. It's a recorded decision on the Firewall item.
+	- Decided against: The append in launch/session.go that lint flags. No backing array is shared.
+	- Decided against: The missing switch cases in launch/group.go. Unknown and here are meant to pass.
+	- Decided against: Operator args and environment reaching the sudo run. sudo resets the environment, and the operator already has sudo.
+	- Decided against: config switches without array and raw cases. The default branch warns.
+	- Decided against: The dropped MarshalIndent error in agent.go. The question holds only strings, so it can't fail.
+	- Decided against: The agent answer file handed to the sudo run. Its folder is 0700 and only the operator can write it, and root checks everything again.
+	- Decided against: A hostile agent hosting a hash on github.com. The plugin name match and the operator's yes are the gate, as design.md says.
+	- Decided against: update exiting 0 when every agent jar fails a check. design.md says so.
+	- Decided against: Unsigned releases. design.md lists signing under Needs more thought.
+	- Decided against: install-dev.bash counting Podman without podman-docker as a container runtime. 2026111713320657 asked for that.
+	- Decided against: A runUser that names an existing service account losing its groups. The operator chose it, and people's accounts are guarded.
+	- Decided against: Unchecked Fprintf to the terminal, about 130 sites. Nothing can be done on a failed terminal write.
+	- Decided against: shellcheck with every optional check on. It found only SC2310 and SC2312 notes.
+
 - setup and repair offer zfs allow for snapshots
 	- ID: 2026111211050654
 	- Type: Feature
@@ -2375,10 +5901,14 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 
 	- The ID is the local time to the hundredth of a second. Opened is when it was written down, which may differ. (Use a keyboard macro and possibly something like project 'zuid' to generate.)
 
-	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Moot means something else changed that made it irrelevant. Canceled means it still applies but was decided against. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Can't reproduce means a real attempt to reproduce it failed.
+	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Canceled means it still applies but was decided against, and it needs no reason. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Closed means no more work is planned, and Closed reason says why.
+
+	- Closed reason values: Done means the work is finished. Duplicate means another item covers it, and Superseded means a newer item replaces it. Both name that item in Superseded by ID. Could not reproduce means a real attempt to reproduce it failed. Works as intended means the report describes how it's meant to work. Won't fix means it's a real bug that's left as is, and the item has to say why. Moot means something else changed that made it irrelevant.
+
+	- Target version is the release an item is meant for. Every open item has one, and so does every item closed since the last release.
 
 	- As issues are worked, and statuses change, place them in correct sorting order within the list:
-		- First by status: Waiting for answers, Waiting on signoff, Testing, Waiting for testing, Can't reproduce, Stalled, Started, Queued, Done, Deferred, Canceled, Moot
+		- First by status: Waiting for answers, Waiting on signoff, Testing, Waiting for testing, Stalled, Started, Queued, Closed, Deferred, Canceled
 		- Then by severity|priority: Critical, High, Avg, Low
 		- Then by type: Bugs, [not bugs together]
 
@@ -2389,7 +5919,9 @@ Template:
 - Title
 	- ID: YYYYmmDDHHMMSSNN
 	- Type: [Bug|Feature|Enhancement|Task]
-	- Status: [Queued|Waiting for answers|Waiting on signoff|Waiting for testing|Started|Testing|Stalled|Can't reproduce|Moot|Canceled|Deferred|Done]
+	- Status: [Queued|Waiting for answers|Waiting on signoff|Waiting for testing|Started|Testing|Stalled|Closed|Canceled|Deferred]
+	- Closed reason: [Done|Duplicate|Superseded|Could not reproduce|Works as intended|Won't fix|Moot]
+	- Target version:
 	- Needs local test suite run?:
 	- Needs external testing:
 	- Priority [Feature|Enhancement] | Severity [Bug]: [Critical|High|Avg|Low]

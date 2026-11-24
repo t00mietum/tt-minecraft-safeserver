@@ -52,7 +52,7 @@ func before() Config {
 }
 
 func TestReadEveryKey(t *testing.T) {
-	defer testid.Line(t, "df5wt")
+	defer testid.Line(t, "1a3ee18")
 	text := `runMode: docker
 runUser: mcd
 runGroup: games
@@ -132,7 +132,7 @@ agentHosts: [CDN.Modrinth.com, ci.example.org]
 }
 
 func TestMissingKeysLeaveDefaults(t *testing.T) {
-	defer testid.Line(t, "df5wv")
+	defer testid.Line(t, "1a3ee4c")
 	c := before()
 	if warns := mustRead(t, "## nothing set\n\nheapMax: 8G\n", &c); len(warns) != 0 {
 		t.Fatalf("warnings: %v", warns)
@@ -145,7 +145,7 @@ func TestMissingKeysLeaveDefaults(t *testing.T) {
 }
 
 func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
-	defer testid.Line(t, "df5ww")
+	defer testid.Line(t, "1a3ee7g")
 	cases := []struct{ line, says string }{
 		{"runMode: lxc", `"lxc" isn't one of: podman, docker`},
 		{"runMode: [docker, native]", "takes one value"},
@@ -182,7 +182,7 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 		{"agent: chatgpt", "isn't one of: none, openai, anthropic, command"},
 		{"agentURL: http://192.168.1.5:11434/v1", "plain http only goes to a loopback address"},
 		{"agentURL: http://localhost.example.com/v1", "plain http only goes to a loopback address"},
-		{"agentURL: https://me:sk-123@api.example.com", "can't hold a user or key"},
+		{"agentURL: https://me:sk-123@api.example.com", "can't have a user name or key"},
 		{"agentURL: ftp://api.example.com", "isn't https"},
 		{"agentURL: api.openai.com/v1", "isn't a web address"},
 		{"agentModel: \"gpt 5\"", "isn't a model name"},
@@ -215,7 +215,7 @@ func TestBadValueWarnsAndKeepsDefault(t *testing.T) {
 }
 
 func TestUnknownNestedAndRepeatedKeysWarn(t *testing.T) {
-	defer testid.Line(t, "df5wx")
+	defer testid.Line(t, "1a3eeam")
 	c := before()
 	warns := mustRead(t, "gamePort: 25570\nwhiteList: true\nheapMax: 8G\n\tmin: 1G\ngamePort: 25571\negress: open\n", &c)
 	got := make([]string, len(warns))
@@ -236,7 +236,7 @@ func TestUnknownNestedAndRepeatedKeysWarn(t *testing.T) {
 }
 
 func TestSizesTakeJavaAndShclForms(t *testing.T) {
-	defer testid.Line(t, "df5wy")
+	defer testid.Line(t, "1a3eedr")
 	cases := map[string]int64{
 		"512m":    512 << 20,
 		"512M":    512 << 20,
@@ -260,7 +260,7 @@ func TestSizesTakeJavaAndShclForms(t *testing.T) {
 }
 
 func TestKeysAndChoicesIgnoreCase(t *testing.T) {
-	defer testid.Line(t, "df5wz")
+	defer testid.Line(t, "1a3eegw")
 	var c Config
 	if warns := mustRead(t, "RunMode: Docker\nALLOWFROM: [LAN, Any]\nEgress: WEB\n", &c); len(warns) != 0 {
 		t.Fatalf("warnings: %v", warns)
@@ -271,7 +271,7 @@ func TestKeysAndChoicesIgnoreCase(t *testing.T) {
 }
 
 func TestBrokenLineWarnsAndRestLoads(t *testing.T) {
-	defer testid.Line(t, "df5x0")
+	defer testid.Line(t, "1a3eem0")
 	c := before()
 	warns := mustRead(t, "gamePort: 25570\nthis line has no colon\negress: open\n", &c)
 	if len(warns) == 0 || warns[0].Line != 2 {
@@ -283,7 +283,7 @@ func TestBrokenLineWarnsAndRestLoads(t *testing.T) {
 }
 
 func TestUnreadableFileIsAnError(t *testing.T) {
-	defer testid.Line(t, "df5x1")
+	defer testid.Line(t, "1a3eeq4")
 	c := before()
 	_, err := Read(filepath.Join(t.TempDir(), "nope.shcl"), &c)
 	if !errors.Is(err, fs.ErrNotExist) {
@@ -299,7 +299,7 @@ func TestUnreadableFileIsAnError(t *testing.T) {
 
 // Every key in design.md's settings table is read, and nothing else.
 func TestKeysMatchDesign(t *testing.T) {
-	defer testid.Line(t, "df5x2")
+	defer testid.Line(t, "1a3eet8")
 	text, err := os.ReadFile("../../../project/design.md")
 	if err != nil {
 		t.Fatal(err)
@@ -321,5 +321,42 @@ func TestKeysMatchDesign(t *testing.T) {
 	}
 	for name := range setters {
 		t.Errorf("%s is read but not in design.md", name)
+	}
+}
+
+// An IPv4-mapped address or range is read as IPv4, since that's how nft and
+// Paper see an IPv4 client.
+func TestMappedAddressesReadAsIPv4(t *testing.T) {
+	defer testid.Line(t, "1a3jyvm")
+	c := before()
+	text := "bindIP: \"::ffff:192.168.1.123\"\n" +
+		"allowFrom: [\"::ffff:10.0.0.1\", \"::ffff:10.1.2.3/104\", \"::FFFF:0:0/96\", \"::ffff:10.0.0.0/80\", \"2001:db8::1\"]\n"
+	if warns := mustRead(t, text, &c); len(warns) != 0 {
+		t.Fatalf("warnings: %v", warns)
+	}
+	if c.BindIP != "192.168.1.123" {
+		t.Errorf("bindIP = %q", c.BindIP)
+	}
+	// A range wider than the mapped block isn't all IPv4, so it stays IPv6.
+	want := []string{"10.0.0.1", "10.0.0.0/8", "0.0.0.0/0", "::/80", "2001:db8::1"}
+	if !reflect.DeepEqual(c.AllowFrom, want) {
+		t.Errorf("allowFrom = %q, want %q", c.AllowFrom, want)
+	}
+}
+
+// A comment against a value cuts it with no error from shcl, so it warns.
+func TestGluedCommentWarns(t *testing.T) {
+	defer testid.Line(t, "1a4zb2h")
+	c := before()
+	warns := mustRead(t, "serverDir: /srv/games#2\nrunUser: mc  # the account\n", &c)
+	if len(warns) != 1 || warns[0].Line != 1 || !strings.Contains(warns[0].Text, "starts a comment") {
+		t.Errorf("got %v", warns)
+	}
+	if c.ServerDir != "/srv/games" || c.RunUser != "mc" {
+		t.Errorf("got serverDir %q, runUser %q", c.ServerDir, c.RunUser)
+	}
+	c = before()
+	if warns := mustRead(t, "serverDir: \"/srv/games#2\"\n", &c); len(warns) != 0 || c.ServerDir != "/srv/games#2" {
+		t.Errorf("quoted: got %v, %q", warns, c.ServerDir)
 	}
 }

@@ -4,6 +4,7 @@
 package geyser
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/testid"
 )
 
@@ -54,7 +56,7 @@ func sum(b []byte) string {
 }
 
 func TestLatest(t *testing.T) {
-	defer testid.Line(t, "df65x")
+	defer testid.Line(t, "1a3faem")
 	jar := []byte("PK not really a jar")
 	f := &fakeAPI{name: "Geyser-Spigot.jar", sum: strings.ToUpper(sum(jar)), jar: jar}
 	api := newAPI(t, f)
@@ -89,7 +91,7 @@ func TestLatest(t *testing.T) {
 }
 
 func TestInstall(t *testing.T) {
-	defer testid.Line(t, "df65y")
+	defer testid.Line(t, "1a3fahr")
 	jar := []byte("PK not really a jar")
 	f := &fakeAPI{name: "Geyser-Spigot.jar", sum: sum(jar), jar: jar}
 	api := newAPI(t, f)
@@ -138,10 +140,46 @@ func TestInstall(t *testing.T) {
 	}
 }
 
+// A new plugins/ that the server swaps for a link before its mode is set
+// leaves the link's target alone. A file outside stands in for /etc/passwd.
+func TestInstallSwappedFolder(t *testing.T) {
+	defer testid.Line(t, "1a3jt2g")
+	jar := []byte("PK not really a jar")
+	api := newAPI(t, &fakeAPI{name: "Geyser-Spigot.jar", sum: sum(jar), jar: jar})
+	b, err := api.Latest(context.Background(), "geyser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, target := t.TempDir(), filepath.Join(t.TempDir(), "passwd")
+	if err := os.WriteFile(target, []byte("root:x:0:0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	swapped := false
+	linksafe.AfterMkdirat = func(path string) {
+		if path != dir+"/plugins" {
+			return
+		}
+		swapped = true
+		if err := os.Remove(path); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { linksafe.AfterMkdirat = nil })
+	if err := api.Install(context.Background(), dir, b); err == nil {
+		t.Error("no error with plugins/ swapped for a link")
+	}
+	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o644 || !swapped {
+		t.Errorf("target %v %v, swapped %v", fi.Mode(), err, swapped)
+	}
+}
+
 // A jar is GeyserMC's only when it sits in plugins/ and both its file name
 // and the plugin name it claims say so.
 func TestProject(t *testing.T) {
-	defer testid.Line(t, "df76p")
+	defer testid.Line(t, "1a3jgwr")
 	for _, c := range []struct{ name, claim, want string }{
 		{"plugins/Geyser-Spigot.jar", "Geyser-Spigot", "geyser"},
 		{"plugins/floodgate-spigot.jar", "floodgate", "floodgate"},
@@ -156,5 +194,63 @@ func TestProject(t *testing.T) {
 		if got := Project(c.name, c.claim); got != c.want {
 			t.Errorf("Project(%q, %q) = %q, want %q", c.name, c.claim, got, c.want)
 		}
+	}
+}
+
+// Add-ons named like Geyser or Floodgate aren't GeyserMC's, by their file
+// name or the plugin name they claim, so they keep their own source and
+// don't stand in for the real jar at setup.
+func TestAddonsArentGeyser(t *testing.T) {
+	defer testid.Line(t, "1a4z3bm")
+	for _, c := range []struct{ name, claim, want string }{
+		{"plugins/GeyserExtras.jar", "GeyserExtras 2.0.1", ""},
+		{"plugins/GeyserSkinManager-Spigot.jar", "GeyserSkinManager 1.7", ""},
+		{"plugins/GeyserModelEngine.jar", "GeyserModelEngine 1.0", ""},
+		{"plugins/Geyser-ModelEngine.jar", "GeyserModelEngine 1.0", ""},
+		{"plugins/floodgate-addon.jar", "FloodgateAddon 1", ""},
+		{"plugins/GeyserExtras.jar", "Geyser-Spigot 2.12.1", ""},
+		{"plugins/Geyser-Spigot.jar", "Geyser-Spigot 2.12.1-b1", "geyser"},
+		{"plugins/geyser.jar", "geyser-spigot", "geyser"},
+		{"plugins/floodgate-spigot.jar", "floodgate 2.2.5-SNAPSHOT (b123)", "floodgate"},
+	} {
+		if got := Project(c.name, c.claim); got != c.want {
+			t.Errorf("Project(%q, %q) = %q, want %q", c.name, c.claim, got, c.want)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "plugins"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	put := func(name, yml string) {
+		t.Helper()
+		var b strings.Builder
+		z := zip.NewWriter(&b)
+		if yml != "" {
+			w, err := z.Create("plugin.yml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.Write([]byte(yml)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := z.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "plugins", name), []byte(b.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("GeyserExtras.jar", "name: GeyserExtras\nversion: 2.0.1\n")
+	put("Geyser-ModelEngine.jar", "name: GeyserModelEngine\nversion: 1.0\n")
+	put("floodgate-addon.jar", "name: FloodgateAddon\nversion: 1\n")
+	if has, err := Installed(dir); err != nil || len(has) != 0 {
+		t.Errorf("add-ons only: %v %v", has, err)
+	}
+	put("Geyser-Spigot.jar", "name: Geyser-Spigot\nversion: 2.12.1\n")
+	put("floodgate.jar", "")
+	if has, err := Installed(dir); err != nil || !has["geyser"] || !has["floodgate"] {
+		t.Errorf("with GeyserMC's: %v %v", has, err)
 	}
 }

@@ -12,26 +12,21 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
-	"slices"
+	"strconv"
 	"strings"
-	"syscall"
-	"time"
-	"unicode/utf8"
 
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/yottacore/shcl/source/go/v3"
 )
 
-// RefusedDir is where repair --approve-plugins moves a refused jar, under
-// serverDir, so the server doesn't load it.
-const RefusedDir = "plugins-refused"
-
-// Info is what an operator sees about a jar before approving it.
+// Info is a jar with what's known about it.
 type Info struct {
 	Jar
 	SHA256 string
-	Size   int64
-	Mod    time.Time
+	// Size and Mod are commented out by 2026112110300390: set, and never read
+	// since plugin approval went.
+	// Size   int64
+	// Mod    time.Time
 	// About is the name and version from the jar's own plugin.yml,
 	// paper-plugin.yml, or Geyser's extension.yml, or empty.
 	About string
@@ -39,16 +34,12 @@ type Info struct {
 	Source string
 }
 
-// Describe gives the jar's hash, size, date, and what it says it is.
+// Describe gives the jar's hash and what it says it is, both
+// from one open, so the hash is of the jar the rest describes. Anything but
+// a regular file is refused before it's opened.
 func Describe(j Jar) (Info, error) {
 	info := Info{Jar: j}
-	var sums Sums
-	sum, err := sums.Sum(j.File)
-	if err != nil {
-		return info, err
-	}
-	info.SHA256 = sum
-	f, err := os.OpenFile(j.File, os.O_RDONLY|syscall.O_NONBLOCK, 0) // #nosec G304 -- a jar under the configured serverDir
+	f, err := server.OpenRegular(j.File)
 	if err != nil {
 		return info, err
 	}
@@ -57,19 +48,35 @@ func Describe(j Jar) (Info, error) {
 	if err != nil {
 		return info, err
 	}
-	info.Size, info.Mod = fi.Size(), fi.ModTime()
-	if fi.Mode().IsRegular() {
-		info.About = about(f, fi.Size())
+	if info.SHA256, err = hashOf(f); err != nil {
+		return info, err
 	}
+	// info.Size, info.Mod = fi.Size(), fi.ModTime()
+	info.About = about(f, fi.Size())
 	return info, nil
 }
 
 // about reads the name and version a jar claims. A jar that isn't a zip, or
 // has none of the files, gives "". The jar could say anything, so this is
-// only a hint for the person approving it.
+// only a hint.
 func about(r io.ReaderAt, size int64) string {
 	name, version := claims(r, size)
 	return strings.TrimSpace(name + " " + version)
+}
+
+// aboutFile is about for a jar on disk, with no hash, since setup and repair
+// only want the name.
+func aboutFile(file string) (string, error) {
+	f, err := server.OpenRegular(file)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	return about(f, fi.Size()), nil
 }
 
 // Claims gives the plugin name and version an open jar says it is, from the
@@ -131,29 +138,29 @@ func yamlNameVersion(r io.Reader) (name, version string) {
 // a jar can't write escape codes to the terminal or disguise its name, and
 // cuts a long value on a character boundary.
 func clean(s string) string {
-	s = strings.Map(func(r rune) rune {
-		switch {
-		case r < 0x20, r >= 0x7f && r < 0xa0,
-			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
-			return -1
-		}
-		return r
-	}, s)
-	if len(s) > 80 {
-		cut := 80
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = s[:cut] + "..."
-	}
-	return s
+	return server.Cut(server.Clean(s), 80)
 }
 
-// Approve writes the hashes of jars into the approved list, adding the ones
-// it doesn't have, and a jar's source when it has one. Other entries,
-// comments, sources, and the operator's own lines stay byte for byte. A new file is made readable by
-// all, so status works without sudo.
-func Approve(file string, jars []Info) error {
+// NotKept is SetSources' error when plugins.shcl can't be saved with its
+// lines kept, so it's left as it was. Jars are the sources to add by hand.
+type NotKept struct {
+	File string
+	Jars []Info
+}
+
+func (e *NotKept) Error() string {
+	adds := make([]string, 0, len(e.Jars))
+	for _, j := range e.Jars {
+		adds = append(adds, "source: "+strconv.Quote(j.Source)+" under jar: "+strconv.Quote(j.Name))
+	}
+	return fmt.Sprintf("%s: saving would rewrite every line in shcl's own form, such as when a key is given more than once, so it's left as it was. Add %s there by hand", e.File, strings.Join(adds, ", and "))
+}
+
+// SetSources writes each jar's source into plugins.shcl, adding the jars it
+// doesn't have. Other entries, comments, and the operator's own lines stay
+// byte for byte, or the file isn't written and the error is a *NotKept. A
+// new file is made readable by all, so status works without sudo.
+func SetSources(file string, jars []Info) error {
 	doc, st, err := shcl.LoadFileKeepLines(file, shcl.Standard)
 	fresh := st == shcl.FileNotFound
 	switch {
@@ -162,21 +169,27 @@ func Approve(file string, jars []Info) error {
 	case st == shcl.FileUnreadable:
 		return fmt.Errorf("can't read %s", file)
 	}
+	var set []Info
 	for _, j := range jars {
 		if !insideServer(j.Name) {
 			return fmt.Errorf("%q isn't a path under the server folder", j.Name)
 		}
-		key := "jar(" + shcl.QuoteSegment(j.Name) + ").sha256"
-		if s := doc.SetString(key, j.SHA256); s != shcl.SetOk {
-			return fmt.Errorf("%s: can't add %s: %s", file, j.Name, s)
-		}
 		if j.Source == "" {
 			continue
 		}
-		key = "jar(" + shcl.QuoteSegment(j.Name) + ").source"
+		key := "jar(" + shcl.QuoteSegment(j.Name) + ").source"
 		if s := doc.SetString(key, j.Source); s != shcl.SetOk {
 			return fmt.Errorf("%s: can't add %s's source: %s", file, j.Name, s)
 		}
+		set = append(set, j)
+	}
+	if len(set) == 0 && !fresh {
+		return nil
+	}
+	// shcl falls back to its own form after it merged a repeated key, which
+	// would drop the operator's comments and lines (2026112214545321).
+	if _, kept := doc.ToTextKeepLines(); !kept && !fresh {
+		return &NotKept{File: file, Jars: set}
 	}
 	if _, err := doc.SaveFileKeepLines(file); err != nil {
 		return err
@@ -187,32 +200,40 @@ func Approve(file string, jars []Info) error {
 	return nil
 }
 
-// Refuse moves a jar from pinnedDirs into RefusedDir, owned like plugins/.
-// One that's already there with the same name gets the time added to the new
-// one's name.
-func Refuse(serverDir string, j Jar, now time.Time) (string, error) {
-	if !slices.Contains(pinnedDirs, path.Dir(j.Name)) {
-		return "", fmt.Errorf("%s isn't a plugin, so it stays where it is", j.Name)
+// Unsourced lists the jars in plugins/ that plugins.shcl gives no source and
+// want takes by name, each with About, so setup and repair can give Geyser
+// and Floodgate theirs. A nil want takes all. No list yet means none has
+// one. A jar that leads out of serverDir and trees isn't read, since this
+// runs as root; start refuses it. Nor is one that's gone by then.
+func Unsourced(serverDir string, trees []string, file string, want func(name string) bool) ([]Info, error) {
+	listed, _, err := ReadSources(file)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
 	}
-	plugins, err := os.Stat(filepath.Join(serverDir, "plugins"))
+	has := make(map[string]bool, len(listed))
+	for _, a := range listed {
+		has[a.Name] = a.Source != ""
+	}
+	jars, err := Jars(serverDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	dir := filepath.Join(serverDir, RefusedDir)
-	switch err := os.Mkdir(dir, 0o750); {
-	case err == nil:
-		if st, ok := plugins.Sys().(*syscall.Stat_t); ok {
-			if err := os.Lchown(dir, int(st.Uid), int(st.Gid)); err != nil {
-				return "", err
-			}
+	var out []Info
+	for _, j := range jars {
+		if path.Dir(j.Name) != "plugins" || has[j.Name] || (want != nil && !want(j.Name)) {
+			continue
 		}
-	case !errors.Is(err, fs.ErrExist):
-		return "", err
+		if _, err := Within(j.File, serverDir, trees); err != nil {
+			continue
+		}
+		about, err := aboutFile(j.File)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", j.Name, err)
+		}
+		out = append(out, Info{Jar: j, About: about})
 	}
-	dest := filepath.Join(dir, path.Base(j.Name))
-	if _, err := os.Lstat(dest); err == nil {
-		dest += "." + now.Format("20060102-150405")
-	}
-	// A link goes as the link; Rename doesn't follow it.
-	return dest, os.Rename(filepath.Join(serverDir, filepath.FromSlash(j.Name)), dest)
+	return out, nil
 }

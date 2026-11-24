@@ -4,13 +4,19 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
 )
 
 // LogFile is latest.log. It's the same file in both modes, since the server
@@ -19,17 +25,71 @@ func LogFile(serverDir string) string {
 	return filepath.Join(serverDir, "logs", "latest.log")
 }
 
-// OpenRegular opens a file in the server tree for reading. The server owns
-// the tree, so it could swap a file for a pipe or a device, to hang a reader
-// or feed it without end.
+// ErrNotRegular is a file in the server tree that's a pipe, a device, a
+// socket, or a folder, or for OpenLog a link.
+var ErrNotRegular = errors.New("not a regular file")
+
+// OpenRegular opens a file in the server tree for reading, after links. The
+// server owns the tree, so it could swap a file for a pipe, or a link to a
+// device, to hang a reader or feed it without end. Opening a device runs its
+// driver, and some act on the open alone, such as a watchdog that reboots
+// the host when it's closed without its stop byte, so the kind is checked
+// before the file is opened to read.
 func OpenRegular(file string) (*os.File, error) {
-	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0) // #nosec G304 -- under the configured serverDir
+	// O_PATH gets the inode without opening it: no driver runs and a pipe
+	// doesn't wait. Reopening through /proc/self/fd opens that same inode,
+	// so a link swapped after the check can't change what's read.
+	pfd, err := syscall.Open(file, oPath|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: file, Err: err}
+	}
+	return reopen(pfd, file)
+}
+
+// OpenLog opens latest.log the way OpenRegular does, but follows no link
+// below serverDir. status is run with sudo, and a link the server account
+// put in place of the log or its folder would show root's files.
+func OpenLog(serverDir string) (*os.File, error) {
+	top, err := linksafe.Open(serverDir)
 	if err != nil {
 		return nil, err
 	}
-	fi, err := f.Stat()
-	if err == nil && !fi.Mode().IsRegular() {
-		err = fmt.Errorf("%s isn't a regular file", file)
+	defer top.Close()
+	logs, err := top.Sub("logs")
+	if err != nil {
+		return nil, err
+	}
+	defer logs.Close()
+	file := LogFile(serverDir)
+	// With O_NOFOLLOW, O_PATH opens a link itself, which then isn't regular.
+	pfd, err := syscall.Openat(logs.Fd(), "latest.log", oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: file, Err: err}
+	}
+	return reopen(pfd, file)
+}
+
+// reopen opens an O_PATH handle to read, if it's a regular file, and closes
+// the handle.
+func reopen(pfd int, file string) (*os.File, error) {
+	defer syscall.Close(pfd)
+	var want syscall.Stat_t
+	if err := syscall.Fstat(pfd, &want); err != nil {
+		return nil, &fs.PathError{Op: "stat", Path: file, Err: err}
+	}
+	if want.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return nil, fmt.Errorf("%s: %w", file, ErrNotRegular)
+	}
+	// O_NONBLOCK, in case the reopen isn't the same file after all.
+	fd, err := syscall.Open("/proc/self/fd/"+strconv.Itoa(pfd), syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: file, Err: err}
+	}
+	f := os.NewFile(uintptr(fd), file)
+	var got syscall.Stat_t
+	err = syscall.Fstat(fd, &got)
+	if err == nil && (got.Dev != want.Dev || got.Ino != want.Ino || got.Mode&syscall.S_IFMT != syscall.S_IFREG) {
+		err = fmt.Errorf("%s changed while it was opened: %w", file, ErrNotRegular)
 	}
 	if err != nil {
 		_ = f.Close() // only read from, so nothing is lost
@@ -51,12 +111,34 @@ func Clean(s string) string {
 	}, s)
 }
 
+// CleanLines is Clean for text of several lines, such as a log tail or an
+// error, and keeps the line breaks.
+func CleanLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = Clean(l)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Cut shortens s to limit bytes on a character boundary, and marks the cut.
+func Cut(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
 // MainThread is the thread console commands run on, so their answers are
 // logged from it.
 const MainThread = "Server thread"
 
 // logHead is the start of a latest.log line, as in
-// "[12:00:03] [Server thread/INFO]: ". A thread name can hold a slash.
+// "[12:00:03] [Server thread/INFO]: ". A thread name can have a slash in it.
 var logHead = regexp.MustCompile(`^\[[0-9:]+\] \[(.+)/(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\]: `)
 
 // LogThread gives the thread that logged a latest.log line. ok is false for a

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright © 2026 t00mietum (CryptogID: ปʬϝღถɔ4რఠΔթะ9ƾǝu)
 
-// Package repair holds design.md's repair checks. Each one looks, and says what
+// Package repair has design.md's repair checks. Each one looks, and says what
 // it found, with a fix where there is one. setup reuses the fixes.
 package repair
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
@@ -23,13 +25,21 @@ type Host struct {
 	Passwd, Group string
 	// Root is whether repair runs as root, which some reads need.
 	Root bool
-	// RulesFile, UnitFile, and ResolvConf are the firewall's files. Empty
-	// means the real ones.
-	RulesFile, UnitFile, ResolvConf string
+	// RulesFile, UnitFile, ResolvConf, and Routes are the firewall's files.
+	// Routes stands in for /proc/net/ipv6_route. Empty means the real ones.
+	RulesFile, UnitFile, ResolvConf, Routes string
 	// BootFile is the boot unit's file. Empty means the real one.
 	BootFile string
+	// PkgBin and LocalBin stand in for boot.PkgBin and boot.LocalBin. Empty
+	// means the real ones.
+	PkgBin, LocalBin string
+	// OldBuilds stands in for oldbuild.Dir. Empty means the real one.
+	OldBuilds string
 	// NftThere, when set, stands in for HasNft.
 	NftThere func() bool
+	// ReadFile reads /proc, for which process is the tool's server. nil
+	// means os.ReadFile.
+	ReadFile func(string) ([]byte, error)
 }
 
 // NewHost gives a Host on the real account files.
@@ -38,11 +48,12 @@ func NewHost(r host.Runner, c *config.Config, configPath string) *Host {
 }
 
 // Finding is one thing a check found wrong. Fix is nil when repair only
-// reports it.
+// reports it. A Note is fine as it is, and shows as OK with Problem saying why.
 type Finding struct {
 	Problem string
 	Fixed   string
 	Fix     func(ctx context.Context) error
+	Note    bool
 }
 
 // Check is one of design.md's repair checks.
@@ -53,6 +64,12 @@ type Check struct {
 	Applies func(c *config.Config) bool
 	Look    func(ctx context.Context, h *Host) ([]Finding, error)
 }
+
+// Warning is a Fix's error when the fix worked but has something to say,
+// so the outcome is still FIXED.
+type Warning struct{ Err error }
+
+func (w Warning) Error() string { return w.Err.Error() }
 
 // Report shows one outcome: OK, FIXED, or FAILED.
 type Report func(state, text string)
@@ -74,11 +91,20 @@ func Run(ctx context.Context, h *Host, checks []Check, checkOnly bool, report Re
 			continue
 		}
 		for _, f := range found {
+			if f.Note {
+				report("OK", c.Name+": "+f.Problem)
+				continue
+			}
 			if checkOnly || f.Fix == nil {
 				report("FAILED", f.Problem)
 				continue
 			}
 			if err := f.Fix(ctx); err != nil {
+				var w Warning
+				if errors.As(err, &w) {
+					report("FIXED", f.Fixed+"; warning: "+w.Err.Error())
+					continue
+				}
 				report("FAILED", f.Problem+"; the fix failed: "+err.Error())
 				continue
 			}
@@ -91,7 +117,7 @@ func Run(ctx context.Context, h *Host, checks []Check, checkOnly bool, report Re
 // and After the ones that follow them. See design.md, repair.
 var (
 	Before = []Check{configCheck, accountCheck, operatorCheck, serverTreeCheck, ownershipCheck}
-	After  = []Check{bedrockCheck, FirewallCheck, hostFirewallCheck, containerCheck, catatonitCheck, datasetCheck, BootCheck, othersCheck}
+	After  = []Check{bedrockCheck, FirewallCheck, hostFirewallCheck, containerCheck, catatonitCheck, datasetCheck, BootCheck, othersCheck, shadowCheck}
 	// AccountCheck and OperatorCheck are setup's second step.
 	AccountCheck, OperatorCheck = accountCheck, operatorCheck
 )
@@ -102,4 +128,35 @@ func (h *Host) fix(args ...string) func(ctx context.Context) error {
 		_, err := h.Run.Run(ctx, host.Cmd{Args: args, Sudo: true})
 		return err
 	}
+}
+
+// fixAll runs root commands in order, and stops at the first that fails.
+func (h *Host) fixAll(cmds ...[]string) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		for _, args := range cmds {
+			if err := h.fix(args...)(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// enabled gives a finding when unit isn't enabled.
+func (h *Host) enabled(ctx context.Context, unit, problem string) []Finding {
+	out, _ := h.Run.Run(ctx, host.Cmd{Look: true, Args: []string{"systemctl", "is-enabled", unit}}) // disabled exits 1
+	if strings.TrimSpace(string(out)) == "enabled" {
+		return nil
+	}
+	return []Finding{{Problem: problem, Fixed: unit + " enabled", Fix: h.fix("systemctl", "enable", unit)}}
+}
+
+// anyRegular says whether any of paths is a plain file.
+func anyRegular(paths []string) bool {
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }

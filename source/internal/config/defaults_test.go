@@ -5,6 +5,7 @@ package config
 
 import (
 	"os"
+	"os/user"
 	"reflect"
 	"regexp"
 	"strings"
@@ -39,7 +40,7 @@ func asAccount(t *testing.T, name string) {
 // Each default in design.md's table that's written as a value, such as `4G`
 // or `[lan]`, is what Load gives with no file. Rows in words are skipped.
 func TestDefaultsMatchDesign(t *testing.T) {
-	defer testid.Line(t, "df5x6")
+	defer testid.Line(t, "1a3ef6r")
 	asOperator(t, "alice", "")
 	text, err := os.ReadFile("../../../project/design.md")
 	if err != nil {
@@ -68,7 +69,7 @@ func TestDefaultsMatchDesign(t *testing.T) {
 }
 
 func TestLoadLayersFileThenOptions(t *testing.T) {
-	defer testid.Line(t, "df5x7")
+	defer testid.Line(t, "1a3ef9w")
 	asOperator(t, "alice", "")
 	path := writeConfig(t, "heapMax: 8G\ngamePort: 25570\nrunUser: mcd\n")
 	c, warns := mustLoad(t, path, Option{"gamePort", "25580"}, Option{"RUNMODE", "Docker"}, Option{"allowFrom", "[lan, 203.0.113.7]"})
@@ -98,7 +99,7 @@ func TestLoadLayersFileThenOptions(t *testing.T) {
 }
 
 func TestDerivedDefaults(t *testing.T) {
-	defer testid.Line(t, "df5x8")
+	defer testid.Line(t, "1a3efd0")
 	cases := []struct {
 		sudoUser, user, file string
 		check                func(c Config) bool
@@ -129,7 +130,7 @@ func TestDerivedDefaults(t *testing.T) {
 // With neither variable set, as under cron or docker exec, the operator is
 // the account running it.
 func TestOperatorFromAccount(t *testing.T) {
-	defer testid.Line(t, "df67v")
+	defer testid.Line(t, "1a3fggc")
 	asOperator(t, "", "")
 	asAccount(t, "dave")
 	if c, _ := mustLoad(t, ""); c.OwnerAfterStop != "dave" {
@@ -147,8 +148,47 @@ func TestOperatorFromAccount(t *testing.T) {
 	}
 }
 
+// From a root shell, SUDO_USER or USER can be root. The default skips it, or
+// stop would hand the trees to root and repair would add root to the group.
+func TestOperatorSkipsRoot(t *testing.T) {
+	defer testid.Line(t, "1a3jyj8")
+	cases := []struct{ sudoUser, user, account, want string }{
+		{"root", "root", "", ""},
+		{"root", "", "", ""},
+		{"", "root", "", ""},
+		{"root", "bob", "", "bob"},
+		{"", "root", "dave", "dave"},
+		{"alice", "root", "", "alice"},
+	}
+	for _, tc := range cases {
+		asOperator(t, tc.sudoUser, tc.user)
+		asAccount(t, tc.account)
+		if c, _ := mustLoad(t, ""); c.OwnerAfterStop != tc.want {
+			t.Errorf("SUDO_USER %q USER %q account %q: ownerAfterStop %q, want %q", tc.sudoUser, tc.user, tc.account, c.OwnerAfterStop, tc.want)
+		}
+	}
+	// Another name for uid 0 counts as root too.
+	old := lookupUser
+	lookupUser = func(name string) (*user.User, error) {
+		if name == "toor" {
+			return &user.User{Username: name, Uid: "0"}, nil
+		}
+		return old(name)
+	}
+	t.Cleanup(func() { lookupUser = old })
+	asOperator(t, "toor", "bob")
+	if c, _ := mustLoad(t, ""); c.OwnerAfterStop != "bob" {
+		t.Errorf("SUDO_USER toor: ownerAfterStop %q, want bob", c.OwnerAfterStop)
+	}
+	// An explicit setting is the operator's own call, root included.
+	asOperator(t, "", "")
+	if c, _ := mustLoad(t, writeConfig(t, "ownerAfterStop: root\n")); c.OwnerAfterStop != "root" {
+		t.Errorf("set ownerAfterStop: root gave %q", c.OwnerAfterStop)
+	}
+}
+
 func TestClashingKeysWarn(t *testing.T) {
-	defer testid.Line(t, "df5x9")
+	defer testid.Line(t, "1a3efg4")
 	asOperator(t, "alice", "")
 	c, warns := mustLoad(t, writeConfig(t, "heapMin: 6G\nmemCap: 3G\n"))
 	got := make([]string, len(warns))
@@ -168,7 +208,7 @@ func TestClashingKeysWarn(t *testing.T) {
 }
 
 func TestBadOptionIsAnError(t *testing.T) {
-	defer testid.Line(t, "df5xa")
+	defer testid.Line(t, "1a3efk8")
 	cases := []struct{ key, value, says string }{
 		{"whiteList", "true", `unknown key "whiteList"`},
 		{"heapMax.min", "1G", "unknown key"},
@@ -194,7 +234,7 @@ func TestBadOptionIsAnError(t *testing.T) {
 
 // A bad line costs only its own key. Options still apply on top.
 func TestBadLinesDontSinkLoad(t *testing.T) {
-	defer testid.Line(t, "df5xb")
+	defer testid.Line(t, "1a3efpc")
 	asOperator(t, "alice", "")
 	path := writeConfig(t, "gamePort: 70000\nthis line has no colon\nheapMax: 6G\negress: lan\nfirewall: off\n")
 	c, warns := mustLoad(t, path, Option{"egress", "open"})
@@ -211,7 +251,7 @@ func TestBadLinesDontSinkLoad(t *testing.T) {
 
 // Geyser's signaling can't share gamePort's TCP port, so bedrockPort moves off it.
 func TestBedrockPortClash(t *testing.T) {
-	defer testid.Line(t, "df5yz")
+	defer testid.Line(t, "1a3emrw")
 	asOperator(t, "alice", "")
 	for _, c := range []struct {
 		text string
@@ -231,5 +271,36 @@ func TestBedrockPortClash(t *testing.T) {
 		if got.BedrockPort != c.port || text != c.warn || len(warns) > 1 {
 			t.Errorf("%q: bedrockPort %d, warnings %v; want %d, %q", c.text, got.BedrockPort, warns, c.port, c.warn)
 		}
+	}
+}
+
+// A '#' outside quotes starts a comment, so /srv/games#2 would read as
+// /srv/games, and setup and repair would chown that other tree.
+func TestSetRefusesValueCutByComment(t *testing.T) {
+	defer testid.Line(t, "1a4zb2g")
+	for _, v := range []string{"/srv/games#2", "/srv/games #2", "#2"} {
+		c := Defaults()
+		err := c.Set("serverDir", v)
+		if err == nil || !strings.Contains(err.Error(), "starts a comment") || !reflect.DeepEqual(c, Defaults()) {
+			t.Errorf("serverDir=%q: got %v, serverDir %q", v, err, c.ServerDir)
+		}
+	}
+	c := Defaults()
+	if err := c.Set("allowFrom", "[lan, 203.0.113.7] #x"); err == nil {
+		t.Errorf("allowFrom with a comment: got %v", c.AllowFrom)
+	}
+	for _, kv := range [][2]string{
+		{"serverDir", `"/srv/games#2"`},
+		{"heapMax", "6G"},
+		{"heapMax", "4 GiB"},
+		{"allowFrom", "[lan, 203.0.113.7]"},
+		{"extraArgs", `["-Dx=#1"]`},
+	} {
+		if err := c.Set(kv[0], kv[1]); err != nil {
+			t.Errorf("%s=%s: %v", kv[0], kv[1], err)
+		}
+	}
+	if c.ServerDir != "/srv/games#2" {
+		t.Errorf("quoted serverDir: got %q", c.ServerDir)
 	}
 }

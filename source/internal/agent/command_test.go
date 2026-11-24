@@ -25,7 +25,7 @@ func script(t *testing.T, body string) string {
 }
 
 func TestCommandAsks(t *testing.T) {
-	defer testid.Line(t, "df762")
+	defer testid.Line(t, "1a3jey8")
 	side := t.TempDir()
 	sh := script(t, `cat > "$1/stdin"
 pwd > "$1/pwd"
@@ -57,7 +57,7 @@ echo "thinking..." >&2
 }
 
 func TestCommandFailures(t *testing.T) {
-	defer testid.Line(t, "df763")
+	defer testid.Line(t, "1a3jf1c")
 	cases := map[string]struct {
 		body    string
 		timeout time.Duration
@@ -87,7 +87,7 @@ func TestCommandFailures(t *testing.T) {
 }
 
 func TestCommandNotAsRoot(t *testing.T) {
-	defer testid.Line(t, "df764")
+	defer testid.Line(t, "1a3jf4g")
 	old := geteuid
 	geteuid = func() int { return 0 }
 	t.Cleanup(func() { geteuid = old })

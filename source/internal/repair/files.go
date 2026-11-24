@@ -16,6 +16,8 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/config"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/geyser"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/launch"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/linksafe"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/tree"
 )
 
@@ -101,17 +103,18 @@ var ownershipCheck = Check{
 		// Native mode gives the jars to root while it runs.
 		skip := map[string]bool{}
 		if up && c.RunMode == "native" {
-			jars, _ := launch.LockedJars(c.ServerDir) // missing ones are the server folder check's to report
+			jars, _ := launch.LockedJars(c.ServerDir, c.OwnerTrees) // missing ones are the server folder check's to report
 			for _, j := range jars {
 				skip[j] = true
 			}
 		}
 
-		var found, wrong []string
+		var out []Finding
+		var wrong []string
 		for _, t := range c.OwnerTrees {
 			real, err := filepath.EvalSymlinks(t)
 			if err != nil {
-				found = append(found, "tree "+t+" is missing")
+				out = append(out, Finding{Problem: "tree " + t + " is missing"})
 				continue
 			}
 			owners, modes, err := walkTree(real, uint32(u.uid), uint32(g.gid), up, skip)
@@ -122,12 +125,8 @@ var ownershipCheck = Check{
 				wrong = append(wrong, fmt.Sprintf("%s has %d %s not owned by %s:%s", t, owners, plural(owners, "file"), owner, c.RunGroup))
 			}
 			if modes > 0 {
-				wrong = append(wrong, fmt.Sprintf("%s has %d %s with modes other than ug+rwX,o-rwx", t, modes, plural(modes, "file")))
+				wrong = append(wrong, fmt.Sprintf("%s has %d %s other accounts can reach", t, modes, plural(modes, "file")))
 			}
-		}
-		var out []Finding
-		for _, f := range found {
-			out = append(out, Finding{Problem: f})
 		}
 		if len(wrong) == 0 {
 			return out, nil
@@ -154,16 +153,26 @@ var ownershipCheck = Check{
 }
 
 // walkTree counts files with the wrong owner, and while the server runs, the
-// wrong modes. Links aren't followed or counted.
+// ones other accounts can reach. A mode tighter than ug+rwX passes, since Java
+// makes its temp files 0600 whatever the umask, and Paper saves through them.
+// Links aren't followed or counted. A file or folder that's gone by the time
+// it's looked at is left out, since a running Paper saves through temp files
+// it renames. Only a missing root is an error.
 func walkTree(root string, uid, gid uint32, up bool, skip map[string]bool) (owners, modes int, err error) {
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = walkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path != root && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if d.Type()&fs.ModeSymlink != 0 || skip[path] {
 			return nil
 		}
 		fi, err := d.Info()
+		if path != root && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -175,13 +184,16 @@ func walkTree(root string, uid, gid uint32, up bool, skip map[string]bool) (owne
 			owners++
 		}
 		perm := fi.Mode().Perm()
-		if up && (perm&0o007 != 0 || perm&0o660 != 0o660 || (d.IsDir() && perm&0o110 != 0o110)) {
+		if up && perm&0o007 != 0 {
 			modes++
 		}
 		return nil
 	})
 	return owners, modes, err
 }
+
+// walkDir is a var so a test can take a file away mid-walk.
+var walkDir = filepath.WalkDir
 
 func plural(n int, word string) string {
 	if n == 1 {
@@ -209,22 +221,94 @@ var bedrockCheck = Check{
 			}
 		}
 
-		key := filepath.Join(dir, "floodgate", "key.pem")
-		fi, err := os.Lstat(key)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			// Floodgate makes it at its first start, under the server's umask.
-		case err != nil:
-			return nil, err
-		case !fi.Mode().IsRegular():
-			found = append(found, Finding{Problem: key + " isn't a plain file; Floodgate makes a new one when it's moved away"})
-		case fi.Mode().Perm()&0o007 != 0:
-			found = append(found, Finding{
-				Problem: fmt.Sprintf("%s is mode %04o, so other accounts can read the Floodgate key", key, fi.Mode().Perm()),
-				Fixed:   key + " can only be read by its owner and group now",
-				Fix:     h.fix("chmod", "o-rwx", "--", key),
-			})
-		}
-		return found, nil
+		key, err := keyFindings(h)
+		return append(found, key...), err
 	},
+}
+
+// FloodgateKeyCheck is the Floodgate key part of bedrockCheck, for setup on an
+// adopted tree, where Floodgate has made its key already.
+var FloodgateKeyCheck = Check{
+	Name:    "Floodgate key",
+	Applies: func(c *config.Config) bool { return c.Bedrock },
+	Look:    func(_ context.Context, h *Host) ([]Finding, error) { return keyFindings(h) },
+}
+
+func keyFindings(h *Host) ([]Finding, error) {
+	var found []Finding
+	key := filepath.Join(h.Cfg.ServerDir, "plugins", "floodgate", "key.pem")
+	f, st, err := floodgateKey(h.Cfg.ServerDir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// Floodgate makes it at its first start, under the server's umask.
+	case errors.Is(err, linksafe.ErrLink):
+		found = append(found, Finding{Problem: err.Error() + ", so the Floodgate key can't be checked"})
+	case err != nil:
+		return nil, err
+	case st.Mode&syscall.S_IFMT != syscall.S_IFREG:
+		found = append(found, Finding{Problem: key + " isn't a plain file; Floodgate makes a new one when it's moved away"})
+	case st.Mode&0o007 != 0:
+		found = append(found, Finding{
+			Problem: fmt.Sprintf("%s is mode %04o, so other accounts can read the Floodgate key", key, st.Mode&0o777),
+			Fixed:   key + " can only be read by its owner and group now",
+			Fix:     func(context.Context) error { return closeKey(h.Cfg.ServerDir) },
+		})
+	}
+	if f != nil {
+		_ = f.Close() // only read from
+	}
+	return found, nil
+}
+
+// floodgateKey opens plugins/floodgate/key.pem without following a link on
+// the way, since the server account could swap one in, and root changes its
+// mode.
+func floodgateKey(serverDir string) (*os.File, *syscall.Stat_t, error) {
+	top, err := linksafe.Open(serverDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer top.Close()
+	d, err := top.Walk("plugins/floodgate")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer d.Close()
+	return d.OpenFile("key.pem")
+}
+
+// closeKey takes away other accounts' access to the key, through the handle
+// it checked.
+func closeKey(serverDir string) error {
+	f, st, err := floodgateKey(serverDir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return fmt.Errorf("%s isn't a plain file", f.Name())
+	}
+	if err := syscall.Fchmod(int(f.Fd()), st.Mode&0o7770); err != nil {
+		return &fs.PathError{Op: "chmod", Path: f.Name(), Err: err}
+	}
+	return nil
+}
+
+// GeyserSources are the Geyser and Floodgate jars in plugins/ that file gives
+// no source, as on an adopted tree, each with source's for its project. Only
+// jars named as GeyserMC's are read, so one other jar that can't be read
+// doesn't stop setup or this step.
+func GeyserSources(serverDir string, trees []string, file string, source func(project string) string) ([]plugins.Info, error) {
+	all, err := plugins.Unsourced(serverDir, trees, file, geyser.Named)
+	if err != nil {
+		return nil, err
+	}
+	var jars []plugins.Info
+	for _, info := range all {
+		if p := geyser.Project(info.Name, info.About); p != "" {
+			info.Source = source(p)
+			jars = append(jars, info)
+		}
+	}
+	return jars, nil
 }

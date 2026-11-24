@@ -68,6 +68,7 @@ func Defaults() Config {
 			"hangar.papermc.io", "hangarcdn.papermc.io",
 			"modrinth.com", "api.modrinth.com", "cdn.modrinth.com",
 			"github.com", "api.github.com",
+			"release-assets.githubusercontent.com", "objects.githubusercontent.com", "raw.githubusercontent.com", // where github.com sends downloads
 			"download.geysermc.org",
 			"fill.papermc.io", "fill-data.papermc.io",
 		},
@@ -123,10 +124,23 @@ func (c *Config) Set(key, value string) error {
 	if len(tops) != 1 {
 		return fmt.Errorf("%s: takes one value or one list", key)
 	}
+	if cut(tops[0].Path, value, doc) {
+		return fmt.Errorf("%s: a '#' outside quotes starts a comment, so %q reads as %q; quote the value if the '#' is part of it", key, value, doc.ReadString(tops[0].Path).Value)
+	}
 	if err := set(doc, tops[0].Path); err != nil {
 		return fmt.Errorf("%s: %w", key, err)
 	}
 	return nil
+}
+
+// cut is true when value, parsed as the line in doc, lost text to a comment.
+// SetLiteral drops a comment, so the two forms differ only when there was one.
+func cut(path, value string, doc *shcl.Document) bool {
+	bare := shcl.Parse("")
+	if bare.SetLiteral(path, value) != shcl.SetOk {
+		return false
+	}
+	return bare.ToCanonical() != doc.ToCanonical()
 }
 
 // derive fills the keys whose defaults come from others, and settles keys
@@ -157,7 +171,7 @@ func (c *Config) derive() []Warning {
 	if c.MemCap == 0 {
 		c.MemCap = c.HeapMax + c.HeapMax/4 + gib
 	}
-	// Geyser's signaling needs bedrockPort over TCP. When Paper holds it,
+	// Geyser's signaling needs bedrockPort over TCP. When Paper listens on it,
 	// Geyser sends Bedrock players through an outside service instead.
 	if c.Bedrock && c.BedrockPort == c.GamePort {
 		port := 19132
@@ -172,14 +186,29 @@ func (c *Config) derive() []Warning {
 
 // operator is who gets the trees back after a stop. It's empty when no
 // usable name turns up, as when systemd starts the boot unit as root.
+// Root is skipped, since a root shell sets SUDO_USER or USER to root, and
+// stop would then hand the trees to root.
 func operator() string {
 	for _, name := range []string{os.Getenv("SUDO_USER"), os.Getenv("USER"), Account()} {
-		if s, err := checkAccount(name); err == nil {
+		if s, err := checkAccount(name); err == nil && !isRoot(s) {
 			return s
 		}
 	}
 	return ""
 }
+
+// isRoot is true for root and any other name for uid 0. A name that can't be
+// looked up isn't root.
+func isRoot(name string) bool {
+	if name == "root" {
+		return true
+	}
+	u, err := lookupUser(name)
+	return err == nil && u.Uid == "0"
+}
+
+// lookupUser is a var so tests can add a second uid 0 name.
+var lookupUser = user.Lookup
 
 // Account names the account this runs as, for cron and the like, which
 // don't set USER. Root gives "", or the boot unit's stop would hand the

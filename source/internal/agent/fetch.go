@@ -18,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/download"
 )
 
 // Fetcher is the one tool the API kinds get: a GET of an https page, given
@@ -30,6 +32,7 @@ type Fetcher struct {
 	MaxPage    int64
 	MaxFetches int
 	done       int
+	public     *http.Client // made once, so fetches share connections
 }
 
 const fetchSpec = `{"type": "object", "properties": {"url": {"type": "string", "description": "https address to read"}}, "required": ["url"]}`
@@ -65,15 +68,18 @@ func (f *Fetcher) get(ctx context.Context, address string) (string, error) {
 	req.Header.Set("User-Agent", "tt-minecraftd")
 	client := f.Client
 	if client == nil {
-		client = publicClient()
+		if f.public == nil {
+			f.public = publicClient()
+		}
+		client = f.public
 	}
 	resp, err := client.Do(req) // #nosec G107 G704 -- https only, to public addresses only, see publicOnly
 	if err != nil {
-		return "", err
+		return "", untold(err)
 	}
 	defer func() { _ = resp.Body.Close() }() // read-only, nothing to lose
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %s", resp.Status)
+		return "", fmt.Errorf("HTTP %s", download.Status(resp.StatusCode))
 	}
 	kind, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if kind != "" && !strings.HasPrefix(kind, "text/") && !strings.HasSuffix(kind, "json") &&
@@ -124,7 +130,8 @@ func pageText(s string) string {
 func publicClient() *http.Client { return PublicClient(30 * time.Second) }
 
 // PublicClient only reaches public addresses, over https, with up to 5
-// redirects. update fetches the agent's jars and hash pages with it.
+// redirects. update fetches the agent's jars and hash pages with it, through
+// HoldTo.
 func PublicClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{Timeout: 15 * time.Second, Control: publicOnly}
 	return &http.Client{
@@ -145,7 +152,74 @@ func PublicClient(timeout time.Duration) *http.Client {
 	}
 }
 
-var sharedSpace = netip.MustParsePrefix("100.64.0.0/10")
+// HoldTo is a copy of c that only follows a redirect to a host in hosts, by
+// the same rules as the agent's first address. Otherwise a redirect could
+// take a jar anywhere, while the plan names the host it was found on.
+func HoldTo(c *http.Client, hosts []string) *http.Client {
+	own := *c
+	before := c.CheckRedirect
+	own.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if before != nil {
+			if err := before(req, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 { // Go's own limit, which setting this drops
+			return errors.New("too many redirects")
+		}
+		if err := checkAddress(req.URL.String(), hosts); err != nil {
+			return fmt.Errorf("redirected, but %w", err)
+		}
+		return nil
+	}
+	return &own
+}
+
+var errNotPublic = errors.New("the name doesn't lead to a public address")
+
+// Not public, though IsGlobalUnicast and IsPrivate let them by.
+var notPublic = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), // shared, carrier NAT
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/96"), // old IPv4-compatible form; Unmap took the mapped one
+	netip.MustParsePrefix("::ffff:0:0:0/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/32"), // Teredo, whose relay can reach the LAN
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("fec0::/10"),
+}
+
+var (
+	nat64     = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFour = netip.MustParsePrefix("2002::/16")
+)
+
+func public(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() || addr.IsPrivate() {
+		return false
+	}
+	for _, p := range notPublic {
+		if p.Contains(addr) {
+			return false
+		}
+	}
+	// These have an IPv4 address inside, which a gateway on the path connects to.
+	b := addr.As16()
+	switch {
+	case nat64.Contains(addr):
+		return public(netip.AddrFrom4([4]byte(b[12:16])))
+	case sixToFour.Contains(addr):
+		return public(netip.AddrFrom4([4]byte(b[2:6])))
+	}
+	return true
+}
 
 // publicOnly runs on the address a name resolved to, just before the
 // connect, so a name can't point fetch at this host or the LAN.
@@ -158,9 +232,31 @@ func publicOnly(_, address string, _ syscall.RawConn) error {
 	if err != nil {
 		return err
 	}
-	addr = addr.Unmap()
-	if !addr.IsGlobalUnicast() || addr.IsPrivate() || sharedSpace.Contains(addr) {
-		return fmt.Errorf("%s isn't a public address", addr)
+	if !public(addr) {
+		return errNotPublic
 	}
 	return nil
+}
+
+// untold is why a fetch failed, without the addresses Go's errors name: the
+// one a name resolved to, or this host's resolver. design.md's Update agent
+// says the agent isn't told the host's addresses.
+func untold(err error) error {
+	var dns *net.DNSError
+	var op *net.OpError
+	var ue *url.Error
+	switch {
+	case errors.Is(err, errNotPublic):
+		return fmt.Errorf("refused, since %w", errNotPublic)
+	case errors.As(err, &dns):
+		if dns.IsTimeout {
+			return fmt.Errorf("looking up %s timed out", dns.Name)
+		}
+		return fmt.Errorf("can't look up %s", dns.Name)
+	case errors.As(err, &op):
+		return fmt.Errorf("can't connect: %w", op.Err)
+	case errors.As(err, &ue):
+		return ue.Err
+	}
+	return err
 }

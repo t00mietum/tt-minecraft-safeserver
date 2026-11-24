@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,16 +64,10 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 	}
-	if err := n.checkSettings(); err != nil {
+	if err := n.preflight(ctx); err != nil {
 		return err
 	}
-	if err := n.checkPlugins(); err != nil {
-		return err
-	}
-	if err := n.checkFirewall(ctx); err != nil {
-		return err
-	}
-	jars, err := LockedJars(n.Cfg.ServerDir)
+	jars, err := LockedJars(n.Cfg.ServerDir, n.Cfg.OwnerTrees)
 	if err != nil {
 		return err
 	}
@@ -104,12 +99,12 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 		return err
 	}
 	if err := n.lockJars(ctx, jars); err != nil {
-		return err
+		return n.failedStart(ctx, n, err)
 	}
-	n.oldLog, _ = server.OpenRegular(n.latestLog()) // none yet is fine
+	n.oldLog, _ = server.OpenLog(n.Cfg.ServerDir) // none yet is fine
 	defer n.dropOldLog()
 	if _, err := n.Run.Run(ctx, host.Cmd{Args: args, Sudo: true}); err != nil {
-		return err
+		return n.failedStart(ctx, n, err)
 	}
 
 	if mode.Debug {
@@ -119,8 +114,8 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 	if n.DryRun {
 		return nil
 	}
-	if err := n.waitLoaded(ctx, n); err != nil {
-		return err
+	if err := n.waitLoaded(ctx, n); err != nil && !n.slowAtBoot(mode, err) {
+		return n.failedStart(ctx, n, err)
 	}
 	n.dropOldLog()
 	if !mode.Foreground {
@@ -132,9 +127,14 @@ func (n *Native) Start(ctx context.Context, mode StartMode) error {
 			return err
 		}
 		if !up {
-			return n.handBack(ctx)
+			return n.startHandBack(ctx)
 		}
-		n.Sleep(foregroundPoll)
+		if err := n.pause(ctx, foregroundPoll); err != nil {
+			if n.stoppedByUnit(ctx, n) {
+				return nil
+			}
+			return fmt.Errorf("%w; stop stops the server if it's still up", err)
+		}
 	}
 }
 
@@ -253,18 +253,24 @@ func (n *Native) latestLog() string {
 // log is this run's latest.log. Paper moves the last run's aside as it
 // starts, so until then there's nothing.
 func (n *Native) log(context.Context) ([]byte, error) {
-	fi, err := os.Stat(n.latestLog())
+	f, err := server.OpenLog(n.Cfg.ServerDir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
 	case err != nil:
 		return nil, err
-	case n.oldLog != nil:
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if n.oldLog != nil {
 		if old, err := n.oldLog.Stat(); err == nil && os.SameFile(old, fi) {
 			return nil, nil
 		}
 	}
-	return os.ReadFile(n.latestLog())
+	return io.ReadAll(f)
 }
 
 func (n *Native) dropOldLog() {

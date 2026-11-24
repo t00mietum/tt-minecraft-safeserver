@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/host"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/paper"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/plugins"
+	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/server"
 	"github.com/t00mietum/tt-minecraft-safeserver/source/internal/zfs"
 )
 
@@ -51,7 +54,7 @@ type Parts struct {
 	Image   bool
 }
 
-// Update holds what one run of the command needs.
+// Update is what one run of the command needs.
 type Update struct {
 	Cfg         *config.Config
 	ConfigPath  string
@@ -78,13 +81,17 @@ type Update struct {
 	// AgentNote says why Agent is nil though agent is set, such as a run
 	// that started as root.
 	AgentNote string
-	// Fetch gets the agent's jars and hash pages. Its zero value reaches
+	// Fetch gets the agent's jars and hash pages. Its zero value gets from
 	// public addresses only.
 	Fetch download.Client
+	held  *http.Client // Fetch's client with redirects held, made once
 	// MCVersion is --mc-version's, the Minecraft version to move Paper to.
 	MCVersion string
 	// Root skips the zfs try without sudo.
 	Root bool
+	// Running says the server runs, so its library cache is left alone. Nil
+	// is never.
+	Running func(ctx context.Context) (bool, error)
 	// Now is when the --mc-version snapshot is taken; nil is the clock.
 	Now func() time.Time
 }
@@ -113,7 +120,7 @@ type paperFailed struct {
 func (e *paperFailed) Error() string { return e.err.Error() }
 func (e *paperFailed) Unwrap() error { return e.err }
 
-// pluginStep is a newer build of an approved plugin with a known source.
+// pluginStep is a newer build of a plugin with a known source.
 type pluginStep struct {
 	jar plugins.Approved
 	// old is what the jar on disk says it is.
@@ -183,6 +190,9 @@ func (u *Update) Do(ctx context.Context) error {
 	if ok && q.MoveTo != "" {
 		report = agent.CheckMove(ans, q.Plugins)
 	}
+	if n := len(l.libs); n > 0 {
+		plan = append(plan, fmt.Sprintf("Remove the %s plugins asked Paper for, from its cache, so it downloads fresh ones at the next start.", libraries(n, "")))
+	}
 	var is *imageStep
 	if parts.Image {
 		if is, err = u.imageLookup(ctx, func() (string, error) { return u.paperVersion(ctx, ps) }); err != nil {
@@ -203,6 +213,10 @@ func (u *Update) Do(ctx context.Context) error {
 	}
 	if len(plan) == 0 {
 		return nil
+	}
+	// Plan lines name jars from the tree, which the server account names.
+	for i := range plan {
+		plan[i] = server.Clean(plan[i])
 	}
 	fmt.Fprintf(u.Out, "\nupdate will:\n  - %s\n\n", strings.Join(plan, "\n  - "))
 	if len(report) > 0 {
@@ -243,6 +257,10 @@ func (u *Update) Do(ctx context.Context) error {
 			return err
 		}
 	}
+	// After Paper, so the new build's own libraries are the ones left.
+	if err := u.clearLibraries(ctx, l.libs); err != nil {
+		return err
+	}
 	if is != nil {
 		if err := u.getImage(ctx, *is); err != nil {
 			return err
@@ -281,6 +299,9 @@ type lookups struct {
 	steps  []pluginStep
 	// asks are the jars for the agent, per pluginLookup.
 	asks []plugins.Approved
+	// libs are the plugins' libraries in Paper's cache, removed so Paper
+	// downloads them fresh at the next start.
+	libs []plugins.Jar
 	// moveTo is --mc-version's, and report the plugins the agent says have
 	// a build for it or not.
 	moveTo string
@@ -312,6 +333,13 @@ func (u *Update) lookup(ctx context.Context, parts Parts, quiet bool) (*lookups,
 		if l.steps, l.asks, err = u.pluginLookup(ctx); err != nil {
 			return nil, err
 		}
+		if l.libs, err = plugins.Libraries(u.Cfg.ServerDir); err != nil && !quiet {
+			return nil, fmt.Errorf("can't list Paper's library cache: %w", err)
+		}
+		// So the plan doesn't offer what clearLibraries would skip.
+		if len(l.libs) > 0 && u.mayRun(ctx) {
+			l.libs = nil
+		}
 	}
 	if l.moveTo != "" && u.agentOn() {
 		l.report = u.movePlugins()
@@ -319,23 +347,45 @@ func (u *Update) lookup(ctx context.Context, parts Parts, quiet bool) (*lookups,
 	return &l, nil
 }
 
-// movePlugins are the approved plugins in the tree, for the agent's report
-// before --mc-version.
+// movePlugins are the plugins in the tree, for the agent's report before
+// --mc-version.
 func (u *Update) movePlugins() []plugins.Approved {
-	approved, _, err := plugins.ReadApproved(u.PluginsFile)
+	jars, _ := u.treeJars()
+	return jars
+}
+
+// treeJars are the plugin jars in the tree, each with its source from
+// plugins.shcl, if any, and the hash of the file on disk. A jar that can't be
+// hashed is left out, with why in skipped. What paper.jar links to is
+// --paper's.
+func (u *Update) treeJars() (jars []plugins.Approved, skipped []string) {
+	found, err := plugins.Jars(u.Cfg.ServerDir)
 	if err != nil {
-		return nil
+		return nil, []string{err.Error()}
 	}
-	var in []plugins.Approved
-	for _, a := range approved {
-		if paper.IsBuild(a.Name) {
+	listed, _, _ := plugins.ReadSources(u.PluginsFile) // only the sources matter here; pluginLookup shows a bad list's warnings
+	source := make(map[string]string, len(listed))
+	for _, a := range listed {
+		source[a.Name] = a.Source
+	}
+	for _, j := range found {
+		if !strings.HasPrefix(j.Name, "plugins/") {
 			continue
 		}
-		if _, err := os.Lstat(filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(a.Name))); err == nil {
-			in = append(in, a)
+		// Root shouldn't hash, or tell the agent about, a host file a
+		// planted link names.
+		if _, err := plugins.Within(j.File, u.Cfg.ServerDir, u.Cfg.OwnerTrees); err != nil {
+			skipped = append(skipped, err.Error())
+			continue
 		}
+		sum, err := plugins.Sum(j.File)
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s: can't read it: %v", j.Name, err))
+			continue
+		}
+		jars = append(jars, plugins.Approved{Name: j.Name, SHA256: sum, Source: source[j.Name]})
 	}
-	return in
+	return jars, skipped
 }
 
 // fullQuestion is everything the agent is asked in one run.
@@ -352,7 +402,7 @@ func (u *Update) fullQuestion(l *lookups) agent.Question {
 
 // showReport shows what the agent said about the plugins before a move.
 func showReport(w io.Writer, version string, notes []agent.MoveNote) {
-	fmt.Fprintf(w, "The update agent's report on the approved plugins for Minecraft %s. It changes nothing.\n", version)
+	fmt.Fprintf(w, "The update agent's report on the plugins for Minecraft %s. It changes nothing.\n", version)
 	for _, n := range notes {
 		var what string
 		switch n.Has {
@@ -369,7 +419,7 @@ func showReport(w io.Writer, version string, notes []agent.MoveNote) {
 		if n.Notes != "" {
 			what += ". " + n.Notes
 		}
-		fmt.Fprintf(w, "  - %s: %s\n", n.Jar, what)
+		fmt.Fprintf(w, "  - %s: %s\n", server.Clean(n.Jar), what)
 	}
 	fmt.Fprintln(w)
 }
@@ -466,9 +516,9 @@ func (u *Update) snapshot(ctx context.Context) error {
 }
 
 func (s paperStep) plan() string {
-	how := "check its SHA-256, approve it, and point paper.jar at it"
+	how := "check its SHA-256, and point paper.jar at it"
 	if f := s.found; f != nil {
-		how = fmt.Sprintf("check its SHA-256 %s is on %s, check the download's SHA-256 and that it's Paper for Minecraft %s, ask before using it, then approve it and point paper.jar at it. The update agent found it on %s, since PaperMC's lookup failed", f.SHA256, f.HashFrom, s.to.Version, hostOf(f.URL))
+		how = fmt.Sprintf("check its SHA-256 %s is on %s, check the download's SHA-256 and that it's Paper for Minecraft %s, ask before using it, then point paper.jar at it. The update agent found it on %s, since PaperMC's lookup failed", f.SHA256, f.HashFrom, s.to.Version, hostOf(f.URL))
 		if f.Notes != "" {
 			how += ". The agent's notes: " + f.Notes
 		}
@@ -491,7 +541,7 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 		fmt.Fprintf(u.Out, "would check Paper's hash page, download %s into %s, check it, and ask before using it\n", s.to.Name, dir)
 		return nil
 	case u.DryRun:
-		fmt.Fprintf(u.Out, "would download %s into %s, approve it, and point paper.jar at it\n", s.to.Name, dir)
+		fmt.Fprintf(u.Out, "would download %s into %s, and point paper.jar at it\n", s.to.Name, dir)
 		return nil
 	case s.found != nil:
 		size, use, err := u.getAgentPaper(ctx, s)
@@ -505,14 +555,11 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 		}
 	}
 	fmt.Fprintf(u.Out, "%-7s Paper %s build %d downloaded, and its SHA-256 matches; paper.jar points at %s\n", "FIXED", s.to.Version, s.to.ID, s.to.Name)
-	// start pins the build paper.jar points at, like a plugin.
-	if err := plugins.Approve(u.PluginsFile, []plugins.Info{{Jar: plugins.Jar{Name: s.to.Name}, SHA256: s.to.SHA256, Size: s.to.Size}}); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
-	}
-	fmt.Fprintf(u.Out, "%-7s %s approved\n", "FIXED", s.to.Name)
 	keep := []string{s.to.Name}
-	if s.from != nil && filepath.Dir(s.from.Target) == "." {
-		keep = append(keep, s.from.Target)
+	// Name, not Target: a link written as ./name or a full path never
+	// equals a file name, and the build it replaced would go.
+	if s.from != nil && s.from.Name != "" {
+		keep = append(keep, s.from.Name)
 	}
 	gone, err := paper.Prune(dir, keep...)
 	if len(gone) > 0 {
@@ -524,37 +571,30 @@ func (u *Update) getPaper(ctx context.Context, s paperStep) error {
 	return nil
 }
 
-// pluginLookup finds the approved plugins that have a newer build at their
-// source. Only GeyserMC's sources are known so far. asks are the jars for the
-// update agent: ones with no known source, or whose lookup failed.
+// pluginLookup finds the plugins in the tree that have a newer build at
+// their source. Only GeyserMC's sources are known so far. asks are the jars
+// for the update agent: ones with no known source, or whose lookup failed.
 func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []plugins.Approved, err error) {
-	approved, warns, err := plugins.ReadApproved(u.PluginsFile)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, nil
-	}
-	if err != nil {
+	_, warns, err := plugins.ReadSources(u.PluginsFile)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, err
 	}
 	for _, w := range warns {
-		fmt.Fprintf(u.Out, "warning: %s\n", w)
+		fmt.Fprintf(u.Out, "warning: %s\n", server.Clean(w.String()))
+	}
+	jars, skipped := u.treeJars()
+	for _, why := range skipped {
+		fmt.Fprintf(u.Out, "%-7s %s\n", "SKIPPED", server.Clean(why))
 	}
 	agentOn := u.agentOn()
-	for _, a := range approved {
+	for _, a := range jars {
 		file := filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(a.Name))
-		_, statErr := os.Lstat(file)
-		gone := errors.Is(statErr, fs.ErrNotExist)
 		project := u.geyserProject(a.Source)
 		switch {
-		case paper.IsBuild(a.Name):
-			// --paper's, from PaperMC.
-			continue
 		case a.Source == "" && !agentOn:
 			continue
 		case project == "" && !agentOn:
-			fmt.Fprintf(u.Out, "%-7s %s: its source isn't one update knows yet, so it stays as it is\n", "SKIPPED", a.Name)
-			continue
-		case gone:
-			fmt.Fprintf(u.Out, "%-7s %s: approved, but not in the server folder, so it stays out\n", "SKIPPED", a.Name)
+			fmt.Fprintf(u.Out, "%-7s %s: its source isn't one update knows yet, so it stays as it is\n", "SKIPPED", server.Clean(a.Name))
 			continue
 		case project == "":
 			asks = append(asks, a)
@@ -562,7 +602,7 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 		}
 		b, err := u.Geyser.Latest(ctx, project)
 		if err != nil && u.Agent != nil {
-			fmt.Fprintf(u.Out, "warning: can't get %s: %v, so the update agent is asked about %s\n", geyser.Title(project), err, a.Name)
+			fmt.Fprintf(u.Out, "warning: can't get %s: %v, so the update agent is asked about %s\n", geyser.Title(project), err, server.Clean(a.Name))
 			asks = append(asks, a)
 			continue
 		}
@@ -572,11 +612,11 @@ func (u *Update) pluginLookup(ctx context.Context) (steps []pluginStep, asks []p
 		what := fmt.Sprintf("%s %s build %d", geyser.Title(project), b.Version, b.ID)
 		switch {
 		case b.SHA256 == a.SHA256:
-			fmt.Fprintf(u.Out, "%-7s %s is the newest build, %s\n", "OK", a.Name, what)
+			fmt.Fprintf(u.Out, "%-7s %s is the newest build, %s\n", "OK", server.Clean(a.Name), what)
 			continue
 		case b.Path() != a.Name:
 			// It would sit beside the old one, and both would load.
-			fmt.Fprintf(u.Out, "%-7s %s: the newest build, %s, is named %s; replace it by hand\n", "SKIPPED", a.Name, what, b.Name)
+			fmt.Fprintf(u.Out, "%-7s %s: the newest build, %s, is named %s; replace it by hand\n", "SKIPPED", server.Clean(a.Name), what, b.Name)
 			continue
 		}
 		steps = append(steps, pluginStep{jar: a, old: oldAbout(file), to: b})
@@ -606,23 +646,18 @@ func (u *Update) geyserProject(source string) string {
 }
 
 func (s pluginStep) plan() string {
-	return fmt.Sprintf("Update %s from %s to %s %s build %d: download it, check its SHA-256, and approve it.", s.jar.Name, s.old, geyser.Title(s.to.Project), s.to.Version, s.to.ID)
+	return fmt.Sprintf("Update %s from %s to %s %s build %d: download it, and check its SHA-256.", s.jar.Name, s.old, geyser.Title(s.to.Project), s.to.Version, s.to.ID)
 }
 
 func (u *Update) getPlugin(ctx context.Context, s pluginStep) error {
 	if u.DryRun {
-		fmt.Fprintf(u.Out, "would download %s over %s, and approve it\n", s.to.Name, s.jar.Name)
+		fmt.Fprintf(u.Out, "would download %s over %s\n", s.to.Name, s.jar.Name)
 		return nil
 	}
 	if err := u.Geyser.Install(ctx, u.Cfg.ServerDir, s.to); err != nil {
 		return err
 	}
 	fmt.Fprintf(u.Out, "%-7s %s %s build %d downloaded, and its SHA-256 matches\n", "FIXED", geyser.Title(s.to.Project), s.to.Version, s.to.ID)
-	info := plugins.Info{Jar: plugins.Jar{Name: s.jar.Name}, SHA256: s.to.SHA256, Source: s.jar.Source}
-	if err := plugins.Approve(u.PluginsFile, []plugins.Info{info}); err != nil {
-		return fmt.Errorf("can't write the approved list: %w", err)
-	}
-	fmt.Fprintf(u.Out, "%-7s %s approved\n", "FIXED", s.jar.Name)
 	return nil
 }
 
@@ -641,4 +676,48 @@ func (u *Update) ask(prompt string) bool {
 			return false
 		}
 	}
+}
+
+// clearLibraries removes the plugins' libraries from Paper's cache, as the
+// service account, so a link there only leads where it could write anyway.
+// Paper downloads them again at the next start, so code written there lasts
+// until the next update, not for good. See design.md, Plugin jars.
+func (u *Update) clearLibraries(ctx context.Context, libs []plugins.Jar) error {
+	// Asked again here, since the "Go ahead?" prompt can wait any length of
+	// time, and a server started meanwhile hasn't opened all its libraries.
+	if len(libs) == 0 || u.mayRun(ctx) {
+		return nil
+	}
+	args := []string{"rm", "-f", "--"}
+	for _, j := range libs {
+		args = append(args, filepath.Join(u.Cfg.ServerDir, filepath.FromSlash(j.Name)))
+	}
+	if _, err := u.Run.Run(ctx, host.Cmd{Args: args, As: u.Cfg.RunUser}); err != nil {
+		return fmt.Errorf("clearing Paper's library cache: %w", err)
+	}
+	if !u.DryRun {
+		fmt.Fprintf(u.Out, "%-7s %s removed from Paper's cache; it downloads them again at the next start\n", "FIXED", libraries(len(libs), "plugin "))
+	}
+	return nil
+}
+
+// mayRun says the server may be running, and says so, since a running Paper
+// can still open a library jar it hasn't read yet. A failed look counts as
+// running.
+func (u *Update) mayRun(ctx context.Context) bool {
+	if u.Running == nil {
+		return false
+	}
+	if on, err := u.Running(ctx); !on && err == nil {
+		return false
+	}
+	fmt.Fprintf(u.Out, "%-7s plugin libraries: the server may be running, so Paper's cache is left until an update while it's stopped\n", "SKIPPED")
+	return true
+}
+
+func libraries(n int, kind string) string {
+	if n == 1 {
+		return "1 " + kind + "library"
+	}
+	return strconv.Itoa(n) + " " + kind + "libraries"
 }
