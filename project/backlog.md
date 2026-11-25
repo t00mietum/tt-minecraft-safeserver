@@ -111,7 +111,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111412275150
 	- Type: Task
 	- Status: Waiting on signoff
-	- Target version: v1.0.0-beta.1
+	- Target version: v1.0.0-beta.2
 	- Opened: 20261114-122751
 	- Opened by: JC
 	- Progress log:
@@ -124,7 +124,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- ID: 2026111111303242
 	- Type: Task
 	- Status: Stalled
-	- Target version: v1.0.0-beta.1
+	- Target version: v1.0.0-beta.2
 	- Priority: Avg
 	- Opened: 20261111-113032
 	- Opened by: t00mietum
@@ -144,7 +144,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Type: Feature
 	- Status: Stalled
 		- Held for: a Geyser build that answers LAN discovery (Geyser issue 6853, pull request 6896).
-	- Target version: v1.0.0-beta.1
+	- Target version: v1.0.0-beta.2
 	- Priority: Avg
 	- Opened: 20261113-184851
 	- Opened by:
@@ -157,6 +157,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions: Turn LAN discovery on once a Geyser release has it (t00mietum, 2026-11-17).
 	- 2026-11-17: The firewall half is split off and done. Geyser pull request 6896 is still open. Its keys are signaling.lan-discovery enabled, address and ice-port (19134), and may change before it's merged.
 	- Left: pin Geyser's LAN discovery settings, treat its LAN join port as a game port, and update how-to-connect.md. 1a3jrsw and design.md are done.
+	- 2026-11-24: Pull request 6896 is still open and unreviewed, with its last change on 11-07. GeyserMC points console players at MCXboxBroadcast in the meantime.
 
 - Container start mounts any host path that a plugin jar link points to
 	- ID: 2026112110300013
@@ -5801,7 +5802,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Consoles over the internet
 	- ID: 2026111111065842
 	- Type: Feature
-	- Status: Deferred
+	- Status: Queued
+	- Target version: v1.0.0-beta.2
 	- Priority: Low
 	- Opened: 20261111-110658
 	- Opened by: t00mietum
@@ -5810,6 +5812,8 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Decisions:
 		- MCXboxBroadcast, when this gets picked up. It needs a spare Microsoft account, never the main one.
 		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
+	- Progress log:
+		- 2026-11-24: Queued for beta.2 by t00mietum. GeyserMC also points console players at MCXboxBroadcast while LAN discovery is broken (Geyser issue 6853).
 
 - Code review 20261121: observations not filed
 	- ID: 2026112110300442
