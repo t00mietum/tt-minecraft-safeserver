@@ -5802,7 +5802,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 - Consoles over the internet
 	- ID: 2026111111065842
 	- Type: Feature
-	- Status: Queued
+	- Status: Started
 	- Target version: v1.0.0-beta.2
 	- Priority: Low
 	- Opened: 20261111-110658
@@ -5815,6 +5815,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 	- Progress log:
 		- 2026-11-24: Queued for beta.2 by t00mietum. GeyserMC also points console players at MCXboxBroadcast while LAN discovery is broken (Geyser issue 6853).
 		- 2026-11-24: Current builds (165, 11-16) relay NetherNet joins, per its issues 402 and 411. A join from the Friends tab sends the console's offer to Geyser's signaling over TCP on the remote address and port, so it goes to the server's public address. That a console on the home LAN can join this way still needs a test. Its README says to use a spare account, since it acts like a client in ways that may break Xbox's terms.
+		- 2026-11-24: First a hand trial on b23 with no code change, per t00mietum: the extension jar (build 165) in Geyser's extensions folder, signed in to a spare account. Its Xbox calls are all https or wss on 443, which `egress` `web` allows. Its default relay target is Geyser's own address (`bindIP`), which the kernel routes over `lo`, where the server's Bedrock port is allowed. Code follows only if the trial works.
 
 - Code review 20261121: observations not filed
 	- ID: 2026112110300442
