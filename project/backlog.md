@@ -5814,7 +5814,7 @@ This is a product backlog just for pre-v1.0.0 release. After that, bugs, feature
 		- BedrockConnect and a LAN relay app were weighed, per `design.md`. A console that already uses BedrockConnect can join from anywhere in the meantime.
 	- Progress log:
 		- 2026-11-24: Queued for beta.2 by t00mietum. GeyserMC also points console players at MCXboxBroadcast while LAN discovery is broken (Geyser issue 6853).
-		- 2026-11-24: Builds 162 and later support NetherNet. A join from the Friends tab sends the console's offer to Geyser's signaling over TCP on the remote address and port, so it goes to the server's public address. That a console on the home LAN can join this way still needs a test. Its README says to use a spare account, since it acts like a client in ways that may break Xbox's terms.
+		- 2026-11-24: Current builds (165, 11-16) relay NetherNet joins, per its issues 402 and 411. A join from the Friends tab sends the console's offer to Geyser's signaling over TCP on the remote address and port, so it goes to the server's public address. That a console on the home LAN can join this way still needs a test. Its README says to use a spare account, since it acts like a client in ways that may break Xbox's terms.
 
 - Code review 20261121: observations not filed
 	- ID: 2026112110300442
