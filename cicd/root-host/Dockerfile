@@ -11,8 +11,9 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 
 # What a fresh install wouldn't run, and would fight the container over.
+# Privileged means /proc/sys is the host's, so systemd-sysctl here set the host's kernel.core_pattern to "core" and broke its crash dumps. binfmt is host-wide too.
 RUN systemctl mask getty.target systemd-logind.service systemd-firstboot.service systemd-modules-load.service \
-		systemd-networkd-wait-online.service \
+		systemd-networkd-wait-online.service systemd-sysctl.service systemd-binfmt.service \
 	&& useradd -m -s /bin/bash op \
 	&& printf 'op ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/op \
 	&& chmod 0440 /etc/sudoers.d/op
